@@ -1,0 +1,94 @@
+import {
+	createTicketSchema,
+	ticketSchema,
+	type CreateTicket,
+	type MoveTicket,
+	type Ticket,
+} from "@forge/contracts/tickets";
+
+import type { IDatabase } from "../database/sqlite-database.ts";
+import { TicketError } from "./errors.ts";
+
+const columns = "id, projectId, title, description, status, createdAt";
+export interface ITicketStore {
+	/** Allocates an immutable globally increasing key; at most 1000 tickets per project. Failures throw TicketError. */
+	insert(projectId: string, input: CreateTicket, createdAt: string): Promise<Ticket>;
+	get(id: string): Promise<Ticket | undefined>;
+	/** Ordered by position within each status. */
+	list(projectId: string): Promise<Ticket[]>;
+	update(id: string, input: CreateTicket): Promise<void>;
+	/** Atomically inserts before a validated same-project/status ticket, or appends. */
+	move(id: string, input: MoveTicket): Promise<void>;
+}
+export class TicketStore implements ITicketStore {
+	constructor(private readonly database: IDatabase) {}
+	async initialize(): Promise<void> {
+		await this.guard(async () => {
+			await this.database.run(
+				"CREATE TABLE IF NOT EXISTS tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT GENERATED ALWAYS AS ('FORGE-' || number) STORED UNIQUE, projectId TEXT NOT NULL REFERENCES projects(id), title TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'backlog' CHECK(status IN ('backlog','todo','in-progress','in-review','merging','done')), position INTEGER NOT NULL, createdAt TEXT NOT NULL)",
+			);
+			await this.database.run("CREATE INDEX IF NOT EXISTS tickets_board ON tickets(projectId, status, position)");
+		});
+	}
+	async insert(projectId: string, input: CreateTicket, createdAt: string): Promise<Ticket> {
+		return this.guard(async () => {
+			const fields = createTicketSchema.parse(input);
+			ticketSchema.pick({ projectId: true, createdAt: true }).parse({ projectId, createdAt });
+			const rows = await this.database.all(
+				`INSERT INTO tickets(projectId,title,description,createdAt,position) SELECT ?,?,?,?,COALESCE((SELECT MAX(position)+1 FROM tickets WHERE projectId=? AND status='backlog'),1) WHERE (SELECT COUNT(*) FROM tickets WHERE projectId=?) < 1000 RETURNING ${columns}`,
+				[projectId, fields.title, fields.description, createdAt, projectId, projectId],
+			);
+			return ticketSchema.parse(rows.at(0));
+		});
+	}
+	async get(id: string): Promise<Ticket | undefined> {
+		return this.guard(async () => {
+			const rows = await this.database.all(`SELECT ${columns} FROM tickets WHERE id=?`, [id]);
+			return rows.length ? ticketSchema.parse(rows.at(0)) : undefined;
+		});
+	}
+	async list(projectId: string): Promise<Ticket[]> {
+		return this.guard(async () =>
+			(
+				await this.database.all(`SELECT ${columns} FROM tickets WHERE projectId=? ORDER BY position,number`, [
+					projectId,
+				])
+			).map((row) => ticketSchema.parse(row)),
+		);
+	}
+	async update(id: string, input: CreateTicket): Promise<void> {
+		await this.guard(async () => {
+			const fields = createTicketSchema.parse(input);
+			if (
+				(await this.database.run("UPDATE tickets SET title=?,description=? WHERE id=?", [
+					fields.title,
+					fields.description,
+					id,
+				])) !== 1
+			)
+				throw new TicketError("ticket-not-found");
+		});
+	}
+	async move(id: string, input: MoveTicket): Promise<void> {
+		await this.guard(() =>
+			this.database.transaction([
+				{
+					sql: "UPDATE tickets SET position=position+1 WHERE projectId=(SELECT projectId FROM tickets WHERE id=?) AND status=? AND position >= (SELECT position FROM tickets WHERE id=?)",
+					parameters: [id, input.status, input.beforeId ?? null],
+				},
+				{
+					sql: "UPDATE tickets SET status=?,position=COALESCE((SELECT position-1 FROM tickets WHERE id=?),(SELECT COALESCE(MAX(position),0)+1 FROM tickets WHERE projectId=(SELECT projectId FROM tickets WHERE id=?) AND status=?)) WHERE id=?",
+					parameters: [input.status, input.beforeId ?? null, id, input.status, id],
+				},
+			]),
+		);
+	}
+	private async guard<T>(operation: () => Promise<T>): Promise<T> {
+		try {
+			return await operation();
+		} catch (cause) {
+			if (cause instanceof TicketError) throw cause;
+			throw new TicketError("ticket-unavailable", { cause });
+		}
+	}
+}

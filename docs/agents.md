@@ -1,0 +1,167 @@
+# Codex and interactive agents
+
+## Codex harness and lifecycle
+
+Use Codex CLI's app-server as the built-in harness. Forge orchestrates tickets and
+reviews; Codex owns model interaction, tools, agent execution, and conversations.
+
+- Manage one long-lived `codex app-server` child process over stdio JSON-RPC.
+- Initialize the protocol connection, then use supported thread, turn,
+  notification, interruption, and approval operations. Validate the pinned CLI's
+  protocol before implementing integrations; do not invent fields or guarantees.
+- Keep app-server private to the backend. Browser clients call Forge APIs rather
+  than receiving unrestricted Codex protocol access.
+- Map executions to worktrees, branches, Codex thread IDs, active turn IDs, and
+  execution status. Ticket planning agents retain their conversation through
+  clarification and plan feedback; implementation starts a fresh conversation in
+  the same ticket worktree, carrying only the approved plan and execution skill. Keep [ticket orchestration](tickets.md#agentic-ticket-board) outside the
+  Codex execution adapter.
+- Persist important normalized activity and approval state for browser reconnects.
+  Reconcile actual Codex state after app-server or application restart before
+  dispatching more work. Surface interrupted execution and recovery failures explicitly.
+- A shared execution pool limits Forge to three active agents across projects,
+  standalone chats and all ticket phases, including review followups and rebases.
+  Running, waiting and uncertain executions retain slots. Completed, failed and
+  interrupted turns release slots. Serialize mutations within each thread.
+- Shut down child processes cleanly and reap descendants. Keep the web UI and
+  process health available when Codex is unavailable or unauthenticated.
+
+References: [official app-server documentation](https://learn.chatgpt.com/docs/app-server)
+and the local `~/repo/codex-runner` source. Its short-lived setup/proxy connection is
+a reference, not the required transport lifecycle for Forge's continuous agent UI.
+
+### Interactive agents
+
+The Agents tab and backend reuse the one private, pinned Codex `0.164.0` stdio
+process and existing persistent ChatGPT login.
+`AgentService` owns thread/workspace coordination, authorization and per-thread
+serialization; `CodexAgentClient` owns execution and maps validated harness events
+to browser-safe values. Future ticket workflows can reuse that execution adapter
+without depending on HTTP, browser connections or chat-specific state.
+
+Creating a chat allocates a dedicated managed branch/worktree from local `main`.
+It never uses the project repository or an unrelated manual workspace as its
+execution directory. Codex thread creation is deferred until the first message:
+the pinned runtime does not persist empty threads. Verify workspace ownership
+before starting, resuming or sending a turn, and before answering approvals.
+Canonicalize runtime paths before checking Codex's resumed working directory.
+All working files, branches and thread records are retained.
+
+SQLite stores thread identity/title, project/workspace links, Codex thread/turn
+IDs, execution status and pending normalized requests. Codex's persistent home
+owns conversation history; Forge's bounded in-memory activity view is a cache.
+Persist intent before thread/turn dispatch. On restart, existing execution becomes
+`uncertain` and pending request handles are invalidated. Never replay a turn or
+approval automatically. Opening a chat automatically resumes it to reload Codex
+history and reconcile state without submitting a message. An ambiguous thread creation with no known Codex ID
+cannot be retried; create a new chat, retaining the old worktree. Untouched empty
+chats remain usable across restarts.
+
+Threads use `danger-full-access` and disabled Codex subagent spawning. Start and
+resume use `on-request` approvals; each submitted turn applies its chat's selected
+model and permission mode. `Ask` uses `on-request` with the `user` reviewer,
+`Approve for me` uses `on-request` with Codex's `auto_review` reviewer, and
+`Full access` uses `never` with the `user` reviewer. Automatic review is a runtime
+risk assessment, not Forge automatically accepting approval callbacks. Chat
+settings persist with thread metadata and apply to subsequent turns; changes in
+the composer take effect on its next submitted message. The
+nonroot Forge container is the execution boundary; Codex does not create nested
+Bubblewrap namespaces, so execution requires no host user-namespace sysctls,
+privileged mode or relaxed container security profiles. Commands have the
+container's filesystem and network access, including shared project data and
+credential homes. Worktrees do not isolate agents from each other or Forge.
+This slice supports one-time command/file approval or denial and replies to
+structured user-input questions. Approval replies grant no additional session-wide
+permissions, and the backend does not expose unrestricted RPC. Other server requests
+are explicitly rejected. Approval callbacks belong to a particular live connection,
+thread and turn; disconnects invalidate them. Worktrees remain a trusted-owner
+boundary, not process isolation or protection from deliberately modifying shared
+Git metadata.
+
+Browser-safe schemas are exported from `@forge/contracts/agents`:
+
+| Route                                      | Contract                                                                                                                                                                                                   |
+| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET/POST /api/projects/:projectId/agents` | List summaries / create `{title}`; returns 201 and a view.                                                                                                                                                 |
+| `GET /api/agents/:id`                      | `{thread,items,requests,truncated}`; no Codex thread IDs or internal workspace paths in metadata.                                                                                                          |
+| `POST /api/agents/:id/messages`            | `{text,model?,permissions?}`; starts one turn and returns its current view. Permission values are `ask`, `approve-for-me`, `full-access`.                                                                  |
+| `GET /api/agents/:id/options`              | Runtime models `{id,name,isDefault}` and enabled worktree skills `{name,description}`; no internal skill paths.                                                                                            |
+| `GET /api/agents/:id/files?query=…`        | At most 100 relative file paths from the chat's verified worktree. Empty query lists root files through the workspace tree API; nonempty query uses runtime fuzzy search. Query bounded to 500 characters. |
+| `POST /api/agents/:id/resume`              | History loading and reconciliation; never sends input.                                                                                                                                                     |
+| `POST /api/agents/:id/interrupt`           | Requests interruption of the known active turn.                                                                                                                                                            |
+| `POST /api/agents/:id/replies`             | `{requestId,decision: "accept"/"decline"}` or `{requestId,answers:{questionId:text}}`.                                                                                                                     |
+| `GET /api/agents/:id/events`               | Authorized SSE invalidations (`data: changed`); read the current view after each notification/reconnect.                                                                                                   |
+
+Every operation rechecks owner access; HTTP mutations retain exact-origin checks.
+Errors are `invalid-request` (400), `agent-not-found` (404), `agent-conflict` (409),
+`agent-unavailable` (503), plus existing access/project/workspace failures. Raw
+Codex diagnostics stay in operator logs. Conversation/tool text is owner-visible
+content, not a credential-redaction guarantee.
+
+Messages are limited to 8000 characters. Views retain at most 500 items, 32000
+characters per item and 240000 text characters in total; clipping sets `truncated`.
+Resume loads metadata for the latest 20 turns, then reads items newest first through
+the pinned item pagination API in pages of 20. Stop at the browser snapshot budget
+or 25 item pages, preserving the latest result and marking omitted history explicitly.
+Full turn output must not be bundled into history metadata responses.
+Pending structured requests are bounded per thread. RPC deadlines remain 15 seconds
+and frames are bounded to 16 MiB, including large individual tool results and
+completion notifications; there is no automatic
+turn timeout. The shared three-agent execution limit also applies to these chats;
+capacity failures preserve browser drafts for retry. SSE sends 15-second heartbeats,
+disconnects slow consumers and closes on application shutdown. Reconnection reads
+a current snapshot rather than replaying mutations.
+
+Tests use injected service fakes, real Git/SQLite, controlled stdio peers and a
+temporary credential-free pinned Codex process. The real probe verifies start,
+interruption and history reload, not successful authenticated inference. Resuming
+preserves newer live activity observed during the history read; unloaded or
+system-error runtime states remain uncertain. Externally resolved server requests
+invalidate both the transport reply and browser callback.
+
+The Agents sidebar has a single-row Create chat button without a title input;
+new chats receive a default numbered name. The tab has no additional Agents
+heading, and the selected conversation does not repeat its title. Thread names
+remain in the thread list; execution status and interruption remain available.
+The responsive Agents tab lists and creates project chats, shows conversation and
+tool activity, and supports send, interrupt, one-time approval/denial and structured
+clarification replies. Open chats retain their message and answer drafts across
+thread and project-section selection. Failed writes preserve drafts. Drafts are
+browser memory only and are lost when leaving the project or reloading the page.
+Execution continues independently of the selected chat or browser connection.
+Entering Agents without a chat URL selects the first listed chat. Opening a chat
+automatically loads persisted history and reconciles recoverable execution state;
+running/waiting chats retain their live activity and untouched empty chats need no
+resume. Sidebar chats hide the internal `uncertain` status and recover only when
+selected. The conversation shows history loading instead of uncertainty and
+blocks sending until recovery completes. Recovery failures show a retry action;
+polling does not repeatedly retry failed recovery. Drafts survive recovery.
+Truncation is visible. SSE reconnects and periodic polling read current snapshots
+through a serialized, coalesced reader; selected chats recover newly uncertain
+state without replaying messages or approvals. No Markdown or tool HTML is
+executed from conversation text.
+
+The conversation follows the Codex desktop layout: right-aligned user bubbles,
+unboxed agent text and consecutive tool calls in one initially collapsed group.
+Each tool expands to its output and displays its actual runtime status when
+available. Running tool summaries use a sweeping text highlight, disabled with
+reduced-motion preferences. Tool titles/statuses remain structured through output
+deltas and history reloads. No project/workspace/worktree picker is exposed.
+
+The rounded composer includes a runtime model selector, permission selector and
+small blue upward-arrow send button. Enter sends; Cmd+Enter and Ctrl+Enter insert
+a newline at the caret (Shift+Enter also retains normal textarea behavior). IME
+composition must not submit. `$` opens enabled skills, `@` opens worktree files;
+filter from the caret, navigate with arrows, insert with Tab or a pointer, and
+dismiss with Escape. Completion preserves text after the caret. Explicit `$skill`
+names in submitted text resolve through the verified worktree's enabled runtime
+catalog and are sent as structured skill inputs. File completion inserts a
+relative path into the message. Model/skill discovery failures expose a retry;
+file-search failures retain the draft and allow another query. Ticket workflow
+conversations share message layout and keyboard behavior, but their orchestration
+does not expose standalone-chat model/permission controls.
+
+Controlled Chromium tests cover independent threads, activity, interruptions,
+reopening, failed sends/replies, approval/input, reconnects, automatic recovery and
+mobile layout. Screenshots live under `artifacts/forge-browser/`. Authenticated
+live ChatGPT inference remains a separate manual check.

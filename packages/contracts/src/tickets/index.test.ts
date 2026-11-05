@@ -1,0 +1,29 @@
+import { expect, test } from "vitest";
+
+import { createTicketSchema, moveTicketSchema, ticketSchema, ticketStatuses } from "./index.ts";
+
+test("board exposes exactly six workflow stages", () => {
+	expect(ticketStatuses).toEqual(["backlog", "todo", "in-progress", "in-review", "merging", "done"]);
+	expect(moveTicketSchema.safeParse({ status: "planning" }).success).toBe(false);
+});
+
+test("tickets have bounded plain fields, immutable keys and explicit manual moves", () => {
+	expect(createTicketSchema.parse({ title: "  First task  ", description: "Details" })).toEqual({
+		title: "First task",
+		description: "Details",
+	});
+	for (const value of [
+		{ title: " " },
+		{ title: "x".repeat(121) },
+		{ title: "Task", description: "x".repeat(4001) },
+		{ title: "Task", status: "done" },
+	]) {
+		expect(createTicketSchema.safeParse(value).success).toBe(false);
+	}
+	expect(moveTicketSchema.parse({ status: "done", beforeId: "FORGE-2" })).toEqual({
+		status: "done",
+		beforeId: "FORGE-2",
+	});
+	expect(moveTicketSchema.safeParse({ status: "unknown" }).success).toBe(false);
+	expect(ticketSchema.safeParse({ id: "FORGE-0" }).success).toBe(false);
+});

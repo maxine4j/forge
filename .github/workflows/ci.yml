@@ -1,0 +1,80 @@
+name: CI
+on:
+    pull_request:
+    workflow_call:
+        inputs:
+            publish-image:
+                type: boolean
+                default: false
+permissions:
+    contents: read
+jobs:
+    checks:
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: ./.github/actions/setup
+            - run: pnpm check
+            - run: pnpm test
+            - run: pnpm test:integration
+            - run: pnpm --filter @forge/frontend exec playwright install --with-deps chromium
+            - run: pnpm test:browser
+            - name: Retain browser diagnostics
+              if: always()
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: forge-browser
+                  path: artifacts/forge*/
+                  retention-days: 7
+    image:
+        runs-on: ubuntu-24.04
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: ./.github/actions/setup
+            - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+            - name: Build image
+              run: >-
+                  docker buildx build --platform linux/amd64 --tag forge:dev
+                  --build-arg "BUILD_SHA=$GITHUB_SHA"
+                  --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY"
+                  --load .
+            - run: pnpm test:image
+            - name: Retain runtime diagnostics
+              if: always()
+              uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              with:
+                  name: forge-runtime
+                  path: artifacts/forge/
+                  retention-days: 7
+    publish:
+        if: inputs.publish-image && github.event_name == 'push'
+        needs: [checks, image]
+        runs-on: ubuntu-24.04
+        permissions:
+            contents: read
+            packages: write
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+            - name: Log in to GHCR
+              env:
+                  GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: printf '%s' "$GHCR_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+            - name: Publish Forge image
+              shell: bash
+              run: |
+                  image="ghcr.io/${GITHUB_REPOSITORY,,}"
+                  tags=(--tag "$image:$GITHUB_SHA")
+                  if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+                      if [[ ! "$GITHUB_REF_NAME" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+                          echo "Release tags must use vX.X.X with no leading zeroes."
+                          exit 1
+                      fi
+                      tags+=(--tag "$image:$GITHUB_REF_NAME")
+                  else
+                      tags+=(--tag "$image:latest")
+                  fi
+                  docker buildx build --platform linux/amd64 "${tags[@]}" \
+                      --build-arg "BUILD_SHA=$GITHUB_SHA" \
+                      --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
+                      --push .

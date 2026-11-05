@@ -1,0 +1,41 @@
+{
+	"plugins": ["typescript", "react", "react-hooks", "import"],
+	"rules": {
+		"typescript/no-explicit-any": "error",
+		"import/no-cycle": ["error", { "ignoreTypes": false }]
+	},
+	"ignorePatterns": ["**/dist/**"],
+	"overrides": [
+		{
+			"files": ["src/**/*.ts", "packages/backend-infrastructure/src/**/*.ts"],
+			"excludeFiles": [
+				"packages/backend-infrastructure/src/file.test.ts",
+				"packages/backend-infrastructure/src/file.ts",
+				"packages/backend-infrastructure/src/yaml.ts",
+				"packages/backend-infrastructure/src/sleep.ts"
+			],
+			"rules": {
+				"no-restricted-imports": [
+					"error",
+					{
+						"patterns": [
+							{
+								"group": ["fs", "fs/*", "node:fs", "node:fs/*"],
+								"message": "Use the canonical @forge/backend-infrastructure/file filesystem boundary."
+							},
+							{
+								"group": ["yaml", "yaml/*"],
+								"message": "Use parseYaml/stringifyYaml from @forge/backend-infrastructure/yaml."
+							},
+							{
+								"group": ["timers", "timers/*", "node:timers", "node:timers/*"],
+								"message": "Inject ISleep from @forge/backend-infrastructure/sleep."
+							}
+						]
+					}
+				],
+				"no-restricted-globals": ["error", "setTimeout", "setInterval", "clearTimeout", "clearInterval"]
+			}
+		}
+	]
+}

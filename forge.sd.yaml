@@ -1,0 +1,24 @@
+version: 1
+metadata:
+    serviceId: forge
+resources:
+    app:
+        type: web
+        image: ghcr.io/maxine4j/forge:${COMMIT_ID:40}
+        replicas: 1
+        rolloutStrategy: recreate
+        ingress:
+            public: false
+            port: 8080
+        healthcheckUrl: /health
+        env:
+            - name: FORGE_OWNER
+              value: maxine4j
+            - name: FORGE_ORIGIN
+              value: https://${SERVICE_DOMAIN}
+            - name: FORGE_IMPORT_HOSTS
+              value: github.com
+        volumes:
+            - mountPath: /data
+        termination:
+            timeoutSeconds: 30
