@@ -325,7 +325,7 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 											<div className='ticket-drop-placeholder' aria-hidden='true' />
 										)}
 										<article
-											className={`ticket-card ${drag?.ticket.id === ticket.id ? "is-drag-source" : ""}`}
+											className={`ticket-card ${ticket.needsAttention ? "needs-attention" : ""} ${drag?.ticket.id === ticket.id ? "is-drag-source" : ""}`}
 											data-ticket-id={ticket.id}
 										>
 											<button
@@ -343,18 +343,15 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 														✓
 													</span>
 													{ticket.id}
-													{status === "in-progress" && ticket.needsAttention && (
-														<span
-															className='ticket-attention'
-															role='img'
-															aria-label='Needs attention'
-															title='Needs attention'
-														>
-															!
-														</span>
-													)}
 												</span>
-												{ticket.agentStatus && !ticket.needsAttention && (
+												{ticket.needsAttention ? (
+													<span
+														className='ticket-agent-status ticket-attention'
+														role='img'
+														aria-label='Action required'
+														title='Action required'
+													/>
+												) : ticket.agentStatus ? (
 													<svg
 														className={`ticket-agent-status ${ticket.agentStatus === "working" ? "is-working" : ""}`}
 														role='img'
@@ -382,7 +379,7 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 															<path d='M8 2a6 6 0 1 1-6 6' strokeLinecap='round' />
 														)}
 													</svg>
-												)}
+												) : null}
 											</button>
 											<button
 												className='ticket-drag-handle'

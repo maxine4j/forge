@@ -152,7 +152,8 @@ export class MockApi implements IMockApi {
 					id: `FORGE-${project.id === projects.at(0)!.id ? 2 : 5}`,
 					projectId: project.id,
 					title: "Improve project navigation",
-					description: "Make the project easier to browse on every screen.",
+					description:
+						"Review the completed navigation plan. The orange card and red dot remain until the plan is approved.",
 					status: "in-progress",
 					needsAttention: true,
 					createdAt: date,

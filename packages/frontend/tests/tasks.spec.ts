@@ -67,6 +67,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 					approvals.push(route.request().postDataJSON());
 					approved = true;
 					delete tickets[0]!.needsAttention;
+					tickets[0]!.agentStatus = "queued";
 				}
 				return route.fulfill({
 					json: {
@@ -246,6 +247,7 @@ test("ticket archive requires confirmation and removes the card only after succe
 });
 
 test("agent icons poll from queued to working to idle, and attention takes precedence", async ({ page }) => {
+	test.setTimeout(60_000);
 	const fixture = await setup(page);
 	const card = page.locator('[data-ticket-id="FORGE-1"]');
 	fixture.setAgentStatus("queued");
@@ -266,8 +268,35 @@ test("agent icons poll from queued to working to idle, and attention takes prece
 	await page.emulateMedia({ reducedMotion: "reduce" });
 	await expect(spinner).toHaveCSS("animation-name", "none");
 	fixture.setAgentStatus("working", true);
-	await expect(card.getByRole("img", { name: "Needs attention" })).toBeVisible();
+	const dot = card.getByRole("img", { name: "Action required" });
+	await expect(dot).toBeVisible();
+	await expect(dot).toHaveAttribute("title", "Action required");
+	await expect(card.getByRole("img")).toHaveCount(1);
+	await expect(card).toHaveCSS("background-color", "rgb(81, 43, 18)");
+	expect(await dot.boundingBox()).toEqual(icon);
+	const paint = await dot.evaluate((element) => {
+		const style = getComputedStyle(element, "::before");
+		return [style.width, style.height, style.backgroundColor, style.borderRadius];
+	});
+	expect(paint).toEqual(["8px", "8px", "rgb(255, 77, 79)", "50%"]);
+	await card.locator(".ticket-open").focus();
+	await page.keyboard.press("Tab");
+	await page.keyboard.press("Shift+Tab");
+	await expect(card.locator(".ticket-open")).toBeFocused();
+	await expect(card.locator(".ticket-open")).toHaveCSS("outline-style", "solid");
+	await card.hover();
+	await expect(card).toHaveCSS("background-color", "rgb(99, 54, 21)");
+	await expect(card.locator(".ticket-key")).toHaveCSS("color", "rgb(242, 201, 165)");
+	await page.mouse.move(0, 0);
 	await expect(spinner).toHaveCount(0);
+	for (const status of ["working", "queued", undefined] as const) {
+		fixture.setAgentStatus(status, true);
+		await expect(dot).toBeVisible({ timeout: 10_000 });
+		fixture.setAgentStatus(status);
+		await expect(dot).toHaveCount(0);
+		await expect(card).toHaveCSS("background-color", "rgb(33, 38, 45)");
+		await expect(card.getByRole("img")).toHaveCount(status ? 1 : 0);
+	}
 	fixture.setAgentStatus();
 	await expect(card.getByRole("img")).toHaveCount(0);
 	fixture.setAgentStatus("queued");
@@ -303,6 +332,12 @@ test("mobile agent icons reserve room for long titles and metadata", async ({ pa
 	const bounds = await card.locator(".ticket-open").boundingBox();
 	expect(bounds!.x + bounds!.width - icon!.x - icon!.width).toBeCloseTo(12, 0);
 	expect(bounds!.y + bounds!.height - icon!.y - icon!.height).toBeCloseTo(12, 0);
+	fixture.setAgentStatus("working", true);
+	const dot = card.getByRole("img", { name: "Action required" });
+	await expect(dot).toBeVisible();
+	expect(await dot.boundingBox()).toEqual(icon);
+	await expect(card.getByRole("img")).toHaveCount(1);
+	await expect(card).toHaveCSS("background-color", "rgb(81, 43, 18)");
 });
 
 test("board settings save the slider and control pause, stop and resume", async ({ page }) => {
@@ -845,7 +880,11 @@ test("a plan needs attention on the four-column board and approval submits the d
 		"Done",
 	]);
 	const card = page.locator('[data-ticket-id="FORGE-1"]');
-	await expect(card.getByRole("img", { name: "Needs attention" })).toHaveText("!");
+	const dot = card.getByRole("img", { name: "Action required" });
+	await expect(dot).toBeVisible();
+	await card.getByRole("button", { name: "FORGE-1 First task" }).click();
+	await page.getByRole("button", { name: "Close ticket" }).click();
+	await expect(dot).toBeVisible();
 	await card.getByRole("button", { name: "FORGE-1 First task" }).click();
 	const panel = page.getByRole("dialog");
 	await expect(panel.getByRole("heading", { name: "Search plan" })).toBeVisible();
@@ -854,5 +893,7 @@ test("a plan needs attention on the four-column board and approval submits the d
 	await panel.getByRole("button", { name: "Approve plan", exact: true }).click();
 	await expect.poll(() => f.approvals).toEqual([{ revision: 1 }]);
 	await panel.getByRole("button", { name: "Close ticket" }).click();
-	await expect(card.getByRole("img", { name: "Needs attention" })).toHaveCount(0);
+	await expect(dot).toHaveCount(0);
+	await expect(card.getByRole("img", { name: "Agent queued" })).toBeVisible();
+	await expect(card).not.toHaveClass(/needs-attention/);
 });

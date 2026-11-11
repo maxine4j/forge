@@ -21,12 +21,12 @@ ticket and workflow remain readable by ID.
 Queued work can be archived before it starts. A running turn, unresolved dispatch
 or pending merge must settle before archiving.
 
-| Stage                 | Behavior                                                                                                                                                                                                                                                                                       |
-| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backlog               | The owner writes the scope.                                                                                                                                                                                                                                                                    |
-| Ready for development | The scheduler claims the top ticket when an agent slot opens. It reserves the slot before allocating a new ticket worktree from latest local main.                                                                                                                                             |
-| In progress           | A fresh Codex planner proposes a plan. The card shows an attention badge and Chat renders the Markdown plan and accepts feedback. Approve plan applies to the latest completed revision and queues a fresh implementer in the same worktree. Completed implementation goes to the merge queue. |
-| Done                  | Forge moves the ticket here after confirming its commit is in local main.                                                                                                                                                                                                                      |
+| Stage                 | Behavior                                                                                                                                                                                                                                                                                                  |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backlog               | The owner writes the scope.                                                                                                                                                                                                                                                                               |
+| Ready for development | The scheduler claims the top ticket when an agent slot opens. It reserves the slot before allocating a new ticket worktree from latest local main.                                                                                                                                                        |
+| In progress           | A fresh Codex planner proposes a plan. The orange card shows a red notification dot and Chat renders the Markdown plan and accepts feedback. Approve plan applies to the latest completed revision and queues a fresh implementer in the same worktree. Completed implementation goes to the merge queue. |
+| Done                  | Forge moves the ticket here after confirming its commit is in local main.                                                                                                                                                                                                                                 |
 
 The scheduler wakes when tickets enter Ready or Done, when an agent slot is
 released, and when settings open new capacity. All execution shares a pool with
@@ -55,13 +55,21 @@ The ticket-list response derives optional `agentStatus: "queued" | "working"`
 without storing it. Ready tickets without a workflow and workflows in `queued`
 show a clock, including while dispatch is paused or capacity is exhausted.
 Active workspace/thread setup and `dispatching` or `running` workflows show a spinner. A current
-planner or implementer in `waiting` shows the existing attention badge instead.
-Unreadable agent state also shows attention. Plan review and failure attention
-take precedence. Idle, failed, uncertain and merge-queued workflows have no
+planner or implementer in `waiting` for input or permission requires attention.
+Completed plans ready for review, failures, uncertain execution and unreadable
+agent state also require attention. These cards have an orange background and
+border, including on hover, and a solid red dot labelled and titled “Action required”.
+Attention takes precedence over the queued clock and working spinner: only one
+indicator appears. Idle and merge-queued workflows without attention have no
 status icon; Backlog and Done never show one. Git merge activity is excluded.
+Notifications remain until the underlying condition resolves; opening or closing
+a ticket does not dismiss them. Approving a plan clears its review notification
+once implementation is queued. Resolved cards return to normal styling and show
+the current queued/working indicator, or none when idle.
 The board refreshes these fields with its existing one-second ticket polling.
-The noninteractive 16px icons sit at the bottom right of the ticket-open button,
-with labels and tooltips “Agent queued” and “Agent working”. The working icon
+The noninteractive 16px indicators sit 12px from the bottom and right of the
+ticket-open button. The attention dot is 8px, centered in that same slot. Status
+icons have labels and tooltips “Agent queued” and “Agent working”. The working icon
 remains static when reduced motion is requested.
 
 Board settings apply across projects and persist in SQLite. The concurrency
