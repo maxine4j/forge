@@ -8,6 +8,12 @@ import { RepositoryBrowserService } from "./repository-browser-service.ts";
 test("browsing rechecks owner authorization and ready project state before Git access", async () => {
 	let reads = 0;
 	const client: IRepositoryBrowserClient = {
+		commitDetail: async () => {
+			throw new Error("unused");
+		},
+		commitPatch: async () => {
+			throw new Error("unused");
+		},
 		commit: async () => {
 			reads++;
 			return { head: "a".repeat(40) };

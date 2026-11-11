@@ -47,6 +47,10 @@ container is required. A visible banner identifies the read-only preview.
 Vite serves deterministic HTTP fixtures for projects, accounts, repository
 branches/files/history, project workspaces, changes, pull-request reviews and
 project chat history with clarification requests.
+Commit history opens shareable commit pages with parent navigation, structured
+replacement hunks, renamed files, mode changes and binary placeholders. Preview
+fixtures support unified/split rendering and whitespace filtering. Commit browser
+coverage captures desktop/mobile screenshots under `artifacts/forge-browser/`.
 Both sample projects can be opened. File navigation and client-side editor drafts
 work; all API mutations return 405 and no terminal session or
 WebSocket execution is provided. Unknown API paths, identities, branches and

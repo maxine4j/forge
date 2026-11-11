@@ -131,6 +131,33 @@ test("repository HTTP serves branch-specific trees, files and history behind own
 	expect((await (await request("branches")).json()).map((b: { name: string }) => b.name)).toContain("main");
 	const branch = encodeURIComponent(workspace.branch);
 	const tree = await (await request(`tree?branch=${branch}&path=`)).json();
+	const commitUrl = `commits/${tree.head}`;
+	expect((await request(commitUrl, "intruder")).status).toBe(403);
+	expect((await request(`${commitUrl}/diff?path=README.md`, "intruder")).status).toBe(403);
+	expect(await (await request(commitUrl)).json()).toMatchObject({
+		sha: tree.head,
+		subject: "Documentation",
+		files: [{ path: "README.md", status: "A" }],
+	});
+	expect(await (await request(`${commitUrl}/diff?path=README.md&ignoreWhitespace=false`)).json()).toMatchObject({
+		path: "README.md",
+		additions: 1,
+		truncated: false,
+	});
+	for (const path of [
+		"commits/HEAD",
+		"commits/abc",
+		`${commitUrl}/diff`,
+		`${commitUrl}/diff?path=../secret`,
+		`${commitUrl}/diff?path=README.md&ignoreWhitespace=1`,
+		`${commitUrl}/diff?path=README.md&path=other`,
+	]) {
+		const response = await request(path);
+		expect(response.status).toBe(400);
+		expect(await response.json()).toEqual({ error: "invalid-request" });
+	}
+	expect((await request(`commits/${"f".repeat(40)}`)).status).toBe(404);
+	expect((await request(`${commitUrl}/diff?path=missing`)).status).toBe(404);
 	expect(tree.entries.at(0)).toMatchObject({ name: "README.md", lastCommit: { subject: "Documentation" } });
 	expect((await (await request("tree?branch=main&path=")).json()).entries).toEqual([]);
 	expect(await (await request(`file?branch=${branch}&path=README.md`)).json()).toEqual({

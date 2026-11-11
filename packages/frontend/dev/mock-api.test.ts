@@ -11,6 +11,8 @@ import {
 	repositoryTreeSchema,
 	repositoryFileSchema,
 	repositoryHistorySchema,
+	commitDetailSchema,
+	commitPatchSchema,
 } from "@forge/contracts";
 import { agentThreadsSchema, agentViewSchema, agentOptionsSchema, agentFilesSchema } from "@forge/contracts/agents";
 import {
@@ -46,6 +48,23 @@ const read = async (path: string) => {
 	expect(response.headers.get("cache-control")).toBe("no-store");
 	return response.json();
 };
+
+test("mock commit pages expose validated parent links, structured patches and whitespace filtering", async () => {
+	const projects = projectsSchema.parse(await read("/api/projects"));
+	for (const project of projects) {
+		const root = `/api/projects/${project.id}/repository/commits/`;
+		const detail = commitDetailSchema.parse(await read(root + "a".repeat(40)));
+		for (const parent of detail.parents) commitDetailSchema.parse(await read(root + parent));
+		for (const file of detail.files) {
+			for (const ignore of [false, true])
+				commitPatchSchema.parse(
+					await read(
+						`${root}${detail.sha}/diff?${new URLSearchParams({ path: file.path, ignoreWhitespace: String(ignore) })}`,
+					),
+				);
+		}
+	}
+});
 
 test("mock cost data uses ticket keys from its project", async () => {
 	const projects = projectsSchema.parse(await read("/api/projects"));

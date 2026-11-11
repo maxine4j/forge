@@ -6,6 +6,7 @@ import type {
 	RepositoryHistory,
 	RepositoryCommitInput,
 } from "@forge/contracts";
+import type { CommitDetail, CommitPatch } from "@forge/contracts";
 
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
@@ -16,6 +17,8 @@ interface IReadableProjects {
 	get(actor: Actor, id: string): Promise<Project>;
 }
 export interface IRepositoryBrowserService {
+	commitDetail(actor: Actor, id: string, sha: string): Promise<CommitDetail>;
+	commitPatch(actor: Actor, id: string, sha: string, path: string, ignoreWhitespace: boolean): Promise<CommitPatch>;
 	commit(actor: Actor, id: string, input: RepositoryCommitInput): Promise<{ head: string }>;
 	branches(actor: Actor, id: string): Promise<RepositoryBranch[]>;
 	tree(actor: Actor, id: string, branch: string, path: string): Promise<RepositoryTree>;
@@ -23,6 +26,20 @@ export interface IRepositoryBrowserService {
 	history(actor: Actor, id: string, branch: string, offset: number): Promise<RepositoryHistory>;
 }
 export class RepositoryBrowserService implements IRepositoryBrowserService {
+	async commitDetail(actor: Actor, id: string, sha: string): Promise<CommitDetail> {
+		await this.authorize(actor, id);
+		return this.client.commitDetail(id, sha);
+	}
+	async commitPatch(
+		actor: Actor,
+		id: string,
+		sha: string,
+		path: string,
+		ignoreWhitespace: boolean,
+	): Promise<CommitPatch> {
+		await this.authorize(actor, id);
+		return this.client.commitPatch(id, sha, path, ignoreWhitespace);
+	}
 	constructor(
 		private readonly client: IRepositoryBrowserClient,
 		private readonly projects: IReadableProjects,

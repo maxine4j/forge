@@ -64,6 +64,61 @@ export const repositoryCommitInputSchema = z
 	)
 	.refine(({ files }) => files.every((file) => !file.content.includes("\0")));
 export const repositoryCommitResultSchema = z.strictObject({ head: gitShaSchema });
+const commitFileSchema = z.strictObject({
+	path: z.string().min(1).max(4096),
+	oldPath: z.string().max(4096).optional(),
+	status: z.enum(["A", "D", "M", "R", "T"]),
+	additions: z.int().nonnegative(),
+	deletions: z.int().nonnegative(),
+	binary: z.boolean(),
+	oldMode: z
+		.string()
+		.regex(/^[0-7]{6}$/u)
+		.optional(),
+	newMode: z
+		.string()
+		.regex(/^[0-7]{6}$/u)
+		.optional(),
+});
+export const commitDetailSchema = repositoryCommitSchema.extend({
+	message: z.string(),
+	parents: z.array(gitShaSchema),
+	base: gitShaSchema.nullable(),
+	files: z.array(commitFileSchema).max(1000),
+	additions: z.int().nonnegative(),
+	deletions: z.int().nonnegative(),
+	truncated: z.boolean(),
+});
+export const commitPatchSchema = z.strictObject({
+	path: z.string(),
+	status: commitFileSchema.shape.status,
+	binary: z.boolean(),
+	submodule: z.boolean(),
+	truncated: z.boolean(),
+	oldMode: commitFileSchema.shape.oldMode,
+	newMode: commitFileSchema.shape.newMode,
+	additions: z.int().nonnegative(),
+	deletions: z.int().nonnegative(),
+	hunks: z
+		.array(
+			z.strictObject({
+				header: z.string(),
+				lines: z
+					.array(
+						z.strictObject({
+							kind: z.enum(["context", "addition", "deletion", "marker"]),
+							text: z.string().max(262144),
+							old: z.int().nonnegative().optional(),
+							new: z.int().nonnegative().optional(),
+						}),
+					)
+					.max(1000),
+			}),
+		)
+		.max(1000),
+});
+export type CommitDetail = z.infer<typeof commitDetailSchema>;
+export type CommitPatch = z.infer<typeof commitPatchSchema>;
 export const githubSyncStatusSchema = z.discriminatedUnion("state", [
 	z.strictObject({ state: z.literal("unconfigured") }),
 	z.strictObject({ state: z.literal("unavailable") }),

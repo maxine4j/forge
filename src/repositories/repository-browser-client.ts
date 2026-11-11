@@ -17,12 +17,16 @@ import {
 	type RepositoryHistory,
 	type RepositoryCommit,
 } from "@forge/contracts";
+import type { CommitDetail, CommitPatch } from "@forge/contracts";
 
 import { WorkspaceError } from "../workspaces/errors.ts";
-import type { IGitTransport } from "./git-transport.ts";
+import { CommitReader } from "./commit-reader.ts";
+import type { IGitTransport, IGitBinaryTransport } from "./git-transport.ts";
 import type { IRepositoryClient } from "./repository-client.ts";
 
 export interface IRepositoryBrowserClient {
+	commitDetail(id: string, sha: string): Promise<CommitDetail>;
+	commitPatch(id: string, sha: string, path: string, ignoreWhitespace: boolean): Promise<CommitPatch>;
 	/** Commits text drafts atomically without checkout writes. Stale heads throw workspace-conflict; invalid/unsupported inputs and infrastructure failures use safe WorkspaceError codes. */
 	commit(id: string, input: RepositoryCommitInput): Promise<{ head: string }>;
 	/** Bounded read operations. Throws WorkspaceError with safe invalid-request, file-not-found, file-unsupported or workspace-unavailable codes. */
@@ -32,9 +36,32 @@ export interface IRepositoryBrowserClient {
 	history(id: string, branch: string, offset: number, limit: number): Promise<RepositoryHistory>;
 }
 export class RepositoryBrowserClient implements IRepositoryBrowserClient {
+	async commitDetail(id: string, sha: string): Promise<CommitDetail> {
+		return this.boundary(async () => {
+			await this.verify(id);
+			return new CommitReader((args) => this.run(id, args)).detail(sha);
+		});
+	}
+	async commitPatch(id: string, sha: string, path: string, ignoreWhitespace: boolean): Promise<CommitPatch> {
+		return this.boundary(async () => {
+			await this.verify(id);
+			return new CommitReader(
+				(args) => this.run(id, args),
+				this.git.runBytes
+					? (args) =>
+							this.git.runBytes!([
+								"--literal-pathspecs",
+								"-C",
+								join(this.root, "repositories", `${id}.git`),
+								...args,
+							])
+					: undefined,
+			).patch(sha, path, ignoreWhitespace);
+		});
+	}
 	constructor(
 		private readonly root: string,
-		private readonly git: IGitTransport,
+		private readonly git: IGitTransport & Partial<IGitBinaryTransport>,
 		private readonly repositories: IRepositoryClient,
 	) {}
 	async commit(id: string, input: RepositoryCommitInput): Promise<{ head: string }> {

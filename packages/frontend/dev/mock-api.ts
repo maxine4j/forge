@@ -30,7 +30,7 @@ export interface IMockApi {
 	read(url: URL): unknown;
 }
 
-class MockApi implements IMockApi {
+export class MockApi implements IMockApi {
 	private readonly routes = new Map<string, (url: URL) => unknown>();
 
 	constructor() {
@@ -204,6 +204,78 @@ class MockApi implements IMockApi {
 			}
 			const workspaceRoot = `/api/workspaces/${id}`;
 			const repositoryRoot = `${projectRoot}/repository`;
+			const commitFiles = [
+				{ path: "src/index.ts", status: "M", additions: 2, deletions: 1, binary: false },
+				{
+					path: "src/theme.css",
+					oldPath: "src/style.css",
+					status: "R",
+					additions: 1,
+					deletions: 1,
+					binary: false,
+				},
+				{ path: "assets/logo.bin", status: "A", additions: 0, deletions: 0, binary: true },
+				{
+					path: "scripts/check.sh",
+					status: "M",
+					additions: 0,
+					deletions: 0,
+					binary: false,
+					oldMode: "100644",
+					newMode: "100755",
+				},
+			];
+			for (const sha of [head, baseSha]) {
+				this.routes.set(`${repositoryRoot}/commits/${sha}`, () => ({
+					...commit,
+					sha,
+					subject: sha === head ? commit.subject : "Initialize project",
+					message:
+						sha === head
+							? `${commit.subject}\n\nKeep navigation consistent across desktop and mobile.\nRetain editor drafts while reviewing commits.`
+							: "Initialize project",
+					parents: sha === head ? [baseSha] : [],
+					base: sha === head ? baseSha : null,
+					files: commitFiles,
+					additions: 3,
+					deletions: 2,
+					truncated: false,
+				}));
+				this.routes.set(`${repositoryRoot}/commits/${sha}/diff`, (url) => {
+					const file = commitFiles.find((file) => file.path === url.searchParams.get("path"));
+					if (!file || ![null, "true", "false"].includes(url.searchParams.get("ignoreWhitespace")))
+						return undefined;
+					const hidden = url.searchParams.get("ignoreWhitespace") === "true" && file.status === "R";
+					return {
+						path: file.path,
+						status: file.status,
+						binary: file.binary,
+						oldMode: file.oldMode,
+						newMode: file.newMode,
+						submodule: false,
+						truncated: false,
+						additions: hidden ? 0 : file.additions,
+						deletions: hidden ? 0 : file.deletions,
+						hunks:
+							file.additions && !hidden
+								? [
+										{
+											header: "@@ -1 +1,2 @@",
+											lines: [
+												{ kind: "deletion", text: "export const greeting = 'Hello';", old: 1 },
+												{
+													kind: "addition",
+													text: "export const greeting = 'Hello, Forge';",
+													new: 1,
+												},
+												{ kind: "addition", text: "export const navigation = 'Code';", new: 2 },
+											],
+										},
+									]
+								: [],
+					};
+				});
+			}
 			this.routes.set(`${repositoryRoot}/github-sync`, () =>
 				project === projects.at(0) ? { state: "ready", ahead: 2, behind: 1 } : { state: "unconfigured" },
 			);

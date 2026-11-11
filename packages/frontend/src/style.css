@@ -2142,3 +2142,138 @@ summary {
 		padding: 20px;
 	}
 }
+/* Commit pages keep repository text in scrollable, inert table cells. */
+.commit-heading,
+.commit-file {
+	border: 1px solid var(--border, #30363d);
+	border-radius: 6px;
+	margin: 16px 0;
+}
+.commit-heading {
+	display: block;
+	padding: 16px;
+	overflow-wrap: anywhere;
+}
+.commit-heading pre {
+	white-space: pre-wrap;
+	font: inherit;
+}
+.commit-sha {
+	overflow-wrap: anywhere;
+}
+.commit-controls {
+	display: flex;
+	gap: 20px;
+	flex-wrap: wrap;
+	align-items: center;
+}
+.commit-controls input[type="checkbox"] {
+	display: inline-block;
+	width: auto;
+	padding: 0;
+	margin-right: 6px;
+}
+.commit-layout {
+	display: grid;
+	grid-template-columns: 260px minmax(0, 1fr);
+	gap: 20px;
+	align-items: start;
+}
+.commit-sidebar {
+	position: sticky;
+	top: 16px;
+	max-height: 85vh;
+	overflow: auto;
+	padding-top: 16px;
+}
+.commit-sidebar input {
+	width: 100%;
+	margin: 12px 0;
+}
+.commit-sidebar nav a {
+	display: flex;
+	gap: 8px;
+	justify-content: space-between;
+	padding: 8px 4px;
+	overflow-wrap: anywhere;
+}
+.commit-sidebar small {
+	white-space: nowrap;
+}
+.commit-panels {
+	min-width: 0;
+}
+.commit-file {
+	scroll-margin-top: 16px;
+}
+.commit-file summary {
+	padding: 12px;
+	cursor: pointer;
+	overflow-wrap: anywhere;
+	background: #161b22;
+}
+.commit-file small {
+	color: #a0aab8;
+	margin-left: 10px;
+}
+.commit-file > p {
+	padding: 0 12px;
+}
+.commit-patch-scroll {
+	overflow-x: auto;
+}
+.commit-patch {
+	width: 100%;
+	border-collapse: collapse;
+	font: 12px/1.6 monospace;
+}
+.commit-patch td {
+	padding: 0 8px;
+	border: 0;
+}
+.commit-patch pre {
+	margin: 0;
+	font: inherit;
+	white-space: pre;
+}
+.commit-patch .line-number {
+	width: 1%;
+	min-width: 35px;
+	text-align: right;
+	color: #8995a5;
+	user-select: none;
+}
+.commit-patch .addition {
+	background: #123523;
+	color: #aff5b4;
+}
+.commit-patch .deletion {
+	background: #482029;
+	color: #ffd0d5;
+}
+.commit-patch .hunk-header {
+	background: #182c42;
+	color: #a6c9ee;
+}
+.commit-patch .blank {
+	background: #1d2229;
+}
+.commit-patch.split td:nth-child(2),
+.commit-patch.split td:nth-child(4) {
+	width: 48%;
+}
+@media (max-width: 760px) {
+	.commit-layout {
+		display: block;
+	}
+	.commit-sidebar {
+		position: static;
+		max-height: 300px;
+	}
+	.commit-patch.split {
+		min-width: 800px;
+	}
+	.commit-heading {
+		padding: 12px;
+	}
+}

@@ -5,6 +5,9 @@ import {
 	repositoryTreeSchema,
 	repositoryCommitInputSchema,
 	repositoryCommitResultSchema,
+	commitDetailSchema,
+	commitPatchSchema,
+	gitShaSchema,
 } from "@forge/contracts";
 import Router from "@koa/router";
 
@@ -17,6 +20,26 @@ export class RepositoryBrowserRouter implements IHttpRouter {
 	constructor(private readonly browser: IRepositoryBrowserService) {}
 	create(): Router<{ actor: Actor }> {
 		const router = new Router<{ actor: Actor }>({ prefix: "/api/projects/:id/repository" });
+		router.get("/commits/:sha", async (ctx) => {
+			if (!gitShaSchema.safeParse(ctx.params["sha"]).success) throw new WorkspaceError("invalid-request");
+			ctx.body = commitDetailSchema.parse(
+				await this.browser.commitDetail(ctx.state.actor, ctx.params["id"]!, ctx.params["sha"]!),
+			);
+		});
+		router.get("/commits/:sha/diff", async (ctx) => {
+			if (!gitShaSchema.safeParse(ctx.params["sha"]).success) throw new WorkspaceError("invalid-request");
+			const ignore = this.query(ctx.query["ignoreWhitespace"], "false");
+			if (ignore !== "true" && ignore !== "false") throw new WorkspaceError("invalid-request");
+			ctx.body = commitPatchSchema.parse(
+				await this.browser.commitPatch(
+					ctx.state.actor,
+					ctx.params["id"]!,
+					ctx.params["sha"]!,
+					this.query(ctx.query["path"]),
+					ignore === "true",
+				),
+			);
+		});
 		router.post("/commit", async (ctx) => {
 			const input = repositoryCommitInputSchema.safeParse(ctx.request.body);
 			if (!input.success) throw new WorkspaceError("invalid-request");

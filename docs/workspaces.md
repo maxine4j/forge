@@ -245,6 +245,34 @@ log reads, and the existing 256 KiB text-file bound. Symlinks, submodules, binar
 content and restricted metadata cannot be opened as code. Errors reuse the safe
 workspace/file error contract. Repository HTML is displayed as text, never executed.
 
+History subjects and short SHAs link to `/projects/:id/code?branch=…&view=commit&sha=…`,
+retaining `path` and `file` for return navigation. Commit pages preserve mounted
+editor drafts. `diff=unified|split` (default unified) and
+`ignoreWhitespace=true|false` (default false) retain rendering preferences in the
+URL. Desktop has a sticky, filterable changed-file list; mobile has a collapsible
+list and horizontally scrollable patches. File panels collapse independently.
+
+Owner-authorized `GET /api/projects/:id/repository/commits/:sha` returns validated
+commit metadata, parents, comparison base, original changed-file membership and
+statistics. Only full commit SHAs are accepted. Branch is navigation context.
+Ordinary and merge commits compare to their first parent; roots compare to the
+empty tree. Empty commits explicitly report no changed files.
+`GET /api/projects/:id/repository/commits/:sha/diff?path=…&ignoreWhitespace=true|false`
+returns one file's structured hunks with old/new line numbers, status, modes,
+binary/submodule and truncation indicators. Whitespace filtering affects patches
+and displayed panel statistics, preserving the original file list and labeled
+commit totals. Repository content is rendered as text, including newline markers.
+
+Commit reads use the injected bounded Git transport, NUL-delimited metadata,
+rename detection limited to 1,000 candidates, and disabled external diff/textconv.
+File listing is capped at 1,000 entries; each displayed patch at 1,000 lines and
+256 KiB. The existing 1 MiB command output bound remains. Incomplete listings,
+statistics and patches are explicitly labeled; a command exceeding its bound
+provides an incomplete placeholder. Binary/non-UTF-8 and submodule changes have
+text placeholders. Patches load near the viewport with at most four in-flight
+requests, ignoring stale results after SHA or whitespace navigation. Workspace
+and PR diff contracts are unchanged.
+
 Code omits Changes and Pull requests; those interfaces are deferred. Terminals
 contains a single automatically managed terminal and output, without create,
 refresh, reconnect or close buttons. Remove infrastructure notes, raw revision
