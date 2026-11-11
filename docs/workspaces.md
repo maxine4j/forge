@@ -59,6 +59,8 @@ Shutdown terminates sockets and owned PTY sessions before SQLite closure. Linux
 `/proc` inventory uses the canonical filesystem boundary, captures session leader
 start time and device, and selects groups by that SID, including ordinary jobs
 whose controlling terminal clears on leader exit. It rejects a reused leader.
+Terminal creation waits up to one second for the child to establish its session
+and controlling terminal, and fails with `terminal-unavailable` if setup fails.
 Inventory is capped at 4096 `/proc` entries and one second per cancellable scan.
 Cleanup sends TERM, waits at most a
 second, then KILL and awaits PTY exit with a one-second bound. Natural leader exit
