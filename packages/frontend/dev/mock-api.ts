@@ -147,8 +147,17 @@ export class MockApi implements IMockApi {
 					status: "done",
 					createdAt: date,
 				},
+				{
+					id: `FORGE-${project.id === projects.at(0)!.id ? 7 : 8}`,
+					projectId: project.id,
+					title: "Explore initial requirements",
+					description: "Capture requirements for the first release.",
+					status: "done",
+					createdAt: date,
+					archivedAt: date,
+				},
 			];
-			this.routes.set(`${projectRoot}/tickets`, () => tickets);
+			this.routes.set(`${projectRoot}/tickets`, () => tickets.filter((ticket) => !ticket.archivedAt));
 			const usage = { input: 164000, cached: 96000, output: 21000, turns: 8 };
 			const daily = Array.from({ length: 30 }, (_, index) => ({
 				date: new Date(Date.parse(date) - (29 - index) * 86_400_000).toISOString().slice(0, 10),
@@ -168,9 +177,10 @@ export class MockApi implements IMockApi {
 					{ phase: "implementation", input: 100000, cached: 60000, output: 13000, turns: 4 },
 					{ phase: "review", input: 24000, cached: 14000, output: 4000, turns: 1 },
 				],
-				tickets: tickets.map(({ id, title }, index) => ({
+				tickets: tickets.map(({ id, title, archivedAt }, index) => ({
 					id,
 					title,
+					archivedAt,
 					untimedTurns: 0,
 					unpricedTurns: 0,
 					...(index === 1

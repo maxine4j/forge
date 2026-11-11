@@ -63,6 +63,18 @@ test("workflow intent and board movement are atomic, durable, and scheduled in b
 		expect(await jobs.get(one.id)).toMatchObject({ phase: "review", state: "idle" });
 		expect(await jobs.get(two.id)).toMatchObject({ phase: "rebase", state: "merge-queued" });
 		expect(await jobs.attention(projectId)).toEqual([one.id]);
+		await db.run("DROP TRIGGER reject_done");
+		const done = {
+			...(await jobs.get(two.id))!,
+			state: "idle" as const,
+			workspaceId: "123e4567-e89b-42d3-a456-426614174001",
+			resultSha: "a".repeat(40),
+		};
+		await jobs.save(done, { status: "done" });
+		await tickets.archive(two.id, createdAt);
+		expect(await jobs.pendingCleanup()).toEqual([done]);
+		await jobs.save({ ...done, workspaceCleaned: true });
+		expect(await jobs.pendingCleanup()).toEqual([]);
 	} finally {
 		await db.close();
 		await rm(root, { recursive: true, force: true });

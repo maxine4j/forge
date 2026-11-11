@@ -47,7 +47,11 @@ export interface IWorkspaceService {
 	/** Call before accepting requests; failed records need explicit retry. */
 	recover(): Promise<void>;
 }
-export class WorkspaceService implements IWorkspaceService {
+export interface IMergedWorkspaceCleanup {
+	/** Removes a verified merged worktree and branch, retaining archived workspace metadata. Safe to retry. */
+	cleanupMerged(actor: Actor, id: string, candidate: string): Promise<void>;
+}
+export class WorkspaceService implements IWorkspaceService, IMergedWorkspaceCleanup {
 	private readonly log = createLogger(WorkspaceService.name);
 	private tail: Promise<unknown> = Promise.resolve();
 	constructor(
@@ -106,6 +110,14 @@ export class WorkspaceService implements IWorkspaceService {
 			const record = { ...(await this.require(id)), status: "archived" as const };
 			await this.store.update(record);
 			return record;
+		});
+	}
+	async cleanupMerged(actor: Actor, id: string, candidate: string): Promise<void> {
+		this.access.assertOwner(actor);
+		await this.serialize(async () => {
+			const record = await this.require(id);
+			await this.client.removeMerged(record, candidate);
+			if (record.status !== "archived") await this.store.update({ ...record, status: "archived" });
 		});
 	}
 	async retry(actor: Actor, id: string): Promise<Workspace> {

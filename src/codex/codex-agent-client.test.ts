@@ -20,7 +20,7 @@ const setup = (tracker?: { track: ReturnType<typeof vi.fn> }) => {
 					cwd: (params as { cwd: string }).cwd,
 				},
 			};
-		if (method === "thread/resume")
+		if (method === "thread/resume" || method === "thread/read")
 			return {
 				thread: {
 					id: "codex-1",
@@ -91,6 +91,36 @@ test("registers usage attribution and the runtime default model before submittin
 	await client.send(id, "/data/worktrees/one", "Work", undefined, scope);
 	expect(track).toHaveBeenCalledWith(id, scope, "runtime-default");
 	expect(track.mock.invocationCallOrder[0]).toBeLessThan(rpc.mock.invocationCallOrder[1]!);
+});
+
+test("context usage follows the latest window sample and can decrease after compaction", async () => {
+	const { client, notify } = setup();
+	const listener = vi.fn();
+	client.subscribe(listener);
+	const id = await client.start("/data/worktrees/one");
+	await client.send(id, "/data/worktrees/one", "Work");
+	const update = (used: number, turnId = "turn-1") =>
+		notify("thread/tokenUsage/updated", {
+			threadId: id,
+			turnId,
+			tokenUsage: { last: { totalTokens: used }, total: { totalTokens: 99000 }, modelContextWindow: 128000 },
+		});
+	update(32000);
+	expect(client.read(id).contextWindow).toEqual({ used: 32000, max: 128000 });
+	expect(listener).toHaveBeenLastCalledWith(id);
+	update(64000, "older-turn");
+	expect(client.read(id).contextWindow?.used).toBe(32000);
+	update(4000);
+	expect(client.read(id).contextWindow?.used).toBe(4000);
+	await client.resume(id, "/data/worktrees/one");
+	expect(client.read(id).contextWindow).toEqual({ used: 4000, max: 128000 });
+});
+
+test("reads paginated history without resuming or needing a working directory", async () => {
+	const { client, rpc } = setup();
+	const view = await client.loadHistory("codex-1");
+	expect(view.items).toEqual([{ id: "a", role: "assistant", text: "Previous answer" }]);
+	expect(rpc.mock.calls.map(([method]) => method)).toEqual(["thread/read", "thread/turns/list", "thread/items/list"]);
 });
 
 test("steering uses the pinned active-turn protocol without starting or reviving a turn", async () => {

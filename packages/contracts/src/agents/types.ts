@@ -44,11 +44,16 @@ export interface AgentThread extends AgentSettings {
 	status: AgentStatus;
 	turnId?: string;
 }
+export interface AgentContextWindow {
+	used: number;
+	max: number;
+}
 export interface AgentView {
 	thread: AgentThread;
 	items: AgentItem[];
 	requests: AgentRequest[];
 	truncated: boolean;
+	contextWindow?: AgentContextWindow;
 }
 export interface AgentReply {
 	requestId: string;

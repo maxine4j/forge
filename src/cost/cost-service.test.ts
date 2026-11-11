@@ -37,8 +37,8 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 	const service = new CostService(
 		projects,
 		{
-			list: async () => [
-				{ id: "FORGE-1", title: "Search" },
+			listForCost: async () => [
+				{ id: "FORGE-1", title: "Search", archivedAt: startedAt },
 				{ id: "FORGE-2", title: "Waiting" },
 			],
 		},
@@ -55,7 +55,13 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 	expect(result.days.at(-2)).toMatchObject({ date: "2026-10-31", input: 1000120 });
 	expect(result.days.at(-1)).toMatchObject({ date: "2026-11-01", input: 0 });
 	expect(result.tickets.at(0)?.subscriptionAud).toBeCloseTo(30 / (31 * 24) + 30 / (30 * 24));
-	expect(result.tickets.at(0)).toMatchObject({ id: "FORGE-1", apiAud: 4.3125, unpricedTurns: 1, turns: 2 });
+	expect(result.tickets.at(0)).toMatchObject({
+		id: "FORGE-1",
+		archivedAt: startedAt,
+		apiAud: 4.3125,
+		unpricedTurns: 1,
+		turns: 2,
+	});
 	expect(result.tickets.at(1)).toMatchObject({ id: "FORGE-2", turns: 0 });
 	expect(result.tickets.at(1)?.apiAud).toBeUndefined();
 	expect(result.limits).toBeUndefined();

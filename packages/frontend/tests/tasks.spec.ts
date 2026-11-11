@@ -112,6 +112,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 								]
 							: [],
 						truncated: false,
+						contextWindow: { used: 32000, max: 128000 },
 					},
 				});
 			}
@@ -262,7 +263,8 @@ test("ticket sections are keyboard navigable tabs with a labelled active panel",
 	const tablist = modal.getByRole("tablist", { name: "Ticket sections" });
 	const chat = tablist.getByRole("tab", { name: "Chat" });
 	const details = tablist.getByRole("tab", { name: "Details" });
-	await expect(tablist.getByRole("tab")).toHaveCount(2);
+	const cost = tablist.getByRole("tab", { name: "Cost" });
+	await expect(tablist.getByRole("tab")).toHaveCount(3);
 	await expect(chat).toHaveAttribute("aria-selected", "true");
 	await details.focus();
 	await details.press("ArrowRight");
@@ -270,12 +272,63 @@ test("ticket sections are keyboard navigable tabs with a labelled active panel",
 	await expect(modal.getByRole("tabpanel", { name: "Chat" })).toBeVisible();
 	await expect(modal.getByRole("tabpanel")).toHaveCount(1);
 	await chat.press("ArrowRight");
+	await expect(cost).toBeFocused();
+	await cost.press("ArrowRight");
 	await expect(details).toBeFocused();
 	await expect(details).toHaveAttribute("aria-selected", "true");
 	await details.press("End");
-	await expect(chat).toBeFocused();
-	await chat.press("Home");
+	await expect(cost).toBeFocused();
+	await cost.press("Home");
 	await expect(modal.getByRole("tabpanel", { name: "Details" })).toBeVisible();
+});
+
+test("ticket chat shows the current context window", async ({ page }) => {
+	await setup(page, false, true);
+	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	const modal = page.getByRole("dialog", { name: "FORGE-1" });
+	const ring = modal.getByRole("button", { name: "Context window" });
+	await expect(ring).toBeVisible();
+	await ring.focus();
+	await expect(modal.getByRole("tooltip")).toContainText("32,000 of 128,000 tokens");
+	await expect(modal.getByRole("tooltip")).toContainText("25% used");
+});
+
+test("ticket Cost shows this ticket's estimates and token counts", async ({ page }) => {
+	await setup(page, false, true);
+	const totals = { input: 1800, cached: 600, output: 200, turns: 2 };
+	await page.route(`**/api/projects/${projectId}/cost`, (route) =>
+		route.fulfill({
+			json: {
+				since: createdAt,
+				monthlyAud: 30,
+				audPerUsd: 1.44,
+				exchangeDate: "2026-11-10",
+				totals,
+				phases: [],
+				days: [],
+				tickets: [
+					{
+						...totals,
+						id: "FORGE-1",
+						title: "First task",
+						subscriptionAud: 0.015,
+						apiAud: 0.09,
+						untimedTurns: 0,
+						unpricedTurns: 1,
+					},
+					{ ...totals, id: "FORGE-2", title: "Second task", apiAud: 1.99, untimedTurns: 0, unpricedTurns: 0 },
+				],
+			},
+		}),
+	);
+	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	const modal = page.getByRole("dialog", { name: "FORGE-1" });
+	await expect(modal.getByRole("tab", { name: "Cost" })).toBeVisible();
+	await modal.getByRole("tab", { name: "Cost" }).click();
+	const cost = modal.getByRole("tabpanel", { name: "Cost" });
+	for (const value of ["1,800", "600", "200", "A$0.015", "A$0.09", "1 turn missing pricing"])
+		await expect(cost.getByText(value, { exact: true })).toBeVisible();
+	await expect(cost.getByText("A$1.99")).toHaveCount(0);
 });
 
 for (const size of [
@@ -432,7 +485,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	const modal = page.getByRole("dialog", { name: "FORGE-1", exact: true });
 	const message = modal.getByLabel("Message", { exact: true });
 	const send = modal.getByRole("button", { name: "Send message", exact: true });
-	await expect(modal.getByRole("tab")).toHaveCount(2);
+	await expect(modal.getByRole("tab")).toHaveCount(3);
 	await expect(modal.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
 	await expect(modal.getByRole("heading", { name: "Initial plan" })).toBeVisible();
 	await message.fill("Include filtering");

@@ -13,6 +13,7 @@ const columns = "id, projectId, title, description, status, createdAt";
 const ticketRowSchema = ticketSchema.extend({
 	archivedAt: ticketSchema.shape.archivedAt.nullable(),
 });
+const costTicketRowSchema = ticketRowSchema.pick({ id: true, title: true, archivedAt: true });
 export interface ITicketStore {
 	/** Allocates an immutable globally increasing key; at most 1000 active tickets per project. */
 	insert(projectId: string, input: CreateTicket, createdAt: string): Promise<Ticket>;
@@ -67,6 +68,22 @@ export class TicketStore implements ITicketStore {
 				)
 			).map((row) => ticketSchema.parse(row)),
 		);
+	}
+	async listForCost(projectId: string): Promise<{ id: string; title: string; archivedAt?: string }[]> {
+		return this.guard(async () => {
+			const tickets: { id: string; title: string; archivedAt?: string }[] = [];
+			for (let offset = 0; ; offset += 500) {
+				const rows = await this.database.all(
+					"SELECT id, title, archivedAt FROM tickets WHERE projectId=? ORDER BY number LIMIT 500 OFFSET ?",
+					[projectId, offset],
+				);
+				for (const row of rows) {
+					const { id, title, archivedAt } = costTicketRowSchema.parse(row);
+					tickets.push(archivedAt ? { id, title, archivedAt } : { id, title });
+				}
+				if (rows.length < 500) return tickets;
+			}
+		});
 	}
 	async archive(id: string, archivedAt: string): Promise<void> {
 		await this.guard(async () => {

@@ -12,7 +12,8 @@ export interface ICostProjects {
 }
 
 export interface ICostTickets {
-	list(projectId: string): Promise<{ id: string; title: string }[]>;
+	/** Includes archived tickets and tickets without recorded usage. */
+	listForCost(projectId: string): Promise<{ id: string; title: string; archivedAt?: string }[]>;
 }
 
 export interface ICostService {
@@ -36,7 +37,7 @@ export class CostService implements ICostService {
 		await this.projects.get(actor, projectId);
 		const [{ since, turns }, tickets, limits] = await Promise.all([
 			this.store.read(projectId),
-			this.tickets.list(projectId),
+			this.tickets.listForCost(projectId),
 			this.codex.limits(),
 		]);
 		const today = this.now();

@@ -95,4 +95,8 @@ test("archiving an existing ticket retains its contents and frees board capacity
 	const created = await persisted.insert(projectId, { title: "New task", description: "" }, createdAt);
 	expect(created.id).toBe("FORGE-1001");
 	expect((await persisted.list(projectId)).at(-1)).toEqual(created);
+	const costTickets = await persisted.listForCost(projectId);
+	expect(costTickets).toHaveLength(1001);
+	expect(costTickets).toContainEqual({ id: "FORGE-1000", title: "Original", archivedAt });
+	expect(costTickets).toContainEqual({ id: created.id, title: "New task" });
 });

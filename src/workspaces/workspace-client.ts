@@ -22,6 +22,8 @@ export interface IWorkspaceClient {
 	/** Preceded by durable SQLite intent. Idempotent; never resets a branch or deletes data. */
 	prepare(record: WorkspaceRecord): Promise<string>;
 	verify(record: WorkspaceRecord): Promise<void>;
+	/** Removes only a clean owned checkout and the exact branch tip already reachable from main. */
+	removeMerged(record: WorkspaceRecord, candidate: string): Promise<void>;
 	/** Verified internal runtime path; never a public response field. */
 	location(record: WorkspaceRecord): Promise<string>;
 	head(record: WorkspaceRecord): Promise<string>;
@@ -166,6 +168,69 @@ export class WorkspaceClient implements IWorkspaceClient {
 	async location(record: WorkspaceRecord): Promise<string> {
 		await this.verify(record);
 		return this.path(record);
+	}
+	async removeMerged(record: WorkspaceRecord, candidate: string): Promise<void> {
+		await this.boundary(async () => {
+			this.validateRecord(record);
+			gitShaSchema.parse(candidate);
+			await this.repositories.verify(record.projectId);
+			await this.requireDirectory(dirname(this.path(record)));
+			await this.requireClaim(record);
+			await this.base(record);
+			const repo = ["-C", this.repository(record)];
+			const branch = `refs/heads/${record.branch}`;
+			const refs = await this.git.run([...repo, "for-each-ref", "--format=%(refname) %(objectname)", branch]);
+			const tip = refs
+				.split("\n")
+				.find((line) => line.startsWith(`${branch} `))
+				?.slice(branch.length + 1);
+			if (tip && tip !== candidate) throw new Error("Merged workspace branch changed");
+			const main = gitShaSchema.parse((await this.git.run([...repo, "rev-parse", "refs/heads/main"])).trim());
+			await this.git.run([...repo, "merge-base", "--is-ancestor", candidate, main]);
+
+			const path = this.path(record);
+			const registeredPath = join(await this.files.realpath(dirname(path)), record.id);
+			const worktrees = await this.git.run([...repo, "worktree", "list", "--porcelain", "-z"]);
+			const entries = worktrees.split("\0\0").map((entry) => entry.split("\0"));
+			const entry = entries.find(
+				([first]) => first === `worktree ${path}` || first === `worktree ${registeredPath}`,
+			);
+			if (entries.some((other) => other !== entry && other.includes(`branch ${branch}`)))
+				throw new Error("Merged workspace branch is checked out elsewhere");
+			const exists = await this.exists(path);
+			if (entry) {
+				if (!tip || !entry.includes(`branch ${branch}`) || !entry.includes(`HEAD ${candidate}`))
+					throw new Error("Merged worktree identity changed");
+				if (exists) {
+					await this.verify(record);
+					if ((await this.git.run(["-C", path, "status", "--porcelain", "--untracked-files=all"])).trim())
+						throw new Error("Merged worktree has local changes");
+				}
+				const locked = entry.some((field) => field === "locked" || field.startsWith("locked "));
+				if (locked) await this.git.run([...repo, "worktree", "unlock", path]);
+				try {
+					await this.git.run([...repo, "worktree", "remove", path]);
+				} catch (cause) {
+					if (locked)
+						await this.git.run([
+							...repo,
+							"worktree",
+							"lock",
+							"--reason",
+							`Forge workspace ${record.id}`,
+							path,
+						]);
+					throw cause;
+				}
+			} else if (exists) {
+				throw new Error("Merged worktree is unregistered");
+			}
+			if (tip)
+				await this.git.run(
+					[...repo, "update-ref", "--stdin"],
+					`start\nverify refs/heads/main ${main}\ndelete ${branch} ${candidate}\nprepare\ncommit\n`,
+				);
+		});
 	}
 	async head(record: WorkspaceRecord): Promise<string> {
 		return this.boundary(async () => {

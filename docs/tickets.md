@@ -15,8 +15,9 @@ description (0–4000 characters, default empty) while in Backlog. Each project
 can have at most 1000 active tickets.
 
 The owner can archive a ticket from its details panel after confirming. Archived
-tickets leave the board and scheduler. Forge retains the key, scope, status,
-workflow history and related data. The ticket and workflow remain readable by ID.
+tickets leave the board and remain in [project Cost](agents.md#cost-and-usage).
+Forge retains the key, scope, status, workflow history and related data. The
+ticket and workflow remain readable by ID.
 Queued work can be archived before it starts. A running turn, unresolved dispatch
 or pending merge must settle before archiving.
 
@@ -65,9 +66,14 @@ Board moves and workflow changes are transactional. Dispatch intent is durable a
 ambiguous turns are reconciled against Codex history without replaying input.
 Setup failures can be retried explicitly. Failed agent turns accept owner feedback
 when the conversation is idle. Failed Git merges can be retried against the same
-verified candidate. Worktrees and chats remain available. At upgrade, existing
-In review and Merging tickets move to In progress. Legacy In review tickets need
-an explicit Queue merge action and already authorized merges resume.
+verified candidate. After recording Done, Forge removes the clean
+[ticket worktree and its merged local branch](workspaces.md#slice-2-manual-workspace-foundation).
+Done tickets with a recorded candidate are eligible for cleanup on startup,
+including archived tickets. Cleanup preserves uncommitted changes and branches
+whose tip changed, and pending cleanup is retried on startup. Chat history remains
+readable through Codex. At upgrade, existing In review and Merging tickets move to
+In progress. Legacy In review tickets need an explicit Queue merge action and
+already authorized merges resume.
 
 Browser contracts are exported from `@forge/contracts/tickets`:
 
@@ -89,7 +95,7 @@ Ticket conversations reuse the private agent read, resume, interrupt, reply and
 SSE APIs. Idle and failed ticket messages dispatch through the scheduler, and ticket threads stay
 out of the standalone Agents list. Mutations require owner access and exact-origin
 checks. Transition conflicts return 409. Board and ticket details refresh while
-execution continues. The ticket modal has keyboard-accessible Details and Chat
+execution continues. The ticket modal has keyboard-accessible Details, Chat and Cost
 tabs. Chat opens by default once planning starts. One scroll container shows the
 planner conversation and native Markdown plan revisions chronologically. Approve
 plan attaches to the latest completed plan only while the workflow is idle;
@@ -102,6 +108,9 @@ above it and implementer history appears below it. Codex owns separate threads i
 the same worktree; the fresh implementer receives only the approved plan.
 Historical requests are inactive. Only the current agent exposes reply and
 interruption controls. Completed tickets and preview fixtures are read-only.
+The Chat composer shows a context ring for the current conversation when Codex
+reports a sample, with the latest used token count, percentage and model context
+limit. The last reported sample is retained across restarts.
 The timeline preserves the reading position and follows new activity when already
 near the bottom. One composer uses a ticket-level draft key, retaining unsent
 text across approval and modal reopening within the board's browser memory.
@@ -118,9 +127,11 @@ reply controls. See the [agent protocol contract](agents.md#interactive-agents).
 
 ### Ticket cost
 
-The [Cost tab](agents.md#cost-and-usage) attributes each turn to the ticket and
-phase at dispatch, including rebase turns on an implementation thread and historical review turns.
-Each ticket shows recorded token volume and two AUD estimates.
+The [project Cost tab](agents.md#cost-and-usage) attributes each turn to the
+ticket and phase at dispatch, including rebase turns on an implementation thread
+and historical review turns. The ticket's Cost tab shows its recorded input,
+cached input and output tokens, turn count and two AUD estimates using the same
+data as the project dashboard.
 
 - **Subscription allocation** prorates the monthly plan amount at dispatch over
   elapsed Codex turn time, splitting turns at UTC calendar month boundaries.

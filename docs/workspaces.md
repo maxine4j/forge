@@ -110,8 +110,10 @@ markers live beside worktrees, outside editable/visible source. Git worktrees ar
 locked against pruning; recovery verifies claims, repository ownership, linked
 worktree metadata and branch identity before use. Interrupted creation may
 complete; failed state needs explicit retry. Recovery never resets branches,
-overwrites files, adopts unrelated paths, or deletes partial work. Archives retain
-SQLite metadata, worktree, branch and files; file/Git operations reject archives.
+overwrites files, adopts unrelated paths, or deletes partial work. Manual
+archives retain SQLite metadata, worktree, branch and files. File/Git operations
+reject archived workspaces. [Done ticket cleanup](tickets.md#agentic-ticket-board) removes
+the clean worktree and exact merged local branch, then archives its metadata.
 The initial limit is 1000 retained workspaces across projects.
 
 Files are limited to 256 KiB of valid UTF-8 without NUL. Absolute paths, traversal,

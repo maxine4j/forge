@@ -9,6 +9,8 @@ export interface ITicketWorkflowStore {
 	get(id: string): Promise<TicketWorkflowRecord | undefined>;
 	/** Active jobs in board position order, globally paginated across projects. Idle/failed jobs are read by ID. */
 	list(): Promise<TicketWorkflowRecord[]>;
+	/** Done tickets with a recorded merge candidate and worktree, including archived tickets. */
+	pendingCleanup(): Promise<TicketWorkflowRecord[]>;
 	attention(projectId: string): Promise<string[]>;
 	/** Persists job intent and any board move in one transaction. */
 	save(record: TicketWorkflowRecord, move?: MoveTicket): Promise<void>;
@@ -69,6 +71,20 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 			return rows.map((row) => z.object({ id: ticketIdSchema }).parse(row).id);
 		} catch (cause) {
 			throw new TicketError("ticket-unavailable", { cause });
+		}
+	}
+	async pendingCleanup(): Promise<TicketWorkflowRecord[]> {
+		const jobs: TicketWorkflowRecord[] = [];
+		for (let offset = 0; ; offset += 500) {
+			const page = await this.read(
+				`SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId
+				 WHERE t.status='done' AND json_type(w.record,'$.workspaceId')='text'
+				   AND json_type(w.record,'$.resultSha')='text' AND json_type(w.record,'$.workspaceCleaned') IS NULL
+				 ORDER BY t.number LIMIT 500 OFFSET ?`,
+				[String(offset)],
+			);
+			jobs.push(...page);
+			if (page.length < 500) return jobs;
 		}
 	}
 	async save(record: TicketWorkflowRecord, move?: MoveTicket): Promise<void> {

@@ -318,6 +318,50 @@
 	min-width: 0;
 	flex-wrap: wrap;
 }
+.agent-composer-actions {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+.agent-context {
+	position: relative;
+}
+.agent-context button {
+	display: grid;
+	place-items: center;
+	width: 30px;
+	height: 30px;
+	padding: 0;
+	border: 0;
+	border-radius: 50%;
+	background: transparent;
+	color: #bfc5cf;
+}
+.agent-context button:hover,
+.agent-context button:focus-visible {
+	background: #303137;
+}
+.agent-context-track {
+	stroke: #52545e;
+}
+.agent-context-tooltip {
+	position: absolute;
+	z-index: 5;
+	inset: auto 0 calc(100% + 8px) auto;
+	width: max-content;
+	padding: 8px 10px;
+	border: 1px solid #41424a;
+	border-radius: 8px;
+	background: #232428;
+	color: #e8e8eb;
+	font-size: 12px;
+	pointer-events: none;
+	visibility: hidden;
+}
+.agent-context:hover .agent-context-tooltip,
+.agent-context:focus-within .agent-context-tooltip {
+	visibility: visible;
+}
 .agent-composer-settings select {
 	max-width: 180px;
 	min-width: 0;
@@ -796,11 +840,15 @@
 }
 .ticket-fields,
 .ticket-chat,
+.ticket-cost,
 .ticket-plan {
 	flex: 1;
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
+}
+.ticket-cost {
+	overflow: auto;
 }
 .ticket-plan-markdown {
 	flex: 1;
@@ -1563,6 +1611,10 @@ small {
 	font-weight: 650;
 	overflow-wrap: anywhere;
 }
+.cost-metrics dd small {
+	display: block;
+	font-weight: 400;
+}
 .cost-charts {
 	display: grid;
 	grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
@@ -1731,7 +1783,7 @@ small {
 	margin-top: 5px;
 	min-width: 64px;
 }
-.cost-table td small {
+.cost-table small {
 	display: block;
 }
 .cost-method {

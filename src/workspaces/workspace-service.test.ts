@@ -11,6 +11,7 @@ test("owner authorization precedes every workspace lookup", async () => {
 	const client: IWorkspaceClient = {
 		prepare: vi.fn(),
 		verify: vi.fn(),
+		removeMerged: vi.fn(),
 		location: vi.fn(),
 		head: vi.fn(),
 		tree: vi.fn(),

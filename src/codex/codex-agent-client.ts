@@ -18,6 +18,8 @@ export interface ICodexAgentClient {
 	/** Uses persistent Codex history. Failures throw AgentError; requests are never replayed. */
 	start(path: string): Promise<string>;
 	resume(id: string, path: string): Promise<AgentRuntimeView>;
+	/** Loads stored history without starting or subscribing to a runtime thread. Throws AgentError. */
+	loadHistory(id: string): Promise<AgentRuntimeView>;
 	read(id: string): AgentRuntimeView;
 	send(id: string, path: string, text: string, settings?: AgentSettings, usage?: UsageScope): Promise<void>;
 	options(path: string): Promise<AgentOptions>;
@@ -77,19 +79,10 @@ export class CodexAgentClient implements ICodexAgentClient {
 				throw new Error("Codex workspace identity mismatch");
 			if (result.model) this.models.set(id, result.model);
 			else this.models.delete(id);
-			const page = z.object({ data: z.array(turnSchema).max(20), nextCursor: z.string().nullable() }).parse(
-				await this.connection.request("thread/turns/list", {
-					threadId: id,
-					limit: 20,
-					sortDirection: "desc",
-					itemsView: "notLoaded",
-				}),
-			);
-			result.thread.turns = page.data.reverse();
 			const view = await this.history(result.thread);
-			view.truncated ||= page.nextCursor !== null;
 			const live = this.views.get(id)!;
 			view.requests = live.requests;
+			view.contextWindow = live.contextWindow;
 			if (this.revisions.get(id) !== revision) {
 				view.status = live.status;
 				if (view.turnId !== live.turnId) delete view.plan;
@@ -106,6 +99,19 @@ export class CodexAgentClient implements ICodexAgentClient {
 			this.views.set(id, view);
 			return this.read(id);
 		}).finally(() => this.resuming.delete(id));
+	}
+	async loadHistory(id: string): Promise<AgentRuntimeView> {
+		return this.guard(async () => {
+			await this.connection.initialize();
+			const { thread } = threadResponse.parse(
+				await this.connection.request("thread/read", { threadId: id, includeTurns: false }),
+			);
+			if (thread.id !== id) throw new Error("Codex thread identity mismatch");
+			const view = await this.history(thread);
+			view.contextWindow = this.views.get(id)?.contextWindow;
+			this.views.set(id, view);
+			return this.read(id);
+		});
 	}
 	read(id: string): AgentRuntimeView {
 		const view = this.views.get(id);
@@ -339,9 +345,19 @@ export class CodexAgentClient implements ICodexAgentClient {
 		return view;
 	}
 	private async history(thread: z.infer<typeof threadSchema>): Promise<AgentRuntimeView> {
+		const page = z.object({ data: z.array(turnSchema).max(20), nextCursor: z.string().nullable() }).parse(
+			await this.connection.request("thread/turns/list", {
+				threadId: thread.id,
+				limit: 20,
+				sortDirection: "desc",
+				itemsView: "notLoaded",
+			}),
+		);
 		// Read newest items first so a noisy earlier command cannot evict the final result.
-		const turns = new Map(thread.turns.map((turn) => [turn.id, turn.status]));
-		const view = this.hydrate({ ...thread, turns: thread.turns.map((turn) => ({ ...turn, items: [] })) });
+		const history = page.data.reverse();
+		const turns = new Map(history.map((turn) => [turn.id, turn.status]));
+		const view = this.hydrate({ ...thread, turns: history.map((turn) => ({ ...turn, items: [] })) });
+		view.truncated ||= page.nextCursor !== null;
 		if (!turns.size) return view;
 		const newest: AgentItem[] = [];
 		const cursors = new Set<string>();
@@ -493,7 +509,14 @@ export class CodexAgentClient implements ICodexAgentClient {
 		const view = this.views.get(id);
 		if (!view) return;
 		try {
-			if (method === "thread/status/changed") {
+			if (method === "thread/tokenUsage/updated") {
+				const sample = contextUpdate.safeParse(params);
+				if (!sample.success || (view.turnId && view.turnId !== sample.data.turnId)) return;
+				const { last, modelContextWindow } = sample.data.tokenUsage;
+				if (view.contextWindow?.used === last.totalTokens && view.contextWindow.max === modelContextWindow)
+					return;
+				view.contextWindow = { used: last.totalTokens, max: modelContextWindow };
+			} else if (method === "thread/status/changed") {
 				const { status } = z.object({ status: threadStatusSchema }).parse(params);
 				if (!["systemError", "notLoaded"].includes(status.type)) return;
 				view.status = "uncertain";
@@ -634,6 +657,13 @@ const turnSchema = z.object({
 	id: z.string().min(1).max(256),
 	status: z.enum(["inProgress", "completed", "interrupted", "failed"]),
 	items: z.array(z.unknown()),
+});
+const contextUpdate = z.object({
+	turnId: z.string(),
+	tokenUsage: z.object({
+		last: z.object({ totalTokens: z.int().nonnegative() }),
+		modelContextWindow: z.int().positive(),
+	}),
 });
 const threadStatusSchema = z.object({ type: z.enum(["notLoaded", "idle", "active", "systemError"]) });
 const threadSchema = z.object({

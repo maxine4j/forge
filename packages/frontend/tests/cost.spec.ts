@@ -24,6 +24,7 @@ const cost = {
 		{
 			id: "FORGE-1",
 			title: "Cleanup",
+			archivedAt: since,
 			input: 0,
 			cached: 0,
 			output: 0,
@@ -77,6 +78,7 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	await expect(ticket).toContainText("A$0.015");
 	await expect(ticket).toContainText("A$0.09");
 	await expect(ticket).toContainText("1 turn missing pricing");
+	await expect(page.getByRole("row", { name: /FORGE-1 Cleanup/ })).toContainText("Archived");
 	await page.getByRole("button", { name: "Ticket", exact: true }).click();
 	await expect(page.getByRole("row").nth(1)).toContainText("FORGE-1");
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

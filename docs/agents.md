@@ -194,7 +194,8 @@ live ChatGPT inference remains a separate manual check.
 
 The project Cost tab reads `GET /api/projects/:id/cost` through the owner-only
 API. It shows cumulative recorded usage, 7- and 30-day UTC charts by turn start
-date, a breakdown by phase, and [per-ticket estimates](tickets.md#ticket-cost).
+date, a breakdown by phase, and [per-ticket estimates](tickets.md#ticket-cost)
+for every project ticket, including archived tickets and tickets without usage.
 Standalone chats contribute to project usage in their own category. Cached
 input is included in input totals, and reasoning is included in output.
 
@@ -205,6 +206,10 @@ The tab shows the date tracking began. Older turns lack reliable per-turn token
 and phase data for backfill. Disconnects can leave partial usage and missing
 duration. The endpoint returns normalized counts without conversation content,
 Codex identifiers, or account credentials.
+
+Ticket Chat uses the latest context sample and model context window from the
+same notification. Context can shrink after compaction. Completed ticket chats
+load stored history without resuming Codex in a removed worktree.
 
 Account-wide quota windows come from `account/rateLimits/read` when available.
 Forge shows the reported window length, percent used, and reset time. The request

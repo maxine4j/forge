@@ -13,6 +13,7 @@ test("fast-forward checks ancestry and clean files, then atomically updates main
 		return "";
 	});
 	const workspaces = {
+		get: vi.fn(),
 		tree: vi.fn(),
 		create: vi.fn(),
 		resolve: vi.fn(async () => ({
@@ -74,6 +75,7 @@ test("rejects a branch changed after owner approval and verifies committed compl
 		return "b".repeat(40);
 	});
 	const workspaces = {
+		get: vi.fn(),
 		tree: vi.fn(),
 		create: vi.fn(),
 		resolve: vi.fn(async () => ({

@@ -114,6 +114,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				service,
 				pool,
 				merges,
+				workspaces,
 				new TicketPrompts(),
 				access,
 				undefined,
@@ -232,17 +233,54 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await jobs.save({ ...(await jobs.get(ticket.id))!, state: "uncertain" });
 		await restart();
 		expect((await agents!.get(owner, implemented.implementerId!)).truncated).toBe(true);
-		await expect.poll(idle).toBe("idle");
-		expect((await ticketStore.get(ticket.id))?.status).toBe("done");
 		const completed = (await jobs.get(ticket.id))!;
-		expect((await git.run(["-C", path, "rev-parse", "main"])).trim()).toBe(completed.resultSha);
-		expect(await agents!.list(owner, project.id)).toEqual([]);
 		// Reconstruct services from persisted intent at the Git/SQLite crash boundary.
-		await jobs.save({ ...completed, state: "merge-queued" }, { status: "in-progress" });
+		expect(completed.state).toBe("merge-queued");
+		await expect(merges.merge(owner, planning.workspaceId!, completed.resultSha!)).resolves.toBe("merged");
+		const localFile = join(path, "local-notes.txt");
+		await files.writeFile(localFile, "Uncommitted notes");
+		await expect(workspaces.cleanupMerged(owner, planning.workspaceId!, completed.resultSha!)).rejects.toThrow(
+			"workspace-unavailable",
+		);
+		expect(await files.readFile(localFile)).toBe("Uncommitted notes");
+		await files.rm(localFile);
+		const branch = `refs/heads/forge/workspace/${planning.workspaceId}`;
+		await git.run([
+			"-C",
+			path,
+			"-c",
+			"user.name=Owner",
+			"-c",
+			"user.email=owner@example.com",
+			"commit",
+			"--allow-empty",
+			"-m",
+			"Work after merge",
+		]);
+		const later = (await git.run(["-C", path, "rev-parse", "HEAD"])).trim();
+		await expect(workspaces.cleanupMerged(owner, planning.workspaceId!, completed.resultSha!)).rejects.toThrow(
+			"workspace-unavailable",
+		);
+		expect((await git.run(["-C", path, "rev-parse", branch])).trim()).toBe(later);
+		await git.run(["-C", path, "update-ref", branch, completed.resultSha!, later]);
 		await restart();
 		await workflow.tick(owner);
 		expect((await ticketStore.get(ticket.id))?.status).toBe("done");
 		expect((await jobs.get(ticket.id))?.resultSha).toBe(completed.resultSha);
+		const repository = join(root, "repositories", `${project.id}.git`);
+		expect((await git.run(["-C", repository, "rev-parse", "main"])).trim()).toBe(completed.resultSha);
+		expect(await git.run(["-C", repository, "branch", "--list", `forge/workspace/${planning.workspaceId}`])).toBe(
+			"",
+		);
+		await expect(files.lstat(path)).rejects.toMatchObject({ code: "ENOENT" });
+		expect(await workspaces.get(owner, planning.workspaceId!)).toMatchObject({ status: "archived" });
+		await restart();
+		const history = await agents!.resume(owner, implemented.implementerId!);
+		expect(history.thread.status).toBe("completed");
+		expect(history.items.some((item) => item.role === "assistant")).toBe(true);
+		expect(history.contextWindow).toEqual({ used: 1100, max: 128000 });
+		expect(await agents!.list(owner, project.id)).toEqual([]);
+		const archived = await tickets.archive(owner, ticket.id);
 		await expect.poll(async () => (await cost.read(owner, project.id)).totals.input).toBe(4000);
 		const recorded = await cost.read(owner, project.id);
 		expect(recorded.phases.map(({ phase, turns }) => [phase, turns])).toEqual([
@@ -252,6 +290,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		]);
 		expect(recorded.tickets.at(0)).toMatchObject({
 			id: ticket.id,
+			archivedAt: archived.archivedAt,
 			cached: 2000,
 			untimedTurns: 0,
 			unpricedTurns: 0,

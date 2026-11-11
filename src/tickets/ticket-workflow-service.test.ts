@@ -54,6 +54,8 @@ const fixture = () => {
 		attention: vi.fn(async () => []),
 		get: async (id: string) => structuredClone(jobs.get(id)),
 		list: async () => [...jobs.values()].map((job) => structuredClone(job)),
+		pendingCleanup: async () =>
+			[...jobs.values()].filter((job) => tickets.get(job.ticketId)?.status === "done" && !job.workspaceCleaned),
 		save: vi.fn(async (job: TicketWorkflowRecord, move?: { status: Ticket["status"] }) => {
 			jobs.set(job.ticketId, structuredClone(job));
 			if (move) tickets.get(job.ticketId)!.status = move.status;
@@ -76,12 +78,14 @@ const fixture = () => {
 		base: vi.fn(async () => "a".repeat(40)),
 	};
 	const wake = vi.fn();
+	const cleanup = vi.fn(async (_actor: typeof actor, _workspaceId: string, _candidate: string) => {});
 	const service = new TicketWorkflowService(
 		store,
 		ticketStore,
 		agents,
 		pool,
 		merges,
+		{ cleanupMerged: cleanup },
 		new TicketPrompts(),
 		new AccessService({ owner: "owner", origin: "https://forge.example" }),
 		wake,
@@ -105,7 +109,7 @@ const fixture = () => {
 		else plans.delete(id);
 		pool.observe(id, "completed");
 	};
-	return { service, jobs, tickets, views, pool, agents, merges, create, complete, wake };
+	return { service, jobs, tickets, views, pool, agents, merges, create, complete, wake, cleanup };
 };
 
 test.each(["implementation", "rebase"] as const)(
@@ -244,6 +248,30 @@ test("implementation queues and fast-forwards automatically even when every agen
 	expect(f.merges.merge).toHaveBeenCalledOnce();
 	expect(f.agents.dispatch).toHaveBeenCalledTimes(2);
 	expect(f.wake).toHaveBeenCalledTimes(4);
+});
+
+test("cleans up after Done and retries interrupted cleanup without replaying the merge", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	const id = await implement(f, ticket);
+	f.complete(id);
+	await f.service.tick(actor);
+	const { workspaceId, resultSha } = f.jobs.get(ticket.id)!;
+	let statusAtCleanup: Ticket["status"] | undefined;
+	f.cleanup.mockImplementationOnce(async () => {
+		statusAtCleanup = ticket.status;
+		throw new Error("Cleanup interrupted");
+	});
+	await f.service.tick(actor);
+	expect(ticket.status).toBe("done");
+	expect(statusAtCleanup).toBe("done");
+	expect(f.cleanup).toHaveBeenCalledExactlyOnceWith(actor, workspaceId, resultSha);
+	await f.service.archive(actor, ticket, "2026-11-04T00:00:00.000Z");
+	await f.service.recover(actor);
+	await f.service.recover(actor);
+	expect(f.cleanup).toHaveBeenCalledTimes(2);
+	expect(f.merges.merge).toHaveBeenCalledOnce();
+	expect(await f.service.get(actor, ticket.id)).toMatchObject({ state: "idle", workspaceId, resultSha });
 });
 
 test("only a divergent fast-forward requests a rebase and recovery does not replay the turn", async () => {

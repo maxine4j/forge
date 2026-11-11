@@ -12,8 +12,9 @@ import { useEffect, useRef, useState, useId } from "react";
 import { Conversation } from "../agents/agent-chat.tsx";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { TicketCost } from "./ticket-cost.tsx";
 
-const tabLabels = { details: "Details", chat: "Chat" };
+const tabLabels = { details: "Details", chat: "Chat", cost: "Cost" };
 type TicketTab = keyof typeof tabLabels;
 
 export const ticketLabels: Record<TicketStatus, string> = {
@@ -82,9 +83,8 @@ export const TicketDetails = ({
 	const plan = job?.plan;
 	const awaitingReview =
 		ticket.status === "in-progress" && job?.phase === "planning" && job.state === "idle" && !!plan;
-	const tabs: TicketTab[] = ["details"];
-	tabs.push("chat");
-	const tab = section && tabs.includes(section) ? section : currentId || job?.state === "queued" ? "chat" : "details";
+	const tabs: TicketTab[] = ["details", "chat", "cost"];
+	const tab = section ?? (currentId || job?.state === "queued" ? "chat" : "details");
 	const selectTab = (next: TicketTab) => {
 		setTab(next);
 		document.getElementById(`${fieldId}-tab-${next}`)?.focus();
@@ -386,6 +386,9 @@ export const TicketDetails = ({
 				{blocked && ticket.status === "in-progress" && (
 					<p role='status'>Messages unavailable while {job?.state ?? "loading"}.</p>
 				)}
+			</div>
+			<div className='ticket-cost' {...panel("cost")}>
+				{tab === "cost" && <TicketCost api={api} projectId={ticket.projectId} ticketId={ticket.id} />}
 			</div>
 		</dialog>
 	);
