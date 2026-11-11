@@ -237,6 +237,13 @@ describe("CodexConnection", () => {
 								);
 							if (["thread/read", "thread/start", "thread/resume"].includes(message.method))
 								output(JSON.stringify({ id: message.id, result: { thread: { id: "thread" } } }) + "\n");
+							if (message.method === "turn/steer")
+								output(
+									JSON.stringify({
+										id: message.id,
+										result: { turnId: message.params.expectedTurnId },
+									}) + "\n",
+								);
 						},
 					};
 				},
@@ -252,6 +259,20 @@ describe("CodexConnection", () => {
 			approvalPolicy: "on-request",
 			config: { features: { multi_agent: false } },
 		};
+		const steering = {
+			threadId: "thread",
+			expectedTurnId: "turn",
+			input: [{ type: "text", text: "Feedback", text_elements: [] }],
+		};
+		expect(await connection.request("turn/steer", steering)).toEqual({ turnId: "turn" });
+		expect(writes.at(-1)).toMatchObject({ method: "turn/steer", params: steering });
+		for (const invalid of [
+			{ ...steering, expectedTurnId: "" },
+			{ ...steering, model: "override" },
+			{ ...steering, input: [] },
+		]) {
+			await expect(connection.request("turn/steer", invalid)).rejects.toThrow("Invalid Codex operation input");
+		}
 		for (const method of ["thread/start", "thread/resume"]) {
 			const params = method === "thread/start" ? options : { ...options, threadId: "thread", excludeTurns: true };
 			expect(await connection.request(method, params)).toEqual({ thread: { id: "thread" } });

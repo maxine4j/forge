@@ -7,7 +7,7 @@ import {
 	type AgentView,
 } from "@forge/contracts/agents";
 import { ticketWorkflowSchema, type TicketWorkflow } from "@forge/contracts/tickets";
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
 
 import { ResourcePoller } from "../api/resource-poller.ts";
@@ -134,6 +134,15 @@ export const Conversation = ({
 	readOnly = false,
 	drafts,
 	workflowChanged,
+	draftKey = id,
+	historyOnly = false,
+	prefix,
+	suffix,
+	steer = false,
+	planText,
+	planAction,
+	snapshots,
+	scrollState,
 }: {
 	id: string;
 	api: IWorkspaceApi;
@@ -144,9 +153,34 @@ export const Conversation = ({
 	readOnly?: boolean;
 	drafts?: Map<string, string>;
 	workflowChanged?: (job: TicketWorkflow) => void;
+	draftKey?: string;
+	historyOnly?: boolean;
+	prefix?: ReactNode;
+	suffix?: ReactNode;
+	steer?: boolean;
+	planText?: string;
+	planAction?: ReactNode;
+	snapshots?: Map<string, AgentView>;
+	scrollState?: { top: number; follow: boolean };
 }) => {
-	const [view, setView] = useState<AgentView>();
-	const [draft, setDraft] = useState(() => drafts?.get(id) ?? "");
+	const [view, setView] = useState<AgentView | undefined>(() => snapshots?.get(id));
+	const [draft, setDraft] = useState(() => drafts?.get(draftKey) ?? "");
+	const messages = useRef<HTMLDivElement>(null);
+	const content = useRef<HTMLDivElement>(null);
+	const position = useRef(scrollState ?? { top: 0, follow: true });
+	const scroll = () => {
+		const element = messages.current;
+		if (element && element.clientHeight > 0)
+			element.scrollTop = position.current.follow ? element.scrollHeight : position.current.top;
+	};
+	useLayoutEffect(() => {
+		scroll();
+	});
+	useEffect(() => {
+		const observer = new ResizeObserver(scroll);
+		if (content.current) observer.observe(content.current);
+		return () => observer.disconnect();
+	}, []);
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
 	const [connected, setConnected] = useState(false);
@@ -190,6 +224,7 @@ export const Conversation = ({
 				}
 			},
 			(value) => {
+				snapshots?.set(id, value);
 				setView(value);
 				setLoadingHistory(false);
 				changed();
@@ -216,7 +251,7 @@ export const Conversation = ({
 			events.close();
 			poller.current = undefined;
 		};
-	}, [api, id, changed]);
+	}, [api, id, changed, snapshots]);
 	useEffect(() => {
 		selection.current = selected;
 		if (!selected) return;
@@ -240,7 +275,7 @@ export const Conversation = ({
 					} else value = await api.read(`agents/${id}/${suffix}`, agentViewSchema, "POST", body);
 					if (sent) {
 						setDraft("");
-						drafts?.delete(id);
+						drafts?.delete(draftKey);
 					}
 					return value;
 				} finally {
@@ -261,8 +296,36 @@ export const Conversation = ({
 		&& !readOnly
 		&& !loadingHistory
 		&& !historyFailed
-		&& !["creating", "running", "waiting", "uncertain"].includes(status);
+		&& (!steer || !view?.requests.length)
+		&& (steer ? status === "running" : !["creating", "running", "waiting", "uncertain"].includes(status));
+	const eligiblePlanAction =
+		!busy && !blocked && !loadingHistory && !historyFailed && status === "completed" && planAction;
 	const displayStatus = status === "uncertain" ? (historyFailed ? "unavailable" : "loading") : status;
+	if (historyOnly)
+		return (
+			<>
+				{error && (
+					<p role='alert' className='error'>
+						{error}
+					</p>
+				)}
+				{historyFailed && (
+					<button
+						disabled={loadingHistory}
+						onClick={() => {
+							recoveryBlocked.current = false;
+							historyNeeded.current = true;
+							poller.current?.refresh();
+						}}
+					>
+						Retry loading history
+					</button>
+				)}
+				{loadingHistory && <p role='status'>Loading planning history…</p>}
+				{view?.truncated && <p className='agent-notice'>Some history or output was omitted.</p>}
+				<AgentActivity items={view?.items ?? []} />
+			</>
+		);
 	return (
 		<section className='agent-conversation' aria-label='Chat conversation'>
 			<div className='agent-chat-heading'>
@@ -307,30 +370,59 @@ export const Conversation = ({
 				</p>
 			)}
 			{view?.truncated && <p className='agent-notice'>Some history or output was omitted.</p>}
-			<div className='agent-messages' tabIndex={0} aria-label='Conversation history'>
-				{view && !loadingHistory && !historyFailed && status !== "uncertain" && !view.items.length && (
-					<p className='agent-empty'>
-						Start a conversation about this project. Each chat works in its own managed worktree.
-					</p>
-				)}
-				<AgentActivity items={view?.items ?? []} />
-				{active && (
-					<p
-						className={`agent-notice ${status === "running" ? "agent-working-highlight" : ""}`}
-						role='status'
-					>
-						{status === "waiting" ? "Waiting for your response" : "Codex is working…"}
-					</p>
-				)}
-				{view?.requests.map((request) => (
-					<RequestCard
-						key={request.id}
-						request={request}
-						drafts={drafts}
-						busy={busy || readOnly}
-						reply={(input) => act("replies", input)}
-					/>
-				))}
+			<div
+				ref={messages}
+				onScroll={() => {
+					const element = messages.current;
+					if (element && element.clientHeight > 0) {
+						position.current.top = element.scrollTop;
+						position.current.follow = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+					}
+				}}
+				className='agent-messages'
+				tabIndex={0}
+				aria-label='Conversation history'
+			>
+				<div ref={content}>
+					{prefix}
+					{view
+						&& !messagePath
+						&& !loadingHistory
+						&& !historyFailed
+						&& status !== "uncertain"
+						&& !view.items.length && (
+							<p className='agent-empty'>
+								Start a conversation about this project. Each chat works in its own managed worktree.
+							</p>
+						)}
+					<AgentActivity items={view?.items ?? []} planText={planText} planAction={eligiblePlanAction} />
+					{planText && view && !loadingHistory && !view.items.some((item) => item.kind === "plan") && (
+						<AgentActivity
+							items={[{ id: "saved-plan", role: "assistant", kind: "plan", text: planText }]}
+							planText={planText}
+							planAction={eligiblePlanAction}
+						/>
+					)}
+					{suffix}
+					{active && (
+						<p
+							className={`agent-notice ${status === "running" ? "agent-working-highlight" : ""}`}
+							role='status'
+						>
+							{status === "waiting" ? "Waiting for your response" : "Codex is working…"}
+						</p>
+					)}
+					{!readOnly
+						&& view?.requests.map((request) => (
+							<RequestCard
+								key={request.id}
+								request={request}
+								drafts={drafts}
+								busy={busy || readOnly}
+								reply={(input) => act("replies", input)}
+							/>
+						))}
+				</div>
 			</div>
 			{view && (
 				<AgentComposer
@@ -343,9 +435,19 @@ export const Conversation = ({
 					configurable={!messagePath && !readOnly}
 					change={(value) => {
 						setDraft(value);
-						drafts?.set(id, value);
+						drafts?.set(draftKey, value);
 					}}
-					send={(settings) => act("messages", { text: draft, ...(!messagePath ? settings : {}) }, true)}
+					send={(settings) =>
+						act(
+							"messages",
+							{
+								text: draft,
+								...(steer && status === "running" ? { expectedTurnId: view.thread.turnId } : {}),
+								...(!messagePath ? settings : {}),
+							},
+							true,
+						)
+					}
 				/>
 			)}
 		</section>

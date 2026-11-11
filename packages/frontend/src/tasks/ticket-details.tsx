@@ -1,3 +1,4 @@
+import type { AgentView } from "@forge/contracts/agents";
 import {
 	ticketWorkflowSchema,
 	type Ticket,
@@ -6,14 +7,13 @@ import {
 	type MoveTicket,
 	type TicketWorkflow,
 } from "@forge/contracts/tickets";
-import { lazy, Suspense, useEffect, useRef, useState, useId } from "react";
+import { useEffect, useRef, useState, useId } from "react";
 
 import { Conversation } from "../agents/agent-chat.tsx";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 
-const Markdown = lazy(() => import("react-markdown"));
-const tabLabels = { details: "Details", plan: "Plan", chat: "Chat", history: "Planning history" };
+const tabLabels = { details: "Details", chat: "Chat" };
 type TicketTab = keyof typeof tabLabels;
 
 export const ticketLabels: Record<TicketStatus, string> = {
@@ -45,6 +45,8 @@ export const TicketDetails = ({
 	drafts: Map<string, string>;
 }) => {
 	const dialog = useRef<HTMLDialogElement>(null);
+	const [snapshots] = useState(() => new Map<string, AgentView>());
+	const [scrollState] = useState(() => ({ top: 0, follow: true }));
 	const archiveDialog = useRef<HTMLDialogElement>(null);
 	const fieldId = useId();
 	const poller = useRef<ResourcePoller<TicketWorkflow> | undefined>(undefined);
@@ -76,16 +78,13 @@ export const TicketDetails = ({
 			poller.current = undefined;
 		};
 	}, [api, ticket.id]);
-	const currentId = job?.phase === "planning" ? job.plannerId : job?.implementerId;
+	const currentId = job?.implementerId ?? job?.plannerId;
 	const plan = job?.plan;
-	const hasHistory = !!job?.implementerId && !!job.plannerId;
 	const awaitingReview =
 		ticket.status === "in-progress" && job?.phase === "planning" && job.state === "idle" && !!plan;
 	const tabs: TicketTab[] = ["details"];
-	if (plan) tabs.push("plan");
 	tabs.push("chat");
-	if (hasHistory) tabs.push("history");
-	const tab = section && tabs.includes(section) ? section : awaitingReview ? "plan" : currentId ? "chat" : "details";
+	const tab = section && tabs.includes(section) ? section : currentId || job?.state === "queued" ? "chat" : "details";
 	const selectTab = (next: TicketTab) => {
 		setTab(next);
 		document.getElementById(`${fieldId}-tab-${next}`)?.focus();
@@ -97,7 +96,16 @@ export const TicketDetails = ({
 		hidden: tab !== name,
 		tabIndex: 0,
 	});
-	const blocked = !job || !["idle", "failed"].includes(job.state) || ticket.status !== "in-progress";
+	const steering = !!job && ["implementation", "rebase"].includes(job.phase) && job.state === "running";
+	const blocked = !job || (!steering && !["idle", "failed"].includes(job.state)) || ticket.status !== "in-progress";
+	const implementation = job?.approvedRevision ? (
+		<div className='ticket-implementation-divider' role='separator' aria-label='Plan approved · Implementation'>
+			Plan approved · Implementation
+			{["queued", "dispatching", "setup-failed"].includes(job.state) && (
+				<p role='status'>Implementation: {job.state}</p>
+			)}
+		</div>
+	) : undefined;
 	const target = ticket.status === "backlog" ? "todo" : undefined;
 	const canQueueMerge =
 		ticket.status === "in-progress"
@@ -280,36 +288,6 @@ export const TicketDetails = ({
 					Queue merge
 				</button>
 			)}
-			{plan && (
-				<div className='ticket-plan' {...panel("plan")}>
-					{tab === "plan" && (
-						<Suspense fallback={<p role='status'>Loading plan…</p>}>
-							<div className='ticket-plan-markdown'>
-								<Markdown skipHtml disallowedElements={["img"]}>
-									{plan.text}
-								</Markdown>
-							</div>
-							{awaitingReview && (
-								<div className='ticket-plan-actions'>
-									<button type='button' disabled={acting} onClick={() => selectTab("chat")}>
-										Request changes
-									</button>
-									<button
-										type='button'
-										className='primary'
-										disabled={acting}
-										onClick={() =>
-											act("approve", { revision: plan.revision }, () => selectTab("chat"))
-										}
-									>
-										Approve
-									</button>
-								</div>
-							)}
-						</Suspense>
-					)}
-				</div>
-			)}
 			<div className='ticket-fields' {...panel("details")}>
 				<form
 					onSubmit={(event) => {
@@ -347,41 +325,68 @@ export const TicketDetails = ({
 					)}
 				</form>
 			</div>
-			{tabs
-				.filter((name) => name === "chat" || name === "history")
-				.map((name) => {
-					const history = name === "history";
-					const id = history ? job?.plannerId : currentId;
-					return (
-						<div key={name} className='ticket-chat' {...panel(name)}>
-							{id ? (
-								history === (tab === "history") && (
+			<div className='ticket-chat' {...panel("chat")}>
+				{currentId ? (
+					<Conversation
+						key={currentId}
+						snapshots={snapshots}
+						scrollState={scrollState}
+						id={currentId}
+						api={api}
+						changed={refresh}
+						selected={tab === "chat"}
+						messagePath={`tickets/${ticket.id}/messages`}
+						blocked={blocked}
+						steer={steering}
+						readOnly={ticket.status !== "in-progress" || (!job?.implementerId && job?.phase !== "planning")}
+						draftKey={`ticket:${ticket.id}`}
+						drafts={drafts}
+						planText={!job?.implementerId ? plan?.text : undefined}
+						planAction={
+							awaitingReview && (
+								<button
+									type='button'
+									className='primary'
+									disabled={acting}
+									onClick={() => act("approve", { revision: plan!.revision })}
+								>
+									Approve plan
+								</button>
+							)
+						}
+						prefix={
+							job?.implementerId && job.plannerId ? (
+								<>
 									<Conversation
-										key={id}
-										id={id}
+										id={job.plannerId}
 										api={api}
 										changed={refresh}
-										selected={tab === name}
-										messagePath={`tickets/${ticket.id}/messages`}
-										blocked={history || blocked}
-										readOnly={history || ticket.status !== "in-progress"}
-										drafts={drafts}
-										workflowChanged={(value) => {
-											setJob(value);
-											refreshBoard();
-										}}
+										selected={tab === "chat"}
+										readOnly
+										historyOnly
+										snapshots={snapshots}
 									/>
-								)
-							) : (
-								<p>
-									{ticket.status === "backlog"
-										? "Move this ticket to Ready for development to queue planning."
-										: "Waiting for a ticket agent to start."}
-								</p>
-							)}
-						</div>
-					);
-				})}
+									{implementation}
+								</>
+							) : undefined
+						}
+						suffix={!job?.implementerId ? implementation : undefined}
+						workflowChanged={(value) => {
+							setJob(value);
+							refreshBoard();
+						}}
+					/>
+				) : (
+					<p>
+						{ticket.status === "backlog"
+							? "Move this ticket to Ready for development to queue planning."
+							: "Waiting for a ticket agent to start."}
+					</p>
+				)}
+				{blocked && ticket.status === "in-progress" && (
+					<p role='status'>Messages unavailable while {job?.state ?? "loading"}.</p>
+				)}
+			</div>
 		</dialog>
 	);
 };

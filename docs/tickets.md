@@ -20,12 +20,12 @@ workflow history and related data. The ticket and workflow remain readable by ID
 Queued work can be archived before it starts. A running turn, unresolved dispatch
 or pending merge must settle before archiving.
 
-| Stage                 | Behavior                                                                                                                                                                                                                                                                                                |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backlog               | The owner writes the scope.                                                                                                                                                                                                                                                                             |
-| Ready for development | The scheduler claims the top ticket when an agent slot opens. It reserves the slot before allocating a new ticket worktree from latest local main.                                                                                                                                                      |
-| In progress           | A fresh Codex planner proposes a plan. The card shows an attention badge and details render the Markdown plan. Request changes opens the planner chat. Approve applies to the displayed revision and queues a fresh implementer in the same worktree. Completed implementation goes to the merge queue. |
-| Done                  | Forge moves the ticket here after confirming its commit is in local main.                                                                                                                                                                                                                               |
+| Stage                 | Behavior                                                                                                                                                                                                                                                                                       |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backlog               | The owner writes the scope.                                                                                                                                                                                                                                                                    |
+| Ready for development | The scheduler claims the top ticket when an agent slot opens. It reserves the slot before allocating a new ticket worktree from latest local main.                                                                                                                                             |
+| In progress           | A fresh Codex planner proposes a plan. The card shows an attention badge and Chat renders the Markdown plan and accepts feedback. Approve plan applies to the latest completed revision and queues a fresh implementer in the same worktree. Completed implementation goes to the merge queue. |
+| Done                  | Forge moves the ticket here after confirming its commit is in local main.                                                                                                                                                                                                                      |
 
 The scheduler wakes when tickets enter Ready or Done, when an agent slot is
 released, and when settings open new capacity. All execution shares a pool with
@@ -79,20 +79,42 @@ Browser contracts are exported from `@forge/contracts/tickets`:
 | `POST /api/tickets/:id/move`                | Reorder or move Backlog to Ready with optional beforeId.                            |
 | `GET /api/tickets/:id/workflow`             | Current plan revision, phase, execution state and Forge conversation/workspace IDs. |
 | `POST /api/tickets/:id/approve`             | Approve the current idle plan with `{revision}`.                                    |
-| `POST /api/tickets/:id/messages`            | Queue bounded feedback for the current phase.                                       |
+| `POST /api/tickets/:id/messages`            | Queue feedback, or steer implementation/rebase with `{text,expectedTurnId}`.        |
 | `POST /api/tickets/:id/merge`               | Queue a legacy review candidate or retry a failed merge.                            |
 | `POST /api/tickets/:id/reconcile`           | Reconcile uncertain execution or retry a failed setup.                              |
 | `GET/PATCH /api/board/settings`             | Read settings or update `maxAgents` and ticket dispatch (`running` or `paused`).    |
 | `POST /api/board/settings/stop`             | Stop ticket dispatch and return interruption request and failure counts.            |
 
 Ticket conversations reuse the private agent read, resume, interrupt, reply and
-SSE APIs. Ticket messages dispatch through the scheduler, and ticket threads stay
+SSE APIs. Idle and failed ticket messages dispatch through the scheduler, and ticket threads stay
 out of the standalone Agents list. Mutations require owner access and exact-origin
 checks. Transition conflicts return 409. Board and ticket details refresh while
-execution continues. The ticket modal has keyboard-accessible Details, Plan,
-Chat and Planning history tabs when the respective content is available.
-Drafts persist in browser memory within the board. Planning
-history after approval and Done chats are read-only. Preview fixtures are read-only.
+execution continues. The ticket modal has keyboard-accessible Details and Chat
+tabs. Chat opens by default once planning starts. One scroll container shows the
+planner conversation and native Markdown plan revisions chronologically. Approve
+plan attaches to the latest completed plan only while the workflow is idle;
+feedback queues a revision and disables approval until it finishes. The saved
+workflow revision remains the approval authority.
+
+Successful approval inserts a persistent **Plan approved · Implementation** divider,
+with queued/setup status until the implementer starts. Planner history remains
+above it and implementer history appears below it. Codex owns separate threads in
+the same worktree; the fresh implementer receives only the approved plan.
+Historical requests are inactive. Only the current agent exposes reply and
+interruption controls. Completed tickets and preview fixtures are read-only.
+The timeline preserves the reading position and follows new activity when already
+near the bottom. One composer uses a ticket-level draft key, retaining unsent
+text across approval and modal reopening within the board's browser memory.
+
+Messages during running implementation and rebase turns steer the known active
+turn immediately through `turn/steer` with `expectedTurnId`; they retain the same
+execution slot and turn identity. Steering is serialized with ticket completion
+and merge transitions. Stale turns, completed tickets and merge-queued submissions
+are rejected. Failed or ambiguous steering is never replayed automatically; the
+browser retains its draft and refreshes status. Planning messages remain limited
+to idle/failed turns. Queued, dispatching and uncertain execution disable sending
+with status text. Structured input and permission requests retain their dedicated
+reply controls. See the [agent protocol contract](agents.md#interactive-agents).
 
 ### Ticket cost
 

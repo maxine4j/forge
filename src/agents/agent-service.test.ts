@@ -56,6 +56,7 @@ const setup = () => {
 		})),
 	};
 	const client = {
+		steer: vi.fn(async (_id: string, _turnId: string, _text: string) => {}),
 		options: vi.fn(async () => ({
 			models: [{ id: "test-model", name: "Test model", isDefault: true }],
 			skills: [],
@@ -108,6 +109,31 @@ const setup = () => {
 	);
 	return { service, client, workspaces, records, views, changed: (key: string) => changed(key) };
 };
+
+test("ticket steering checks authorization, ownership and active turn without claiming another slot", async () => {
+	const f = setup();
+	const { thread } = await f.service.createTicketThread(owner, projectId, "Implementation");
+	await f.service.dispatch(owner, thread.id, "Implement", { ticketId: "FORGE-1", phase: "implementation" });
+	await expect(f.service.steer({ username: "stranger" }, thread.id, "turn", "Feedback")).rejects.toThrow();
+	await expect(f.service.steer(owner, thread.id, "stale", "Feedback")).rejects.toThrow("agent-conflict");
+	await expect(f.service.steer(owner, thread.id, "turn", "   ")).rejects.toThrow("invalid-request");
+	const before = f.records.get(thread.id);
+	await f.service.steer(owner, thread.id, "turn", "Focus on tests");
+	expect(f.client.steer).toHaveBeenCalledWith(before!.codexId, "turn", "Focus on tests");
+	expect(f.records.get(thread.id)).toEqual(before);
+	expect(f.client.send).toHaveBeenCalledTimes(1);
+	vi.mocked(f.workspaces.resolve).mockResolvedValueOnce({
+		path: "/wrong",
+		workspace: { ...(await f.workspaces.resolve(owner, thread.workspaceId)).workspace, projectId: "other" },
+	});
+	await expect(f.service.steer(owner, thread.id, "turn", "Feedback")).rejects.toThrow("agent-conflict");
+	vi.mocked(f.workspaces.resolve).mockRejectedValueOnce(new Error("workspace unavailable"));
+	await expect(f.service.steer(owner, thread.id, "turn", "Feedback")).rejects.toThrow("workspace unavailable");
+	expect(f.client.steer).toHaveBeenCalledTimes(1);
+	f.client.steer.mockRejectedValueOnce(new AgentError("agent-unavailable"));
+	await expect(f.service.steer(owner, thread.id, "turn", "Feedback")).rejects.toThrow("agent-unavailable");
+	expect(f.client.steer).toHaveBeenCalledTimes(2);
+});
 test("settings persist per chat and discovery always resolves the owned worktree", async () => {
 	const { service, client, workspaces, records } = setup();
 	const { thread } = await service.create(owner, projectId, "Configured");

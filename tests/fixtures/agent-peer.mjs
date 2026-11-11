@@ -143,6 +143,18 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			notify("turn/completed", { threadId: thread.id, turn });
 		}
 	}
+	if (method === "turn/steer") {
+		const thread = threads.get(params.threadId);
+		const turn = thread?.turns.at(-1);
+		if (!turn || turn.status !== "inProgress" || turn.id !== params.expectedTurnId) {
+			write({ id, error: { code: -32602, message: "Active turn mismatch" } });
+			return;
+		}
+		const item = { id: `steer-${++sequence}`, type: "userMessage", content: params.input };
+		turn.items.push(item);
+		notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
+		result = { turnId: turn.id };
+	}
 	if (method === "turn/interrupt") {
 		const thread = threads.get(params.threadId);
 		const turn = thread.turns.at(-1);

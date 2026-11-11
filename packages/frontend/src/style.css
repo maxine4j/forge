@@ -125,6 +125,7 @@
 	min-height: 0;
 	flex: 1;
 	overflow-y: auto;
+	overflow-anchor: none;
 	overscroll-behavior-y: contain;
 	margin: 16px 0;
 	padding: 8px max(4px, calc((100% - 760px) / 2));
@@ -136,6 +137,15 @@
 	background: transparent;
 	overflow-wrap: anywhere;
 	line-height: 1.75;
+}
+.ticket-implementation-divider {
+	border-top: 1px solid #30363d;
+	margin: 24px 0;
+	padding-top: 16px;
+	color: #a6a7ad;
+}
+.agent-message pre {
+	overflow: auto;
 }
 .agent-message-user {
 	margin-left: auto;

@@ -260,12 +260,12 @@ test("ticket sections are keyboard navigable tabs with a labelled active panel",
 	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
 	const modal = page.getByRole("dialog", { name: "FORGE-1" });
 	const tablist = modal.getByRole("tablist", { name: "Ticket sections" });
-	const plan = tablist.getByRole("tab", { name: "Plan" });
 	const chat = tablist.getByRole("tab", { name: "Chat" });
 	const details = tablist.getByRole("tab", { name: "Details" });
-	await expect(plan).toHaveAttribute("aria-selected", "true");
-	await plan.focus();
-	await plan.press("ArrowRight");
+	await expect(tablist.getByRole("tab")).toHaveCount(2);
+	await expect(chat).toHaveAttribute("aria-selected", "true");
+	await details.focus();
+	await details.press("ArrowRight");
 	await expect(chat).toBeFocused();
 	await expect(modal.getByRole("tabpanel", { name: "Chat" })).toBeVisible();
 	await expect(modal.getByRole("tabpanel")).toHaveCount(1);
@@ -288,7 +288,7 @@ for (const size of [
 		const fixture = await setup(page, false, true);
 		await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
 		const panel = page.getByRole("dialog");
-		await panel.getByRole("button", { name: "Request changes", exact: true }).click();
+		await panel.getByRole("tab", { name: "Chat", exact: true }).click();
 		await expect(panel.getByLabel("Message", { exact: true })).toBeVisible();
 		await expect(
 			panel.getByText("Planning message 0: implement search with tests.", { exact: true }),
@@ -321,22 +321,199 @@ for (const size of [
 test("ticket message drafts survive closing and reopening", async ({ page }) => {
 	await setup(page, false, true);
 	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
-	await page.getByRole("button", { name: "Request changes", exact: true }).click();
+	await page.getByRole("tab", { name: "Chat", exact: true }).click();
 	await page.getByLabel("Message", { exact: true }).fill("Keep this feedback");
 	await page.getByRole("button", { name: "Close ticket", exact: true }).click();
 	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
-	await page.getByRole("button", { name: "Request changes", exact: true }).click();
+	await page.getByRole("tab", { name: "Chat", exact: true }).click();
 	await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Keep this feedback");
 });
 
-test("planning history disables execution controls", async ({ page }) => {
+test("combined chat has one set of live execution controls", async ({ page }) => {
 	await setup(page, false, true, true);
 	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
-	await expect(page.getByRole("button", { name: "Interrupt", exact: true })).toBeVisible();
-	await page.getByRole("tab", { name: "Planning history", exact: true }).click();
-	await expect(page.getByRole("tabpanel", { name: "Planning history" })).toBeVisible();
-	await expect(page.getByRole("button", { name: "Interrupt", exact: true })).toHaveCount(0);
-	await expect(page.getByRole("button", { name: "Allow once", exact: true })).toBeDisabled();
+	await expect(page.getByRole("button", { name: "Interrupt", exact: true })).toHaveCount(1);
+	await expect(page.getByRole("tab", { name: "Planning history", exact: true })).toHaveCount(0);
+	await expect(page.getByRole("button", { name: "Allow once", exact: true })).toHaveCount(1);
+	await expect(page.getByLabel("Message", { exact: true })).toHaveCount(1);
+});
+
+test("one ticket timeline retains revisions, approval, drafts and history through steering and completion", async ({
+	page,
+}) => {
+	await setup(page, false, true);
+	const planner = "123e4567-e89b-42d3-a456-426614174010";
+	const implementer = "123e4567-e89b-42d3-a456-426614174011";
+	let phase = "planning";
+	let state = "idle";
+	let revision = 1;
+	let started = false;
+	let done = false;
+	let uncertain = false;
+	let resumes = 0;
+	let reject = false;
+	const submissions: unknown[] = [];
+	const plans = [{ id: "plan-1", role: "assistant", kind: "plan", text: "# Initial plan\n\nAdd **search**." }];
+	const activity: { id: string; role: string; text: string }[] = [];
+	const workflow = () => ({
+		ticketId: "FORGE-1",
+		plannerId: planner,
+		...(started ? { implementerId: implementer } : {}),
+		phase,
+		state,
+		mergeAttempts: 0,
+		plan: { revision, text: plans[revision - 1]!.text },
+		...(phase !== "planning" ? { approvedRevision: revision } : {}),
+	});
+	await page.route("**/api/tickets/FORGE-1/{workflow,messages,approve}", async (route) => {
+		const path = new URL(route.request().url()).pathname;
+		if (path.endsWith("/approve")) {
+			expect(route.request().postDataJSON()).toEqual({ revision: 2 });
+			phase = "implementation";
+			state = "queued";
+		}
+		if (path.endsWith("/messages")) {
+			const input = route.request().postDataJSON();
+			submissions.push(input);
+			if (reject) return route.fulfill({ status: 409, json: { error: "ticket-conflict" } });
+			if (phase === "planning") state = "queued";
+			else activity.push({ id: `steer-${submissions.length}`, role: "user", text: input.text });
+		}
+		return route.fulfill({ json: workflow() });
+	});
+	await page.route("**/api/agents/**", async (route) => {
+		const path = new URL(route.request().url()).pathname;
+		if (path.endsWith("/events"))
+			return route.fulfill({ contentType: "text/event-stream", body: "data: changed\n\n" });
+		const historical = path.includes(planner);
+		if (!historical && path.endsWith("/resume")) {
+			uncertain = false;
+			resumes++;
+		}
+		return route.fulfill({
+			json: {
+				thread: {
+					id: historical ? planner : implementer,
+					projectId,
+					workspaceId: planner,
+					title: "Ticket",
+					createdAt,
+					status: historical
+						? phase === "planning" && state === "running"
+							? "running"
+							: "completed"
+						: uncertain
+							? "uncertain"
+							: done
+								? "completed"
+								: "running",
+					turnId: historical ? "plan-turn" : "implementation-turn",
+				},
+				items: historical
+					? [
+							...Array.from({ length: 25 }, (_, i) => ({
+								id: `old-${i}`,
+								role: "assistant",
+								text: `Retained planning message ${i}`,
+							})),
+							...plans,
+						]
+					: activity,
+				// A stale planner callback must never acquire live controls in the combined view.
+				requests:
+					historical && phase !== "planning"
+						? [{ id: "historical-request", kind: "command", description: "Old approval", questions: [] }]
+						: [],
+				truncated: false,
+			},
+		});
+	});
+	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	const modal = page.getByRole("dialog", { name: "FORGE-1", exact: true });
+	const message = modal.getByLabel("Message", { exact: true });
+	const send = modal.getByRole("button", { name: "Send message", exact: true });
+	await expect(modal.getByRole("tab")).toHaveCount(2);
+	await expect(modal.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
+	await expect(modal.getByRole("heading", { name: "Initial plan" })).toBeVisible();
+	await message.fill("Include filtering");
+	await message.press("Enter");
+	await expect.poll(() => submissions.length).toBe(1);
+	await expect(modal.getByRole("button", { name: "Approve plan" })).toHaveCount(0);
+	state = "running";
+	await expect(send).toBeDisabled();
+	plans.push({ id: "plan-2", role: "assistant", kind: "plan", text: "# Streaming revision\n\nAdd **filtering**." });
+	await expect(modal.getByRole("heading", { name: "Streaming revision" })).toBeAttached();
+	await expect(modal.getByRole("button", { name: "Approve plan" })).toHaveCount(0);
+	revision = 2;
+	plans[1]!.text = "# Revised plan\n\nAdd **filtering**.";
+	state = "idle";
+	await expect(modal.getByRole("button", { name: "Approve plan" })).toBeVisible();
+	await expect(modal.getByRole("heading", { name: "Initial plan" })).toBeAttached();
+	await message.fill("Retain this draft across approval");
+	const history = modal.getByLabel("Conversation history", { exact: true });
+	await history.evaluate((element) => {
+		element.scrollTop = 80;
+	});
+	await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(80);
+	await page.waitForTimeout(1200);
+	expect(await history.evaluate((element) => element.scrollTop)).toBe(80);
+	await modal.getByRole("tab", { name: "Details", exact: true }).click();
+	await modal.getByRole("tab", { name: "Chat", exact: true }).click();
+	await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(80);
+	await modal.getByRole("button", { name: "Approve plan" }).click();
+	await expect(modal.getByRole("separator", { name: "Plan approved · Implementation" })).toHaveCount(1);
+	await expect(modal.getByText("Implementation: queued", { exact: true })).toBeVisible();
+	await expect(send).toBeDisabled();
+	await expect(message).toHaveValue("Retain this draft across approval");
+	await history.evaluate((element) => {
+		element.scrollTop = 80;
+	});
+	started = true;
+	state = "running";
+	activity.push({ id: "working", role: "assistant", text: "Implementing filtering" });
+	await expect(modal.getByRole("button", { name: "Interrupt", exact: true })).toBeVisible();
+	await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(80);
+	await expect(message).toHaveValue("Retain this draft across approval");
+	await expect(message).toHaveCount(1);
+	await expect(history).toHaveCount(1);
+	await expect(modal.getByRole("separator")).toHaveCount(1);
+	await expect(modal.getByText("Retained planning message 0", { exact: true })).toBeAttached();
+	await expect(modal.getByRole("button", { name: "Allow once" })).toHaveCount(0);
+	reject = true;
+	await send.click();
+	await expect(modal.getByRole("alert")).toBeVisible();
+	await expect(message).toHaveValue("Retain this draft across approval");
+	await modal.getByRole("button", { name: "Close ticket" }).click();
+	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	await expect(message).toHaveValue("Retain this draft across approval");
+	reject = false;
+	await send.click();
+	await expect(message).toHaveValue("");
+	expect(submissions.at(-1)).toEqual({
+		text: "Retain this draft across approval",
+		expectedTurnId: "implementation-turn",
+	});
+	await expect(modal.getByText("Retain this draft across approval", { exact: true })).toBeAttached();
+	await expect(modal.getByText("Retain this draft across approval", { exact: true })).toBeInViewport();
+	const submitted = submissions.length;
+	const recovered = resumes;
+	await message.fill("Keep this draft through recovery");
+	uncertain = true;
+	await expect.poll(() => resumes).toBeGreaterThan(recovered);
+	await expect(message).toHaveValue("Keep this draft through recovery");
+	expect(submissions).toHaveLength(submitted);
+	state = "merge-queued";
+	done = true;
+	await expect(send).toBeDisabled();
+	await page.route(`**/api/projects/${projectId}/tickets`, (route) =>
+		route.fulfill({
+			json: [{ id: "FORGE-1", projectId, title: "First task", description: "Scope", status: "done", createdAt }],
+		}),
+	);
+	await expect(message).toBeDisabled();
+	await expect(modal.getByRole("button", { name: "Interrupt" })).toHaveCount(0);
+	await expect(modal.getByRole("heading", { name: "Revised plan" })).toBeAttached();
+	await expect(modal.getByRole("separator")).toHaveCount(1);
 });
 
 test("ticket input drafts survive closing and reopening", async ({ page }) => {
@@ -541,7 +718,7 @@ test("a plan needs attention on the four-column board and approval submits the d
 	await expect(panel.getByRole("heading", { name: "Search plan" })).toBeVisible();
 	await expect(panel.getByRole("listitem")).toHaveText("Add filtering.");
 	await expect(panel.getByText("unsafe")).toHaveCount(0);
-	await panel.getByRole("button", { name: "Approve", exact: true }).click();
+	await panel.getByRole("button", { name: "Approve plan", exact: true }).click();
 	await expect.poll(() => f.approvals).toEqual([{ revision: 1 }]);
 	await panel.getByRole("button", { name: "Close ticket" }).click();
 	await expect(card.getByRole("img", { name: "Needs attention" })).toHaveCount(0);

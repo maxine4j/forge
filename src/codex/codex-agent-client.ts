@@ -23,6 +23,7 @@ export interface ICodexAgentClient {
 	options(path: string): Promise<AgentOptions>;
 	files(path: string, query: string): Promise<string[]>;
 	interrupt(id: string, turnId: string): Promise<void>;
+	steer(id: string, turnId: string, text: string): Promise<void>;
 	reply(id: string, input: AgentReply): void;
 	subscribe(listener: (id: string) => void): () => void;
 }
@@ -222,6 +223,21 @@ export class CodexAgentClient implements ICodexAgentClient {
 			}
 		});
 	}
+	async steer(id: string, turnId: string, text: string): Promise<void> {
+		await this.guard(async () => {
+			const view = this.views.get(id);
+			if (!view || view.status !== "running" || view.turnId !== turnId || view.requests.length)
+				throw new AgentError("agent-conflict");
+			const result = z.object({ turnId: z.string() }).parse(
+				await this.connection.request("turn/steer", {
+					threadId: id,
+					expectedTurnId: turnId,
+					input: [{ type: "text", text, text_elements: [] }],
+				}),
+			);
+			if (result.turnId !== turnId) throw new AgentError("agent-conflict");
+		});
+	}
 	async interrupt(id: string, turnId: string): Promise<void> {
 		await this.guard(async () => {
 			await this.connection.request("turn/interrupt", { threadId: id, turnId });
@@ -409,7 +425,11 @@ export class CodexAgentClient implements ICodexAgentClient {
 		if (capturePlan && item.type === "plan" && item.text?.trim() && item.text.length <= 32000)
 			view.plan = item.text.trim();
 		const role: AgentItem["role"] =
-			item.type === "userMessage" ? "user" : item.type === "agentMessage" ? "assistant" : "activity";
+			item.type === "userMessage"
+				? "user"
+				: ["agentMessage", "plan"].includes(item.type)
+					? "assistant"
+					: "activity";
 		const text =
 			item.type === "userMessage"
 				? (item.content ?? []).map((part) => part.text ?? `[${part.type}]`).join("\n")
@@ -420,6 +440,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 		this.put(view, {
 			id: item.id,
 			role,
+			...(item.type === "plan" ? { kind: "plan" as const } : {}),
 			text,
 			...(role === "activity"
 				? {
@@ -520,7 +541,8 @@ export class CodexAgentClient implements ICodexAgentClient {
 				this.put(view, {
 					...existing,
 					id: delta.itemId,
-					role: method === "item/agentMessage/delta" ? "assistant" : "activity",
+					role: method === "item/commandExecution/outputDelta" ? "activity" : "assistant",
+					...(method === "item/plan/delta" ? { kind: "plan" as const } : {}),
 					text: (existing?.text ?? "") + delta.delta,
 				});
 			} else return;

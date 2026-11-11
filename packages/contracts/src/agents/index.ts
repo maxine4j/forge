@@ -40,6 +40,7 @@ export const agentThreadsSchema = z.array(agentThreadSchema);
 export const agentItemSchema = z.strictObject({
 	id: z.string().min(1).max(256),
 	role: z.enum(["user", "assistant", "activity"]),
+	kind: z.literal("plan").optional(),
 	text: z.string().max(32000),
 	title: z.string().max(256).optional(),
 	status: z.enum(["running", "completed", "failed", "interrupted"]).optional(),

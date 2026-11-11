@@ -123,6 +123,22 @@ const methods = new Map<string, z.ZodType>([
 		}),
 	],
 	["turn/interrupt", z.strictObject({ threadId: z.string().min(1), turnId: z.string().min(1) })],
+	[
+		"turn/steer",
+		z.strictObject({
+			threadId: z.string().min(1),
+			expectedTurnId: z.string().min(1).max(256),
+			input: z
+				.array(
+					z.strictObject({
+						type: z.literal("text"),
+						text: z.string().min(1).max(8000),
+						text_elements: z.array(z.never()),
+					}),
+				)
+				.length(1),
+		}),
+	],
 ]);
 
 export class CodexConnection implements ICodexAgentConnection {

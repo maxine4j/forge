@@ -1,4 +1,7 @@
 import type { AgentItem } from "@forge/contracts/agents";
+import { lazy, Suspense, type ReactNode } from "react";
+
+const Markdown = lazy(() => import("react-markdown"));
 
 const ToolGroup = ({ items }: { items: AgentItem[] }) => {
 	const running = items.some((item) => item.status === "running");
@@ -51,7 +54,16 @@ const ToolGroup = ({ items }: { items: AgentItem[] }) => {
 	);
 };
 
-export const AgentActivity = ({ items }: { items: AgentItem[] }) => {
+export const AgentActivity = ({
+	items,
+	planAction,
+	planText,
+}: {
+	items: AgentItem[];
+	planAction?: ReactNode;
+	planText?: string;
+}) => {
+	const latestPlan = items.findLast((item) => item.kind === "plan");
 	const groups: AgentItem[][] = [];
 	for (const item of items) {
 		const last = groups.at(-1);
@@ -68,7 +80,16 @@ export const AgentActivity = ({ items }: { items: AgentItem[] }) => {
 				className={`agent-message agent-message-${item.role}`}
 				aria-label={item.role === "user" ? "You" : "Codex"}
 			>
-				<div>{item.text}</div>
+				{item.kind === "plan" ? (
+					<Suspense fallback={<div>{item.text}</div>}>
+						<Markdown skipHtml disallowedElements={["img"]}>
+							{item.text}
+						</Markdown>
+					</Suspense>
+				) : (
+					<div>{item.text}</div>
+				)}
+				{item === latestPlan && item.text.trim() === planText && planAction}
 			</article>
 		);
 	});

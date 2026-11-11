@@ -40,10 +40,18 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	const access = new AccessService({ owner: "owner", origin: "https://forge.example.com" });
 	const workflowStore = new TicketWorkflowStore(db);
 	await workflowStore.initialize();
+	const steer = vi.fn();
 	const workflow = new TicketWorkflowService(
 		workflowStore,
 		store,
-		{ createTicketThread: vi.fn(), dispatch: vi.fn(), get: vi.fn(), resume: vi.fn(), plan: vi.fn() },
+		{
+			createTicketThread: vi.fn(),
+			dispatch: vi.fn(),
+			steer,
+			get: vi.fn(),
+			resume: vi.fn(),
+			plan: vi.fn(),
+		},
 		new AgentExecutionPool(),
 		{ merge: vi.fn(), base: vi.fn(), verify: vi.fn(), candidate: vi.fn() },
 		new TicketPrompts(),
@@ -125,4 +133,42 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	expect(await (await request(`tickets/${ticket.id}/workflow`)).json()).toMatchObject({ state: "queued" });
 	const next = await request(listPath, "POST", { title: "Next ticket" });
 	expect(await next.json()).toMatchObject({ id: "FORGE-2" });
+	const implementerId = "123e4567-e89b-42d3-a456-426614174010";
+	await workflowStore.save(
+		{
+			ticketId: "FORGE-2",
+			phase: "implementation",
+			state: "running",
+			mergeAttempts: 0,
+			implementerId,
+			turnId: "active-turn",
+		},
+		{ status: "in-progress" },
+	);
+	const messagePath = "tickets/FORGE-2/messages";
+	expect((await request(messagePath, "POST", { text: "Focus on tests", expectedTurnId: "active-turn" })).status).toBe(
+		200,
+	);
+	expect(steer).toHaveBeenCalledWith({ username: "owner" }, implementerId, "active-turn", "Focus on tests");
+	for (const [input, status] of [
+		[{ text: "Feedback", expectedTurnId: "stale" }, 409],
+		[{ text: "Feedback" }, 409],
+		[{ text: "Feedback", expectedTurnId: "" }, 400],
+		[{ text: "Feedback", expectedTurnId: "active-turn", model: "override" }, 400],
+	] as const)
+		expect((await request(messagePath, "POST", input)).status).toBe(status);
+	for (const headers of [
+		{ "x-webauth-user": "stranger", origin: "https://forge.example.com" },
+		{ "x-webauth-user": "owner", origin: "https://other.example.com" },
+	])
+		expect(
+			(
+				await fetch(`http://127.0.0.1:${address.port}/api/${messagePath}`, {
+					method: "POST",
+					headers: { ...headers, "content-type": "application/json" },
+					body: JSON.stringify({ text: "Feedback", expectedTurnId: "active-turn" }),
+				})
+			).status,
+		).toBe(403);
+	expect(steer).toHaveBeenCalledTimes(1);
 });

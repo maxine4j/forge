@@ -99,6 +99,26 @@ test("real Git/SQLite and a stdio peer run concurrent agents only in owned workt
 		expect((await agents.get(owner, two.thread.id)).items).toEqual(
 			expect.arrayContaining([expect.objectContaining({ text: "Working" })]),
 		);
+		const managed = await agents.createTicketThread(owner, project.id, "Ticket implementation");
+		const running = await agents.dispatch(owner, managed.thread.id, "Keep working", {
+			ticketId: "FORGE-1",
+			phase: "implementation",
+		});
+		const turnId = running.thread.turnId!;
+		await expect(agents.steer(owner, managed.thread.id, "stale", "Feedback")).rejects.toThrow("agent-conflict");
+		await agents.steer(owner, managed.thread.id, turnId, "Focus on tests");
+		await expect
+			.poll(async () =>
+				(await agents!.get(owner, managed.thread.id)).items.some((item) => item.text === "Focus on tests"),
+			)
+			.toBe(true);
+		expect((await agents.get(owner, managed.thread.id)).thread.turnId).toBe(turnId);
+		await agents.interrupt(owner, managed.thread.id);
+		await expect(agents.steer(owner, managed.thread.id, turnId, "Too late")).rejects.toThrow("agent-conflict");
+		const restored = await agents.resume(owner, managed.thread.id);
+		expect(restored.items).toEqual(
+			expect.arrayContaining([expect.objectContaining({ role: "user", text: "Focus on tests" })]),
+		);
 		await agents.interrupt(owner, one.thread.id);
 		expect((await agents.get(owner, one.thread.id)).thread.status).toBe("interrupted");
 		await agents.shutdown();

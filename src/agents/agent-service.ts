@@ -43,6 +43,7 @@ export interface IAgentService {
 	shutdown(): Promise<void>;
 }
 export interface ITicketAgents {
+	steer(actor: Actor, id: string, turnId: string, text: string): Promise<AgentView>;
 	createTicketThread(
 		actor: Actor,
 		projectId: string,
@@ -149,6 +150,19 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		allowed?: () => boolean,
 	): Promise<AgentView> {
 		return this.execute(actor, id, text, undefined, ticket, allowed);
+	}
+	async steer(actor: Actor, id: string, turnId: string, text: string): Promise<AgentView> {
+		this.authorize(actor);
+		if (!agentMessageSchema.safeParse({ text }).success) throw new AgentError("invalid-request");
+		return this.serialize(id, async () => {
+			const record = await this.require(id);
+			if (!record.managed || !record.codexId || record.turnId !== turnId || record.status !== "running")
+				throw new AgentError("agent-conflict");
+			const location = await this.workspaces.resolve(actor, record.workspaceId);
+			if (location.workspace.projectId !== record.projectId) throw new AgentError("agent-conflict");
+			await this.client.steer(record.codexId, turnId, text.trim());
+			return this.sync(record);
+		});
 	}
 	async plan(actor: Actor, id: string, turnId: string): Promise<string | undefined> {
 		this.authorize(actor);

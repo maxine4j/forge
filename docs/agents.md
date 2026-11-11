@@ -166,6 +166,25 @@ on planner turns through the pinned app-server collaboration mode and persists
 its completed plan items. Managed chats use the runtime's thread model and omit
 the standalone model and permission selectors.
 
+Native Codex plan items carry `kind: "plan"` in the browser contract and render
+as Markdown assistant messages outside tool groups, identically for deltas and
+restored history. Completed revisions stay visible. The [ticket Chat timeline](tickets.md#agentic-ticket-board)
+combines planner and implementer history visually without duplicating Codex's
+authoritative conversation storage. Approval uses the workflow's saved revision.
+
+Managed ticket implementation and rebase turns support owner steering. Forge
+verifies workspace ownership, serializes per-thread operations, and submits
+`turn/steer` with `{threadId,expectedTurnId,input:[{type:"text",text,text_elements:[]}]}`.
+The response is `{turnId}` and must match the expected active turn. These shapes
+were verified with `codex app-server generate-ts` from pinned Codex `0.164.0`
+against the [official steering documentation](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn).
+Steering starts no turn and claims no additional slot. Runtime completion remains
+authoritative even if it precedes the steering response. Stale or inactive turns
+are rejected; transport failures never trigger replay. Ticket workflow
+serialization also prevents steering after completion/merge queuing. Waiting
+structured requests use existing replies; planner feedback requires an idle or
+failed workflow. Standalone chat messages retain their existing turn-start behavior.
+
 Controlled Chromium tests cover independent threads, activity, interruptions,
 reopening, failed sends/replies, approval/input, reconnects, automatic recovery and
 mobile layout. Screenshots live under `artifacts/forge-browser/`. Authenticated

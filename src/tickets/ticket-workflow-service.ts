@@ -21,7 +21,7 @@ export interface ITicketWorkflowService {
 	attention(actor: Actor, projectId: string): Promise<string[]>;
 	approve(actor: Actor, ticket: Ticket, revision: number): Promise<TicketWorkflow>;
 	queueMerge(actor: Actor, ticket: Ticket): Promise<TicketWorkflow>;
-	message(actor: Actor, ticket: Ticket, text: string): Promise<TicketWorkflow>;
+	message(actor: Actor, ticket: Ticket, text: string, expectedTurnId?: string): Promise<TicketWorkflow>;
 	tick(actor: Actor): Promise<void>;
 	recover(actor: Actor, id?: string): Promise<void>;
 }
@@ -108,11 +108,24 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			return this.summary(next);
 		});
 	}
-	async message(actor: Actor, ticket: Ticket, text: string): Promise<TicketWorkflow> {
+	async message(actor: Actor, ticket: Ticket, text: string, expectedTurnId?: string): Promise<TicketWorkflow> {
 		this.access.assertOwner(actor);
 		return this.serialize(async () => {
 			const job = await this.inProgress(ticket.id);
 			const threadId = job.phase === "planning" ? job.plannerId : job.implementerId;
+			if (expectedTurnId) {
+				if (
+					!threadId
+					|| !["implementation", "rebase"].includes(job.phase)
+					|| job.state !== "running"
+					|| job.turnId !== expectedTurnId
+					|| !text.trim()
+					|| text.length > 8000
+				)
+					throw new TicketError("ticket-conflict");
+				await this.agents.steer(actor, threadId, expectedTurnId, text.trim());
+				return this.summary(job);
+			}
 			if (!threadId || !["idle", "failed"].includes(job.state) || !text.trim() || text.length > 8000)
 				throw new TicketError("ticket-conflict");
 			const next: TicketWorkflowRecord = {

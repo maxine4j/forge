@@ -10,6 +10,10 @@ export const createTicketSchema = z.strictObject({
 export const updateTicketSchema = createTicketSchema;
 export const moveTicketSchema = z.strictObject({ status: ticketStatusSchema, beforeId: ticketIdSchema.optional() });
 export const approveTicketPlanSchema = z.strictObject({ revision: z.number().int().positive() });
+export const ticketMessageSchema = z.strictObject({
+	text: z.string().trim().min(1).max(8000),
+	expectedTurnId: z.string().min(1).max(256).optional(),
+});
 export const ticketSchema = z.strictObject({
 	id: ticketIdSchema,
 	projectId: z.uuid(),

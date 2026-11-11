@@ -1,6 +1,6 @@
-import { agentMessageSchema } from "@forge/contracts/agents";
 import {
 	createTicketSchema,
+	ticketMessageSchema,
 	approveTicketPlanSchema,
 	moveTicketSchema,
 	ticketSchema,
@@ -27,11 +27,11 @@ export class TicketRouter implements IHttpRouter {
 			ctx.body = ticketWorkflowSchema.parse(await this.workflow.get(ctx.state.actor, ticket.id));
 		});
 		router.post("/api/tickets/:id/messages", async (ctx) => {
-			const input = agentMessageSchema.safeParse(ctx.request.body);
+			const input = ticketMessageSchema.safeParse(ctx.request.body);
 			if (!input.success) throw new TicketError("invalid-request");
 			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);
 			ctx.body = ticketWorkflowSchema.parse(
-				await this.workflow.message(ctx.state.actor, ticket, input.data.text),
+				await this.workflow.message(ctx.state.actor, ticket, input.data.text, input.data.expectedTurnId),
 			);
 		});
 		router.post("/api/tickets/:id/approve", async (ctx) => {

@@ -93,6 +93,74 @@ test("registers usage attribution and the runtime default model before submittin
 	expect(track.mock.invocationCallOrder[0]).toBeLessThan(rpc.mock.invocationCallOrder[1]!);
 });
 
+test("steering uses the pinned active-turn protocol without starting or reviving a turn", async () => {
+	const track = vi.fn();
+	const { client, rpc, notify } = setup({ track });
+	const id = await client.start("/data/worktrees/one");
+	await client.send(id, "/data/worktrees/one", "Implement", undefined, {
+		projectId: "project",
+		ticketId: "FORGE-1",
+		phase: "implementation",
+	});
+	await expect(client.steer(id, "stale", "Feedback")).rejects.toThrow("agent-conflict");
+	const before = client.read(id);
+	rpc.mockResolvedValueOnce({ turnId: "turn-1" });
+	await client.steer(id, "turn-1", "Focus on tests");
+	expect(rpc).toHaveBeenLastCalledWith("turn/steer", {
+		threadId: id,
+		expectedTurnId: "turn-1",
+		input: [{ type: "text", text: "Focus on tests", text_elements: [] }],
+	});
+	expect(client.read(id)).toEqual(before);
+	expect(track).toHaveBeenCalledTimes(1);
+	rpc.mockImplementationOnce(async () => {
+		notify("turn/completed", { threadId: id, turn: { id: "turn-1", status: "completed", items: [] } });
+		return { turnId: "turn-1" };
+	});
+	await client.steer(id, "turn-1", "A racing message");
+	expect(client.read(id).status).toBe("completed");
+	await expect(client.steer(id, "turn-1", "Too late")).rejects.toThrow("agent-conflict");
+	expect(rpc.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(1);
+});
+
+test("steering failures are never replayed and do not create activity or change turn identity", async () => {
+	const { client, rpc } = setup();
+	const id = await client.start("/data/worktrees/one");
+	await client.send(id, "/data/worktrees/one", "Implement");
+	const before = client.read(id);
+	rpc.mockRejectedValueOnce(new Error("Transport lost"));
+	await expect(client.steer(id, "turn-1", "Feedback")).rejects.toThrow("agent-unavailable");
+	expect(client.read(id)).toEqual(before);
+	expect(rpc.mock.calls.filter(([method]) => method === "turn/steer")).toHaveLength(1);
+	rpc.mockResolvedValueOnce({ turnId: "different" });
+	await expect(client.steer(id, "turn-1", "Feedback")).rejects.toThrow("agent-conflict");
+});
+
+test("native plans have identical browser items while streaming, completed and restored", async () => {
+	const { client, rpc, notify } = setup();
+	const id = await client.start("/data/worktrees/one");
+	await client.send(id, "/data/worktrees/one", "Plan");
+	notify("item/started", { threadId: id, turnId: "turn-1", item: { id: "plan", type: "plan", text: "" } });
+	notify("item/plan/delta", { threadId: id, turnId: "turn-1", itemId: "plan", delta: "# Proposed plan" });
+	const streamed = client.read(id).items;
+	expect(streamed).toEqual([{ id: "plan", role: "assistant", kind: "plan", text: "# Proposed plan" }]);
+	notify("item/completed", {
+		threadId: id,
+		turnId: "turn-1",
+		item: { id: "plan", type: "plan", text: "# Proposed plan" },
+	});
+	expect(client.read(id).items).toEqual(streamed);
+	rpc.mockImplementationOnce(async () => ({
+		thread: { id, historyMode: "paginated", cwd: "/data/worktrees/one", status: { type: "idle" }, turns: [] },
+	}));
+	rpc.mockResolvedValueOnce({ data: [{ id: "turn-1", status: "completed", items: [] }], nextCursor: null });
+	rpc.mockResolvedValueOnce({
+		data: [{ turnId: "turn-1", item: { id: "plan", type: "plan", text: "# Proposed plan" } }],
+		nextCursor: null,
+	});
+	expect((await client.resume(id, "/data/worktrees/one")).items).toEqual(streamed);
+});
+
 test("planning uses native collaboration mode and captures only a completed plan item from its turn", async () => {
 	const { client, rpc, notify } = setup();
 	const id = await client.start("/data/worktrees/one");

@@ -18,6 +18,7 @@ const fixture = () => {
 	const plans = new Map<string, string>();
 	const pool = new AgentExecutionPool();
 	const agents = {
+		steer: vi.fn<ITicketAgents["steer"]>(async (_actor, id) => structuredClone(views.get(id)!)),
 		createTicketThread: vi.fn<ITicketAgents["createTicketThread"]>(
 			async (_actor, projectId, title, workspaceId) => {
 				const id = `thread-${views.size}`;
@@ -106,6 +107,56 @@ const fixture = () => {
 	};
 	return { service, jobs, tickets, views, pool, agents, merges, create, complete, wake };
 };
+
+test.each(["implementation", "rebase"] as const)(
+	"%s steering serializes with completion/merge and retains turn and slot accounting",
+	async (phase) => {
+		const f = fixture();
+		const ticket = f.create();
+		await f.service.move(actor, ticket, { status: "todo" });
+		await f.service.tick(actor);
+		let job = f.jobs.get(ticket.id)!;
+		await expect(f.service.message(actor, ticket, "Feedback", job.turnId)).rejects.toThrow("ticket-conflict");
+		f.complete(job.plannerId!, "Implement tests");
+		await f.service.tick(actor);
+		await f.service.approve(actor, ticket, 1);
+		await f.service.tick(actor);
+		job = structuredClone(f.jobs.get(ticket.id)!);
+		job.phase = phase;
+		f.jobs.set(ticket.id, structuredClone(job));
+		await expect(f.service.message({ username: "stranger" }, ticket, "Feedback", job.turnId)).rejects.toThrow();
+		await expect(f.service.message(actor, ticket, "Feedback", "stale")).rejects.toThrow("ticket-conflict");
+		await f.service.message(actor, ticket, "Focus on tests", job.turnId);
+		expect(f.agents.steer).toHaveBeenCalledWith(actor, job.implementerId, job.turnId, "Focus on tests");
+		expect(f.jobs.get(ticket.id)).toEqual(job);
+		expect(f.pool.activeIds()).toEqual([job.implementerId]);
+		f.agents.steer.mockRejectedValueOnce(new Error("Transport lost"));
+		await expect(f.service.message(actor, ticket, "Feedback", job.turnId)).rejects.toThrow("Transport lost");
+		expect(f.jobs.get(ticket.id)).toEqual(job);
+		expect(f.agents.steer).toHaveBeenCalledTimes(2);
+		let release = () => {};
+		f.agents.steer.mockImplementationOnce(async () => {
+			await new Promise<void>((resolve) => {
+				release = resolve;
+			});
+			return structuredClone(f.views.get(job.implementerId!)!);
+		});
+		const send = f.service.message(actor, ticket, "Before completion", job.turnId);
+		await vi.waitFor(() => expect(f.agents.steer).toHaveBeenCalledTimes(3));
+		f.complete(job.implementerId!);
+		const completion = f.service.tick(actor);
+		expect(f.jobs.get(ticket.id)?.state).toBe("running");
+		release();
+		await send;
+		await completion;
+		expect(f.jobs.get(ticket.id)?.state).toBe("merge-queued");
+		await expect(f.service.message(actor, ticket, "Too late", job.turnId)).rejects.toThrow("ticket-conflict");
+		await expect(f.service.message(actor, ticket, "Too late")).rejects.toThrow("ticket-conflict");
+		await f.service.tick(actor);
+		await expect(f.service.message(actor, ticket, "After merge", job.turnId)).rejects.toThrow("ticket-conflict");
+		expect(f.agents.dispatch).toHaveBeenCalledTimes(2);
+	},
+);
 
 test("archiving serializes with ticket execution and preserves workflow history", async () => {
 	const f = fixture();
