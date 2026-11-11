@@ -8,7 +8,7 @@ const shortNumber = new Intl.NumberFormat("en-AU", { notation: "compact" });
 const amount = new Intl.NumberFormat("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 const day = new Intl.DateTimeFormat("en-AU", { month: "short", day: "numeric", timeZone: "UTC" });
 const resetTime = new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeStyle: "short" });
-const money = (value?: number) =>
+export const formatAud = (value?: number) =>
 	value === undefined ? "—" : value > 0 && value < 0.0001 ? "< A$0.0001" : `A$${amount.format(value)}`;
 const tokens = (value: { input: number; output: number }) => value.input + value.output;
 const phaseLabels = {
@@ -200,7 +200,7 @@ const TicketCosts = ({ cost }: { cost: ProjectCost }) => {
 				: left - Number(right);
 		return sort.ascending ? order : -order;
 	});
-	const scale = Math.max(1, ...tickets.map(tokens));
+	const scale = tickets.reduce((max, ticket) => Math.max(max, tokens(ticket)), 1);
 	return (
 		<section className='cost-card'>
 			<h3>Usage and cost by ticket</h3>
@@ -246,6 +246,7 @@ const TicketCosts = ({ cost }: { cost: ProjectCost }) => {
 								<tr key={ticket.id}>
 									<th scope='row'>
 										<span className='cost-muted'>{ticket.id}</span> {ticket.title}
+										{ticket.archivedAt && <small>Archived</small>}
 									</th>
 									<td>
 										{ticket.turns ? (
@@ -260,7 +261,7 @@ const TicketCosts = ({ cost }: { cost: ProjectCost }) => {
 										)}
 									</td>
 									<td>
-										{money(ticket.subscriptionAud)}
+										{formatAud(ticket.subscriptionAud)}
 										{ticket.untimedTurns > 0 && (
 											<small>
 												{ticket.untimedTurns} {ticket.untimedTurns === 1 ? "turn" : "turns"}{" "}
@@ -269,7 +270,7 @@ const TicketCosts = ({ cost }: { cost: ProjectCost }) => {
 										)}
 									</td>
 									<td>
-										{money(ticket.apiAud)}
+										{formatAud(ticket.apiAud)}
 										{ticket.unpricedTurns > 0 && (
 											<small>
 												{ticket.unpricedTurns} {ticket.unpricedTurns === 1 ? "turn" : "turns"}{" "}
@@ -285,8 +286,8 @@ const TicketCosts = ({ cost }: { cost: ProjectCost }) => {
 			)}
 			<p className='cost-muted cost-method'>
 				Subscription allocation uses recorded turn duration and the monthly rate at dispatch. The current
-				setting is {money(cost.monthlyAud)}/month. API estimates use standard text token prices and{" "}
-				{money(cost.audPerUsd)} per US$1 as of {cost.exchangeDate}.
+				setting is {formatAud(cost.monthlyAud)}/month. API estimates use standard text token prices and{" "}
+				{formatAud(cost.audPerUsd)} per US$1 as of {cost.exchangeDate}.
 			</p>
 		</section>
 	);

@@ -1,4 +1,4 @@
-import { agentThreadSchema, agentRequestSchema } from "@forge/contracts/agents";
+import { agentContextWindowSchema, agentThreadSchema, agentRequestSchema } from "@forge/contracts/agents";
 import { z } from "zod";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
@@ -85,4 +85,5 @@ const recordSchema = agentThreadSchema.extend({
 	managed: z.boolean().optional(),
 	codexId: z.string().min(1).max(256).optional(),
 	requests: z.array(agentRequestSchema).max(32),
+	contextWindow: agentContextWindowSchema.optional(),
 });

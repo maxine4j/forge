@@ -52,7 +52,14 @@ test("mock cost data uses ticket keys from its project", async () => {
 	for (const project of projects) {
 		const tickets = ticketsSchema.parse(await read(`/api/projects/${project.id}/tickets`));
 		const cost = projectCostSchema.parse(await read(`/api/projects/${project.id}/cost`));
-		expect(cost.tickets.map(({ id }) => id)).toEqual(tickets.map(({ id }) => id));
+		expect(cost.tickets.filter((ticket) => !ticket.archivedAt).map(({ id }) => id)).toEqual(
+			tickets.map(({ id }) => id),
+		);
+		const archived = cost.tickets.find((ticket) => ticket.archivedAt)!;
+		expect(await read(`/api/tickets/${archived.id}`)).toMatchObject({
+			projectId: project.id,
+			archivedAt: archived.archivedAt,
+		});
 		expect(cost.days).toHaveLength(30);
 	}
 });

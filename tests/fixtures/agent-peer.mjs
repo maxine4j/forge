@@ -81,7 +81,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		const usage = {
 			threadId: thread.id,
 			turnId: turn.id,
-			tokenUsage: { total: breakdown(thread.turns.length), last: breakdown(1) },
+			tokenUsage: { total: breakdown(thread.turns.length), last: breakdown(1), modelContextWindow: 128000 },
 		};
 		notify("thread/tokenUsage/updated", usage);
 		notify("thread/tokenUsage/updated", usage);

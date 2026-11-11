@@ -38,6 +38,15 @@ test("persists one usage snapshot per turn across restarts and scopes reads by p
 		await reopened.initialize("2026-11-12T00:00:00.000Z");
 		expect(await reopened.read("a")).toEqual({ since: date, turns: [{ ...record, output: 10, durationMs: 1000 }] });
 		expect((await reopened.read("b")).turns).toHaveLength(1);
+		await db.run(
+			`WITH RECURSIVE turns(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM turns WHERE n<1000)
+			 INSERT INTO codex_usage(projectId,threadId,turnId,record)
+			 SELECT 'a','thread','turn-'||n,json_set(?,'$.turnId','turn-'||n) FROM turns`,
+			[JSON.stringify(record)],
+		);
+		const history = await reopened.read("a");
+		expect(history.turns).toHaveLength(1001);
+		expect(history.turns.at(-1)?.turnId).toBe("turn-1000");
 	} finally {
 		await db.close();
 		await rm(directory, { recursive: true, force: true });

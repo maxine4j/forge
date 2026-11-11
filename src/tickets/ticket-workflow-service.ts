@@ -7,6 +7,7 @@ import { AgentError } from "../agents/errors.ts";
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
 import type { ITicketMergeClient } from "../workspaces/workspace-merge-client.ts";
+import type { IMergedWorkspaceCleanup } from "../workspaces/workspace-service.ts";
 import { TicketError } from "./errors.ts";
 import type { ITicketPrompts } from "./ticket-prompts.ts";
 import type { ITicketStore } from "./ticket-store.ts";
@@ -35,6 +36,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		private readonly agents: ITicketAgents,
 		private readonly pool: IAgentExecutionPool,
 		private readonly merges: ITicketMergeClient,
+		private readonly workspaceCleanup: IMergedWorkspaceCleanup,
 		private readonly prompts: ITicketPrompts,
 		private readonly access: IAccessService,
 		private readonly wake: () => void = () => {},
@@ -174,6 +176,9 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				if (!ticket) throw new TicketError("ticket-not-found");
 				if (ticket.archivedAt) throw new TicketError("ticket-conflict");
 			}
+			if (!ticketId) {
+				for (const job of await this.store.pendingCleanup()) await this.cleanup(actor, job);
+			}
 			const selected = ticketId ? [await this.record(ticketId)] : await this.store.list();
 			for (const job of selected) {
 				if (ticketId && job.state === "setup-failed") {
@@ -204,7 +209,12 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		if (ticket?.archivedAt || ticket?.status !== "in-progress") throw new TicketError("ticket-conflict");
 		return this.record(id);
 	}
-	private summary({ previousTurnId: _previous, turnId: _turn, ...workflow }: TicketWorkflowRecord): TicketWorkflow {
+	private summary({
+		previousTurnId: _previous,
+		turnId: _turn,
+		workspaceCleaned: _cleaned,
+		...workflow
+	}: TicketWorkflowRecord): TicketWorkflow {
 		return workflow;
 	}
 	private canDispatch(ticket: Ticket): boolean {
@@ -303,7 +313,9 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	private async merge(actor: Actor, job: TicketWorkflowRecord): Promise<void> {
 		if (!job.workspaceId || !job.resultSha) throw new TicketError("ticket-conflict");
 		if ((await this.merges.merge(actor, job.workspaceId, job.resultSha)) === "merged") {
-			await this.store.save({ ...job, state: "idle", message: undefined }, { status: "done" });
+			const done = { ...job, state: "idle" as const, message: undefined };
+			await this.store.save(done, { status: "done" });
+			await this.cleanup(actor, done);
 			this.wake();
 		} else {
 			const exhausted = job.mergeAttempts >= 3;
@@ -315,6 +327,15 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				message: undefined,
 			});
 			if (!exhausted) this.wake();
+		}
+	}
+	private async cleanup(actor: Actor, job: TicketWorkflowRecord): Promise<void> {
+		if (!job.workspaceId || !job.resultSha || job.workspaceCleaned) return;
+		try {
+			await this.workspaceCleanup.cleanupMerged(actor, job.workspaceId, job.resultSha);
+			await this.store.save({ ...job, workspaceCleaned: true });
+		} catch (err) {
+			this.log.error({ err, ticketId: job.ticketId }, "Merged ticket workspace cleanup is pending");
 		}
 	}
 	private serialize<T>(operation: () => Promise<T>): Promise<T> {

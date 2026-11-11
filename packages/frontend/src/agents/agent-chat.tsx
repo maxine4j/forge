@@ -432,6 +432,7 @@ export const Conversation = ({
 					disabled={busy || readOnly}
 					sendable={Boolean(sendable)}
 					settings={view.thread}
+					contextWindow={messagePath ? view.contextWindow : undefined}
 					configurable={!messagePath && !readOnly}
 					change={(value) => {
 						setDraft(value);

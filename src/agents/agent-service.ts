@@ -24,6 +24,7 @@ import type { IAgentThreadStore } from "./agent-thread-store.ts";
 import { AgentError } from "./errors.ts";
 import type { AgentThreadRecord } from "./types.ts";
 export interface IAgentWorkspaces {
+	get(actor: Actor, id: string): Promise<Workspace>;
 	create(actor: Actor, projectId: string, input: CreateWorkspace): Promise<Workspace>;
 	resolve(actor: Actor, id: string): Promise<WorkspaceLocation>;
 	tree(actor: Actor, id: string, path: string): Promise<WorkspaceTree>;
@@ -257,6 +258,11 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				if (record.status === "idle") return this.view(record);
 				throw new AgentError("agent-conflict");
 			}
+			if (record.managed && (await this.workspaces.get(actor, record.workspaceId)).status === "archived") {
+				await this.client.loadHistory(record.codexId);
+				this.identities.set(record.codexId, id);
+				return this.view(record);
+			}
 			const location = await this.workspaces.resolve(actor, record.workspaceId);
 			await this.client.resume(record.codexId, location.path);
 			this.identities.set(record.codexId, id);
@@ -397,19 +403,27 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		try {
 			if (record.codexId && this.identities.has(record.codexId)) runtime = this.client.read(record.codexId);
 		} catch {}
-		const { codexId: _codexId, managed: _managed, requests, ...thread } = record;
+		const { codexId: _codexId, managed: _managed, requests, contextWindow: savedContext, ...thread } = record;
+		const contextWindow = runtime?.contextWindow ?? savedContext;
 		return {
 			thread,
 			items: runtime?.items ?? [],
 			requests: runtime?.requests ?? requests,
 			truncated: runtime?.truncated ?? false,
+			...(contextWindow && { contextWindow }),
 		};
 	}
 	private async sync(record: AgentThreadRecord): Promise<AgentView> {
 		if (record.codexId) {
 			const runtime = this.client.read(record.codexId);
 			this.pool.observe(record.id, runtime.status);
-			const updated = { ...record, status: runtime.status, turnId: runtime.turnId, requests: runtime.requests };
+			const updated = {
+				...record,
+				status: runtime.status,
+				turnId: runtime.turnId,
+				requests: runtime.requests,
+				contextWindow: runtime.contextWindow ?? record.contextWindow,
+			};
 			if (JSON.stringify(updated) !== JSON.stringify(record)) await this.store.update(updated);
 			return this.view(updated);
 		}

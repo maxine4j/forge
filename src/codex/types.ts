@@ -1,4 +1,4 @@
-import type { AgentItem, AgentRequest, AgentStatus } from "@forge/contracts/agents";
+import type { AgentContextWindow, AgentItem, AgentRequest, AgentStatus } from "@forge/contracts/agents";
 export interface AgentRuntimeView {
 	status: AgentStatus;
 	turnId?: string;
@@ -6,4 +6,5 @@ export interface AgentRuntimeView {
 	items: AgentItem[];
 	requests: AgentRequest[];
 	truncated: boolean;
+	contextWindow?: AgentContextWindow;
 }

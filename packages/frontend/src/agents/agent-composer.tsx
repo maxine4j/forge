@@ -1,7 +1,49 @@
-import { agentFilesSchema, agentOptionsSchema, type AgentOptions, type AgentSettings } from "@forge/contracts/agents";
+import {
+	agentFilesSchema,
+	agentOptionsSchema,
+	type AgentContextWindow,
+	type AgentOptions,
+	type AgentSettings,
+} from "@forge/contracts/agents";
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+
+const number = new Intl.NumberFormat("en-AU");
+
+const ContextWindow = ({ used, max }: AgentContextWindow) => {
+	const tooltipId = useId();
+	const percent = 100 * (used / max);
+	return (
+		<div className='agent-context'>
+			<button
+				type='button'
+				aria-label='Context window'
+				aria-describedby={tooltipId}
+				onClick={(event) => event.currentTarget.focus()}
+			>
+				<svg width='20' height='20' viewBox='0 0 20 20' aria-hidden='true' fill='none' strokeWidth='2'>
+					<circle cx='10' cy='10' r='7' className='agent-context-track' />
+					<circle
+						cx='10'
+						cy='10'
+						r='7'
+						pathLength='100'
+						stroke='currentColor'
+						strokeDasharray={`${Math.min(percent, 100)} 100`}
+						transform='rotate(-90 10 10)'
+					/>
+				</svg>
+			</button>
+			<div id={tooltipId} role='tooltip' className='agent-context-tooltip'>
+				<strong>{number.format(Math.round(percent))}% used</strong>
+				<div>
+					{number.format(used)} of {number.format(max)} tokens
+				</div>
+			</div>
+		</div>
+	);
+};
 
 export const AgentComposer = ({
 	id,
@@ -12,6 +54,7 @@ export const AgentComposer = ({
 	disabled,
 	sendable,
 	settings,
+	contextWindow,
 	configurable = true,
 }: {
 	id: string;
@@ -22,6 +65,7 @@ export const AgentComposer = ({
 	disabled: boolean;
 	sendable: boolean;
 	settings: AgentSettings;
+	contextWindow?: AgentContextWindow;
 	configurable?: boolean;
 }) => {
 	const inputId = useId();
@@ -251,24 +295,27 @@ export const AgentComposer = ({
 						</>
 					)}
 				</div>
-				<button
-					className='agent-send'
-					aria-label='Send message'
-					title='Send message'
-					disabled={disabled || !sendable || !draft.trim()}
-				>
-					<svg
-						viewBox='0 0 24 24'
-						width='18'
-						height='18'
-						fill='none'
-						stroke='currentColor'
-						strokeWidth='2'
-						aria-hidden='true'
+				<div className='agent-composer-actions'>
+					{contextWindow && <ContextWindow {...contextWindow} />}
+					<button
+						className='agent-send'
+						aria-label='Send message'
+						title='Send message'
+						disabled={disabled || !sendable || !draft.trim()}
 					>
-						<path d='M12 19V5m-6 6 6-6 6 6' />
-					</svg>
-				</button>
+						<svg
+							viewBox='0 0 24 24'
+							width='18'
+							height='18'
+							fill='none'
+							stroke='currentColor'
+							strokeWidth='2'
+							aria-hidden='true'
+						>
+							<path d='M12 19V5m-6 6 6-6 6 6' />
+						</svg>
+					</button>
+				</div>
 			</div>
 			{error && (
 				<div className='agent-composer-error' role='status'>

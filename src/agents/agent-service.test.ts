@@ -30,6 +30,14 @@ const setup = () => {
 		recover: vi.fn(),
 	};
 	const workspaces: IAgentWorkspaces = {
+		get: vi.fn<IAgentWorkspaces["get"]>(async (_actor, workspaceId) => ({
+			id: workspaceId,
+			projectId,
+			name: "Chat",
+			status: "ready",
+			branch: "forge/workspace/test",
+			createdAt,
+		})),
 		tree: vi.fn(async () => ({
 			path: "",
 			truncated: false,
@@ -68,6 +76,16 @@ const setup = () => {
 			return key;
 		}),
 		read: (key: string) => structuredClone(views.get(key)!),
+		loadHistory: vi.fn(async (key: string): Promise<AgentRuntimeView> => {
+			const view: AgentRuntimeView = {
+				status: "completed",
+				items: [{ id: "answer", role: "assistant", text: "Completed work" }],
+				requests: [],
+				truncated: false,
+			};
+			views.set(key, view);
+			return view;
+		}),
 		resume: vi.fn(async (key: string) => {
 			const view = views.get(key)!;
 			view.status = "completed";
@@ -109,6 +127,31 @@ const setup = () => {
 	);
 	return { service, client, workspaces, records, views, changed: (key: string) => changed(key) };
 };
+
+test("completed managed conversations load history and saved context after worktree removal", async () => {
+	const f = setup();
+	const { thread } = await f.service.createTicketThread(owner, projectId, "Implementation");
+	await f.service.dispatch(owner, thread.id, "Implement", { ticketId: "FORGE-1", phase: "implementation" });
+	const codexId = f.records.get(thread.id)!.codexId!;
+	Object.assign(f.views.get(codexId)!, { status: "completed", contextWindow: { used: 4200, max: 128000 } });
+	f.changed(codexId);
+	await expect(f.service.get(owner, thread.id)).resolves.toMatchObject({
+		contextWindow: { used: 4200, max: 128000 },
+	});
+	expect(f.records.get(thread.id)?.contextWindow).toEqual({ used: 4200, max: 128000 });
+	f.views.get(codexId)!.contextWindow = undefined;
+	const { workspace } = await f.workspaces.resolve(owner, thread.workspaceId);
+	vi.mocked(f.workspaces.get).mockResolvedValueOnce({ ...workspace, status: "archived" });
+	vi.mocked(f.workspaces.resolve).mockClear();
+	await expect(f.service.resume(owner, thread.id)).resolves.toMatchObject({
+		thread: { status: "completed" },
+		items: [{ text: "Completed work" }],
+		contextWindow: { used: 4200, max: 128000 },
+	});
+	expect(f.client.loadHistory).toHaveBeenCalledWith(codexId);
+	expect(f.client.resume).not.toHaveBeenCalled();
+	expect(f.workspaces.resolve).not.toHaveBeenCalled();
+});
 
 test("ticket steering checks authorization, ownership and active turn without claiming another slot", async () => {
 	const f = setup();

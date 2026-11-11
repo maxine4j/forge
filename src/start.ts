@@ -223,6 +223,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		agents,
 		pool,
 		new WorkspaceMergeClient(workspaces, git),
+		workspaces,
 		new TicketPrompts(() => settings.current()),
 		access,
 		wakeScheduler,

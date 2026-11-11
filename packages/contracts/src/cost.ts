@@ -13,18 +13,17 @@ export const projectCostSchema = z.object({
 	totals: summary,
 	phases: z.array(summary.extend({ phase: costPhaseSchema })),
 	days: z.array(tokens.extend({ date: z.iso.date() })).max(30),
-	tickets: z
-		.array(
-			summary.extend({
-				id: z.string(),
-				title: z.string(),
-				subscriptionAud: amount.optional(),
-				apiAud: amount.optional(),
-				untimedTurns: count,
-				unpricedTurns: count,
-			}),
-		)
-		.max(1000),
+	tickets: z.array(
+		summary.extend({
+			id: z.string(),
+			title: z.string(),
+			archivedAt: z.iso.datetime().optional(),
+			subscriptionAud: amount.optional(),
+			apiAud: amount.optional(),
+			untimedTurns: count,
+			unpricedTurns: count,
+		}),
+	),
 	limits: z
 		.object({
 			plan: z.string().optional(),

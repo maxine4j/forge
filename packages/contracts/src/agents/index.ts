@@ -60,11 +60,16 @@ export const agentRequestSchema = z.strictObject({
 		)
 		.max(10),
 });
+export const agentContextWindowSchema = z.strictObject({
+	used: z.int().nonnegative(),
+	max: z.int().positive(),
+});
 export const agentViewSchema = z.strictObject({
 	thread: agentThreadSchema,
 	items: z.array(agentItemSchema).max(500),
 	requests: z.array(agentRequestSchema).max(32),
 	truncated: z.boolean(),
+	contextWindow: agentContextWindowSchema.optional(),
 });
 export type {
 	AgentStatus,
@@ -73,6 +78,7 @@ export type {
 	AgentRequest,
 	AgentThread,
 	AgentView,
+	AgentContextWindow,
 	AgentReply,
 	AgentSettings,
 	AgentOptions,

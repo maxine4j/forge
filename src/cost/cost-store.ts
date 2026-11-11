@@ -48,17 +48,18 @@ export class CostStore implements ICostStore {
 	}
 
 	async read(projectId: string): Promise<{ since: string; turns: UsageTurn[] }> {
-		const [metadata, rows] = await Promise.all([
-			this.database.all("SELECT since FROM cost_tracking WHERE id=1"),
-			this.database.all("SELECT record FROM codex_usage WHERE projectId=?", [projectId]),
-		]);
+		const metadata = await this.database.all("SELECT since FROM cost_tracking WHERE id=1");
 		const { since } = z.object({ since: z.iso.datetime() }).parse(metadata.at(0));
-		return {
-			since,
-			turns: rows.map((row) =>
-				recordSchema.parse(JSON.parse(z.object({ record: z.string() }).parse(row).record)),
-			),
-		};
+		const turns: UsageTurn[] = [];
+		for (let offset = 0; ; offset += 500) {
+			const rows = await this.database.all(
+				"SELECT record FROM codex_usage WHERE projectId=? ORDER BY rowid LIMIT 500 OFFSET ?",
+				[projectId, offset],
+			);
+			for (const row of rows)
+				turns.push(recordSchema.parse(JSON.parse(z.object({ record: z.string() }).parse(row).record)));
+			if (rows.length < 500) return { since, turns };
+		}
 	}
 
 	async save(turn: UsageTurn): Promise<void> {
