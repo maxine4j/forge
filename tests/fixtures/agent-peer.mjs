@@ -93,18 +93,21 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		});
 		result = { turn };
 		const prompt = params.input.map((part) => part.text ?? "").join("\n");
-		if (prompt.includes("FORGE_RESULT")) {
-			const run = Number(/"run":(\d+)/u.exec(prompt)?.[1]);
-			let artifact;
-			if (prompt.includes("Planning skill"))
-				artifact = {
-					kind: "plan",
-					run,
+		const planning = params.collaborationMode?.mode === "plan";
+		const rebase = prompt.startsWith("Rebase this branch");
+		if (planning || rebase || prompt.startsWith("Implement the approved plan")) {
+			if (planning) {
+				if (thread.turns.length > 1 && prompt !== "Include filtering")
+					throw new Error("Planner feedback must arrive verbatim");
+				const item = {
+					id: `plan-${sequence}`,
+					type: "plan",
 					text:
-						"Plan: implement search with filtering and behavioral tests. Files: search.ts, search.test.ts. Validate with repository checks.\n"
-						+ "Acceptance detail. ".repeat(500),
+						"## Search plan\n\n- Implement search with filtering.\n\n" + "Acceptance detail. ".repeat(500),
 				};
-			else {
+				turn.items.push(item);
+				notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
+			} else {
 				const git = (...args) =>
 					execFileSync(
 						"git",
@@ -119,16 +122,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 						],
 						{ encoding: "utf8" },
 					).trim();
-				if (prompt.includes("Rebase the ticket branch")) git("rebase", "--keep-empty", "main");
+				if (rebase) git("rebase", "--keep-empty", "main");
 				else git("commit", "--allow-empty", "-m", `Controlled implementation ${sequence}`);
-				artifact = {
-					kind: "complete",
-					run,
-					commit: git("rev-parse", "HEAD"),
-					validation: "Controlled fixture: Git committed state verified; no authenticated inference",
-				};
 			}
-			if (prompt.includes("Rebase the ticket branch"))
+			if (rebase)
 				turn.items.push({
 					id: `tool-${sequence}`,
 					type: "commandExecution",
@@ -139,7 +136,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			turn.items.push({
 				id: `answer-${sequence}`,
 				type: "agentMessage",
-				text: "FORGE_RESULT\n" + JSON.stringify(artifact),
+				text: planning ? "Plan ready." : "Changes committed.",
 			});
 			turn.status = "completed";
 			turn.durationMs = 1000;

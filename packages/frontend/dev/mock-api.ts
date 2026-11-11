@@ -132,6 +132,7 @@ class MockApi implements IMockApi {
 					title: "Improve project navigation",
 					description: "Make the project easier to browse on every screen.",
 					status: "in-progress",
+					needsAttention: true,
 					createdAt: date,
 				},
 				{
@@ -184,10 +185,17 @@ class MockApi implements IMockApi {
 				this.routes.set(`/api/tickets/${ticket.id}`, () => ticket);
 				this.routes.set(`/api/tickets/${ticket.id}/workflow`, () => ({
 					ticketId: ticket.id,
-					phase: ticket.status === "backlog" ? "planning" : "implementation",
+					phase: ticket.status === "done" ? "implementation" : "planning",
 					state: "idle",
 					mergeAttempts: 0,
-					run: 0,
+					...(ticket.needsAttention
+						? {
+								plan: {
+									revision: 1,
+									text: "## Project navigation\n\n- Keep the active section visible on mobile.\n- Preserve links to each section when the layout changes.",
+								},
+							}
+						: {}),
 				}));
 			}
 			const workspaceRoot = `/api/workspaces/${id}`;

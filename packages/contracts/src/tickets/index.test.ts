@@ -2,8 +2,8 @@ import { expect, test } from "vitest";
 
 import { createTicketSchema, moveTicketSchema, ticketSchema, ticketStatuses } from "./index.ts";
 
-test("board exposes exactly six workflow stages", () => {
-	expect(ticketStatuses).toEqual(["backlog", "todo", "in-progress", "in-review", "merging", "done"]);
+test("board exposes exactly four workflow stages", () => {
+	expect(ticketStatuses).toEqual(["backlog", "todo", "in-progress", "done"]);
 	expect(moveTicketSchema.safeParse({ status: "planning" }).success).toBe(false);
 });
 

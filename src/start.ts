@@ -169,7 +169,13 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const agentStore = new AgentThreadStore(database);
 	await agentStore.initialize();
 	await agentStore.recover();
-	const pool = new AgentExecutionPool();
+	let wakeRequested = false;
+	let schedulerWait: AbortController | undefined;
+	const wakeScheduler = () => {
+		wakeRequested = true;
+		schedulerWait?.abort();
+	};
+	const pool = new AgentExecutionPool(wakeScheduler);
 	const agents = new AgentService(
 		agentStore,
 		new CodexAgentClient(connection, files.realpath, randomUUID, usage),
@@ -191,6 +197,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		new WorkspaceMergeClient(workspaces, git),
 		new TicketPrompts(),
 		access,
+		wakeScheduler,
 	);
 	const tickets = new TicketService(ticketStore, store, access, () => new Date(), workflow);
 	const actor = { username: config.owner };
@@ -200,15 +207,20 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		await agents.recover(actor);
 		await workflow.recover(actor);
 		while (!workflowAbort.signal.aborted) {
+			wakeRequested = false;
 			try {
 				await workflow.tick(actor);
 			} catch (err) {
 				log.error({ err }, "Ticket scheduler failed");
 			}
+			if (wakeRequested || workflowAbort.signal.aborted) continue;
+			schedulerWait = new AbortController();
 			try {
-				await sleep(500, workflowAbort.signal);
-			} catch {
-				break;
+				await sleep(500, AbortSignal.any([workflowAbort.signal, schedulerWait.signal]));
+			} catch (err) {
+				if (!schedulerWait.signal.aborted && !workflowAbort.signal.aborted) throw err;
+			} finally {
+				schedulerWait = undefined;
 			}
 		}
 	})();

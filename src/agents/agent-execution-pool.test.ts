@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { AgentExecutionPool } from "./agent-execution-pool.ts";
 
@@ -16,4 +16,16 @@ test("limits all active work to three, retains uncertain slots and releases comp
 	expect(pool.available()).toBe(false);
 	pool.observe("rebase", "interrupted");
 	expect(pool.available()).toBe(true);
+});
+
+test("wakes the scheduler only when an occupied slot is released", () => {
+	const wake = vi.fn();
+	const pool = new AgentExecutionPool(wake);
+	pool.claim("planner");
+	pool.observe("planner", "waiting");
+	pool.observe("other", "completed");
+	expect(wake).not.toHaveBeenCalled();
+	pool.observe("planner", "completed");
+	pool.observe("planner", "completed");
+	expect(wake).toHaveBeenCalledOnce();
 });

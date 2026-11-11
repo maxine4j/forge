@@ -7,9 +7,10 @@
 - Protect `main` across agent operations and external pushes; explicit owner
   commits through the repository editor are permitted under the [repository editor contract](workspaces.md#slice-2-integrated-manual-workspace-and-pr-review).
   Receive-side enforcement is required for hosted Git pushes.
-- The current [ticket workflow](tickets.md#agentic-ticket-board) uses fast-forward-only merging with expected-main
-  compare-and-swap. Future remote-CI candidate workflows below require a separate
-  explicit contract change before implementation.
+- The [ticket merge queue](tickets.md#agentic-ticket-board) automatically attempts a
+  fast-forward update with expected-main compare-and-swap after implementation.
+  If main has diverged, the implementer rebases and Forge retries. Future remote-CI
+  candidate workflows below require a separate explicit contract change.
 - Forge is authoritative for Git and PRs. GitHub is the CI execution mirror;
   initially do not create a second set of GitHub PRs or synchronize their reviews.
 - Push an immutable candidate commit to a dedicated GitHub branch with a configured

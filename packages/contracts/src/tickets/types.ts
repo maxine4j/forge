@@ -1,4 +1,4 @@
-export type TicketStatus = "backlog" | "todo" | "in-progress" | "in-review" | "merging" | "done";
+export type TicketStatus = "backlog" | "todo" | "in-progress" | "done";
 export interface CreateTicket {
 	title: string;
 	description: string;
@@ -12,4 +12,5 @@ export interface Ticket extends CreateTicket {
 	projectId: string;
 	status: TicketStatus;
 	createdAt: string;
+	needsAttention?: true;
 }

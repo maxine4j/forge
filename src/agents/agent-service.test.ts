@@ -223,6 +223,24 @@ test("ticket phases retain one worktree, use separate Codex contexts and reject 
 	expect((await service.list(owner, projectId)).map((thread) => thread.id)).not.toContain(planning.thread.id);
 	await service.shutdown();
 });
+
+test("ticket thread setup reserves capacity before allocating a worktree and releases it on failure", async () => {
+	const { service, workspaces } = setup();
+	const chats = await Promise.all([1, 2, 3].map((n) => service.create(owner, projectId, `Chat ${n}`)));
+	for (const chat of chats.slice(0, 2)) await service.send(owner, chat.thread.id, "Work");
+	const pending = Promise.withResolvers<Awaited<ReturnType<IAgentWorkspaces["create"]>>>();
+	vi.mocked(workspaces.create).mockReturnValueOnce(pending.promise);
+	const planning = service.createTicketThread(owner, projectId, "Ticket planning", undefined, true);
+	await expect(service.send(owner, chats[2]!.thread.id, "Work")).rejects.toThrow("agent-capacity");
+	pending.reject(new Error("Workspace unavailable"));
+	await expect(planning).rejects.toThrow("Workspace unavailable");
+	await service.send(owner, chats[2]!.thread.id, "Work");
+	await expect(service.createTicketThread(owner, projectId, "Queued planning", undefined, true)).rejects.toThrow(
+		"agent-capacity",
+	);
+	expect(workspaces.create).toHaveBeenCalledTimes(4);
+	await service.shutdown();
+});
 test("shutdown drains an accepted chat creation before storage may close", async () => {
 	const { service, workspaces } = setup();
 	let release = () => {};

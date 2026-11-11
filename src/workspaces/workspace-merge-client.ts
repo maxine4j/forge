@@ -10,6 +10,7 @@ export interface ITicketMergeClient {
 	merge(actor: Actor, workspaceId: string, candidate: string): Promise<"merged" | "rebase">;
 	/** Requires clean, committed work on the owned branch, outside an unfinished rebase. */
 	verify(actor: Actor, workspaceId: string, candidate: string): Promise<void>;
+	candidate(actor: Actor, workspaceId: string): Promise<string>;
 	base(actor: Actor, workspaceId: string): Promise<string>;
 }
 
@@ -24,17 +25,21 @@ export class WorkspaceMergeClient implements ITicketMergeClient {
 		return workspace.baseSha;
 	}
 	async verify(actor: Actor, workspaceId: string, candidate: string): Promise<void> {
+		if ((await this.candidate(actor, workspaceId)) !== candidate) throw new TicketError("ticket-conflict");
+	}
+	async candidate(actor: Actor, workspaceId: string): Promise<string> {
 		try {
 			const { path, workspace } = await this.workspaces.resolve(actor, workspaceId);
-			gitShaSchema.parse(candidate);
 			const branch = (await this.git.run(["-C", path, "symbolic-ref", "HEAD"])).trim();
-			const head = (await this.git.run(["-C", path, "rev-parse", "--verify", "HEAD^{commit}"])).trim();
+			const head = gitShaSchema.parse(
+				(await this.git.run(["-C", path, "rev-parse", "--verify", "HEAD^{commit}"])).trim(),
+			);
 			if (
 				branch !== `refs/heads/${workspace.branch}`
-				|| head !== candidate
 				|| (await this.git.run(["-C", path, "status", "--porcelain", "--untracked-files=all"])).trim()
 			)
 				throw new TicketError("ticket-conflict");
+			return head;
 		} catch (cause) {
 			if (cause instanceof TicketError) throw cause;
 			throw new TicketError("ticket-unavailable", { cause });
@@ -46,23 +51,30 @@ export class WorkspaceMergeClient implements ITicketMergeClient {
 			const { path, workspace } = await this.workspaces.resolve(actor, workspaceId);
 			if ((await this.git.run(["-C", path, "status", "--porcelain", "--untracked-files=all"])).trim())
 				throw new TicketError("ticket-conflict");
-			const main = gitShaSchema.parse(
-				(await this.git.run(["-C", path, "rev-parse", "--verify", "refs/heads/main"])).trim(),
-			);
-			const head = gitShaSchema.parse(
-				(await this.git.run(["-C", path, "rev-parse", "--verify", `refs/heads/${workspace.branch}`])).trim(),
-			);
-			if (head !== candidate) throw new TicketError("ticket-conflict");
-			const base = gitShaSchema.parse((await this.git.run(["-C", path, "merge-base", main, head])).trim());
-			// A crash after updating Git but before recording Done must be recoverable,
-			// including when later approved work has already advanced main again.
-			if (base === candidate) return "merged";
-			if (base !== main) return "rebase";
-			await this.git.run(
-				["-C", path, "update-ref", "--stdin"],
-				`start\nverify refs/heads/${workspace.branch} ${candidate}\nupdate refs/heads/main ${candidate} ${main}\nprepare\ncommit\n`,
-			);
-			return "merged";
+			const readRef = async (ref: string) =>
+				gitShaSchema.parse((await this.git.run(["-C", path, "rev-parse", "--verify", ref])).trim());
+			const branch = `refs/heads/${workspace.branch}`;
+			let main = await readRef("refs/heads/main");
+			for (let attempt = 0; ; attempt++) {
+				if ((await readRef(branch)) !== candidate) throw new TicketError("ticket-conflict");
+				const base = gitShaSchema.parse(
+					(await this.git.run(["-C", path, "merge-base", main, candidate])).trim(),
+				);
+				// Git may already contain the candidate if Forge restarted before saving Done.
+				if (base === candidate) return "merged";
+				if (base !== main) return "rebase";
+				try {
+					await this.git.run(
+						["-C", path, "update-ref", "--stdin"],
+						`start\nverify ${branch} ${candidate}\nupdate refs/heads/main ${candidate} ${main}\nprepare\ncommit\n`,
+					);
+					return "merged";
+				} catch (cause) {
+					const latest = await readRef("refs/heads/main");
+					if (main === latest || attempt >= 2) throw cause;
+					main = latest;
+				}
+			}
 		} catch (cause) {
 			if (cause instanceof TicketError) throw cause;
 			throw new TicketError("ticket-unavailable", { cause });

@@ -158,8 +158,11 @@ names in submitted text resolve through the verified worktree's enabled runtime
 catalog and are sent as structured skill inputs. File completion inserts a
 relative path into the message. Model/skill discovery failures expose a retry;
 file-search failures retain the draft and allow another query. Ticket workflow
-conversations share message layout and keyboard behavior, but their orchestration
-does not expose standalone-chat model/permission controls.
+conversations share message layout and keyboard behavior. The
+[ticket scheduler](tickets.md#agentic-ticket-board) selects native Codex Plan mode
+on planner turns through the pinned app-server collaboration mode and persists
+its completed plan items. Managed chats use the runtime's thread model and omit
+the standalone model and permission selectors.
 
 Controlled Chromium tests cover independent threads, activity, interruptions,
 reopening, failed sends/replies, approval/input, reconnects, automatic recovery and

@@ -6,18 +6,18 @@ import {
 	type MoveTicket,
 	type TicketWorkflow,
 } from "@forge/contracts/tickets";
-import { useEffect, useRef, useState, useId } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, useId } from "react";
 
 import { Conversation } from "../agents/agent-chat.tsx";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 
+const Markdown = lazy(() => import("react-markdown"));
+
 export const ticketLabels: Record<TicketStatus, string> = {
 	backlog: "Backlog",
-	todo: "To do",
+	todo: "Ready for development",
 	"in-progress": "In progress",
-	"in-review": "In review",
-	merging: "Merging",
 	done: "Done",
 };
 
@@ -28,6 +28,7 @@ export const TicketDetails = ({
 	close,
 	save,
 	move,
+	refreshBoard,
 	drafts,
 }: {
 	ticket: Ticket;
@@ -36,13 +37,15 @@ export const TicketDetails = ({
 	close: () => void;
 	save: (input: CreateTicket) => Promise<void>;
 	move: (id: string, input: MoveTicket) => Promise<void>;
+	refreshBoard: () => void;
 	drafts: Map<string, string>;
 }) => {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const fieldId = useId();
 	const poller = useRef<ResourcePoller<TicketWorkflow> | undefined>(undefined);
 	const [job, setJob] = useState<TicketWorkflow>();
-	const [tab, setTab] = useState(ticket.status === "backlog" ? "details" : "chat");
+	const [section, setTab] = useState<"details" | "plan" | "chat">();
+	const [acting, setActing] = useState(false);
 	const [title, setTitle] = useState(ticket.title);
 	const [description, setDescription] = useState(ticket.description);
 	const [error, setError] = useState("");
@@ -68,18 +71,31 @@ export const TicketDetails = ({
 			poller.current = undefined;
 		};
 	}, [api, ticket.id]);
-	const currentId = ticket.status === "todo" ? job?.plannerId : (job?.implementerId ?? job?.plannerId);
+	const currentId = job?.phase === "planning" ? job.plannerId : job?.implementerId;
 	const id = history ? job?.plannerId : currentId;
-	const blocked =
-		history || !job || !["idle", "failed"].includes(job.state) || ["backlog", "done"].includes(ticket.status);
-	const target =
-		ticket.status === "backlog"
-			? "todo"
-			: ticket.status === "todo"
-				? "in-progress"
-				: ticket.status === "in-review"
-					? "merging"
-					: undefined;
+	const plan = job?.plan;
+	const awaitingReview =
+		ticket.status === "in-progress" && job?.phase === "planning" && job.state === "idle" && !!plan;
+	const tab = section ?? (awaitingReview ? "plan" : currentId ? "chat" : "details");
+	const blocked = history || !job || !["idle", "failed"].includes(job.state) || ticket.status !== "in-progress";
+	const target = ticket.status === "backlog" ? "todo" : undefined;
+	const canQueueMerge =
+		ticket.status === "in-progress"
+		&& job?.resultSha
+		&& ((job.phase === "review" && job.state === "idle") || job.state === "failed");
+	const act = (path: string, body: unknown, onSuccess?: () => void) => {
+		if (acting || !poller.current) return;
+		setActing(true);
+		setError("");
+		void poller.current
+			.mutate(async () => {
+				const updated = await api.read(`tickets/${ticket.id}/${path}`, ticketWorkflowSchema, "POST", body);
+				onSuccess?.();
+				refreshBoard();
+				return updated;
+			})
+			.finally(() => setActing(false));
+	};
 	return (
 		<dialog
 			ref={dialog}
@@ -105,7 +121,7 @@ export const TicketDetails = ({
 					<select
 						aria-label='Status'
 						value={ticket.status}
-						disabled={busy}
+						disabled={busy || !target}
 						onChange={(event) => {
 							setError("");
 							void move(ticket.id, { status: event.target.value as TicketStatus }).catch((err: unknown) =>
@@ -118,18 +134,26 @@ export const TicketDetails = ({
 					</select>
 				</label>
 				<span role='status'>
-					{job?.state ?? "loading"}
-					{job?.plan ? ` · Plan revision ${job.plan.revision}` : ""}
+					{awaitingReview
+						? "Plan ready for review"
+						: job?.state === "merge-queued"
+							? "Queued to merge"
+							: (job?.state ?? "Loading")}
 				</span>
 			</div>
 			<nav aria-label='Ticket sections' className='ticket-details-tabs'>
 				<button type='button' aria-pressed={tab === "details"} onClick={() => setTab("details")}>
 					Details
 				</button>
+				{plan && (
+					<button type='button' aria-pressed={tab === "plan"} onClick={() => setTab("plan")}>
+						Plan
+					</button>
+				)}
 				<button type='button' aria-pressed={tab === "chat"} onClick={() => setTab("chat")}>
 					Chat
 				</button>
-				{job?.implementerId && (
+				{job?.implementerId && job.plannerId && (
 					<button
 						type='button'
 						aria-pressed={history}
@@ -149,20 +173,56 @@ export const TicketDetails = ({
 			)}
 			{job?.state === "uncertain" && (
 				<div className='ticket-recovery'>
-					<span>Execution needs reconciliation; no input will be replayed.</span>
-					<button
-						onClick={() => {
-							void api
-								.read(`tickets/${ticket.id}/reconcile`, ticketWorkflowSchema, "POST", {})
-								.then(setJob)
-								.catch((err: unknown) =>
-									setError(err instanceof Error ? err.message : "Cannot reconcile execution."),
-								);
-						}}
-					>
+					<button type='button' disabled={acting} onClick={() => act("reconcile", {})}>
 						Reconcile execution
 					</button>
 				</div>
+			)}
+			{job?.state === "setup-failed" && (
+				<div className='ticket-recovery'>
+					<span>Agent setup failed.</span>
+					<button type='button' disabled={acting} onClick={() => act("reconcile", {})}>
+						Retry setup
+					</button>
+				</div>
+			)}
+			{canQueueMerge && (
+				<button type='button' disabled={acting} onClick={() => act("merge", {})}>
+					Queue merge
+				</button>
+			)}
+			{plan && tab === "plan" && (
+				<Suspense fallback={<p role='status'>Loading plan…</p>}>
+					<div className='ticket-plan'>
+						<div className='ticket-plan-markdown'>
+							<Markdown skipHtml disallowedElements={["img"]}>
+								{plan.text}
+							</Markdown>
+						</div>
+						{awaitingReview && (
+							<div className='ticket-plan-actions'>
+								<button
+									type='button'
+									disabled={acting}
+									onClick={() => {
+										setHistory(false);
+										setTab("chat");
+									}}
+								>
+									Request changes
+								</button>
+								<button
+									type='button'
+									className='primary'
+									disabled={acting}
+									onClick={() => act("approve", { revision: plan.revision }, () => setTab("chat"))}
+								>
+									Approve
+								</button>
+							</div>
+						)}
+					</div>
+				</Suspense>
 			)}
 			<div className='ticket-fields' hidden={tab !== "details"}>
 				<form
@@ -211,14 +271,17 @@ export const TicketDetails = ({
 						selected={tab === "chat"}
 						messagePath={`tickets/${ticket.id}/messages`}
 						blocked={blocked}
-						readOnly={history || ["backlog", "done"].includes(ticket.status)}
+						readOnly={history || ticket.status !== "in-progress"}
 						drafts={drafts}
-						workflowChanged={setJob}
+						workflowChanged={(value) => {
+							setJob(value);
+							refreshBoard();
+						}}
 					/>
 				) : (
 					<p>
 						{ticket.status === "backlog"
-							? "Move this ticket to To do to start planning."
+							? "Move this ticket to Ready for development to start planning."
 							: "Queued for an available agent slot. Up to three agents can run at once."}
 					</p>
 				)}

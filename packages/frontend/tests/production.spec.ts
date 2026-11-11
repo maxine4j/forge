@@ -168,7 +168,7 @@ test("integrated production bundle styles editor/terminal on desktop/mobile and 
 		await page.getByRole("tab", { name: "Tasks", exact: true }).click();
 		await page.getByRole("button", { name: "Drag FORGE-1", exact: true }).hover();
 		await page.mouse.down();
-		const target = (await page.getByRole("region", { name: "To do", exact: true }).boundingBox())!;
+		const target = (await page.getByRole("region", { name: "Ready for development", exact: true }).boundingBox())!;
 		await page.mouse.move(target.x + 80, target.y + 120);
 		await expect(page.locator(".ticket-drop-placeholder")).toBeVisible();
 		await expect(page.locator(".ticket-drag-preview")).toBeVisible();

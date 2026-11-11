@@ -91,8 +91,16 @@ test("mock boards expose project-scoped tickets across the workflow", async () =
 		const ticket = tickets.at(0)!;
 		expect(ticketSchema.parse(await read(`/api/tickets/${ticket.id}`))).toEqual(ticket);
 		for (const value of tickets) {
-			expect(ticketWorkflowSchema.parse(await read(`/api/tickets/${value.id}/workflow`)).ticketId).toBe(value.id);
+			const workflow = ticketWorkflowSchema.parse(await read(`/api/tickets/${value.id}/workflow`));
+			expect(workflow.ticketId).toBe(value.id);
+			if (value.status === "in-progress") {
+				expect(value.needsAttention).toBe(true);
+				expect(workflow.plan?.text).toContain("## Project navigation");
+			}
 			expect((await fetch(new URL(`/api/tickets/${value.id}/messages`, origin), { method: "POST" })).status).toBe(
+				405,
+			);
+			expect((await fetch(new URL(`/api/tickets/${value.id}/approve`, origin), { method: "POST" })).status).toBe(
 				405,
 			);
 		}

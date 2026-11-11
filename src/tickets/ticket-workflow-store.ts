@@ -1,41 +1,79 @@
-import { ticketWorkflowSchema, type TicketWorkflow, type MoveTicket } from "@forge/contracts/tickets";
+import { ticketIdSchema, type MoveTicket } from "@forge/contracts/tickets";
 import { z } from "zod";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
 import { TicketError } from "./errors.ts";
+import { ticketWorkflowRecordSchema, type TicketWorkflowRecord } from "./types.ts";
 
 export interface ITicketWorkflowStore {
-	get(id: string): Promise<TicketWorkflow | undefined>;
+	get(id: string): Promise<TicketWorkflowRecord | undefined>;
 	/** Active jobs in board position order, globally paginated across projects. Idle/failed jobs are read by ID. */
-	list(): Promise<TicketWorkflow[]>;
+	list(): Promise<TicketWorkflowRecord[]>;
+	attention(projectId: string): Promise<string[]>;
 	/** Persists job intent and any board move in one transaction. */
-	save(record: TicketWorkflow, move?: MoveTicket): Promise<void>;
+	save(record: TicketWorkflowRecord, move?: MoveTicket): Promise<void>;
 }
 export class TicketWorkflowStore implements ITicketWorkflowStore {
 	constructor(private readonly database: IDatabase) {}
 	async initialize(): Promise<void> {
-		await this.database.run(
-			"CREATE TABLE IF NOT EXISTS ticket_workflows (ticketId TEXT PRIMARY KEY REFERENCES tickets(id), record TEXT NOT NULL)",
-		);
+		await this.database.transaction([
+			{
+				sql: "CREATE TABLE IF NOT EXISTS ticket_workflows (ticketId TEXT PRIMARY KEY REFERENCES tickets(id), record TEXT NOT NULL)",
+			},
+			{
+				sql: "UPDATE ticket_workflows SET record=json_set(record,'$.phase','review') WHERE ticketId IN (SELECT id FROM tickets WHERE status='in-review')",
+			},
+			{
+				sql: "UPDATE ticket_workflows SET record=json_set(record,'$.state','merge-queued') WHERE ticketId IN (SELECT id FROM tickets WHERE status='merging') AND json_extract(record,'$.state')='queued' AND json_extract(record,'$.message') IS NULL",
+			},
+			{
+				sql: "UPDATE tickets SET status='in-progress' WHERE status IN ('in-review','merging') OR (status='todo' AND id IN (SELECT ticketId FROM ticket_workflows WHERE json_extract(record,'$.plannerId') IS NOT NULL OR json_extract(record,'$.state')<>'queued'))",
+			},
+			{
+				sql: "UPDATE ticket_workflows SET record=json_set(record,'$.state','failed') WHERE json_type(record,'$.run') IS NOT NULL AND json_extract(record,'$.state') IN ('dispatching','uncertain')",
+			},
+			{
+				sql: "UPDATE ticket_workflows SET record=json_remove(record,'$.run') WHERE json_type(record,'$.run') IS NOT NULL",
+			},
+		]);
 	}
-	async get(id: string): Promise<TicketWorkflow | undefined> {
+	async get(id: string): Promise<TicketWorkflowRecord | undefined> {
 		const records = await this.read("SELECT record FROM ticket_workflows WHERE ticketId=?", [id]);
 		return records.at(0);
 	}
-	async list(): Promise<TicketWorkflow[]> {
-		const jobs: TicketWorkflow[] = [];
+	async list(): Promise<TicketWorkflowRecord[]> {
+		const jobs: TicketWorkflowRecord[] = [];
 		for (let offset = 0; ; offset += 500) {
 			const page = await this.read(
-				"SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId WHERE t.status NOT IN ('backlog','done') AND json_extract(w.record,'$.state') IN ('queued','running','dispatching','uncertain') ORDER BY t.position,t.number LIMIT 500 OFFSET ?",
+				"SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId WHERE t.status NOT IN ('backlog','done') AND json_extract(w.record,'$.state') IN ('queued','running','dispatching','uncertain','merge-queued') ORDER BY CASE json_extract(w.record,'$.state') WHEN 'running' THEN 0 WHEN 'merge-queued' THEN 1 ELSE 2 END,t.position,t.number LIMIT 500 OFFSET ?",
 				[String(offset)],
 			);
 			jobs.push(...page);
 			if (page.length < 500) return jobs;
 		}
 	}
-	async save(record: TicketWorkflow, move?: MoveTicket): Promise<void> {
+	async attention(projectId: string): Promise<string[]> {
 		try {
-			const value = ticketWorkflowSchema.parse(record);
+			const rows = await this.database.all(
+				`SELECT t.id FROM tickets t JOIN ticket_workflows w ON w.ticketId=t.id
+				 WHERE t.projectId=? AND t.status='in-progress' AND (
+				   json_extract(w.record,'$.state') IN ('setup-failed','failed','uncertain') OR (
+				     json_extract(w.record,'$.state')='idle' AND (
+				       json_extract(w.record,'$.phase')='review' OR
+				       (json_extract(w.record,'$.phase')='planning' AND json_type(w.record,'$.plan')='object')
+				     )
+				   )
+				 ) ORDER BY t.position,t.number`,
+				[projectId],
+			);
+			return rows.map((row) => z.object({ id: ticketIdSchema }).parse(row).id);
+		} catch (cause) {
+			throw new TicketError("ticket-unavailable", { cause });
+		}
+	}
+	async save(record: TicketWorkflowRecord, move?: MoveTicket): Promise<void> {
+		try {
+			const value = ticketWorkflowRecordSchema.parse(record);
 			await this.database.transaction([
 				{
 					sql: "INSERT INTO ticket_workflows(ticketId,record) VALUES(?,?) ON CONFLICT(ticketId) DO UPDATE SET record=excluded.record",
@@ -64,10 +102,10 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 			throw new TicketError("ticket-unavailable", { cause });
 		}
 	}
-	private async read(sql: string, parameters: string[]): Promise<TicketWorkflow[]> {
+	private async read(sql: string, parameters: string[]): Promise<TicketWorkflowRecord[]> {
 		try {
 			return (await this.database.all(sql, parameters)).map((row) =>
-				ticketWorkflowSchema.parse(JSON.parse(z.object({ record: z.string() }).parse(row).record)),
+				ticketWorkflowRecordSchema.parse(JSON.parse(z.object({ record: z.string() }).parse(row).record)),
 			);
 		} catch (cause) {
 			throw new TicketError("ticket-unavailable", { cause });

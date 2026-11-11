@@ -514,7 +514,7 @@
 	align-items: stretch;
 }
 .kanban-column {
-	flex: 0 0 248px;
+	flex: 1 0 248px;
 	min-height: 0;
 	overflow-y: auto;
 	background: #161b22;
@@ -611,6 +611,17 @@
 }
 .ticket-complete {
 	background: #238636;
+}
+.ticket-attention {
+	display: inline-grid;
+	place-items: center;
+	width: 16px;
+	height: 16px;
+	border: 1px solid #d29922;
+	border-radius: 50%;
+	color: #e3b341;
+	font-size: 11px;
+	font-weight: 700;
 }
 .ticket-drag-handle {
 	position: absolute;
@@ -736,11 +747,43 @@
 	justify-content: flex-start;
 }
 .ticket-fields,
-.ticket-chat {
+.ticket-chat,
+.ticket-plan {
 	flex: 1;
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
+}
+.ticket-plan-markdown {
+	flex: 1;
+	min-height: 0;
+	overflow: auto;
+	overflow-wrap: anywhere;
+	padding: 0 8px;
+	line-height: 1.55;
+}
+.ticket-plan-markdown pre {
+	overflow: auto;
+	padding: 12px;
+	background: #161b22;
+	border-radius: 6px;
+}
+.ticket-plan-markdown :not(pre) > code {
+	padding: 2px 4px;
+	background: #21262d;
+	border-radius: 4px;
+}
+.ticket-plan-markdown blockquote {
+	margin-inline: 0;
+	padding-inline-start: 12px;
+	border-inline-start: 3px solid #30363d;
+}
+.ticket-plan-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	padding-top: 8px;
+	border-top: 1px solid #30363d;
 }
 .ticket-fields form {
 	flex: 1;

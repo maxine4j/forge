@@ -91,7 +91,9 @@ export class CodexAgentClient implements ICodexAgentClient {
 			view.requests = live.requests;
 			if (this.revisions.get(id) !== revision) {
 				view.status = live.status;
+				if (view.turnId !== live.turnId) delete view.plan;
 				view.turnId = live.turnId;
+				if (live.plan !== undefined) view.plan = live.plan;
 				view.truncated ||= live.truncated;
 				for (const item of live.items) if (before.get(item.id) !== item.text) this.put(view, item);
 			}
@@ -176,17 +178,24 @@ export class CodexAgentClient implements ICodexAgentClient {
 			const view = this.views.get(id);
 			if (!view || ["running", "waiting", "uncertain"].includes(view.status))
 				throw new AgentError("agent-conflict");
-			const selectedSkills = /(?:^|\s)\$[\w-]+/.test(text)
-				? (await this.skills(path)).filter((skill) => text.split(/\s+/).includes(`$${skill.name}`))
-				: [];
+			const selectedSkills =
+				!usage?.ticketId && /(?:^|\s)\$[\w-]+/.test(text)
+					? (await this.skills(path)).filter((skill) => text.split(/\s+/).includes(`$${skill.name}`))
+					: [];
+			const model = settings?.model ?? this.models.get(id);
+			if (usage?.phase === "planning" && !model) throw new AgentError("agent-unavailable");
 			view.status = "running";
 			delete view.turnId;
+			delete view.plan;
 			try {
-				if (usage) this.usageTracker?.track(id, usage, settings?.model ?? this.models.get(id));
+				if (usage) this.usageTracker?.track(id, usage, model);
 				const result = z.object({ turn: turnSchema }).parse(
 					await this.connection.request("turn/start", {
 						threadId: id,
 						cwd: path,
+						...(usage?.phase === "planning"
+							? { collaborationMode: { mode: "plan", settings: { model, developer_instructions: null } } }
+							: {}),
 						...(settings
 							? {
 									...(settings.model ? { model: settings.model } : {}),
@@ -308,7 +317,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			truncated: false,
 		};
 		for (const turn of thread.turns) {
-			for (const item of turn.items) this.item(view, item);
+			for (const item of turn.items) this.item(view, item, turn.id === last?.id && turn.status === "completed");
 			this.finishTools(view, this.status(turn.status));
 		}
 		return view;
@@ -345,7 +354,8 @@ export class CodexAgentClient implements ICodexAgentClient {
 					return view;
 				}
 				const itemView: AgentRuntimeView = { status: view.status, items: [], requests: [], truncated: false };
-				this.item(itemView, entry.item);
+				this.item(itemView, entry.item, entry.turnId === view.turnId && status === "completed");
+				if (itemView.plan !== undefined) view.plan ??= itemView.plan;
 				this.finishTools(itemView, this.status(status));
 				view.truncated ||= itemView.truncated;
 				const item = itemView.items[0]!;
@@ -384,7 +394,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 					? "interrupted"
 					: "failed";
 	}
-	private item(view: AgentRuntimeView, raw: unknown): void {
+	private item(view: AgentRuntimeView, raw: unknown, capturePlan = false): void {
 		const item = z
 			.object({
 				id: z.string().min(1).max(256),
@@ -396,6 +406,8 @@ export class CodexAgentClient implements ICodexAgentClient {
 				content: z.array(z.object({ type: z.string(), text: z.string().optional() })).optional(),
 			})
 			.parse(raw);
+		if (capturePlan && item.type === "plan" && item.text?.trim() && item.text.length <= 32000)
+			view.plan = item.text.trim();
 		const role: AgentItem["role"] =
 			item.type === "userMessage" ? "user" : item.type === "agentMessage" ? "assistant" : "activity";
 		const text =
@@ -485,16 +497,21 @@ export class CodexAgentClient implements ICodexAgentClient {
 				}
 			} else if (method === "turn/started" || method === "turn/completed") {
 				const { turn } = z.object({ turn: turnSchema }).parse(params);
+				if (view.turnId && view.turnId !== turn.id) {
+					if (method === "turn/completed") return;
+					delete view.plan;
+				}
 				view.turnId = turn.id;
 				view.status = this.status(turn.status);
-				for (const item of turn.items) this.item(view, item);
+				for (const item of turn.items) this.item(view, item, turn.status === "completed");
 				if (method === "turn/completed") {
 					this.finishTools(view, view.status);
 					view.requests = [];
 					for (const [key, request] of this.pending) if (request.threadId === id) this.pending.delete(key);
 				}
 			} else if (method === "item/started" || method === "item/completed") {
-				this.item(view, z.object({ item: z.unknown() }).parse(params).item);
+				const { item, turnId } = z.object({ item: z.unknown(), turnId: z.string().optional() }).parse(params);
+				this.item(view, item, method === "item/completed" && !!turnId && view.turnId === turnId);
 			} else if (
 				["item/agentMessage/delta", "item/plan/delta", "item/commandExecution/outputDelta"].includes(method)
 			) {

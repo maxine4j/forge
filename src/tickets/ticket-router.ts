@@ -1,6 +1,7 @@
 import { agentMessageSchema } from "@forge/contracts/agents";
 import {
 	createTicketSchema,
+	approveTicketPlanSchema,
 	moveTicketSchema,
 	ticketSchema,
 	ticketsSchema,
@@ -32,6 +33,18 @@ export class TicketRouter implements IHttpRouter {
 			ctx.body = ticketWorkflowSchema.parse(
 				await this.workflow.message(ctx.state.actor, ticket, input.data.text),
 			);
+		});
+		router.post("/api/tickets/:id/approve", async (ctx) => {
+			const input = approveTicketPlanSchema.safeParse(ctx.request.body);
+			if (!input.success) throw new TicketError("invalid-request");
+			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);
+			ctx.body = ticketWorkflowSchema.parse(
+				await this.workflow.approve(ctx.state.actor, ticket, input.data.revision),
+			);
+		});
+		router.post("/api/tickets/:id/merge", async (ctx) => {
+			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);
+			ctx.body = ticketWorkflowSchema.parse(await this.workflow.queueMerge(ctx.state.actor, ticket));
 		});
 		router.post("/api/tickets/:id/reconcile", async (ctx) => {
 			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);

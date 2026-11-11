@@ -184,6 +184,8 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 		const column = element?.closest<HTMLElement>("[data-drop-status]");
 		if (!column || !board.current?.contains(column)) return;
 		const status = column.dataset["dropStatus"] as TicketStatus;
+		const source = dragging.current?.ticket.status;
+		if (source !== status && !(source === "backlog" && status === "todo")) return;
 		const cards = [...column.querySelectorAll<HTMLElement>("[data-ticket-id]")].filter(
 			(card) => card.dataset["ticketId"] !== id,
 		);
@@ -270,7 +272,6 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 			<div className='task-board-heading'>
 				<div>
 					<h2>Board</h2>
-					<p>Shape the work. Move it forward.</p>
 				</div>
 				<div className='task-board-actions'>
 					<button
@@ -337,6 +338,16 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 														✓
 													</span>
 													{ticket.id}
+													{status === "in-progress" && ticket.needsAttention && (
+														<span
+															className='ticket-attention'
+															role='img'
+															aria-label='Needs attention'
+															title='Needs attention'
+														>
+															!
+														</span>
+													)}
 												</span>
 											</button>
 											<button
@@ -383,6 +394,7 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 					drafts={drafts}
 					close={() => setEditing(undefined)}
 					move={move}
+					refreshBoard={() => poller.current?.refresh()}
 					save={(input) =>
 						mutate(async () => {
 							const updated = await api.read(`tickets/${editing.id}`, ticketSchema, "PATCH", input);

@@ -37,7 +37,12 @@ export class TicketService implements ITicketService {
 	async list(actor: Actor, projectId: string): Promise<Ticket[]> {
 		this.access.assertOwner(actor);
 		await this.requireProject(projectId);
-		return this.store.list(projectId);
+		const [tickets, attention] = await Promise.all([
+			this.store.list(projectId),
+			this.workflow.attention(actor, projectId),
+		]);
+		const ids = new Set(attention);
+		return tickets.map((ticket) => (ids.has(ticket.id) ? { ...ticket, needsAttention: true } : ticket));
 	}
 	async create(actor: Actor, projectId: string, input: CreateTicket): Promise<Ticket> {
 		this.access.assertOwner(actor);

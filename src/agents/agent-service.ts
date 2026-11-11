@@ -43,8 +43,15 @@ export interface IAgentService {
 	shutdown(): Promise<void>;
 }
 export interface ITicketAgents {
-	createTicketThread(actor: Actor, projectId: string, title: string, workspaceId?: string): Promise<AgentView>;
+	createTicketThread(
+		actor: Actor,
+		projectId: string,
+		title: string,
+		workspaceId?: string,
+		reserveSlot?: boolean,
+	): Promise<AgentView>;
 	dispatch(actor: Actor, id: string, text: string, ticket: TicketUsageScope): Promise<AgentView>;
+	plan(actor: Actor, id: string, turnId: string): Promise<string | undefined>;
 	get(actor: Actor, id: string): Promise<AgentView>;
 	resume(actor: Actor, id: string): Promise<AgentView>;
 }
@@ -77,8 +84,14 @@ export class AgentService implements IAgentService, ITicketAgents {
 	async create(actor: Actor, projectId: string, title: string): Promise<AgentView> {
 		return this.createThread(actor, projectId, title, false);
 	}
-	async createTicketThread(actor: Actor, projectId: string, title: string, workspaceId?: string): Promise<AgentView> {
-		return this.createThread(actor, projectId, title, true, workspaceId);
+	async createTicketThread(
+		actor: Actor,
+		projectId: string,
+		title: string,
+		workspaceId?: string,
+		reserveSlot = false,
+	): Promise<AgentView> {
+		return this.createThread(actor, projectId, title, true, workspaceId, reserveSlot);
 	}
 	async list(actor: Actor, projectId: string): Promise<AgentThread[]> {
 		this.authorize(actor);
@@ -121,6 +134,15 @@ export class AgentService implements IAgentService, ITicketAgents {
 	async dispatch(actor: Actor, id: string, text: string, ticket?: TicketUsageScope): Promise<AgentView> {
 		return this.execute(actor, id, text, undefined, ticket);
 	}
+	async plan(actor: Actor, id: string, turnId: string): Promise<string | undefined> {
+		this.authorize(actor);
+		return this.serialize(id, async () => {
+			const record = await this.require(id);
+			if (!record.managed || !record.codexId) throw new AgentError("agent-conflict");
+			const runtime = this.client.read(record.codexId);
+			return runtime.status === "completed" && runtime.turnId === turnId ? runtime.plan : undefined;
+		});
+	}
 	private async execute(
 		actor: Actor,
 		id: string,
@@ -135,14 +157,16 @@ export class AgentService implements IAgentService, ITicketAgents {
 			const record = await this.require(id);
 			if (["creating", "running", "waiting", "uncertain"].includes(record.status))
 				throw new AgentError("agent-conflict");
-			const location = await this.workspaces.resolve(actor, record.workspaceId);
 			if (settings) {
 				const parsed = agentSettingsSchema.safeParse(settings);
 				if (!parsed.success) throw new AgentError("invalid-request");
 				Object.assign(record, parsed.data);
 			}
 			this.pool.claim(id);
+			let contactedRuntime = false;
 			try {
+				const location = await this.workspaces.resolve(actor, record.workspaceId);
+				contactedRuntime = true;
 				if (record.codexId) {
 					const runtime = await this.client.resume(record.codexId, location.path);
 					this.identities.set(record.codexId, id);
@@ -170,6 +194,10 @@ export class AgentService implements IAgentService, ITicketAgents {
 				);
 				return await this.sync(record);
 			} catch (cause) {
+				if (!contactedRuntime) {
+					this.pool.observe(id, record.status);
+					throw cause;
+				}
 				record.status = "uncertain";
 				this.pool.observe(id, "uncertain");
 				await this.store.update(record);
@@ -257,11 +285,13 @@ export class AgentService implements IAgentService, ITicketAgents {
 		title: string,
 		managed: boolean,
 		workspaceId?: string,
+		reserveSlot = false,
 	): Promise<AgentView> {
 		this.authorize(actor);
 		const input = createAgentSchema.safeParse({ title });
 		if (!input.success) throw new AgentError("invalid-request");
 		const id = this.generateId();
+		if (reserveSlot) this.pool.claim(id);
 		return this.serialize(id, async () => {
 			const workspace = workspaceId
 				? (await this.workspaces.resolve(actor, workspaceId)).workspace
@@ -279,6 +309,9 @@ export class AgentService implements IAgentService, ITicketAgents {
 			};
 			await this.store.insert(record);
 			return this.view(record);
+		}).catch((cause: unknown) => {
+			if (reserveSlot) this.pool.observe(id, "idle");
+			throw cause;
 		});
 	}
 	private authorize(actor: Actor): void {

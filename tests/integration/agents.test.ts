@@ -114,7 +114,7 @@ test("real Git/SQLite and a stdio peer run concurrent agents only in owned workt
 	}
 });
 
-test("pinned Codex starts and resumes a thread without an inner sandbox or live credentials", async () => {
+test("pinned Codex starts and resumes a Plan mode turn without an inner sandbox or live credentials", async () => {
 	const root = await files.mkdtemp(join(tmpdir(), "forge-agent-protocol-"));
 	const path = join(root, "worktrees", "probe");
 	await files.mkdir(path, { recursive: true });
@@ -164,7 +164,17 @@ test("pinned Codex starts and resumes a thread without an inner sandbox or live 
 		expect(client.read(id).status).toBe("idle");
 		const result = await connection.request("thread/read", { threadId: id, includeTurns: false });
 		expect(result).toMatchObject({ thread: { id, cwd: await files.realpath(path) } });
-		await client.send(id, path, "Protocol probe with no credentials", { permissions: "approve-for-me" });
+		await client.send(
+			id,
+			path,
+			"Protocol probe with no credentials",
+			{ permissions: "approve-for-me" },
+			{
+				projectId: "probe",
+				ticketId: "FORGE-1",
+				phase: "planning",
+			},
+		);
 		await expect.poll(() => client.read(id).items.length).toBeGreaterThan(0);
 		await client.interrupt(id, client.read(id).turnId!);
 		await expect.poll(() => client.read(id).status).toBe("interrupted");

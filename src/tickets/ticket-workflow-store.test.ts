@@ -30,7 +30,6 @@ test("workflow intent and board movement are atomic, durable, and scheduled in b
 			phase: "planning" as const,
 			state: "queued" as const,
 			mergeAttempts: 0,
-			run: 0,
 		};
 		await jobs.save(job, { status: "todo" });
 		await jobs.save({ ...job, ticketId: two.id }, { status: "todo", beforeId: one.id });
@@ -50,6 +49,20 @@ test("workflow intent and board movement are atomic, durable, and scheduled in b
 		expect((await tickets.get(one.id))?.status).toBe("todo");
 		await jobs.save({ ...job, state: "idle" });
 		expect((await jobs.list()).map((record) => record.ticketId)).toEqual([two.id]);
+
+		await db.run("UPDATE tickets SET status='in-review' WHERE id=?", [one.id]);
+		await db.run("UPDATE tickets SET status='merging' WHERE id=?", [two.id]);
+		await db.run(
+			"UPDATE ticket_workflows SET record=json_set(record,'$.phase','rebase','$.run',1) WHERE ticketId=?",
+			[two.id],
+		);
+		await jobs.initialize();
+		await jobs.initialize();
+		expect((await tickets.get(one.id))?.status).toBe("in-progress");
+		expect((await tickets.get(two.id))?.status).toBe("in-progress");
+		expect(await jobs.get(one.id)).toMatchObject({ phase: "review", state: "idle" });
+		expect(await jobs.get(two.id)).toMatchObject({ phase: "rebase", state: "merge-queued" });
+		expect(await jobs.attention(projectId)).toEqual([one.id]);
 	} finally {
 		await db.close();
 		await rm(root, { recursive: true, force: true });

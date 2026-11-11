@@ -9,13 +9,14 @@ export interface IAgentExecutionPool {
 }
 export class AgentExecutionPool implements IAgentExecutionPool {
 	private readonly active = new Set<string>();
+	constructor(private readonly onRelease: () => void = () => {}) {}
 	claim(id: string): void {
 		if (!this.active.has(id) && !this.available()) throw new AgentError("agent-capacity");
 		this.active.add(id);
 	}
 	observe(id: string, status: AgentStatus): void {
 		if (["creating", "running", "waiting", "uncertain"].includes(status)) this.active.add(id);
-		else this.active.delete(id);
+		else if (this.active.delete(id)) this.onRelease();
 	}
 	available(): boolean {
 		return this.active.size < 3;

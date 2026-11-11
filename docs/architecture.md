@@ -195,8 +195,12 @@ and exact-tested-commit merging. The central E2E scenario is:
 
 ```text
 create project -> ready ticket -> review plan -> agent implementation
--> PR/work review -> GitHub CI -> merge exact tested commit -> done
+-> Forge fast-forward merge -> done
 ```
+
+See the [ticket workflow](tickets.md#agentic-ticket-board) for the board and
+automatic merge queue. The [Git and CI contract](git-and-ci.md) describes the
+future CI-gated candidate workflow.
 
 Automated tests must not require live ChatGPT or GitHub credentials. Separately
 report manual verification of real login, Codex execution, remote CI, and credential

@@ -153,6 +153,7 @@ describe("CodexConnection", () => {
 		await Promise.all([connection.initialize(), connection.initialize()]);
 		expect(starts).toBe(1);
 		expect(sent.map((value) => value["method"])).toEqual(["initialize", "initialized"]);
+		expect(sent.at(0)?.["params"]).toMatchObject({ capabilities: { experimentalApi: true } });
 		const pending = connection.request("account/read", { refreshToken: true });
 		exit(1);
 		await expect(pending).rejects.toThrow("Codex connection unavailable");

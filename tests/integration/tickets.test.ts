@@ -43,9 +43,9 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	const workflow = new TicketWorkflowService(
 		workflowStore,
 		store,
-		{ createTicketThread: vi.fn(), dispatch: vi.fn(), get: vi.fn(), resume: vi.fn() },
+		{ createTicketThread: vi.fn(), dispatch: vi.fn(), get: vi.fn(), resume: vi.fn(), plan: vi.fn() },
 		new AgentExecutionPool(),
-		{ merge: vi.fn(), base: vi.fn(), verify: vi.fn() },
+		{ merge: vi.fn(), base: vi.fn(), verify: vi.fn(), candidate: vi.fn() },
 		new TicketPrompts(),
 		access,
 	);
@@ -99,6 +99,8 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		[listPath, "POST", { title: " " }, 400],
 		[`tickets/${ticket.id}`, "PATCH", { title: "Task", id: "FORGE-99" }, 400],
 		[`tickets/${ticket.id}/move`, "POST", { status: "invented" }, 400],
+		[`tickets/${ticket.id}/approve`, "POST", { revision: 0 }, 400],
+		[`tickets/${ticket.id}/approve`, "POST", { revision: 1 }, 409],
 		[`tickets/${ticket.id}/move`, "POST", { status: "done", beforeId: ticket.id }, 409],
 		["tickets/FORGE-999", "GET", undefined, 404],
 	] as const) {

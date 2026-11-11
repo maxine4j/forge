@@ -150,25 +150,11 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await workflow.tick(owner);
 		await expect.poll(idle).toBe("idle");
 		expect((await jobs.get(ticket.id))?.plan?.revision).toBe(2);
-		await tickets.move(owner, ticket.id, { status: "in-progress" });
-		await workflow.tick(owner);
-		await expect.poll(idle).toBe("idle");
-		expect((await ticketStore.get(ticket.id))?.status).toBe("in-review");
-		const implemented = (await jobs.get(ticket.id))!;
-		expect(implemented.workspaceId).toBe(planning.workspaceId);
-		expect(implemented.implementerId).not.toBe(planning.plannerId);
-		await workflow.message(owner, (await ticketStore.get(ticket.id))!, "Improve empty search");
-		await workflow.tick(owner);
-		await expect.poll(idle).toBe("idle");
-		let reviewed = (await jobs.get(ticket.id))!;
-		expect(reviewed.resultSha).not.toBe(implemented.resultSha);
-		await workflow.message(owner, (await ticketStore.get(ticket.id))!, "Queued review after restart");
-		await restart();
-		await workflow.tick(owner);
-		await expect.poll(idle).toBe("idle");
-		expect((await jobs.get(ticket.id))?.resultSha).not.toBe(reviewed.resultSha);
-		reviewed = (await jobs.get(ticket.id))!;
-		const { path } = await workspaces.resolve(owner, reviewed.workspaceId!);
+		expect((await tickets.list(owner, project.id)).at(0)).toMatchObject({
+			status: "in-progress",
+			needsAttention: true,
+		});
+		const { path } = await workspaces.resolve(owner, planning.workspaceId!);
 		const main = (await git.run(["-C", path, "rev-parse", "main"])).trim();
 		const tree = (await git.run(["-C", path, "rev-parse", "main^{tree}"])).trim();
 		const advanced = (
@@ -189,43 +175,48 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			)
 		).trim();
 		await git.run(["-C", path, "update-ref", "refs/heads/main", advanced, main]);
-		await tickets.move(owner, ticket.id, { status: "merging" });
+		await workflow.approve(owner, (await ticketStore.get(ticket.id))!, 2);
+		await restart();
+		await workflow.tick(owner);
+		await expect.poll(idle).toBe("merge-queued");
+		const implemented = (await jobs.get(ticket.id))!;
+		expect(implemented.workspaceId).toBe(planning.workspaceId);
+		expect(implemented.implementerId).not.toBe(planning.plannerId);
 		await workflow.tick(owner);
 		expect(await jobs.get(ticket.id)).toMatchObject({ state: "queued", phase: "rebase", mergeAttempts: 1 });
 		await workflow.tick(owner);
 		// Lose Forge's in-memory history after the noisy rebase finishes, before observing its result.
 		await expect
-			.poll(async () => (await agents!.get(owner, reviewed.implementerId!)).thread.status)
+			.poll(async () => (await agents!.get(owner, implemented.implementerId!)).thread.status)
 			.toBe("completed");
 		await jobs.save({ ...(await jobs.get(ticket.id))!, state: "uncertain" });
 		await restart();
-		expect((await agents!.get(owner, reviewed.implementerId!)).truncated).toBe(true);
+		expect((await agents!.get(owner, implemented.implementerId!)).truncated).toBe(true);
 		await expect.poll(idle).toBe("idle");
 		expect((await ticketStore.get(ticket.id))?.status).toBe("done");
 		const completed = (await jobs.get(ticket.id))!;
 		expect((await git.run(["-C", path, "rev-parse", "main"])).trim()).toBe(completed.resultSha);
 		expect(await agents!.list(owner, project.id)).toEqual([]);
 		// Reconstruct services from persisted intent at the Git/SQLite crash boundary.
-		await jobs.save({ ...completed, state: "queued" }, { status: "merging" });
+		await jobs.save({ ...completed, state: "merge-queued" }, { status: "in-progress" });
 		await restart();
 		await workflow.tick(owner);
 		expect((await ticketStore.get(ticket.id))?.status).toBe("done");
 		expect((await jobs.get(ticket.id))?.resultSha).toBe(completed.resultSha);
-		await expect.poll(async () => (await cost.read(owner, project.id)).totals.input).toBe(6000);
+		await expect.poll(async () => (await cost.read(owner, project.id)).totals.input).toBe(4000);
 		const recorded = await cost.read(owner, project.id);
 		expect(recorded.phases.map(({ phase, turns }) => [phase, turns])).toEqual([
 			["planning", 2],
 			["implementation", 1],
-			["review", 2],
 			["rebase", 1],
 		]);
 		expect(recorded.tickets.at(0)).toMatchObject({
 			id: ticket.id,
-			cached: 3000,
+			cached: 2000,
 			untimedTurns: 0,
 			unpricedTurns: 0,
 		});
-		expect(recorded.tickets.at(0)?.apiAud).toBeCloseTo(0.02484);
+		expect(recorded.tickets.at(0)?.apiAud).toBeCloseTo(0.01656);
 		expect(recorded.limits?.windows.at(0)).toMatchObject({ minutes: 300, usedPercent: 40 });
 		expect((await cost.read(owner, other.id)).phases.map(({ phase }) => phase)).toEqual(["chat"]);
 	} finally {

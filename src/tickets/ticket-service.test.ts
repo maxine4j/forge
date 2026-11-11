@@ -45,6 +45,9 @@ const fixture = () => {
 		{
 			move: async (_actor, ticket, input) => store.move(ticket.id, input),
 			get: vi.fn(),
+			attention: vi.fn(async () => []),
+			approve: vi.fn(),
+			queueMerge: vi.fn(),
 			message: vi.fn(),
 			tick: vi.fn(),
 			recover: vi.fn(),
@@ -60,7 +63,7 @@ test("create backlog tickets, edit scope and delegate moves to the workflow", as
 	expect(await service.update(actor, value.id, { title: "Edited", description: "New scope" })).toMatchObject({
 		title: "Edited",
 	});
-	for (const status of ["todo", "in-progress", "in-review", "merging", "done", "backlog"] as const) {
+	for (const status of ["todo", "in-progress", "done", "backlog"] as const) {
 		expect((await service.move(actor, value.id, { status })).status).toBe(status);
 	}
 	expect(await service.list(actor, projectId)).toHaveLength(1);

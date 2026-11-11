@@ -46,6 +46,25 @@ test("fast-forward checks ancestry and clean files, then atomically updates main
 	});
 	expect(await client.merge({ username: "owner" }, "test", head)).toBe("rebase");
 	expect(run.mock.calls.filter(([args]) => args.includes("update-ref"))).toHaveLength(1);
+
+	// Another writer advanced main to an ancestor of the candidate during the CAS.
+	const advanced = "c".repeat(40);
+	let current = main;
+	run.mockImplementation(async (args) => {
+		if (args.includes("symbolic-ref")) return "refs/heads/forge/workspace/test";
+		if (args.includes("status")) return "";
+		if (args.includes("update-ref") && current === main) {
+			current = advanced;
+			throw new Error("Main advanced");
+		}
+		if (args.includes("update-ref")) return "";
+		return args.includes("refs/heads/main") || args.includes("merge-base") ? current : head;
+	});
+	expect(await client.merge({ username: "owner" }, "test", head)).toBe("merged");
+	expect(run).toHaveBeenLastCalledWith(
+		["-C", "/data/worktrees/test", "update-ref", "--stdin"],
+		expect.stringContaining(`update refs/heads/main ${head} ${advanced}`),
+	);
 });
 
 test("rejects a branch changed after owner approval and verifies committed completion", async () => {
@@ -71,6 +90,7 @@ test("rejects a branch changed after owner approval and verifies committed compl
 	};
 	const client = new WorkspaceMergeClient(workspaces, { run });
 	await expect(client.merge({ username: "owner" }, "id", "c".repeat(40))).rejects.toThrow("ticket-conflict");
+	expect(await client.candidate({ username: "owner" }, "id")).toBe("b".repeat(40));
 	await client.verify({ username: "owner" }, "id", "b".repeat(40));
 	run.mockImplementation(async (args) => (args.includes("status") ? "?? uncommitted" : "b".repeat(40)));
 	await expect(client.verify({ username: "owner" }, "id", "b".repeat(40))).rejects.toThrow("ticket-conflict");

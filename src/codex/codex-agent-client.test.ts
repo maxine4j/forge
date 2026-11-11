@@ -93,6 +93,32 @@ test("registers usage attribution and the runtime default model before submittin
 	expect(track.mock.invocationCallOrder[0]).toBeLessThan(rpc.mock.invocationCallOrder[1]!);
 });
 
+test("planning uses native collaboration mode and captures only a completed plan item from its turn", async () => {
+	const { client, rpc, notify } = setup();
+	const id = await client.start("/data/worktrees/one");
+	const scope = { projectId: "project", ticketId: "FORGE-1", phase: "planning" } as const;
+	await client.send(id, "/data/worktrees/one", "Plan this ticket", undefined, scope);
+	expect(rpc).toHaveBeenLastCalledWith(
+		"turn/start",
+		expect.objectContaining({
+			collaborationMode: { mode: "plan", settings: { model: "runtime-default", developer_instructions: null } },
+		}),
+	);
+	notify("item/plan/delta", { threadId: id, turnId: "turn-1", itemId: "plan", delta: "Partial" });
+	expect(client.read(id).plan).toBeUndefined();
+	notify("item/completed", {
+		threadId: id,
+		turnId: "older",
+		item: { id: "previous", type: "plan", text: "Old plan" },
+	});
+	expect(client.read(id).plan).toBeUndefined();
+	notify("item/completed", { threadId: id, turnId: "turn-1", item: { id: "plan", type: "plan", text: "# Plan" } });
+	notify("turn/completed", { threadId: id, turn: { id: "turn-1", status: "completed", items: [] } });
+	expect(client.read(id).plan).toBe("# Plan");
+	await client.send(id, "/data/worktrees/one", "Revise", undefined, scope);
+	expect(client.read(id).plan).toBeUndefined();
+});
+
 test("discovers runtime models and enabled worktree skills, searches only that worktree", async () => {
 	const { client, rpc } = setup();
 	rpc.mockResolvedValueOnce({

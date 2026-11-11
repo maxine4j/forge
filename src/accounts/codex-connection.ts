@@ -99,6 +99,12 @@ const methods = new Map<string, z.ZodType>([
 			threadId: z.string().min(1),
 			cwd: z.string().min(1),
 			model: z.string().min(1).max(256).optional(),
+			collaborationMode: z
+				.strictObject({
+					mode: z.literal("plan"),
+					settings: z.strictObject({ model: z.string().min(1).max(256), developer_instructions: z.null() }),
+				})
+				.optional(),
 			approvalPolicy: z.enum(["on-request", "never"]).optional(),
 			approvalsReviewer: z.enum(["user", "auto_review"]).optional(),
 			input: z
@@ -204,7 +210,7 @@ export class CodexConnection implements ICodexAgentConnection {
 			initializeSchema.parse(
 				await this.send("initialize", {
 					clientInfo: { name: "forge", version: "0.1.0" },
-					capabilities: { experimentalApi: false },
+					capabilities: { experimentalApi: true },
 				}),
 			);
 			if (this.handle !== handle) throw new CodexConnectionError();
