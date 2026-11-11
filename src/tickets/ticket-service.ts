@@ -39,12 +39,17 @@ export class TicketService implements ITicketService {
 	async list(actor: Actor, projectId: string): Promise<Ticket[]> {
 		this.access.assertOwner(actor);
 		await this.requireProject(projectId);
-		const [tickets, attention] = await Promise.all([
+		const [tickets, summary] = await Promise.all([
 			this.store.list(projectId),
-			this.workflow.attention(actor, projectId),
+			this.workflow.boardSummary(actor, projectId),
 		]);
-		const ids = new Set(attention);
-		return tickets.map((ticket) => (ids.has(ticket.id) ? { ...ticket, needsAttention: true } : ticket));
+		return tickets.map((ticket) => {
+			if (ticket.status === "backlog" || ticket.status === "done") return ticket;
+			return {
+				...ticket,
+				...(summary.get(ticket.id) ?? (ticket.status === "todo" ? { agentStatus: "queued" as const } : {})),
+			};
+		});
 	}
 	async create(actor: Actor, projectId: string, input: CreateTicket): Promise<Ticket> {
 		this.access.assertOwner(actor);

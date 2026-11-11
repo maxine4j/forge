@@ -123,6 +123,24 @@ export class MockApi implements IMockApi {
 			}));
 			const tickets = [
 				{
+					id: `FORGE-${project.id === projects.at(0)!.id ? 11 : 13}`,
+					projectId: project.id,
+					title: "Add keyboard navigation",
+					description: "Support keyboard shortcuts.",
+					status: "todo",
+					agentStatus: "queued",
+					createdAt: date,
+				},
+				{
+					id: `FORGE-${project.id === projects.at(0)!.id ? 12 : 14}`,
+					projectId: project.id,
+					title: "Improve search results",
+					description: "Implement search ranking.",
+					status: "in-progress",
+					agentStatus: "working",
+					createdAt: date,
+				},
+				{
 					id: `FORGE-${project.id === projects.at(0)!.id ? 1 : 4}`,
 					projectId: project.id,
 					title: "Define the next change",
@@ -200,7 +218,12 @@ export class MockApi implements IMockApi {
 				this.routes.set(`/api/tickets/${ticket.id}/workflow`, () => ({
 					ticketId: ticket.id,
 					phase: ticket.status === "done" ? "implementation" : "planning",
-					state: "idle",
+					state:
+						ticket.agentStatus === "queued"
+							? "queued"
+							: ticket.agentStatus === "working"
+								? "running"
+								: "idle",
 					mergeAttempts: 0,
 					...(ticket.needsAttention
 						? {

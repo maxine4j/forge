@@ -23,6 +23,7 @@ export const ticketSchema = z.strictObject({
 	createdAt: z.iso.datetime(),
 	archivedAt: z.iso.datetime().optional(),
 	needsAttention: z.literal(true).optional(),
+	agentStatus: z.enum(["queued", "working"]).optional(),
 });
 export const ticketsSchema = z.array(ticketSchema).max(1000);
 export const ticketWorkflowSchema = z.strictObject({

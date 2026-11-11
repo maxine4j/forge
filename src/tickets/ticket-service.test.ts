@@ -40,6 +40,7 @@ const fixture = () => {
 		list: vi.fn(),
 		setStatus: vi.fn(),
 	} satisfies IProjectStore;
+	const summary = new Map<string, Pick<Ticket, "agentStatus" | "needsAttention">>();
 	const service = new TicketService(
 		store,
 		projects,
@@ -49,7 +50,7 @@ const fixture = () => {
 			archive: async (_actor, ticket, archivedAt) => store.archive(ticket.id, archivedAt),
 			move: async (_actor, ticket, input) => store.move(ticket.id, input),
 			get: vi.fn(),
-			attention: vi.fn(async () => []),
+			boardSummary: vi.fn(async () => summary),
 			approve: vi.fn(),
 			queueMerge: vi.fn(),
 			message: vi.fn(),
@@ -57,7 +58,7 @@ const fixture = () => {
 			recover: vi.fn(),
 		},
 	);
-	return { service, tickets, store, projects };
+	return { service, tickets, store, projects, summary };
 };
 
 test("create backlog tickets, edit scope and delegate moves to the workflow", async () => {
@@ -71,6 +72,36 @@ test("create backlog tickets, edit scope and delegate moves to the workflow", as
 		expect((await service.move(actor, value.id, { status })).status).toBe(status);
 	}
 	expect(await service.list(actor, projectId)).toHaveLength(1);
+});
+
+test("ready tickets without workflows retain their queued status; inactive cards have no icon", async () => {
+	const { service, tickets } = fixture();
+	const ticket = await service.create(actor, projectId, { title: "Task", description: "" });
+	for (const status of ["backlog", "todo", "in-progress", "done"] as const) {
+		tickets.set(ticket.id, { ...ticket, status });
+		expect((await service.list(actor, projectId))[0]?.agentStatus).toBe(status === "todo" ? "queued" : undefined);
+	}
+});
+
+test("list combines workflow status and attention while excluding inactive columns", async () => {
+	const { service, tickets, summary } = fixture();
+	const ticket = await service.create(actor, projectId, { title: "Task", description: "" });
+	for (const status of ["backlog", "todo", "in-progress", "done"] as const) {
+		tickets.set(ticket.id, { ...ticket, status });
+		for (const flags of [
+			{ agentStatus: "queued" as const },
+			{ agentStatus: "working" as const },
+			{ needsAttention: true as const },
+			{},
+		]) {
+			summary.set(ticket.id, flags);
+			expect((await service.list(actor, projectId))[0]).toEqual({
+				...ticket,
+				status,
+				...(status === "todo" || status === "in-progress" ? flags : {}),
+			});
+		}
+	}
 });
 
 test("archived tickets can be read but cannot be edited, moved or used as drop targets", async () => {

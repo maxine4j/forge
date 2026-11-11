@@ -51,7 +51,8 @@ const fixture = () => {
 		resume: vi.fn<ITicketAgents["resume"]>(async (_actor, id) => structuredClone(views.get(id)!)),
 	};
 	const store = {
-		attention: vi.fn(async () => []),
+		boardSummary: async (id: string) =>
+			[...jobs.values()].filter((job) => tickets.get(job.ticketId)?.projectId === id),
 		get: async (id: string) => structuredClone(jobs.get(id)),
 		list: async () => [...jobs.values()].map((job) => structuredClone(job)),
 		pendingCleanup: async () =>
@@ -111,6 +112,74 @@ const fixture = () => {
 	};
 	return { service, jobs, tickets, views, pool, agents, merges, create, complete, wake, cleanup };
 };
+
+test("board summary maps execution and attention, checking only the current running agent", async () => {
+	const { service, jobs, create, agents } = fixture();
+	const ticket = create();
+	const base: TicketWorkflowRecord = { ticketId: ticket.id, phase: "planning", state: "queued", mergeAttempts: 0 };
+	for (const state of [
+		"queued",
+		"dispatching",
+		"idle",
+		"setup-failed",
+		"failed",
+		"uncertain",
+		"merge-queued",
+	] as const) {
+		jobs.set(ticket.id, { ...base, state });
+		const flags = (await service.boardSummary(actor, projectId)).get(ticket.id);
+		expect(flags).toEqual(
+			state === "queued"
+				? { agentStatus: "queued" }
+				: state === "dispatching"
+					? { agentStatus: "working" }
+					: ["setup-failed", "failed", "uncertain"].includes(state)
+						? { needsAttention: true }
+						: {},
+		);
+	}
+	for (const phase of ["planning", "implementation", "rebase"] as const) {
+		jobs.set(ticket.id, { ...base, phase, state: "running", plannerId: "planner", implementerId: "implementer" });
+		for (const status of ["running", "waiting"] as const) {
+			agents.get.mockResolvedValueOnce({ thread: { status } } as AgentView);
+			expect((await service.boardSummary(actor, projectId)).get(ticket.id)).toEqual(
+				status === "waiting" ? { needsAttention: true } : { agentStatus: "working" },
+			);
+			expect(agents.get).toHaveBeenLastCalledWith(actor, phase === "planning" ? "planner" : "implementer");
+		}
+	}
+	agents.get.mockRejectedValueOnce(new Error("offline"));
+	expect((await service.boardSummary(actor, projectId)).get(ticket.id)).toEqual({ needsAttention: true });
+	for (const phase of ["planning", "review"] as const) {
+		jobs.set(ticket.id, { ...base, phase, state: "idle", plan: { revision: 1, text: "Plan" } });
+		expect((await service.boardSummary(actor, projectId)).get(ticket.id)).toEqual({ needsAttention: true });
+	}
+	await expect(service.boardSummary({ username: "guest" }, projectId)).rejects.toThrow("Access denied");
+});
+
+test("board shows working during thread setup and preserves setup failure attention", async () => {
+	const { service, create, agents } = fixture();
+	const ticket = create();
+	await service.move(actor, ticket, { status: "todo" });
+	let failSetup = () => {};
+	const setup = new Promise<never>((_resolve, reject) => {
+		failSetup = () => reject(new Error("setup failed"));
+	});
+	let started = () => {};
+	const starting = new Promise<void>((resolve) => {
+		started = resolve;
+	});
+	agents.createTicketThread.mockImplementationOnce(() => {
+		started();
+		return setup;
+	});
+	const tick = service.tick(actor);
+	await starting;
+	expect((await service.boardSummary(actor, projectId)).get(ticket.id)).toEqual({ agentStatus: "working" });
+	failSetup();
+	await tick;
+	expect((await service.boardSummary(actor, projectId)).get(ticket.id)).toEqual({ needsAttention: true });
+});
 
 test.each(["implementation", "rebase"] as const)(
 	"%s steering serializes with completion/merge and retains turn and slot accounting",

@@ -19,7 +19,7 @@ export interface ITicketWorkflowService {
 	archive(actor: Actor, ticket: Ticket, archivedAt: string): Promise<void>;
 	move(actor: Actor, ticket: Ticket, input: MoveTicket): Promise<void>;
 	get(actor: Actor, id: string): Promise<TicketWorkflow>;
-	attention(actor: Actor, projectId: string): Promise<string[]>;
+	boardSummary(actor: Actor, projectId: string): Promise<Map<string, Pick<Ticket, "agentStatus" | "needsAttention">>>;
 	approve(actor: Actor, ticket: Ticket, revision: number): Promise<TicketWorkflow>;
 	queueMerge(actor: Actor, ticket: Ticket): Promise<TicketWorkflow>;
 	message(actor: Actor, ticket: Ticket, text: string, expectedTurnId?: string): Promise<TicketWorkflow>;
@@ -29,6 +29,7 @@ export interface ITicketWorkflowService {
 
 export class TicketWorkflowService implements ITicketWorkflowService {
 	private tail: Promise<unknown> = Promise.resolve();
+	private readonly settingUp = new Set<string>();
 	private readonly log = createLogger(TicketWorkflowService.name);
 	constructor(
 		private readonly store: ITicketWorkflowStore,
@@ -77,9 +78,42 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		if (!(await this.tickets.get(id))) throw new TicketError("ticket-not-found");
 		return this.summary(await this.record(id));
 	}
-	async attention(actor: Actor, projectId: string): Promise<string[]> {
+	async boardSummary(
+		actor: Actor,
+		projectId: string,
+	): Promise<Map<string, Pick<Ticket, "agentStatus" | "needsAttention">>> {
 		this.access.assertOwner(actor);
-		return this.store.attention(projectId);
+		const jobs = await this.store.boardSummary(projectId);
+		const entries = await Promise.all(
+			jobs.map(async (job) => {
+				const flags: Pick<Ticket, "agentStatus" | "needsAttention"> = {};
+				if (
+					["setup-failed", "failed", "uncertain"].includes(job.state)
+					|| (job.state === "idle" && (job.phase === "review" || (job.phase === "planning" && job.plan)))
+				) {
+					flags.needsAttention = true;
+				} else if (this.settingUp.has(job.ticketId)) {
+					flags.agentStatus = "working";
+				} else if (job.state === "queued") {
+					flags.agentStatus = "queued";
+				} else if (job.state === "dispatching") {
+					flags.agentStatus = "working";
+				} else if (job.state === "running") {
+					const id = job.phase === "planning" ? job.plannerId : job.implementerId;
+					try {
+						if (!id) throw new TicketError("ticket-unavailable");
+						const { thread } = await this.agents.get(actor, id);
+						if (thread.status === "waiting") flags.needsAttention = true;
+						else flags.agentStatus = "working";
+					} catch (err) {
+						this.log.error({ err, ticketId: job.ticketId }, "Ticket agent status unavailable");
+						flags.needsAttention = true;
+					}
+				}
+				return [job.ticketId, flags] as const;
+			}),
+		);
+		return new Map(entries);
 	}
 	async approve(actor: Actor, ticket: Ticket, revision: number): Promise<TicketWorkflow> {
 		this.access.assertOwner(actor);
@@ -225,6 +259,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		const planning = job.phase === "planning";
 		let id = planning ? job.plannerId : job.implementerId;
 		let releaseReservation = false;
+		this.settingUp.add(ticket.id);
 		try {
 			if (!id) {
 				if (!planning && !job.workspaceId) throw new TicketError("ticket-conflict");
@@ -264,6 +299,8 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		} catch (err) {
 			if (releaseReservation) this.pool.observe(id!, "idle");
 			throw err;
+		} finally {
+			this.settingUp.delete(ticket.id);
 		}
 	}
 	private async observe(actor: Actor, job: TicketWorkflowRecord): Promise<void> {

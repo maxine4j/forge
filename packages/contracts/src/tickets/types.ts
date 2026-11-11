@@ -14,4 +14,5 @@ export interface Ticket extends CreateTicket {
 	createdAt: string;
 	archivedAt?: string;
 	needsAttention?: true;
+	agentStatus?: "queued" | "working";
 }

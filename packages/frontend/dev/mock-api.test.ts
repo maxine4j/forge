@@ -120,7 +120,7 @@ test("mock boards expose project-scoped tickets across the workflow", async () =
 		for (const value of tickets) {
 			const workflow = ticketWorkflowSchema.parse(await read(`/api/tickets/${value.id}/workflow`));
 			expect(workflow.ticketId).toBe(value.id);
-			if (value.status === "in-progress") {
+			if (value.needsAttention) {
 				expect(value.needsAttention).toBe(true);
 				expect(workflow.plan?.text).toContain("## Project navigation");
 			}

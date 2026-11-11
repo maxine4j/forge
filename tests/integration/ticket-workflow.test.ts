@@ -152,6 +152,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await tickets.move(owner, ticket.id, { status: "todo" });
 		await workflow.tick(owner);
 		expect((await jobs.get(ticket.id))?.plannerId).toBeUndefined();
+		expect((await tickets.list(owner, project.id)).at(0)?.agentStatus).toBe("queued");
 		await agents.interrupt(owner, standalone[0]!.thread.id);
 		dispatch = "paused";
 		await workflow.tick(owner);
@@ -159,6 +160,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect((await jobs.get(ticket.id))?.plannerId).toBeUndefined();
 		dispatch = "running";
 		const resolve = workspaces.resolve.bind(workspaces);
+		expect((await tickets.list(owner, project.id)).at(0)?.agentStatus).toBe("queued");
 		vi.spyOn(workspaces, "resolve").mockImplementationOnce(async (...args) => {
 			dispatch = "paused";
 			return resolve(...args);
@@ -217,9 +219,12 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		).trim();
 		await git.run(["-C", path, "update-ref", "refs/heads/main", advanced, main]);
 		await workflow.approve(owner, (await ticketStore.get(ticket.id))!, 2);
+		expect((await tickets.list(owner, project.id)).at(0)).toMatchObject({ agentStatus: "queued" });
+		expect((await tickets.list(owner, project.id)).at(0)?.needsAttention).toBeUndefined();
 		await restart();
 		await workflow.tick(owner);
 		await expect.poll(idle).toBe("merge-queued");
+		expect((await tickets.list(owner, project.id)).at(0)?.agentStatus).toBeUndefined();
 		const implemented = (await jobs.get(ticket.id))!;
 		expect(implemented.workspaceId).toBe(planning.workspaceId);
 		expect(implemented.implementerId).not.toBe(planning.plannerId);

@@ -1,4 +1,4 @@
-import { ticketIdSchema, type MoveTicket } from "@forge/contracts/tickets";
+import type { MoveTicket } from "@forge/contracts/tickets";
 import { z } from "zod";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
@@ -11,7 +11,7 @@ export interface ITicketWorkflowStore {
 	list(): Promise<TicketWorkflowRecord[]>;
 	/** Done tickets with a recorded merge candidate and worktree, including archived tickets. */
 	pendingCleanup(): Promise<TicketWorkflowRecord[]>;
-	attention(projectId: string): Promise<string[]>;
+	boardSummary(projectId: string): Promise<TicketWorkflowRecord[]>;
 	/** Persists job intent and any board move in one transaction. */
 	save(record: TicketWorkflowRecord, move?: MoveTicket): Promise<void>;
 }
@@ -54,24 +54,11 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 			if (page.length < 500) return jobs;
 		}
 	}
-	async attention(projectId: string): Promise<string[]> {
-		try {
-			const rows = await this.database.all(
-				`SELECT t.id FROM tickets t JOIN ticket_workflows w ON w.ticketId=t.id
-				 WHERE t.projectId=? AND t.archivedAt IS NULL AND t.status='in-progress' AND (
-				   json_extract(w.record,'$.state') IN ('setup-failed','failed','uncertain') OR (
-				     json_extract(w.record,'$.state')='idle' AND (
-				       json_extract(w.record,'$.phase')='review' OR
-				       (json_extract(w.record,'$.phase')='planning' AND json_type(w.record,'$.plan')='object')
-				     )
-				   )
-				 ) ORDER BY t.position,t.number`,
-				[projectId],
-			);
-			return rows.map((row) => z.object({ id: ticketIdSchema }).parse(row).id);
-		} catch (cause) {
-			throw new TicketError("ticket-unavailable", { cause });
-		}
+	async boardSummary(projectId: string): Promise<TicketWorkflowRecord[]> {
+		return this.read(
+			"SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId WHERE t.projectId=? AND t.archivedAt IS NULL AND t.status IN ('todo','in-progress') ORDER BY t.position,t.number",
+			[projectId],
+		);
 	}
 	async pendingCleanup(): Promise<TicketWorkflowRecord[]> {
 		const jobs: TicketWorkflowRecord[] = [];

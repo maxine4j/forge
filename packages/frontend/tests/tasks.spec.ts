@@ -18,6 +18,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		status: string;
 		createdAt: string;
 		needsAttention?: true;
+		agentStatus?: "queued" | "working";
 	}[] = [
 		{ id: "FORGE-1", projectId, title: "First task", description: "Scope", status: "backlog", createdAt },
 		{ id: "FORGE-2", projectId, title: "Second task", description: "", status: "backlog", createdAt },
@@ -173,6 +174,14 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	await page.getByRole("link", { name: "Open Forge", exact: true }).click();
 	await page.getByRole("tab", { name: "Tasks", exact: true }).click();
 	return {
+		setAgentStatus: (agentStatus?: "queued" | "working", needsAttention?: true) => {
+			tickets[0]!.status = "in-progress";
+			tickets[0]!.agentStatus = agentStatus;
+			tickets[0]!.needsAttention = needsAttention;
+		},
+		setTitle: (title: string) => {
+			tickets[0]!.title = title;
+		},
 		operations,
 		held: () => held,
 		blockReads: () => {
@@ -227,6 +236,66 @@ test("ticket archive requires confirmation and removes the card only after succe
 	await expect(card).toHaveCount(0);
 	await expect(page.getByRole("button", { name: "FORGE-2 Second task", exact: true })).toBeVisible();
 	expect(fixture.operations).toEqual(["archive", "archive"]);
+});
+
+test("agent icons poll from queued to working to idle, and attention takes precedence", async ({ page }) => {
+	const fixture = await setup(page);
+	const card = page.locator('[data-ticket-id="FORGE-1"]');
+	fixture.setAgentStatus("queued");
+	const clock = card.getByRole("img", { name: "Agent queued" });
+	await expect(clock).toBeVisible();
+	await expect(clock.locator("title")).toHaveText("Agent queued");
+	const bounds = await card.locator(".ticket-open").boundingBox();
+	const icon = await clock.boundingBox();
+	expect(icon!.width).toBe(16);
+	expect(icon!.height).toBe(16);
+	expect(bounds!.x + bounds!.width - icon!.x - icon!.width).toBeCloseTo(12, 0);
+	expect(bounds!.y + bounds!.height - icon!.y - icon!.height).toBeCloseTo(12, 0);
+	fixture.setAgentStatus("working");
+	const spinner = card.getByRole("img", { name: "Agent working" });
+	await expect(spinner).toBeVisible();
+	await expect(clock).toHaveCount(0);
+	await expect(spinner).toHaveCSS("animation-name", "ticket-agent-spin");
+	await page.emulateMedia({ reducedMotion: "reduce" });
+	await expect(spinner).toHaveCSS("animation-name", "none");
+	fixture.setAgentStatus("working", true);
+	await expect(card.getByRole("img", { name: "Needs attention" })).toBeVisible();
+	await expect(spinner).toHaveCount(0);
+	fixture.setAgentStatus();
+	await expect(card.getByRole("img")).toHaveCount(0);
+	fixture.setAgentStatus("queued");
+	await expect(clock).toBeVisible();
+	await card.getByRole("button", { name: "Drag FORGE-1", exact: true }).hover();
+	await page.mouse.down();
+	await page.mouse.move(bounds!.x + 80, bounds!.y + 10, { steps: 8 });
+	await expect(page.locator(".ticket-drag-preview")).toBeVisible();
+	await page.keyboard.press("Escape");
+	await page.mouse.up();
+	await expect(page.locator(".ticket-drag-preview")).toHaveCount(0);
+	await expect(clock).toBeVisible();
+	await clock.click();
+	await expect(page.getByRole("dialog")).toBeVisible();
+});
+
+test("mobile agent icons reserve room for long titles and metadata", async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.emulateMedia({ reducedMotion: "reduce" });
+	const fixture = await setup(page);
+	fixture.setTitle(
+		"Long title with many words to wrap across the narrow mobile ticket card and preserve room for the status icon",
+	);
+	fixture.setAgentStatus("working");
+	const card = page.locator('[data-ticket-id="FORGE-1"]');
+	const spinner = card.getByRole("img", { name: "Agent working" });
+	await expect(spinner).toBeVisible();
+	const icon = await spinner.boundingBox();
+	for (const selector of [".ticket-title", ".ticket-key"]) {
+		const content = await card.locator(selector).boundingBox();
+		expect(content!.x + content!.width).toBeLessThan(icon!.x);
+	}
+	const bounds = await card.locator(".ticket-open").boundingBox();
+	expect(bounds!.x + bounds!.width - icon!.x - icon!.width).toBeCloseTo(12, 0);
+	expect(bounds!.y + bounds!.height - icon!.y - icon!.height).toBeCloseTo(12, 0);
 });
 
 test("board settings save the slider and control pause, stop and resume", async ({ page }) => {

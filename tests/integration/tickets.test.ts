@@ -103,7 +103,9 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		state: "queued",
 		phase: "planning",
 	});
-	expect(await (await request(listPath)).json()).toEqual([await store.get(ticket.id)]);
+	expect(await (await request(listPath)).json()).toEqual([
+		{ ...(await store.get(ticket.id)), agentStatus: "queued" },
+	]);
 	for (const [path, method, body, status] of [
 		[listPath, "POST", { title: " " }, 400],
 		[`tickets/${ticket.id}`, "PATCH", { title: "Task", id: "FORGE-99" }, 400],

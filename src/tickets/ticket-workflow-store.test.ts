@@ -62,7 +62,14 @@ test("workflow intent and board movement are atomic, durable, and scheduled in b
 		expect((await tickets.get(two.id))?.status).toBe("in-progress");
 		expect(await jobs.get(one.id)).toMatchObject({ phase: "review", state: "idle" });
 		expect(await jobs.get(two.id)).toMatchObject({ phase: "rebase", state: "merge-queued" });
-		expect(await jobs.attention(projectId)).toEqual([one.id]);
+		expect((await jobs.boardSummary(projectId)).map((record) => record.ticketId)).toEqual([two.id, one.id]);
+		const otherProjectId = "123e4567-e89b-42d3-a456-426614174001";
+		await new ProjectStore(db).insert({ id: otherProjectId, name: "Other", status: "ready", createdAt });
+		const other = await tickets.insert(otherProjectId, { title: "Other", description: "" }, createdAt);
+		await jobs.save({ ...job, ticketId: other.id }, { status: "todo" });
+		expect((await jobs.boardSummary(otherProjectId)).map((record) => record.ticketId)).toEqual([other.id]);
+		await tickets.archive(one.id, createdAt);
+		expect((await jobs.boardSummary(projectId)).map((record) => record.ticketId)).toEqual([two.id]);
 		await db.run("DROP TRIGGER reject_done");
 		const done = {
 			...(await jobs.get(two.id))!,

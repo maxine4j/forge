@@ -35,6 +35,19 @@ Idle chats use no slot. A running agent waiting for structured input or permissi
 keeps its slot. Standalone message submissions at capacity retain their drafts.
 Board and conversation selection have no effect on execution.
 
+The ticket-list response derives optional `agentStatus: "queued" | "working"`
+without storing it. Ready tickets without a workflow and workflows in `queued`
+show a clock, including while dispatch is paused or capacity is exhausted.
+Active workspace/thread setup and `dispatching` or `running` workflows show a spinner. A current
+planner or implementer in `waiting` shows the existing attention badge instead.
+Unreadable agent state also shows attention. Plan review and failure attention
+take precedence. Idle, failed, uncertain and merge-queued workflows have no
+status icon; Backlog and Done never show one. Git merge activity is excluded.
+The board refreshes these fields with its existing one-second ticket polling.
+The noninteractive 16px icons sit at the bottom right of the ticket-open button,
+with labels and tooltips “Agent queued” and “Agent working”. The working icon
+remains static when reduced motion is requested.
+
 Board settings apply across projects and persist in SQLite. The concurrency
 limit ranges from 1 to 10 and defaults to 3. Lowering it lets active turns
 finish and holds new turns until a slot opens. Pause new tickets keeps Ready
@@ -77,19 +90,19 @@ already authorized merges resume.
 
 Browser contracts are exported from `@forge/contracts/tickets`:
 
-| Route                                       | Contract                                                                            |
-| ------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `GET/POST /api/projects/:projectId/tickets` | Ordered active tickets with attention flags / create title and description.         |
-| `GET/PATCH /api/tickets/:id`                | Read / edit scope in Backlog.                                                       |
-| `POST /api/tickets/:id/archive`             | Archive an eligible ticket and return it with `archivedAt`. Safe to retry.          |
-| `POST /api/tickets/:id/move`                | Reorder or move Backlog to Ready with optional beforeId.                            |
-| `GET /api/tickets/:id/workflow`             | Current plan revision, phase, execution state and Forge conversation/workspace IDs. |
-| `POST /api/tickets/:id/approve`             | Approve the current idle plan with `{revision}`.                                    |
-| `POST /api/tickets/:id/messages`            | Queue feedback, or steer implementation/rebase with `{text,expectedTurnId}`.        |
-| `POST /api/tickets/:id/merge`               | Queue a legacy review candidate or retry a failed merge.                            |
-| `POST /api/tickets/:id/reconcile`           | Reconcile uncertain execution or retry a failed setup.                              |
-| `GET/PATCH /api/board/settings`             | Read settings or update `maxAgents` and ticket dispatch (`running` or `paused`).    |
-| `POST /api/board/settings/stop`             | Stop ticket dispatch and return interruption request and failure counts.            |
+| Route                                       | Contract                                                                                                       |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| `GET/POST /api/projects/:projectId/tickets` | Ordered active tickets with attention flags and optional derived `agentStatus` / create title and description. |
+| `GET/PATCH /api/tickets/:id`                | Read / edit scope in Backlog.                                                                                  |
+| `POST /api/tickets/:id/archive`             | Archive an eligible ticket and return it with `archivedAt`. Safe to retry.                                     |
+| `POST /api/tickets/:id/move`                | Reorder or move Backlog to Ready with optional beforeId.                                                       |
+| `GET /api/tickets/:id/workflow`             | Current plan revision, phase, execution state and Forge conversation/workspace IDs.                            |
+| `POST /api/tickets/:id/approve`             | Approve the current idle plan with `{revision}`.                                                               |
+| `POST /api/tickets/:id/messages`            | Queue feedback, or steer implementation/rebase with `{text,expectedTurnId}`.                                   |
+| `POST /api/tickets/:id/merge`               | Queue a legacy review candidate or retry a failed merge.                                                       |
+| `POST /api/tickets/:id/reconcile`           | Reconcile uncertain execution or retry a failed setup.                                                         |
+| `GET/PATCH /api/board/settings`             | Read settings or update `maxAgents` and ticket dispatch (`running` or `paused`).                               |
+| `POST /api/board/settings/stop`             | Stop ticket dispatch and return interruption request and failure counts.                                       |
 
 Ticket conversations reuse the private agent read, resume, interrupt, reply and
 SSE APIs. Idle and failed ticket messages dispatch through the scheduler, and ticket threads stay
