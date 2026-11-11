@@ -49,11 +49,51 @@ test.each(["exit", "deadline"])("cleans helper groups after leader %s", async (m
 	}
 });
 
+test("restricted Git uses the current Forge identity for both author and committer", async () => {
+	let identity = { name: "Forge Writer", email: "writer@example.com" };
+	const configuration = { identity: () => identity };
+	const git = new GitTransport(sleep, configuration);
+	const identify = (role: string) =>
+		git.run(["-c", "user.name=Fallback", "-c", "user.email=fallback@example.com", "var", role]);
+
+	try {
+		expect(await identify("GIT_AUTHOR_IDENT")).toMatch(/^Forge Writer <writer@example.com> /u);
+		identity = { name: "Updated Writer", email: "updated@example.com" };
+		expect(await identify("GIT_COMMITTER_IDENT")).toMatch(/^Updated Writer <updated@example.com> /u);
+	} finally {
+		await git.close();
+	}
+});
+
 test("system Git executes without a shell and rejects forbidden protocols with sanitized diagnostics", async () => {
 	const git = new GitTransport();
 	expect(await git.run(["--version"])).toMatch(/^git version /);
 	await expect(git.run(["ls-remote", "file:///SECRET_LOCAL_PATH"])).rejects.toThrow(/^Git operation failed$/);
 	await expect(git.run(["ls-remote", "ext::echo SECRET"])).rejects.toThrow(/^Git operation failed$/);
+});
+
+test("GitHub transport scopes gh credentials to github.com and its dedicated config directory", async () => {
+	const configuration = {
+		executable: process.execPath,
+		prefix: [
+			"-e",
+			"process.stdout.write(JSON.stringify({args:process.argv.slice(1),home:process.env.GH_CONFIG_DIR,token:process.env.GH_TOKEN}))",
+			"--",
+		],
+	};
+	const git = new GitTransport(sleep, configuration);
+	const github = new GitTransport(sleep, { ...configuration, githubConfigDirectory: "/forge/github" });
+	try {
+		const generic = JSON.parse(await git.run(["--version"]));
+		const authenticated = JSON.parse(await github.run(["--version"]));
+		expect(generic.home).toBeUndefined();
+		expect(generic.args).not.toContain("credential.https://github.com.helper=!gh auth git-credential");
+		expect(authenticated.home).toBe("/forge/github");
+		expect(authenticated.token).toBeUndefined();
+		expect(authenticated.args).toContain("credential.https://github.com.helper=!gh auth git-credential");
+	} finally {
+		await Promise.all([git.close(), github.close()]);
+	}
 });
 
 test("binary transport preserves bytes while text transport rejects invalid UTF-8", async () => {

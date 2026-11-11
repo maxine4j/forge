@@ -1,5 +1,6 @@
 import {
 	accountsStatusSchema,
+	githubSyncStatusSchema,
 	projectsSchema,
 	projectCostSchema,
 	workspacesSchema,
@@ -119,6 +120,12 @@ test("mock projects open populated workspaces and schema-valid repository views"
 	expect(file.content).toContain("Forge");
 	workspaceDiffSchema.parse(await read(`/api/workspaces/${workspace.id}/diff`));
 	const base = `/api/projects/${project.id}/repository`;
+	expect(githubSyncStatusSchema.parse(await read(`${base}/github-sync`))).toEqual({
+		state: "ready",
+		ahead: 2,
+		behind: 1,
+	});
+	expect((await fetch(new URL(`${base}/github-sync`, origin), { method: "POST" })).status).toBe(405);
 	const branches = repositoryBranchesSchema.parse(await read(`${base}/branches`));
 	expect(branches.map((branch) => branch.name)).toContain("main");
 	const committed = repositoryTreeSchema.parse(await read(`${base}/tree?branch=main&path=src`));

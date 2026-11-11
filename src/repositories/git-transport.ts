@@ -7,7 +7,10 @@ import { sleep, type ISleep } from "@forge/backend-infrastructure/sleep";
 import type { GitTransportConfiguration } from "./types.ts";
 
 export class GitError extends Error {
-	constructor(options?: ErrorOptions) {
+	constructor(
+		options?: ErrorOptions,
+		readonly exitCode?: number,
+	) {
 		super("Git operation failed", options);
 		this.name = "GitError";
 	}
@@ -54,6 +57,9 @@ export class GitTransport implements IGitRuntime {
 					"protocol.https.allow=always",
 					"-c",
 					"credential.helper=",
+					...(this.config.githubConfigDirectory
+						? ["-c", "credential.https://github.com.helper=!gh auth git-credential"]
+						: []),
 					"-c",
 					"core.hooksPath=/dev/null",
 					"-c",
@@ -71,6 +77,9 @@ export class GitTransport implements IGitRuntime {
 						GIT_CONFIG_GLOBAL: "/dev/null",
 						GIT_TERMINAL_PROMPT: "0",
 						GIT_ASKPASS: "/bin/false",
+						...(this.config.githubConfigDirectory
+							? { GH_CONFIG_DIR: this.config.githubConfigDirectory }
+							: {}),
 					},
 				},
 			);
@@ -78,6 +87,7 @@ export class GitTransport implements IGitRuntime {
 			throw new GitError({ cause });
 		}
 		let failure: unknown;
+		let exitCode: number | undefined;
 		child.stdin.on("error", (error) => {
 			failure = error;
 		});
@@ -123,6 +133,7 @@ export class GitTransport implements IGitRuntime {
 			child.on("close", (code, signal) => {
 				exited = true;
 				deadline.abort();
+				if (code !== null && !failure) exitCode = code;
 				if (code !== 0 || failure)
 					failure = new AggregateError(
 						[
@@ -160,7 +171,7 @@ export class GitTransport implements IGitRuntime {
 		);
 		try {
 			await done;
-			if (failure) throw new GitError({ cause: failure });
+			if (failure) throw new GitError({ cause: failure }, exitCode);
 			return Buffer.concat(stdout);
 		} finally {
 			this.active.delete(stop);

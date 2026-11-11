@@ -15,4 +15,14 @@ export interface GitTransportConfiguration {
 	executable?: string;
 	prefix?: string[];
 	deadlineMs?: number;
+	githubConfigDirectory?: string;
 }
+export interface GithubSyncDrift {
+	ahead: number;
+	behind: number;
+}
+export type GithubSyncResult =
+	| { outcome: "synced"; head: string }
+	| { outcome: "conflict" }
+	| { outcome: "changed" }
+	| { outcome: "push-failed"; head: string; localUpdated: boolean };

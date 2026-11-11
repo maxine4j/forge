@@ -130,6 +130,76 @@ test("editor sidebar shows every root file without expansion controls", async ({
 	await expect(page.getByRole("button", { name: /Show all|Show fewer/ })).toHaveCount(0);
 });
 
+test("Code shows main drift, refreshes after sync, and reports merge conflicts", async ({ page }) => {
+	let counts = { ahead: 2, behind: 1 };
+	let posts = 0;
+	let conflict = false;
+	await page.route("**/repository/github-sync", (route) => {
+		if (route.request().method() === "GET") return route.fulfill({ json: { state: "ready", ...counts } });
+		expect(route.request().method()).toBe("POST");
+		posts++;
+		if (conflict) return route.fulfill({ status: 409, json: { error: "github-sync-conflict" } });
+		counts = { ahead: 0, behind: 0 };
+		return route.fulfill({ json: { head: "b".repeat(40) } });
+	});
+	await page.route(/\/repository\/file\?/, (route) => {
+		const path = new URL(route.request().url()).searchParams.get("path");
+		if (path !== "file-0.ts") return route.fallback();
+		return route.fulfill({ json: { path, content: posts ? "updated by GitHub" : "original file" } });
+	});
+	await page.reload();
+	const sync = page.getByRole("button", { name: /Sync with GitHub/ });
+	await expect(sync).toContainText("↑2 ↓1");
+	expect(posts).toBe(0);
+	await page.getByRole("button", { name: "file-0.ts", exact: true }).click();
+	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("original file");
+	await sync.click();
+	await expect(sync).toContainText("↑0 ↓0");
+	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("updated by GitHub");
+	expect(posts).toBe(1);
+
+	await selectBranch(page, "feature");
+	await expect(sync).toBeHidden();
+	conflict = true;
+	counts = { ahead: 1, behind: 1 };
+	await selectBranch(page, "main");
+	await expect(sync).toContainText("↑1 ↓1");
+	await sync.click();
+	await expect(page.getByRole("alert")).toContainText("cannot be merged automatically");
+	await expect(sync).toContainText("↑1 ↓1");
+});
+
+test("main drafts stay in the editor and block sync until committed or discarded", async ({ page }) => {
+	await page.route("**/repository/github-sync", (route) =>
+		route.fulfill({ json: { state: "ready", ahead: 0, behind: 1 } }),
+	);
+	await page.reload();
+	await page.getByRole("button", { name: "file-0.ts", exact: true }).click();
+	const editor = page.getByRole("textbox", { name: "File editor" });
+	const sync = page.getByRole("button", { name: /Sync with GitHub/ });
+	await expect(sync).toBeEnabled();
+	await editor.fill("draft");
+	await expect(sync).toBeDisabled();
+	await expect(editor).toHaveText("draft");
+	await page.getByRole("button", { name: "Discard all drafts" }).click();
+	await expect(sync).toBeEnabled();
+});
+
+test("visible main refreshes the drift counts without a click", async ({ page }) => {
+	await page.clock.install();
+	let behind = 0;
+	await page.route("**/repository/github-sync", (route) => {
+		expect(route.request().method()).toBe("GET");
+		return route.fulfill({ json: { state: "ready", ahead: 0, behind } });
+	});
+	await page.reload();
+	const sync = page.getByRole("button", { name: /Sync with GitHub/ });
+	await expect(sync).toContainText("↑0 ↓0");
+	behind = 3;
+	await page.clock.fastForward(31_000);
+	await expect(sync).toContainText("↑0 ↓3");
+});
+
 test("code URLs restore branches, directories, files and history through reload and Back/Forward", async ({ page }) => {
 	await selectBranch(page, "feature/navigation");
 	await page.getByRole("button", { name: "src", exact: true }).click();

@@ -37,6 +37,16 @@ export class WorkspaceApi implements IWorkspaceApi {
 				"workspace-conflict":
 					"The branch changed. Your drafts are preserved. Copy them before discarding drafts to reload the branch.",
 				"workspace-unavailable": "Project files unavailable. Retry opening files.",
+				"github-sync-unconfigured": "GitHub sync is unavailable for this project.",
+				"github-sync-unavailable":
+					"Could not sync with GitHub. Check that both main branches are available and try again.",
+				"github-sync-busy": "GitHub sync is already running. Try again when it finishes.",
+				"github-sync-conflict": "Forge and GitHub main cannot be merged automatically.",
+				"github-sync-changed": "Forge main changed during sync. Check the updated counts and try again.",
+				"github-sync-push-failed":
+					"Could not push to GitHub. Check the connected account and repository access.",
+				"github-sync-push-failed-local-updated":
+					"Forge main was updated, but the push to GitHub failed. Check the connected account and repository access.",
 				"file-conflict": "Your draft is preserved. Compare the server version before retrying.",
 				"file-not-found": "Refresh the file tree.",
 				"file-unsupported": "The file is binary, too large, or uses an unsupported path.",

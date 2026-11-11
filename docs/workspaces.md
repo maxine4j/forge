@@ -222,6 +222,11 @@ The branch dropdown lists all local branches and defaults to `main`, or the firs
 branch when `main` is absent. Every branch supports owner editing. There is no
 Working changes option. Listings read committed files and show each entry's latest
 commit subject and date. Browsing and committing never switch or reset a checkout.
+On `main` of the project imported from GitHub's Forge repository, **Sync with
+GitHub** shows commits ahead (↑) and behind (↓). Code checks the counts when
+opened, every 30 seconds while visible, and after committing or syncing.
+Commit or discard main drafts before syncing. Code reloads the current view
+after an attempt and shows any [sync failure](git-and-ci.md#sync-forge-main-with-github).
 Directory tables, including the root, use Name, Last commit message and Last commit
 date headers. Nested directories start with a `..` folder entry for navigating up.
 Breadcrumbs start with the repository's project name followed by directory segments.

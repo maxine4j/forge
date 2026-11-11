@@ -64,6 +64,13 @@ export const repositoryCommitInputSchema = z
 	)
 	.refine(({ files }) => files.every((file) => !file.content.includes("\0")));
 export const repositoryCommitResultSchema = z.strictObject({ head: gitShaSchema });
+export const githubSyncStatusSchema = z.discriminatedUnion("state", [
+	z.strictObject({ state: z.literal("unconfigured") }),
+	z.strictObject({ state: z.literal("unavailable") }),
+	z.strictObject({ state: z.literal("ready"), ahead: z.int().nonnegative(), behind: z.int().nonnegative() }),
+]);
+export const githubSyncResultSchema = z.strictObject({ head: gitShaSchema });
+export type GithubSyncStatus = z.infer<typeof githubSyncStatusSchema>;
 export type RepositoryCommit = z.infer<typeof repositoryCommitSchema>;
 export type RepositoryBranch = z.infer<typeof repositoryBranchesSchema>[number];
 export type RepositoryTree = z.infer<typeof repositoryTreeSchema>;

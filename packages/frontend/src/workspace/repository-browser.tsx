@@ -1,9 +1,12 @@
 import {
+	githubSyncResultSchema,
+	githubSyncStatusSchema,
 	repositoryBranchesSchema,
 	repositoryTreeSchema,
 	repositoryFileSchema,
 	repositoryHistorySchema,
 	repositoryCommitResultSchema,
+	type GithubSyncStatus,
 	type RepositoryBranch,
 	type RepositoryTree,
 	type RepositoryFile,
@@ -57,6 +60,7 @@ const BranchBrowser = ({
 	dirtyChange,
 	branchControl,
 	search,
+	syncVisible,
 }: {
 	branchControl: ReactNode;
 	root: string;
@@ -65,6 +69,7 @@ const BranchBrowser = ({
 	api: IWorkspaceApi;
 	dirtyChange: (branch: string, dirty: boolean) => void;
 	search?: string;
+	syncVisible: boolean;
 }) => {
 	const navigate = useNavigate();
 	const [retainedSearch, setRetainedSearch] = useState("");
@@ -92,9 +97,12 @@ const BranchBrowser = ({
 	const [message, setMessage] = useState("");
 	const [revision, setRevision] = useState(0);
 	const [notice, setNotice] = useState("");
+	const [syncStatus, setSyncStatus] = useState<GithubSyncStatus>();
+	const [syncing, setSyncing] = useState(false);
+	const [syncError, setSyncError] = useState("");
 	const changed = Object.entries(drafts).filter(([, draft]) => draft.original !== draft.content);
 	const dirty = changed.length > 0;
-	const disabled = busy || loading;
+	const disabled = busy || loading || syncing;
 	const draft = drafts[active];
 	const breadcrumbPath = active && !showingHistory ? active.split("/").slice(0, -1).join("/") : path;
 	const entries = [...(tree?.entries ?? [])].sort((a, b) =>
@@ -117,6 +125,37 @@ const BranchBrowser = ({
 	useEffect(() => {
 		dirtyChange(branch, dirty);
 	}, [dirtyChange, branch, dirty]);
+	useEffect(() => {
+		if (!syncVisible || syncing) return;
+		let cancelled = false;
+		let checking = false;
+		let unconfigured = false;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const check = async () => {
+			if (cancelled || checking || unconfigured || document.hidden) return;
+			clearTimeout(timer);
+			checking = true;
+			try {
+				const status = await api.read(`${root}/github-sync`, githubSyncStatusSchema);
+				if (!cancelled) setSyncStatus(status);
+				unconfigured = status.state === "unconfigured";
+			} catch {
+				if (!cancelled)
+					setSyncStatus((current) => (current?.state === "ready" ? { state: "unavailable" } : current));
+			} finally {
+				checking = false;
+				if (!cancelled && !unconfigured) timer = setTimeout(() => void check(), 30_000);
+			}
+		};
+		const onVisibility = () => void check();
+		document.addEventListener("visibilitychange", onVisibility);
+		void check();
+		return () => {
+			cancelled = true;
+			clearTimeout(timer);
+			document.removeEventListener("visibilitychange", onVisibility);
+		};
+	}, [api, root, revision, syncing, syncVisible]);
 	useEffect(() => {
 		let cancelled = false;
 		void loadTree(path)
@@ -192,7 +231,7 @@ const BranchBrowser = ({
 		return () => {
 			cancelled = true;
 		};
-	}, [api, root, branch, active, drafts, showingHistory]);
+	}, [api, root, branch, active, drafts, showingHistory, revision]);
 	useEffect(() => {
 		if (!showingHistory) return;
 		let cancelled = false;
@@ -229,6 +268,23 @@ const BranchBrowser = ({
 		if (more && history && value.head !== history.head)
 			throw new Error("Branch changed. Reopen commit history to refresh.");
 		setHistory(more && history ? { ...value, commits: [...history.commits, ...value.commits] } : value);
+	};
+	const syncGithub = async () => {
+		setSyncing(true);
+		setSyncError("");
+		setNotice("");
+		try {
+			await api.read(`${root}/github-sync`, githubSyncResultSchema, "POST");
+			setNotice("Main synced with GitHub.");
+		} catch (failure) {
+			setSyncError(failure instanceof Error ? failure.message : "Could not sync with GitHub.");
+		} finally {
+			setDrafts({});
+			setBaseHead("");
+			setLoading(true);
+			setRevision((value) => value + 1);
+			setSyncing(false);
+		}
 	};
 	const fileControls = (
 		<div className='file-controls'>
@@ -283,7 +339,31 @@ const BranchBrowser = ({
 					{active && <span> / {active.split("/").at(-1)}</span>}
 				</nav>
 				{!active && !showingHistory && fileControls}
+				{syncVisible && syncStatus && syncStatus.state !== "unconfigured" && (
+					<button
+						type='button'
+						disabled={disabled || dirty}
+						title={dirty ? "Commit or discard main drafts before syncing." : undefined}
+						onClick={() => void syncGithub()}
+					>
+						{syncing ? "Syncing with GitHub…" : "Sync with GitHub"}
+						{syncStatus.state === "ready" && (
+							<>
+								{" "}
+								<span aria-label={`${syncStatus.ahead} ahead, ${syncStatus.behind} behind`}>
+									↑{syncStatus.ahead} ↓{syncStatus.behind}
+								</span>
+							</>
+						)}
+					</button>
+				)}
 			</div>
+			{syncVisible && syncStatus?.state === "unavailable" && <p role='status'>GitHub drift unavailable.</p>}
+			{syncError && (
+				<p className='error' role='alert'>
+					{syncError}
+				</p>
+			)}
 			{error && (
 				<p className='error' role='alert'>
 					{error}
@@ -350,9 +430,10 @@ const BranchBrowser = ({
 								{draft && (
 									<div className='repository-code'>
 										<Editor
-											key={active}
+											key={`${active}:${syncing}`}
 											path={active}
 											content={draft.content}
+											readOnly={syncing}
 											change={(content) =>
 												setDrafts((current) => ({
 													...current,
@@ -613,6 +694,7 @@ export const RepositoryBrowser = ({
 						repositoryName={repositoryName}
 						branch={value}
 						search={inCode && branch === value ? location.search : undefined}
+						syncVisible={inCode && branch === "main" && value === "main"}
 						api={api}
 						dirtyChange={dirtyChange}
 						branchControl={

@@ -38,6 +38,9 @@ import { PullRequestService } from "./pull-requests/pull-request-service.ts";
 import { PullRequestStore } from "./pull-requests/pull-request-store.ts";
 import { GitDiffClient } from "./repositories/git-diff-client.ts";
 import { GitTransport } from "./repositories/git-transport.ts";
+import { GithubSyncClient } from "./repositories/github-sync-client.ts";
+import { GithubSyncRouter } from "./repositories/github-sync-router.ts";
+import { GithubSyncService } from "./repositories/github-sync-service.ts";
 import { RepositoryBrowserClient } from "./repositories/repository-browser-client.ts";
 import { RepositoryBrowserRouter } from "./repositories/repository-browser-router.ts";
 import { RepositoryBrowserService } from "./repositories/repository-browser-service.ts";
@@ -87,12 +90,13 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const costStore = new CostStore(database);
 	await costStore.initialize(new Date().toISOString());
 	const git = options.git ?? new GitTransport(sleep);
+	const githubGit = new GitTransport(sleep, { githubConfigDirectory: join(config.dataDirectory, "github") });
 	const differences = new GitDiffClient(git);
 	const repositories = new RepositoryClient(config.dataDirectory, config.importHosts, files, git);
 	const projects = new ProjectService(store, repositories, access, randomUUID, () => new Date());
 	let recovery = Promise.resolve();
 	lifecycle.register(async () => {
-		await git.close();
+		await Promise.all([git.close(), githubGit.close()]);
 		await recovery.catch(() => {});
 	});
 	recovery = projects.recover();
@@ -249,6 +253,13 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			new TicketRouter(tickets, workflow),
 			new CostRouter(cost),
 			new WorkspaceRouter(workspaces),
+			new GithubSyncRouter(
+				new GithubSyncService(
+					new GithubSyncClient(config.dataDirectory, repositories, git, githubGit),
+					store,
+					access,
+				),
+			),
 			new RepositoryBrowserRouter(
 				new RepositoryBrowserService(
 					new RepositoryBrowserClient(config.dataDirectory, git, repositories),

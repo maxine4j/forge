@@ -202,6 +202,9 @@ class MockApi implements IMockApi {
 			}
 			const workspaceRoot = `/api/workspaces/${id}`;
 			const repositoryRoot = `${projectRoot}/repository`;
+			this.routes.set(`${repositoryRoot}/github-sync`, () =>
+				project === projects.at(0) ? { state: "ready", ahead: 2, behind: 1 } : { state: "unconfigured" },
+			);
 			this.routes.set(projectRoot, () => project);
 			this.routes.set(`${projectRoot}/workspaces`, () => [workspace]);
 			this.routes.set(`${repositoryRoot}/branches`, () => [
