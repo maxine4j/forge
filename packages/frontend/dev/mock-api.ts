@@ -1,3 +1,4 @@
+import { defaultForgeSettings } from "@forge/contracts/settings";
 import { defaultBoardSettings } from "@forge/contracts/tickets";
 import type { Plugin } from "vite";
 
@@ -34,6 +35,7 @@ class MockApi implements IMockApi {
 
 	constructor() {
 		this.routes.set("/api/projects", () => projects);
+		this.routes.set("/api/settings", () => defaultForgeSettings);
 		this.routes.set("/api/board/settings", () => defaultBoardSettings);
 		this.routes.set("/api/accounts", () => ({
 			codex: { connection: "available", account: { name: "owner@example.test" }, login: { state: "completed" } },

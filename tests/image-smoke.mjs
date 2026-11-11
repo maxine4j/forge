@@ -47,6 +47,42 @@ try {
 		assert.ok(docker("exec", name, "/bin/bash", "-c", `command -v ${command}`));
 	assert.match(docker("exec", name, "codex", "--version"), /0\.164\.0/);
 	assert.equal(Object.keys(inspect.HostConfig.PortBindings ?? {}).length, 0);
+	const settings = {
+		planningInstructions: "Include rollout steps.",
+		implementationInstructions: "Run focused tests.",
+		gitName: "Forge Test Developer",
+		gitEmail: "forge@example.test",
+	};
+	const assertGitIdentity = () => {
+		for (const user of ["agent", "root"]) {
+			assert.equal(
+				docker("exec", "-u", user, name, "git", "config", "--system", "--includes", "--get", "user.name"),
+				settings.gitName,
+			);
+			assert.match(
+				docker(
+					"exec",
+					"-u",
+					user,
+					"-e",
+					"HOME=/tmp/forge-test-home",
+					name,
+					"git",
+					"var",
+					"GIT_COMMITTER_IDENT",
+				),
+				/^Forge Test Developer <forge@example\.test> /u,
+			);
+		}
+		assert.match(
+			docker("exec", "-e", "HOME=/data", name, "git", "var", "GIT_AUTHOR_IDENT"),
+			/^Forge Test Developer <forge@example\.test> /u,
+		);
+	};
+	const savedSettings = request("/api/settings", { method: "PUT", headers, body: JSON.stringify(settings) });
+	assert.equal(savedSettings.status, 200);
+	assert.deepEqual(JSON.parse(savedSettings.body), settings);
+	assertGitIdentity();
 	// Match Codex's sanitized HOME/PATH and the reported Bash login-shell command.
 	execute(
 		"import {mkdir,writeFile} from '@forge/backend-infrastructure/file'; await mkdir('/tmp/forge-nvm-probe'); await writeFile('/tmp/forge-nvm-probe/.nvmrc','24.22.0\\n');",
@@ -114,6 +150,19 @@ try {
 	assert.equal(chat.thread.status, "idle");
 	assert.deepEqual(chat.items, []);
 	assert.equal(request(`/api/workspaces/${chat.thread.workspaceId}`, { headers }).status, 200);
+	assert.equal(
+		docker(
+			"exec",
+			name,
+			"git",
+			"--git-dir",
+			`/data/repositories/${project.id}.git`,
+			"log",
+			"-1",
+			"--format=%an|%ae|%cn|%ce",
+		),
+		`${settings.gitName}|${settings.gitEmail}|${settings.gitName}|${settings.gitEmail}`,
+	);
 	assert.equal(
 		request(`/api/agents/${chat.thread.id}/messages`, {
 			method: "POST",
@@ -212,6 +261,11 @@ try {
 	assert.equal(terminal.status, "running");
 	// Real production glibc addon, nonroot PTY and authenticated upgrade. Leave the shell
 	// alive after detaching to exercise application shutdown below.
+	const terminalProbe = [
+		"printf 'PTY:%s USER:%s BASH:%s GIT:%s <%s>'",
+		'ok "$(id -un)" "$BASH_VERSION"',
+		'"$(git config --get user.name)" "$(git config --get user.email)"\r',
+	].join(" ");
 	assert.equal(
 		execute(`
 		import WebSocket from 'ws';
@@ -222,9 +276,9 @@ try {
 			client.on('error',reject);
 			client.on('message',bytes=>{
 				const frame=JSON.parse(bytes.toString());
-				if(frame.type==='status' && frame.session.status==='running') client.send(JSON.stringify({type:'input',data:${JSON.stringify('printf \'PTY:%s USER:%s BASH:%s\' ok "$(id -un)" "$BASH_VERSION"\r')}}));
+				if(frame.type==='status' && frame.session.status==='running') client.send(JSON.stringify({type:'input',data:${JSON.stringify(terminalProbe)}}));
 				if(frame.type==='output') output+=frame.data;
-				if(/PTY:ok USER:agent BASH:\\d+\\.\\d+/.test(output)) { clearTimeout(timeout); client.terminate(); resolve(); }
+				if(/PTY:ok USER:agent BASH:\\d+\\.\\d+/.test(output) && output.includes(${JSON.stringify(`GIT:${settings.gitName} <${settings.gitEmail}>`)})) { clearTimeout(timeout); client.terminate(); resolve(); }
 			});
 		});
 		console.log('pty-ok');
@@ -284,8 +338,12 @@ try {
 		"-e",
 		"import {rename,writeFile} from '@forge/backend-infrastructure/file';await rename('/data/github','/data/github-backup');await writeFile('/data/github','test-only broken home');",
 	);
-	docker("start", name);
+	normalLogs = docker("logs", name);
+	docker("rm", name);
+	docker("run", "-d", "--name", name, "--mount", `type=volume,source=${volume},target=/data`, ...env, image);
 	await waitFor(() => assert.equal(request("/health").status, 200));
+	assert.deepEqual(JSON.parse(request("/api/settings", { headers }).body), settings);
+	assertGitIdentity();
 	assert.equal(JSON.parse(request("/api/projects", { headers }).body)[0].id, project.id);
 	assert.equal(JSON.parse(request("/api/accounts", { headers }).body).github.connection, "unavailable");
 	execute(
@@ -294,7 +352,7 @@ try {
 	assert.equal(JSON.parse(request("/api/accounts", { headers }).body).github.connection, "available");
 	// Real HTTP/SQLite/lifecycle with a controlled remote-Git CLI peer; no external import or TLS bypass.
 	docker("stop", "--time", "10", name);
-	normalLogs = docker("logs", name);
+	normalLogs += `\n${docker("logs", name)}`;
 	docker("rm", name);
 	docker(
 		"run",

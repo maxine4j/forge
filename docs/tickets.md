@@ -47,6 +47,9 @@ The planner receives a short ticket instruction and uses native Codex Plan mode
 for every turn. Forge saves completed plan items as numbered revisions. Followup
 messages contain the owner's text alone. The implementer receives the approved
 plan once, with an instruction to implement and commit on the worktree branch.
+The owner can add separate planning and implementation instructions in
+[Config](foundation.md#forge-settings). Forge includes them in the respective
+initial prompts when starting a ticket-agent conversation.
 Planner and implementer histories are separate and Codex owns both. Forge records
 turn identity and accepts a plan only from the current planning turn.
 

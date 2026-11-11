@@ -45,6 +45,10 @@ import { RepositoryBrowserClient } from "./repositories/repository-browser-clien
 import { RepositoryBrowserRouter } from "./repositories/repository-browser-router.ts";
 import { RepositoryBrowserService } from "./repositories/repository-browser-service.ts";
 import { RepositoryClient } from "./repositories/repository-client.ts";
+import { GitSystemConfig } from "./settings/git-system-config.ts";
+import { SettingsRouter } from "./settings/settings-router.ts";
+import { SettingsService } from "./settings/settings-service.ts";
+import { SettingsStore } from "./settings/settings-store.ts";
 import { TerminalInventory } from "./terminal/terminal-inventory.ts";
 import { TerminalProcess } from "./terminal/terminal-process.ts";
 import { TerminalRouter } from "./terminal/terminal-router.ts";
@@ -85,12 +89,25 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	await store.initialize();
 	if (!lifecycle.isOpen()) return;
 	const access = new AccessService(config);
+	const settingsStore = new SettingsStore(database);
+	await settingsStore.initialize();
+	const settings = new SettingsService(
+		settingsStore,
+		options.containerGitConfig ? new GitSystemConfig(options.containerGitConfig, files) : undefined,
+		access,
+	);
+	await settings.initialize();
+	if (!lifecycle.isOpen()) return;
 	const ticketStore = new TicketStore(database);
 	await ticketStore.initialize();
 	const costStore = new CostStore(database);
 	await costStore.initialize(new Date().toISOString());
-	const git = options.git ?? new GitTransport(sleep);
-	const githubGit = new GitTransport(sleep, { githubConfigDirectory: join(config.dataDirectory, "github") });
+	const identity = () => settings.gitIdentity();
+	const git = options.git ?? new GitTransport(sleep, { identity });
+	const githubGit = new GitTransport(sleep, {
+		identity,
+		githubConfigDirectory: join(config.dataDirectory, "github"),
+	});
 	const differences = new GitDiffClient(git);
 	const repositories = new RepositoryClient(config.dataDirectory, config.importHosts, files, git);
 	const projects = new ProjectService(store, repositories, access, randomUUID, () => new Date());
@@ -206,7 +223,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		agents,
 		pool,
 		new WorkspaceMergeClient(workspaces, git),
-		new TicketPrompts(),
+		new TicketPrompts(() => settings.current()),
 		access,
 		wakeScheduler,
 		() => boardSettings.dispatchMode(),
@@ -248,6 +265,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const app = new HttpApplication(new ProjectRouter(projects), access).create(
 		[
 			new AccountRouter(accounts),
+			new SettingsRouter(settings),
 			agentRouter,
 			new BoardSettingsRouter(boardSettings),
 			new TicketRouter(tickets, workflow),

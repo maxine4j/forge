@@ -28,4 +28,18 @@ test("initial phase prompts include only the scope needed for that phase and fol
 		expect(prompts.build(ticket, { ...job, phase, plan, message: "Include hidden files" })).toBe(
 			"Include hidden files",
 		);
+	const configured = new TicketPrompts(() => ({
+		planningInstructions: "List the risks.\nConsider migrations.",
+		implementationInstructions: "Run focused tests.",
+	}));
+	expect(configured.build(ticket, job)).toBe(
+		"Propose an implementation plan for FORGE-1 Search files. Filter by extension.\n\nList the risks.\nConsider migrations.",
+	);
+	expect(configured.build(ticket, { ...job, phase: "implementation", plan })).toBe(
+		"Implement the approved plan below and commit the changes on this branch.\n\nRun focused tests.\n\n# Plan\nFilter by extension.",
+	);
+	expect(configured.build(ticket, { ...job, message: "Include hidden files" })).toBe("Include hidden files");
+	expect(configured.build(ticket, { ...job, phase: "rebase" })).toBe(
+		prompts.build(ticket, { ...job, phase: "rebase" }),
+	);
 });

@@ -47,6 +47,7 @@ export class GitTransport implements IGitRuntime {
 		if (input !== undefined && Buffer.byteLength(input) > 1048576) throw new GitError();
 		let child;
 		try {
+			const identity = this.config.identity?.();
 			child = spawn(
 				this.config.executable ?? "git",
 				[
@@ -77,6 +78,12 @@ export class GitTransport implements IGitRuntime {
 						GIT_CONFIG_GLOBAL: "/dev/null",
 						GIT_TERMINAL_PROMPT: "0",
 						GIT_ASKPASS: "/bin/false",
+						...(identity && {
+							GIT_AUTHOR_NAME: identity.name,
+							GIT_AUTHOR_EMAIL: identity.email,
+							GIT_COMMITTER_NAME: identity.name,
+							GIT_COMMITTER_EMAIL: identity.email,
+						}),
 						...(this.config.githubConfigDirectory
 							? { GH_CONFIG_DIR: this.config.githubConfigDirectory }
 							: {}),

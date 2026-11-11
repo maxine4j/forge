@@ -49,6 +49,20 @@ Backend foundation configuration:
 | `FORGE_PORT`           | HTTP listener port; defaults to `8080`; no host publication.                      |
 | `FORGE_IMPORT_HOSTS`   | Optional comma-separated exact DNS host allowlist; defaults to no remote imports. |
 
+### Forge settings
+
+The top-level **Config** tab lets the owner edit multiline instructions for
+[ticket planners and implementers](tickets.md#agentic-ticket-board) and the
+[container-wide Git identity](development.md#image-and-deployment). Forge stores
+these settings in SQLite. The defaults are empty. Each instruction field accepts
+up to 4,000 characters. Set both Git identity fields or clear both together.
+
+The owner-only `GET /api/settings` and `PUT /api/settings` routes use
+`@forge/contracts/settings`. PUT replaces all four fields and requires the
+configured HTTPS origin. Validation failures return 400 and failed saves return 503.
+
+### Projects and repository imports
+
 The initial project API exposes `GET/POST /api/projects`,
 `GET /api/projects/:id`, and `POST /api/projects/:id/retry`. Inputs and responses
 use `@forge/contracts`; public project values contain only ID, name,

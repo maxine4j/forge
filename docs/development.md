@@ -85,6 +85,15 @@ changes require revalidation. Tini
 reaps orphaned descendants. Process-group cleanup covers ordinary descendants;
 deliberately escaped live processes are outside that application-level boundary.
 
+The image includes a Forge-managed identity file from Git's system configuration.
+Saving a name and email in [Config](foundation.md#forge-settings) updates the
+default author and committer for new Git commands across the container, including
+all Codex agents and workspace terminals. Normal Git configuration precedence
+applies in shells. Forge's restricted Git commands receive the same identity
+explicitly. The application restores the identity from SQLite before serving
+requests after container replacement. Native development leaves the host's Git
+configuration alone.
+
 `forge.sd.yaml` uses private ingress, one replica, recreate rollout and persistent
 `/data`, with no HTTP host ports. Its deployment defaults set `FORGE_OWNER` to
 `maxine4j`, derive `FORGE_ORIGIN` from `https://${SERVICE_DOMAIN}`, and allow

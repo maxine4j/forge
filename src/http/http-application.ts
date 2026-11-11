@@ -7,6 +7,7 @@ import { AccessDeniedError, type IAccessService } from "../auth/access-service.t
 import type { Actor } from "../auth/types.ts";
 import { InvalidProjectError, ProjectNotFoundError, ProjectUnavailableError } from "../projects/errors.ts";
 import type { IProjectRouter } from "../projects/project-router.ts";
+import { SettingsError } from "../settings/settings-service.ts";
 import { TicketError } from "../tickets/errors.ts";
 import { WorkspaceError } from "../workspaces/errors.ts";
 import type { IStaticAssets } from "./static-assets.ts";
@@ -35,7 +36,10 @@ export class HttpApplication implements IHttpApplication {
 				failure = err;
 				const badBody = err instanceof Error && "status" in err && err.status === 400;
 				const tooLarge = err instanceof Error && "status" in err && err.status === 413;
-				if (err instanceof TicketError) {
+				if (err instanceof SettingsError) {
+					ctx.status = err.code === "invalid-request" ? 400 : 503;
+					ctx.body = { error: err.code };
+				} else if (err instanceof TicketError) {
 					ctx.status =
 						err.code === "invalid-request"
 							? 400
@@ -111,13 +115,15 @@ export class HttpApplication implements IHttpApplication {
 		// JSON escapes can expand a valid 256 KiB text file by six times.
 		const fileBody = bodyParser({ enableTypes: ["json"], jsonLimit: "2mb" });
 		const commitBody = bodyParser({ enableTypes: ["json"], jsonLimit: "7mb" });
-		app.use((ctx, next) =>
-			/^\/api\/projects\/[^/]+\/repository\/commit$/u.test(ctx.path) && ctx.method === "POST"
-				? commitBody(ctx, next)
-				: /^\/api\/workspaces\/[^/]+\/file$/u.test(ctx.path) && ["POST", "PUT"].includes(ctx.method)
-					? fileBody(ctx, next)
-					: ordinaryBody(ctx, next),
-		);
+		const settingsBody = bodyParser({ enableTypes: ["json"], jsonLimit: "64kb" });
+		app.use((ctx, next) => {
+			if (ctx.path === "/api/settings" && ctx.method === "PUT") return settingsBody(ctx, next);
+			if (/^\/api\/projects\/[^/]+\/repository\/commit$/u.test(ctx.path) && ctx.method === "POST")
+				return commitBody(ctx, next);
+			if (/^\/api\/workspaces\/[^/]+\/file$/u.test(ctx.path) && ["POST", "PUT"].includes(ctx.method))
+				return fileBody(ctx, next);
+			return ordinaryBody(ctx, next);
+		});
 		const router = this.projectRouter.create();
 		app.use(router.routes()).use(router.allowedMethods());
 		for (const extension of extensions) {

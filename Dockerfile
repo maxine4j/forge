@@ -53,9 +53,11 @@ COPY --from=installer /app/packages/contracts/node_modules packages/contracts/no
 COPY --from=builder /app/packages/contracts/dist packages/contracts/dist
 COPY --from=builder /app/packages/frontend/dist packages/frontend/dist
 COPY --from=builder /app/dist dist
-RUN mkdir -p /data && chown agent:agent /data && chmod 0700 /data
+RUN mkdir -p /data && chown agent:agent /data && chmod 0700 /data && \
+    install -d -m 0755 -o agent -g agent /run/forge && \
+    git config --system --add include.path /run/forge/gitconfig
 ENV PATH="/app/node_modules/.bin:/usr/local/bin:${PATH}"
 USER agent
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "dist/main.js"]
+CMD ["node", "dist/main.js", "--container-git-config"]

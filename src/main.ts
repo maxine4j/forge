@@ -28,7 +28,8 @@ for (const event of ["uncaughtException", "unhandledRejection"] as const)
 		log.fatal({ failure: err, event }, "Forge fatal failure");
 		void stop(1);
 	});
-void start(lifecycle).catch((err: unknown) => {
+const options = process.argv.includes("--container-git-config") ? { containerGitConfig: "/run/forge/gitconfig" } : {};
+void start(lifecycle, options).catch((err: unknown) => {
 	log.fatal({ failure: err }, "Forge startup failed");
 	void stop(1);
 });

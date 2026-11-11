@@ -1,3 +1,5 @@
+import type { GitIdentity } from "@forge/contracts/settings";
+
 export interface FileMetadata {
 	isDirectory(): boolean;
 	isFile(): boolean;
@@ -12,6 +14,7 @@ export interface IRepositoryFiles {
 	rename(from: string, to: string): Promise<void>;
 }
 export interface GitTransportConfiguration {
+	identity?: () => GitIdentity | undefined;
 	executable?: string;
 	prefix?: string[];
 	deadlineMs?: number;

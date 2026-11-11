@@ -8,6 +8,7 @@ import type { IApiClient } from "./api/api-client.ts";
 import { ResourcePoller } from "./api/resource-poller.ts";
 import type { IWorkspaceApi } from "./api/workspace-api.ts";
 import { resolveRoute } from "./navigation/routes.ts";
+import { ForgeSettingsForm } from "./settings/settings-form.tsx";
 import { Workbench } from "./workspace/workbench.tsx";
 
 const failureMessages = {
@@ -437,6 +438,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 						))}
 					</div>
 				</section>
+				{config && <ForgeSettingsForm api={workspaceApi} />}
 			</main>
 		</div>
 	);
