@@ -41,6 +41,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		};
 	if (method === "thread/resume" || method === "thread/read") {
 		const thread = threads.get(params.threadId);
+		if (!thread) {
+			write({ id, error: { code: -32600, message: `no rollout found for thread id ${params.threadId}` } });
+			return;
+		}
 		result = {
 			thread: { ...thread, turns: params.excludeTurns || !params.includeTurns ? [] : thread.turns },
 			model: "gpt-5.4",
@@ -70,6 +74,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			items: [{ id: `user-${sequence}`, type: "userMessage", content: params.input }],
 		};
 		thread.turns.push(turn);
+		thread.status = { type: "active" };
 		notify("turn/started", { threadId: thread.id, turn });
 		const breakdown = (turns) => ({
 			inputTokens: 1000 * turns,
@@ -139,6 +144,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 				text: planning ? "Plan ready." : "Changes committed.",
 			});
 			turn.status = "completed";
+			thread.status = { type: "idle" };
 			turn.durationMs = 1000;
 			notify("turn/completed", { threadId: thread.id, turn });
 		}
@@ -159,6 +165,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		const thread = threads.get(params.threadId);
 		const turn = thread.turns.at(-1);
 		turn.status = "interrupted";
+		thread.status = { type: "idle" };
 		notify("turn/completed", { threadId: thread.id, turn });
 	}
 	write({ id, result });

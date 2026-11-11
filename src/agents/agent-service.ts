@@ -65,7 +65,7 @@ export interface ITicketAgents {
 }
 export interface IAgentStop {
 	/** Requests interruption for active reservations. Reports failures individually. */
-	stopAll(actor: Actor): Promise<{ requested: number; failed: number }>;
+	stopAll(actor: Actor): Promise<{ requested: number; recovered: number; failed: number }>;
 }
 export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 	private readonly log = createLogger(AgentService.name);
@@ -74,6 +74,8 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 	private readonly listeners = new Map<string, Set<() => void>>();
 	private readonly unsubscribe: () => void;
 	private closed = false;
+	private stopping = 0;
+	private stopRevision = 0;
 	constructor(
 		private readonly store: IAgentThreadStore,
 		private readonly client: ICodexAgentClient,
@@ -185,8 +187,13 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		this.authorize(actor);
 		const input = z.object({ text: z.string().trim().min(1).max(64000) }).safeParse({ text });
 		if (!input.success) throw new AgentError("invalid-request");
+		const revision = this.stopRevision;
 		const view = await this.serialize(id, async () => {
 			const record = await this.require(id);
+			if (this.stopping || revision !== this.stopRevision) {
+				this.pool.observe(id, record.status);
+				throw new AgentError("agent-capacity");
+			}
 			const previousStatus = record.status;
 			if (["creating", "running", "waiting", "uncertain"].includes(record.status))
 				throw new AgentError("agent-conflict");
@@ -218,7 +225,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				}
 				record.status = "running";
 				await this.store.update(record);
-				if (allowed && !allowed()) {
+				if (this.stopping || revision !== this.stopRevision || (allowed && !allowed())) {
 					record.status = previousStatus;
 					await this.store.update(record);
 					this.pool.observe(id, previousStatus);
@@ -279,30 +286,61 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			return this.sync(record);
 		});
 	}
-	async stopAll(actor: Actor): Promise<{ requested: number; failed: number }> {
+	async stopAll(actor: Actor): Promise<{ requested: number; recovered: number; failed: number }> {
 		this.authorize(actor);
-		const results = await Promise.allSettled(
-			this.pool.activeIds().map((id) =>
-				this.serialize(id, async () => {
-					const record = await this.require(id);
-					const { thread } = await this.sync(record);
-					if (thread.status === "uncertain" || thread.status === "creating")
-						throw new AgentError("agent-unavailable");
-					if (thread.status !== "running" && thread.status !== "waiting") return false;
-					if (!record.codexId || !thread.turnId) throw new AgentError("agent-unavailable");
-					await this.client.interrupt(record.codexId, thread.turnId);
-					await this.sync(record);
-					return true;
-				}).catch((err: unknown) => {
-					this.log.warn({ err, threadId: id }, "Could not interrupt agent");
-					throw err;
-				}),
-			),
-		);
-		return {
-			requested: results.filter((result) => result.status === "fulfilled" && result.value).length,
-			failed: results.filter((result) => result.status === "rejected").length,
-		};
+		this.stopping++;
+		this.stopRevision++;
+		try {
+			const results = await Promise.allSettled(
+				this.pool.activeIds().map((id) =>
+					this.serialize(id, async () => {
+						const record = await this.require(id);
+						if (!["creating", "uncertain", "running", "waiting"].includes(record.status)) {
+							this.pool.observe(id, record.status);
+							return { requested: 0, recovered: 0, failed: 0 };
+						}
+						const result = await this.reconcile(actor, record);
+						if (result.state !== "active") return { requested: 0, recovered: 1, failed: 0 };
+						await this.client.interrupt(record.codexId!, result.turnId);
+						// An acknowledgment is not evidence of termination.
+						try {
+							if (
+								["completed", "failed", "interrupted"].includes(
+									this.client.read(record.codexId!).status,
+								)
+							) {
+								await this.sync(await this.require(id));
+								return { requested: 1, recovered: 1, failed: 0 };
+							}
+							const after = await this.reconcile(actor, await this.require(id));
+							return {
+								requested: 1,
+								recovered: after.state === "active" ? 0 : 1,
+								failed: after.state === "active" ? 1 : 0,
+							};
+						} catch {
+							return { requested: 1, recovered: 0, failed: 1 };
+						}
+					}).catch((err: unknown) => {
+						this.log.warn({ err, threadId: id }, "Could not interrupt agent");
+						throw err;
+					}),
+				),
+			);
+			return {
+				requested: results.reduce(
+					(n, result) => n + (result.status === "fulfilled" ? result.value.requested : 0),
+					0,
+				),
+				recovered: results.reduce(
+					(n, result) => n + (result.status === "fulfilled" ? result.value.recovered : 0),
+					0,
+				),
+				failed: results.reduce((n, result) => n + (result.status === "fulfilled" ? result.value.failed : 1), 0),
+			};
+		} finally {
+			this.stopping--;
+		}
 	}
 	async reply(actor: Actor, id: string, input: AgentReply): Promise<AgentView> {
 		this.authorize(actor);
@@ -346,13 +384,27 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			await Promise.all((await this.projects.list(actor)).map((project) => this.store.list(project.id)))
 		).flat();
 		for (const record of records) {
-			if (!record.codexId || record.status !== "uncertain") continue;
+			if (record.status !== "uncertain") continue;
 			try {
-				await this.resume(actor, record.id);
+				await this.serialize(record.id, async () => this.reconcile(actor, await this.require(record.id)));
 			} catch (err) {
 				this.log.error({ err, threadId: record.id }, "Agent reconciliation failed; retaining execution slot");
 			}
 		}
+	}
+	private async reconcile(actor: Actor, record: AgentThreadRecord) {
+		const path = record.codexId ? (await this.workspaces.resolve(actor, record.workspaceId)).path : undefined;
+		const result = await this.client.reconcile(record.codexId, path);
+		if (result.state === "unavailable") throw new AgentError("agent-unavailable");
+		if (record.codexId) this.identities.set(record.codexId, record.id);
+		const updated: AgentThreadRecord =
+			result.state === "active"
+				? { ...record, status: "running", turnId: result.turnId, requests: [] }
+				: { ...record, status: "interrupted", requests: [] };
+		await this.store.update(updated);
+		this.pool.observe(record.id, updated.status);
+		for (const listener of this.listeners.get(record.id) ?? []) listener();
+		return result;
 	}
 	private async createThread(
 		actor: Actor,
@@ -366,6 +418,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		const input = createAgentSchema.safeParse({ title });
 		if (!input.success) throw new AgentError("invalid-request");
 		const id = this.generateId();
+		if (reserveSlot && this.stopping) throw new AgentError("agent-capacity");
 		if (reserveSlot) this.pool.claim(id);
 		return this.serialize(id, async () => {
 			const workspace = workspaceId
@@ -416,7 +469,9 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 	private async sync(record: AgentThreadRecord): Promise<AgentView> {
 		if (record.codexId) {
 			const runtime = this.client.read(record.codexId);
-			this.pool.observe(record.id, runtime.status);
+			// A persisted terminal outcome survives an unloaded runtime/history snapshot.
+			if (["completed", "failed", "interrupted"].includes(record.status) && runtime.status === "uncertain")
+				return this.view(record);
 			const updated = {
 				...record,
 				status: runtime.status,
@@ -425,6 +480,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				contextWindow: runtime.contextWindow ?? record.contextWindow,
 			};
 			if (JSON.stringify(updated) !== JSON.stringify(record)) await this.store.update(updated);
+			this.pool.observe(record.id, runtime.status);
 			return this.view(updated);
 		}
 		return this.view(record);

@@ -11,17 +11,30 @@ export class CodexConnectionError extends Error {
 		this.name = "CodexConnectionError";
 	}
 }
+/** Private protocol failure; callers must not expose runtime diagnostics. */
+export class CodexRpcError extends Error {
+	constructor(
+		readonly code: number,
+		message: string,
+		readonly data?: unknown,
+	) {
+		super(message);
+		this.name = "CodexRpcError";
+	}
+}
 export interface ICodexConnection {
 	/** Idempotent initialization. Reconnects only when explicitly called; never replays a request. */
 	initialize(): Promise<void>;
 	/** Explicit user retry/cancel can reset an uncertain connection; never replays old work. */
 	restart(): Promise<void>;
-	/** Private allowlisted operations only. Throws CodexConnectionError. */
+	/** Private allowlisted operations only. Throws CodexConnectionError or structured CodexRpcError. */
 	request(method: string, params: unknown): Promise<unknown>;
 	subscribe(listener: AccountNotification): () => void;
 	close(): Promise<void>;
 }
 export interface ICodexAgentConnection extends ICodexConnection {
+	/** Monotonic identity of the owned process; zero before its first spawn. */
+	executionEpoch(): number;
 	/** A handler returns true only after accepting ownership of the request. */
 	subscribeRequests(listener: (id: string | number, method: string, params: unknown) => boolean): () => void;
 	/** Replies exactly once to a pending server request; reset invalidates outstanding IDs. */
@@ -148,6 +161,7 @@ export class CodexConnection implements ICodexAgentConnection {
 	private closed = false;
 	private buffer = "";
 	private sequence = 0;
+	private processEpoch = 0;
 	private readonly pending = new Map<number, PendingRequest>();
 	private readonly expiredQuotaRequests = new Set<number>();
 	private readonly listeners = new Set<AccountNotification>();
@@ -159,6 +173,9 @@ export class CodexConnection implements ICodexAgentConnection {
 		private readonly deadlineMs: number = 15_000,
 		private readonly log: IAccountDiagnostics = createLogger(CodexConnection.name),
 	) {}
+	executionEpoch(): number {
+		return this.processEpoch;
+	}
 	async initialize(): Promise<void> {
 		if (this.closed) throw new CodexConnectionError();
 		this.initialization ??= this.connect();
@@ -214,6 +231,7 @@ export class CodexConnection implements ICodexAgentConnection {
 				},
 			});
 			this.handle = handle;
+			this.processEpoch++;
 			this.buffer = "";
 			void handle.done.then(
 				() => {
@@ -287,7 +305,7 @@ export class CodexConnection implements ICodexAgentConnection {
 				method: z.string().max(256).optional(),
 				params: z.unknown().optional(),
 				result: z.unknown().optional(),
-				error: z.object({ code: z.number(), message: z.string() }).optional(),
+				error: z.object({ code: z.number(), message: z.string(), data: z.unknown().optional() }).optional(),
 			})
 			.parse(value);
 		if (message.method) {
@@ -321,7 +339,8 @@ export class CodexConnection implements ICodexAgentConnection {
 		if (!pending) throw new Error("Unexpected Codex response");
 		this.pending.delete(message.id);
 		pending.timer.abort();
-		if (message.error) pending.reject(new CodexConnectionError({ cause: new Error(message.error.message) }));
+		if (message.error)
+			pending.reject(new CodexRpcError(message.error.code, message.error.message, message.error.data));
 		else if ("result" in message) pending.resolve(message.result);
 		else {
 			pending.reject(new CodexConnectionError());

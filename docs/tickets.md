@@ -35,6 +35,22 @@ Idle chats use no slot. A running agent waiting for structured input or permissi
 keeps its slot. Standalone message submissions at capacity retain their drafts.
 Board and conversation selection have no effect on execution.
 
+**Stop all agents** durably stops ticket dispatch until explicitly resumed and
+remains available while dispatch is stopped. `POST /api/board/settings/stop`
+returns `settings`, `requested` (interrupt acknowledgments), `recovered`
+(executions confirmed stopped or already inactive/missing), and `failed`
+(unresolved executions, including acknowledged interrupts still running).
+The dialog reports these separately; existing board polling refreshes outcomes.
+Repeated Stop attempts reconcile unresolved slots without replaying input or
+resetting Codex. Submissions cannot race the stop operation.
+
+[Startup and stop reconciliation](agents.md#interactive-agents) persist settled
+execution and invalidate approvals before releasing slots. Stopped or missing
+ticket executions become failed/recoverable even without a saved turn ID.
+Plans, conversation history, branches and worktrees are retained. Interrupted
+work is never automatically replayed or merged; unavailable runtimes retain
+uncertain reservations and expose recovery failure for retry.
+
 The ticket-list response derives optional `agentStatus: "queued" | "working"`
 without storing it. Ready tickets without a workflow and workflows in `queued`
 show a clock, including while dispatch is paused or capacity is exhausted.

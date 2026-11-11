@@ -59,6 +59,27 @@ history and reconcile state without submitting a message. An ambiguous thread cr
 cannot be retried; create a new chat, retaining the old worktree. Untouched empty
 chats remain usable across restarts.
 
+Startup seeds every persisted execution reservation before accepting submissions.
+Background reconciliation resumes thread metadata without loading conversation
+items: history pagination failures cannot prevent slot recovery. Confirmed active
+turns keep their slots and are not interrupted at startup. Confirmed idle threads
+and authoritative missing rollouts settle as interrupted/recoverable; records,
+branches and worktrees remain. In pinned Codex 0.164.0, only the structured
+`-32600` response `no rollout found for thread id <id>` from resume establishes
+absence. `thread not loaded`, authentication failures, timeouts and other RPC
+errors remain unresolved, retaining capacity.
+
+An uncertain creation without an ID is settled only after initialization confirms
+a fresh runtime, or cleanup of the process that received creation. A failed
+creation against the current process remains reserved. Recovery never retries
+thread creation, turns or approvals and never resets the shared runtime.
+Settlement invalidates approval handles and persists status before releasing
+capacity. Stale notifications cannot reactivate a settled reservation.
+**Stop all agents** uses the same serialized reconciliation, interrupts current
+active turn IDs, and checks execution again. An interrupt acknowledgment alone
+does not free capacity. Unresolved executions remain visible and can be retried
+through [board settings](tickets.md#agentic-ticket-board).
+
 Threads use `danger-full-access` and disabled Codex subagent spawning. Start and
 resume use `on-request` approvals; each submitted turn applies its chat's selected
 model and permission mode. `Ask` uses `on-request` with the `user` reviewer,

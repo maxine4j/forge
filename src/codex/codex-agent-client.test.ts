@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 
 import type { ICodexAgentConnection } from "../accounts/codex-connection.ts";
+import { CodexRpcError } from "../accounts/codex-connection.ts";
 import { CodexAgentClient } from "./codex-agent-client.ts";
 
 const setup = (tracker?: { track: ReturnType<typeof vi.fn> }) => {
@@ -8,6 +9,7 @@ const setup = (tracker?: { track: ReturnType<typeof vi.fn> }) => {
 	let request: (id: string | number, method: string, params: unknown) => boolean = () => false;
 	let sequence = 0;
 	let requestSequence = 0;
+	let epoch = 0;
 	const rpc = vi.fn(async (method: string, params: unknown): Promise<unknown> => {
 		if (method === "thread/start")
 			return {
@@ -55,6 +57,7 @@ const setup = (tracker?: { track: ReturnType<typeof vi.fn> }) => {
 	});
 	const respond = vi.fn();
 	const connection: ICodexAgentConnection = {
+		executionEpoch: () => epoch,
 		initialize: async () => {},
 		restart: async () => {},
 		close: async () => {},
@@ -78,10 +81,74 @@ const setup = (tracker?: { track: ReturnType<typeof vi.fn> }) => {
 		),
 		rpc,
 		respond,
-		notify: (method: string, params: unknown) => notify(method, params),
+		notify: (method: string, params: unknown) => {
+			if (method === "connection/lost") epoch++;
+			notify(method, params);
+		},
 		request: (id: string | number, method: string, params: unknown) => request(id, method, params),
 	};
 };
+
+test.each([
+	[new CodexRpcError(-32600, "no rollout found for thread id codex-1"), "missing"],
+	[new CodexRpcError(-32600, "thread not loaded: codex-1"), "unavailable"],
+	[new CodexRpcError(-32603, "no rollout found for thread id codex-1"), "unavailable"],
+	[new CodexRpcError(-32600, "authentication required"), "unavailable"],
+	[new Error("request deadline exceeded"), "unavailable"],
+])("reconciliation requires authoritative missing-thread evidence: %s", async (error, state) => {
+	const f = setup();
+	f.rpc.mockRejectedValueOnce(error);
+	expect(await f.client.reconcile("codex-1", "/data/worktrees/one")).toEqual({ state });
+});
+
+test("inactive execution settles independently of failing history and ignores stale notifications", async () => {
+	const f = setup();
+	const id = await f.client.start("/data/worktrees/one");
+	await f.client.send(id, "/data/worktrees/one", "Work");
+	const rpc = f.rpc.getMockImplementation()!;
+	f.rpc.mockImplementation(async (method, params) => {
+		if (method === "thread/items/list") throw new Error("history unavailable");
+		return rpc(method, params);
+	});
+	expect(await f.client.reconcile(id, "/data/worktrees/one")).toEqual({ state: "inactive" });
+	expect(f.rpc.mock.calls.some(([method]) => method === "thread/items/list")).toBe(false);
+	f.notify("turn/started", { threadId: id, turn: { id: "turn-1", status: "inProgress", items: [] } });
+	f.notify("thread/status/changed", { threadId: id, status: { type: "notLoaded" } });
+	expect(f.client.read(id).status).toBe("interrupted");
+	// A later history load must not replace the settled execution with historical completion.
+	f.rpc.mockImplementation(rpc);
+	expect((await f.client.resume(id, "/data/worktrees/one")).status).toBe("interrupted");
+});
+
+test("ambiguous creation needs process lifecycle evidence before releasing an unidentified slot", async () => {
+	const f = setup();
+	f.rpc.mockRejectedValueOnce(new Error("ambiguous creation"));
+	await expect(f.client.start("/data/worktrees/one")).rejects.toThrow("agent-unavailable");
+	expect(await f.client.reconcile()).toEqual({ state: "unavailable" });
+	f.notify("connection/lost", {});
+	expect(await f.client.reconcile()).toEqual({ state: "inactive" });
+	expect(f.rpc).toHaveBeenCalledTimes(1);
+});
+
+test("active reconciliation uses the current turn; interruption alone retains execution", async () => {
+	const f = setup();
+	f.rpc
+		.mockResolvedValueOnce({
+			thread: {
+				id: "codex-1",
+				cwd: "/data/worktrees/one",
+				historyMode: "paginated",
+				status: { type: "active" },
+				turns: [],
+			},
+		})
+		.mockResolvedValueOnce({ data: [{ id: "current", status: "inProgress", items: [] }], nextCursor: null });
+	expect(await f.client.reconcile("codex-1", "/data/worktrees/one")).toEqual({ state: "active", turnId: "current" });
+	await f.client.interrupt("codex-1", "current");
+	expect(f.client.read("codex-1").status).toBe("running");
+	f.notify("turn/completed", { threadId: "codex-1", turn: { id: "current", status: "interrupted", items: [] } });
+	expect(f.client.read("codex-1").status).toBe("interrupted");
+});
 
 test("registers usage attribution and the runtime default model before submitting the turn", async () => {
 	const track = vi.fn();
@@ -386,7 +453,7 @@ test("starts independent threads without an inner sandbox, streams items, interr
 	notify("connection/lost", {});
 	expect(client.read(other).status).toBe("uncertain");
 	expect(await client.resume(id, "/data/worktrees/one")).toMatchObject({
-		status: "completed",
+		status: "interrupted",
 		items: [{ text: "Previous answer" }],
 	});
 	expect(rpc).toHaveBeenCalledWith(
@@ -691,7 +758,7 @@ test("an uncertain resume response invalidates already pending approval callback
 	expect(() => client.reply(id, { requestId, decision: "accept" })).toThrow("agent-conflict");
 });
 
-test("resume retains newer live completion and connection-loss notifications", async () => {
+test("resume retains newer live completion through subsequent connection loss", async () => {
 	const { client, rpc, notify } = setup();
 	const id = await client.start("/data/worktrees/one");
 	const resumeResponse = {
@@ -715,5 +782,5 @@ test("resume retains newer live completion and connection-loss notifications", a
 		notify("connection/lost", {});
 		return { data: [], nextCursor: null };
 	});
-	expect((await client.resume(id, "/data/worktrees/one")).status).toBe("uncertain");
+	expect((await client.resume(id, "/data/worktrees/one")).status).toBe("completed");
 });

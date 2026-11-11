@@ -382,6 +382,29 @@ test("an ambiguous follow-up cannot recover the previous plan as a new revision"
 	await expect(f.service.approve(actor, ticket, 1)).rejects.toThrow("ticket-conflict");
 });
 
+test.each(["failed", "interrupted"] as const)(
+	"%s execution without a turn ID leaves recovery and preserves work",
+	async (status) => {
+		const f = fixture();
+		const ticket = f.create();
+		await f.service.move(actor, ticket, { status: "todo" });
+		await f.service.tick(actor);
+		const job = f.jobs.get(ticket.id)!;
+		const saved = { ...job };
+		job.state = "uncertain";
+		job.turnId = undefined;
+		f.agents.get.mockResolvedValueOnce({ thread: { status }, items: [], requests: [], truncated: false } as never);
+		await f.service.tick(actor);
+		expect(f.jobs.get(ticket.id)).toMatchObject({
+			state: "failed",
+			workspaceId: saved.workspaceId,
+			plannerId: saved.plannerId,
+		});
+		expect(f.agents.dispatch).toHaveBeenCalledTimes(1);
+		expect(f.merges.merge).not.toHaveBeenCalled();
+	},
+);
+
 test("a completed planning turn without a native plan requires attention", async () => {
 	const f = fixture();
 	const ticket = f.create();

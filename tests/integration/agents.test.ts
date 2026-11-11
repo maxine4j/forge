@@ -124,6 +124,39 @@ test("real Git/SQLite and a stdio peer run concurrent agents only in owned workt
 		await agents.shutdown();
 		await store.recover();
 		expect((await store.get(two.thread.id))?.status).toBe("uncertain");
+		const missingId = randomUUID();
+		await store.insert({
+			...(await store.get(two.thread.id))!,
+			id: missingId,
+			codexId: randomUUID(),
+			turnId: undefined,
+		});
+		let recoveredPool = new AgentExecutionPool();
+		const restart = async () => {
+			await agents!.shutdown();
+			await store.recover();
+			recoveredPool = new AgentExecutionPool();
+			agents = new AgentService(
+				store,
+				new CodexAgentClient(connection, files.realpath, randomUUID),
+				workspaces,
+				projects,
+				access,
+				randomUUID,
+				() => new Date(),
+				recoveredPool,
+			);
+			await agents.seed(owner);
+			await agents.recover(owner);
+		};
+		await restart();
+		expect((await store.get(missingId))?.status).toBe("interrupted");
+		expect(recoveredPool.activeIds()).toEqual([two.thread.id]);
+		expect(await agents.stopAll(owner)).toEqual({ requested: 1, recovered: 1, failed: 0 });
+		expect((await store.get(two.thread.id))?.status).toBe("interrupted");
+		await restart();
+		expect(recoveredPool.activeIds()).toEqual([]);
+		expect((await store.get(two.thread.id))?.status).toBe("interrupted");
 		expect(await files.readFile(join(paths[0]!, ".git"))).toContain("gitdir:");
 	} finally {
 		await agents?.shutdown();
@@ -174,6 +207,10 @@ test("pinned Codex starts and resumes a Plan mode turn without an inner sandbox 
 		const client = new CodexAgentClient(connection, files.realpath, randomUUID);
 		await files.writeFile(join(path, "probe.ts"), "export const probe = true;\n");
 		expect((await client.options(path)).models.length).toBeGreaterThan(0);
+		expect(await client.reconcile()).toEqual({ state: "inactive" });
+		expect(await new CodexAgentClient(connection, files.realpath, randomUUID).reconcile()).toEqual({
+			state: "unavailable",
+		});
 		expect(await client.files(path, "probe")).toContain("probe.ts");
 		const rpc = vi.spyOn(connection, "request");
 		const id = await client.start(path);
@@ -220,6 +257,8 @@ test("pinned Codex starts and resumes a Plan mode turn without an inner sandbox 
 			sandbox: { type: "dangerFullAccess" },
 			approvalPolicy: "on-request",
 		});
+		expect(await client.reconcile(id, path)).toEqual({ state: "inactive" });
+		expect(await client.reconcile(randomUUID(), path)).toEqual({ state: "missing" });
 	} finally {
 		await connection.close();
 		await git.close();

@@ -1,7 +1,7 @@
 import { expect, test, vi } from "vitest";
 
 import { AccessService } from "../auth/access-service.ts";
-import type { AgentRuntimeView } from "../codex/types.ts";
+import type { AgentRuntimeView, ExecutionReconciliation } from "../codex/types.ts";
 import type { IProjectService } from "../projects/project-service.ts";
 import { AgentExecutionPool } from "./agent-execution-pool.ts";
 import { AgentService, type IAgentWorkspaces } from "./agent-service.ts";
@@ -25,7 +25,7 @@ const setup = () => {
 			createdAt,
 		})),
 		create: vi.fn(),
-		list: vi.fn(),
+		list: vi.fn(async () => [{ id: projectId, name: "Project", status: "ready" as const, createdAt }]),
 		retry: vi.fn(),
 		recover: vi.fn(),
 	};
@@ -64,6 +64,12 @@ const setup = () => {
 		})),
 	};
 	const client = {
+		reconcile: vi.fn<(key?: string) => Promise<ExecutionReconciliation>>(async (key) => {
+			const view = key ? views.get(key) : undefined;
+			return view && ["running", "waiting"].includes(view.status)
+				? { state: "active" as const, turnId: view.turnId! }
+				: { state: "inactive" as const };
+		}),
 		steer: vi.fn(async (_id: string, _turnId: string, _text: string) => {}),
 		options: vi.fn(async () => ({
 			models: [{ id: "test-model", name: "Test model", isDefault: true }],
@@ -125,8 +131,69 @@ const setup = () => {
 		() => new Date(createdAt),
 		new AgentExecutionPool(),
 	);
-	return { service, client, workspaces, records, views, changed: (key: string) => changed(key) };
+	return { service, client, store, workspaces, records, views, changed: (key: string) => changed(key) };
 };
+
+test("repeated stop reconciles uncertain slots and reports acknowledgments as unresolved", async () => {
+	const f = setup();
+	const { thread } = await f.service.create(owner, projectId, "Chat");
+	await f.service.send(owner, thread.id, "Work");
+	f.records.get(thread.id)!.status = "uncertain";
+	expect(await f.service.stopAll(owner)).toEqual({ requested: 1, recovered: 0, failed: 1 });
+	f.views.get("codex-1")!.status = "interrupted";
+	expect(await f.service.stopAll(owner)).toEqual({ requested: 0, recovered: 1, failed: 0 });
+	expect(f.records.get(thread.id)?.status).toBe("interrupted");
+	expect(await f.service.stopAll(owner)).toEqual({ requested: 0, recovered: 0, failed: 0 });
+});
+
+test("startup recovers unidentified creation only with lifecycle evidence and never dispatches it", async () => {
+	const f = setup();
+	const { thread } = await f.service.create(owner, projectId, "Ambiguous");
+	f.records.get(thread.id)!.status = "uncertain";
+	await f.service.seed(owner);
+	f.client.reconcile.mockResolvedValueOnce({ state: "unavailable" });
+	await f.service.recover(owner);
+	expect(f.records.get(thread.id)?.status).toBe("uncertain");
+	await f.service.recover(owner);
+	expect(f.records.get(thread.id)?.status).toBe("interrupted");
+	expect(f.client.start).not.toHaveBeenCalled();
+	expect(f.client.send).not.toHaveBeenCalled();
+	expect(f.records.get(thread.id)?.workspaceId).toBe(thread.workspaceId);
+});
+
+test("persistence failure retains a recovered reservation for retry", async () => {
+	const f = setup();
+	const { thread } = await f.service.create(owner, projectId, "Chat");
+	await f.service.send(owner, thread.id, "Work");
+	f.views.get("codex-1")!.status = "interrupted";
+	const update = vi.spyOn(f.store, "update").mockRejectedValueOnce(new Error("disk unavailable"));
+	expect(await f.service.stopAll(owner)).toEqual({ requested: 0, recovered: 0, failed: 1 });
+	expect(f.records.get(thread.id)?.status).toBe("running");
+	update.mockRestore();
+	expect(await f.service.stopAll(owner)).toEqual({ requested: 0, recovered: 1, failed: 0 });
+});
+
+test("standalone submissions cannot race an ongoing stop", async () => {
+	const f = setup();
+	const running = await f.service.create(owner, projectId, "Running");
+	const idle = await f.service.create(owner, projectId, "Idle");
+	await f.service.send(owner, running.thread.id, "Work");
+	const entered = Promise.withResolvers<void>();
+	const proceed = Promise.withResolvers<void>();
+	f.client.reconcile.mockImplementationOnce(async () => {
+		entered.resolve();
+		await proceed.promise;
+		return { state: "active", turnId: "turn" };
+	});
+	const stop = f.service.stopAll(owner);
+	await entered.promise;
+	await expect(f.service.send(owner, idle.thread.id, "Race")).rejects.toThrow("agent-capacity");
+	proceed.resolve();
+	await stop;
+	expect(f.client.send).toHaveBeenCalledTimes(1);
+	await f.service.send(owner, idle.thread.id, "Explicit submission after stop");
+	expect(f.client.send).toHaveBeenCalledTimes(2);
+});
 
 test("completed managed conversations load history and saved context after worktree removal", async () => {
 	const f = setup();
@@ -213,7 +280,7 @@ test("stop all interrupts both chat and ticket turns and reports individual fail
 	});
 	await expect(service.stopAll({ username: "outsider" })).rejects.toThrow("Access denied");
 	expect(client.interrupt).not.toHaveBeenCalled();
-	expect(await service.stopAll(owner)).toEqual({ requested: 1, failed: 1 });
+	expect(await service.stopAll(owner)).toEqual({ requested: 1, recovered: 1, failed: 1 });
 	expect(client.interrupt.mock.calls).toEqual([
 		["codex-1", "turn"],
 		["codex-2", "turn"],
@@ -247,7 +314,7 @@ test("a stop during ticket setup holds the turn before sending it to Codex", asy
 	const stopped = service.stopAll(owner);
 	proceed.resolve();
 	await held;
-	expect(await stopped).toEqual({ requested: 0, failed: 0 });
+	expect(await stopped).toEqual({ requested: 0, recovered: 0, failed: 0 });
 	expect(client.send).not.toHaveBeenCalled();
 	expect((await service.get(owner, thread.id)).thread.status).toBe("idle");
 	await service.shutdown();

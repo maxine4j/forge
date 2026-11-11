@@ -23,6 +23,7 @@ export type BoardSettingsUpdate = z.infer<typeof boardSettingsUpdateSchema>;
 export const boardStopSchema = z.strictObject({
 	settings: boardSettingsSchema,
 	requested: z.int().nonnegative(),
+	recovered: z.int().nonnegative(),
 	failed: z.int().nonnegative(),
 });
 export type BoardStop = z.infer<typeof boardStopSchema>;

@@ -52,7 +52,14 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 			if (path === "/api/board/settings/stop") {
 				stopRequests++;
 				boardSettings = { ...boardSettings, dispatch: "stopped" };
-				return route.fulfill({ json: { settings: boardSettings, requested: 2, failed: 1 } });
+				return route.fulfill({
+					json: {
+						settings: boardSettings,
+						requested: stopRequests === 1 ? 2 : 0,
+						recovered: 1,
+						failed: stopRequests === 1 ? 1 : 0,
+					},
+				});
 			}
 			if (path.endsWith("/workflow") || path.endsWith("/messages") || path.endsWith("/approve")) {
 				if (path.endsWith("/messages")) messages++;
@@ -314,9 +321,13 @@ test("board settings save the slider and control pause, stop and resume", async 
 	expect(fixture.stopRequests()).toBe(0);
 	await modal.getByRole("button", { name: "Stop all agents" }).click();
 	await expect(modal.getByRole("alert")).toHaveText(
-		"Interruption requested for 2 agents. 1 agent could not be interrupted.",
+		"Interruption requested for 2 agents. Slots recovered: 1. 1 execution remains unresolved. Retry Stop all agents to reconcile again.",
 	);
 	expect(fixture.stopRequests()).toBe(1);
+	await expect(modal.getByRole("button", { name: "Stop all agents" })).toBeEnabled();
+	await modal.getByRole("button", { name: "Stop all agents" }).click();
+	await expect.poll(fixture.stopRequests).toBe(2);
+	await expect(modal.getByRole("status")).toHaveText("Interruption requested for 0 agents. Slots recovered: 1.");
 	await modal.getByRole("button", { name: "Resume ticket dispatch" }).click();
 	await expect(modal.getByRole("status")).toHaveText("Ticket dispatch resumed.");
 	await modal.getByRole("button", { name: "Close board settings" }).click();

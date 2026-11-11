@@ -61,10 +61,10 @@ export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close:
 		act(async () => {
 			const result = await api.read("board/settings/stop", boardStopSchema, "POST");
 			setSettings(result.settings);
-			const message = `Interruption requested for ${result.requested} ${result.requested === 1 ? "agent" : "agents"}.`;
+			const message = `Interruption requested for ${result.requested} ${result.requested === 1 ? "agent" : "agents"}. Slots recovered: ${result.recovered}.`;
 			if (result.failed)
 				setError(
-					`${message} ${result.failed} ${result.failed === 1 ? "agent" : "agents"} could not be interrupted.`,
+					`${message} ${result.failed} ${result.failed === 1 ? "execution remains" : "executions remain"} unresolved. Retry Stop all agents to reconcile again.`,
 				);
 			else setNotice(message);
 		});

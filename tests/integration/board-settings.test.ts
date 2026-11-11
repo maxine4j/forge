@@ -22,7 +22,7 @@ test("owner can adjust and persist board dispatch and capacity and stop active a
 	let db = new SqliteDatabase(path);
 	const access = new AccessService({ owner: "owner", origin: "https://forge.example" });
 	const pool = new AgentExecutionPool();
-	const agents = { stopAll: vi.fn(async () => ({ requested: 2, failed: 1 })) };
+	const agents = { stopAll: vi.fn(async () => ({ requested: 2, recovered: 1, failed: 1 })) };
 	const wake = vi.fn();
 	const settingsService = async () => {
 		await db.initialize();
@@ -67,6 +67,7 @@ test("owner can adjust and persist board dispatch and capacity and stop active a
 		expect(await (await request("/stop", "POST")).json()).toEqual({
 			settings: { dispatch: "stopped", maxAgents: 1 },
 			requested: 2,
+			recovered: 1,
 			failed: 1,
 		});
 		expect(agents.stopAll).toHaveBeenCalledWith({ username: "owner" });

@@ -182,7 +182,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				const ticket = await this.tickets.get(job.ticketId);
 				if (!ticket || ticket.archivedAt || ticket.status === "backlog" || ticket.status === "done") continue;
 				try {
-					if (job.state === "running") await this.observe(actor, job);
+					if (["running", "uncertain", "dispatching"].includes(job.state)) await this.observe(actor, job);
 					else if (job.state === "merge-queued") await this.merge(actor, job);
 					else if (job.state === "queued" && this.canDispatch(ticket) && this.pool.available())
 						await this.dispatch(actor, ticket, job);
@@ -225,6 +225,11 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				await this.store.save({ ...job, state: "uncertain" });
 				if (!id) continue;
 				try {
+					const { thread } = await this.agents.get(actor, id);
+					if (["interrupted", "failed"].includes(thread.status)) {
+						await this.store.save({ ...job, state: "failed" });
+						continue;
+					}
 					await this.agents.resume(actor, id);
 					await this.observe(actor, { ...job, state: "uncertain" });
 				} catch (err) {
@@ -309,6 +314,10 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		const { thread } = await this.agents.get(actor, id);
 		if (thread.status === "uncertain") {
 			await this.store.save({ ...job, state: "uncertain" });
+			return;
+		}
+		if (["interrupted", "failed"].includes(thread.status)) {
+			await this.store.save({ ...job, state: "failed" });
 			return;
 		}
 		if (!thread.turnId || thread.turnId === job.previousTurnId || (job.turnId && thread.turnId !== job.turnId)) {

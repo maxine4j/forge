@@ -10,11 +10,13 @@ import {
 import { z } from "zod";
 
 import type { ICodexAgentConnection } from "../accounts/codex-connection.ts";
+import { CodexRpcError } from "../accounts/codex-connection.ts";
 import { AgentError } from "../agents/errors.ts";
 import type { UsageScope } from "../cost/types.ts";
 import type { ICodexUsageTracker } from "./codex-usage-client.ts";
-import type { AgentRuntimeView } from "./types.ts";
+import type { AgentRuntimeView, ExecutionReconciliation } from "./types.ts";
 export interface ICodexAgentClient {
+	reconcile(id?: string, path?: string): Promise<ExecutionReconciliation>;
 	/** Uses persistent Codex history. Failures throw AgentError; requests are never replayed. */
 	start(path: string): Promise<string>;
 	resume(id: string, path: string): Promise<AgentRuntimeView>;
@@ -37,12 +39,16 @@ export class CodexAgentClient implements ICodexAgentClient {
 	private readonly revisions = new Map<string, number>();
 	private readonly resuming = new Set<string>();
 	private readonly models = new Map<string, string>();
+	private readonly creations = new Map<object, number>();
+	private readonly settled = new Set<string>();
+	private readonly initialEpoch: number;
 	constructor(
 		private readonly connection: ICodexAgentConnection,
 		private readonly realpath: (path: string) => Promise<string>,
 		private readonly generateId: () => string,
 		private readonly usageTracker?: ICodexUsageTracker,
 	) {
+		this.initialEpoch = connection.executionEpoch();
 		connection.subscribe((method, params) => this.notification(method, params));
 		connection.subscribeRequests((id, method, params) => this.serverRequest(id, method, params));
 	}
@@ -50,14 +56,89 @@ export class CodexAgentClient implements ICodexAgentClient {
 		return this.guard(async () => {
 			path = await this.realpath(path);
 			await this.connection.initialize();
+			const creation = {};
+			this.creations.set(creation, this.connection.executionEpoch());
 			const result = threadResponse.parse(
 				await this.connection.request("thread/start", this.runtimeOptions(path)),
 			);
 			if (result.thread.cwd !== path) throw new Error("Codex workspace identity mismatch");
+			this.creations.delete(creation);
 			this.views.set(result.thread.id, this.hydrate(result.thread));
 			if (result.model) this.models.set(result.thread.id, result.model);
 			return result.thread.id;
 		});
+	}
+	/** Execution metadata is independent of item/history pagination. Never replays input. */
+	async reconcile(id?: string, path?: string): Promise<ExecutionReconciliation> {
+		try {
+			await this.connection.initialize(); // also awaits cleanup of a lost process
+			if (!id)
+				return {
+					state:
+						[...this.creations.values()].includes(this.connection.executionEpoch())
+						|| (this.creations.size === 0 && this.connection.executionEpoch() === this.initialEpoch)
+							? "unavailable"
+							: "inactive",
+				};
+			if (!path) return { state: "unavailable" };
+			path = await this.realpath(path);
+			let thread: z.infer<typeof threadSchema>;
+			try {
+				const result = threadResponse.parse(
+					await this.connection.request("thread/resume", {
+						threadId: id,
+						...this.runtimeOptions(path),
+						excludeTurns: true,
+					}),
+				);
+				thread = result.thread;
+			} catch (error) {
+				// Verified against 0.164.0: `thread not loaded` is NOT missing.
+				if (
+					error instanceof CodexRpcError
+					&& error.code === -32600
+					&& error.message === `no rollout found for thread id ${id}`
+				) {
+					this.settle(id);
+					return { state: "missing" };
+				}
+				throw error;
+			}
+			if (thread.id !== id || thread.cwd !== path) throw new Error("Codex workspace identity mismatch");
+			if (thread.status.type === "idle") {
+				this.settle(id);
+				return { state: "inactive" };
+			}
+			if (thread.status.type !== "active") return { state: "unavailable" };
+			const page = z.object({ data: z.array(turnSchema), nextCursor: z.string().nullable() }).parse(
+				await this.connection.request("thread/turns/list", {
+					threadId: id,
+					limit: 20,
+					sortDirection: "desc",
+					itemsView: "notLoaded",
+				}),
+			);
+			const turn = page.data.find((turn) => turn.status === "inProgress");
+			if (!turn) return { state: "unavailable" };
+			this.settled.delete(id);
+			const view = this.views.get(id) ?? this.hydrate(thread);
+			view.status = view.requests.length ? "waiting" : "running";
+			view.turnId = turn.id;
+			this.views.set(id, view);
+			return { state: "active", turnId: turn.id };
+		} catch (err) {
+			this.log.warn({ err }, "Could not establish Codex execution state");
+			return { state: "unavailable" };
+		}
+	}
+	private settle(id: string): void {
+		const view = this.views.get(id) ?? { status: "interrupted", items: [], requests: [], truncated: false };
+		view.status = "interrupted";
+		view.requests = [];
+		delete view.plan;
+		for (const [key, request] of this.pending) if (request.threadId === id) this.pending.delete(key);
+		this.views.set(id, view);
+		this.settled.add(id);
 	}
 	async resume(id: string, path: string): Promise<AgentRuntimeView> {
 		this.resuming.add(id);
@@ -81,6 +162,11 @@ export class CodexAgentClient implements ICodexAgentClient {
 			else this.models.delete(id);
 			const view = await this.history(result.thread);
 			const live = this.views.get(id)!;
+			if (this.settled.has(id)) {
+				view.status = live.status;
+				view.turnId = live.turnId;
+				if (live.status !== "completed") delete view.plan;
+			}
 			view.requests = live.requests;
 			view.contextWindow = live.contextWindow;
 			if (this.revisions.get(id) !== revision) {
@@ -91,7 +177,10 @@ export class CodexAgentClient implements ICodexAgentClient {
 				view.truncated ||= live.truncated;
 				for (const item of live.items) if (before.get(item.id) !== item.text) this.put(view, item);
 			}
-			if (["systemError", "notLoaded"].includes(result.thread.status.type) || view.status === "uncertain") {
+			if (
+				!this.settled.has(id)
+				&& (["systemError", "notLoaded"].includes(result.thread.status.type) || view.status === "uncertain")
+			) {
 				view.status = "uncertain";
 				view.requests = [];
 				for (const [key, request] of this.pending) if (request.threadId === id) this.pending.delete(key);
@@ -108,6 +197,12 @@ export class CodexAgentClient implements ICodexAgentClient {
 			);
 			if (thread.id !== id) throw new Error("Codex thread identity mismatch");
 			const view = await this.history(thread);
+			if (this.settled.has(id)) {
+				const settled = this.views.get(id)!;
+				view.status = settled.status;
+				view.turnId = settled.turnId;
+				if (settled.status !== "completed") delete view.plan;
+			}
 			view.contextWindow = this.views.get(id)?.contextWindow;
 			this.views.set(id, view);
 			return this.read(id);
@@ -192,6 +287,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			const model = settings?.model ?? this.models.get(id);
 			if (usage?.phase === "planning" && !model) throw new AgentError("agent-unavailable");
 			view.status = "running";
+			this.settled.delete(id);
 			delete view.turnId;
 			delete view.plan;
 			try {
@@ -495,6 +591,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 		if (method === "connection/lost") {
 			this.pending.clear();
 			for (const [id, view] of this.views) {
+				if (this.settled.has(id)) continue;
 				if (!this.resuming.has(id) && ["idle", "completed", "failed", "interrupted"].includes(view.status))
 					continue;
 				view.status = "uncertain";
@@ -506,6 +603,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 		const envelope = z.object({ threadId: z.string() }).safeParse(params);
 		if (!envelope.success) return;
 		const id = envelope.data.threadId;
+		if (this.settled.has(id)) return;
 		const view = this.views.get(id);
 		if (!view) return;
 		try {
@@ -534,10 +632,12 @@ export class CodexAgentClient implements ICodexAgentClient {
 				const error = z.object({ turnId: z.string(), willRetry: z.boolean() }).parse(params);
 				if (view.turnId && error.turnId !== view.turnId) return;
 				if (!error.willRetry) {
+					this.settled.add(id);
 					view.turnId = error.turnId;
 					view.status = "failed";
 					this.finishTools(view, "failed");
 					view.requests = [];
+					for (const [key, request] of this.pending) if (request.threadId === id) this.pending.delete(key);
 				}
 			} else if (method === "turn/started" || method === "turn/completed") {
 				const { turn } = z.object({ turn: turnSchema }).parse(params);
@@ -549,6 +649,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 				view.status = this.status(turn.status);
 				for (const item of turn.items) this.item(view, item, turn.status === "completed");
 				if (method === "turn/completed") {
+					this.settled.add(id);
 					this.finishTools(view, view.status);
 					view.requests = [];
 					for (const [key, request] of this.pending) if (request.threadId === id) this.pending.delete(key);
@@ -609,7 +710,13 @@ export class CodexAgentClient implements ICodexAgentClient {
 				})
 				.parse(params);
 			const view = this.views.get(raw.threadId);
-			if (!view || view.requests.length >= 32 || (view.turnId && view.turnId !== raw.turnId)) return false;
+			if (
+				!view
+				|| this.settled.has(raw.threadId)
+				|| view.requests.length >= 32
+				|| (view.turnId && view.turnId !== raw.turnId)
+			)
+				return false;
 			const id = this.generateId();
 			const request: AgentRequest = {
 				id,
