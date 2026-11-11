@@ -9,6 +9,10 @@ import { describe, expect, it, vi } from "vitest";
 import { TerminalInventory } from "../../src/terminal/terminal-inventory.ts";
 import { TerminalProcess } from "../../src/terminal/terminal-process.ts";
 
+// forkpty can return before the child sets up its session and controlling terminal.
+const pendingPtyStat = (path: string): string =>
+	`${path.split("/").at(-2)} (bash) S 1 1 1 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 7 0`;
+
 // The supported PTY runtime is Linux; run these via pnpm test:containers integration on macOS.
 describe.skipIf(process.platform !== "linux")("real PTY", () => {
 	it("runs curated Bash in the verified directory, resizes and awaits exit", async () => {
@@ -77,12 +81,16 @@ describe.skipIf(process.platform !== "linux")("real PTY", () => {
 	it("cleans same-session background jobs ignoring HUP after natural leader exit", async () => {
 		const path = await mkdtemp(join(tmpdir(), "forge-pty-natural-"));
 		let output = "";
-		const child = await new TerminalProcess(
-			process.env["PATH"] ?? "",
-			sleep,
-			new TerminalInventory(files),
-			process.platform,
-		).spawn({
+		let firstRead = true;
+		const inventory = new TerminalInventory({
+			readdir: files.readdir,
+			readFile: async (path) => {
+				if (!firstRead) return files.readFile(path);
+				firstRead = false;
+				return pendingPtyStat(path);
+			},
+		});
+		const child = await new TerminalProcess(process.env["PATH"] ?? "", sleep, inventory, process.platform).spawn({
 			path,
 			cols: 80,
 			rows: 24,
@@ -102,6 +110,27 @@ describe.skipIf(process.platform !== "linux")("real PTY", () => {
 			});
 		} finally {
 			await child.stop();
+			await rm(path, { recursive: true, force: true });
+		}
+	});
+	it("stops the child when its PTY identity stays pending", async () => {
+		const path = await mkdtemp(join(tmpdir(), "forge-pty-pending-"));
+		const readFile = vi.fn(async (path: string) => pendingPtyStat(path));
+		const adapter = new TerminalProcess(
+			process.env["PATH"] ?? "",
+			sleep,
+			new TerminalInventory({ readdir: files.readdir, readFile }),
+			process.platform,
+		);
+		try {
+			await expect(adapter.spawn({ path, cols: 80, rows: 24, onOutput: () => {} })).rejects.toMatchObject({
+				code: "terminal-unavailable",
+			});
+			expect(readFile.mock.calls.length).toBeGreaterThan(1);
+			const statPath = readFile.mock.calls.at(0)?.at(0);
+			expect(statPath).toBeDefined();
+			if (statPath) expect(await files.readFile(statPath)).toBeUndefined();
+		} finally {
 			await rm(path, { recursive: true, force: true });
 		}
 	});

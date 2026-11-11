@@ -7,16 +7,17 @@ export interface ITerminalInventoryFiles {
 	readFile(path: string): Promise<string | undefined>;
 }
 export interface ITerminalInventory {
-	/** Captures Linux SID, controlling device, and leader start time. Throws on invalid identity. */
-	identify(pid: number): Promise<TerminalIdentity>;
+	/** Captures the leader identity, or returns undefined while session setup is pending. Throws on missing or invalid process data. */
+	identify(pid: number): Promise<TerminalIdentity | undefined>;
 	/** Only process groups in this session/device; rejects a reused session leader. */
 	groups(identity: TerminalIdentity, signal?: AbortSignal): Promise<Set<number>>;
 }
 export class TerminalInventory implements ITerminalInventory {
 	constructor(private readonly files: ITerminalInventoryFiles) {}
-	async identify(pid: number): Promise<TerminalIdentity> {
+	async identify(pid: number): Promise<TerminalIdentity | undefined> {
 		const entry = await this.entry(pid);
-		if (!entry || entry.sessionId !== pid || entry.tty === 0) throw new Error("Invalid PTY session identity");
+		if (!entry) throw new Error("Invalid PTY session identity");
+		if (entry.sessionId !== pid || entry.tty === 0) return undefined;
 		return { sessionId: pid, tty: entry.tty, started: entry.started };
 	}
 	async groups(identity: TerminalIdentity, signal?: AbortSignal): Promise<Set<number>> {

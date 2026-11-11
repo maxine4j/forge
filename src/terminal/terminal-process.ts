@@ -48,9 +48,9 @@ export class TerminalProcess implements ITerminalProcess {
 			});
 			let identity: TerminalIdentity;
 			try {
-				identity = await this.inventory.identify(child.pid);
+				identity = await this.startupIdentity(child.pid, exit);
 			} catch (cause) {
-				this.signal(child.pid, "SIGKILL");
+				if (!exited) this.signal(child.pid, "SIGKILL");
 				await this.bounded(exit);
 				throw cause;
 			}
@@ -100,6 +100,28 @@ export class TerminalProcess implements ITerminalProcess {
 			};
 		} catch (cause) {
 			throw new TerminalError("terminal-unavailable", { cause });
+		}
+	}
+	private async startupIdentity(pid: number, exit: Promise<number>): Promise<TerminalIdentity> {
+		const timer = new AbortController();
+		try {
+			const identity = await Promise.race([
+				this.pollIdentity(pid, timer.signal),
+				this.sleep(1000, timer.signal),
+				exit.then(() => undefined),
+			]);
+			if (!identity) throw new Error("PTY exited or timed out during session setup");
+			return identity;
+		} finally {
+			timer.abort();
+		}
+	}
+	private async pollIdentity(pid: number, signal: AbortSignal): Promise<TerminalIdentity> {
+		for (;;) {
+			signal.throwIfAborted();
+			const identity = await this.inventory.identify(pid);
+			if (identity) return identity;
+			await this.sleep(10, signal);
 		}
 	}
 	private async groups(identity: TerminalIdentity): Promise<Set<number>> {
