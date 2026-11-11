@@ -334,8 +334,8 @@ test("Agents opens the first chat and loads only selected histories without unce
 test("history loading blocks sending and coalesces refreshes; failures allow an explicit retry", async ({ page }) => {
 	const fixture = await setup(page);
 	await fixture.create();
+	await page.getByLabel("Message", { exact: true }).fill("Keep this draft");
 	const view = fixture.views[0]!;
-	view.thread.status = "uncertain";
 	let release = () => {};
 	const held = new Promise<void>((resolve) => {
 		release = resolve;
@@ -344,7 +344,7 @@ test("history loading blocks sending and coalesces refreshes; failures allow an 
 		await held;
 		await route.fallback();
 	});
-	await page.getByLabel("Message", { exact: true }).fill("Keep this draft");
+	view.thread.status = "uncertain";
 	await fixture.event();
 	await expect(page.getByText("Loading history…", { exact: true })).toBeVisible();
 	await expect(page.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
@@ -354,8 +354,8 @@ test("history loading blocks sending and coalesces refreshes; failures allow an 
 	release();
 	await expect(page.getByRole("alert")).toContainText("Could not load chat history");
 	const writes = fixture.writes.length;
-	await fixture.event("open");
 	const reads = fixture.reads();
+	await fixture.event("open");
 	await expect.poll(fixture.reads).toBeGreaterThan(reads);
 	expect(fixture.writes).toHaveLength(writes);
 	await expect(page.getByText("uncertain", { exact: true })).toHaveCount(0);
