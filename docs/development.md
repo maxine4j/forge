@@ -112,7 +112,8 @@ undeclared secret-file entries are not injected. Keep credentials out of literal
 descriptor values. Private-repository imports remain unsupported, including after
 GitHub account sign-in.
 Build locally with `pnpm image`. GitHub Actions publishes
-`ghcr.io/maxine4j/forge` after the checks pass. A push to `main` publishes
+`ghcr.io/maxine4j/forge` alongside the independent checks and image validation
+jobs. Publishing can succeed even when validation fails. A push to `main` publishes
 the full commit SHA and `latest`. A `vX.X.X` tag publishes the full SHA and
 release tag. The root descriptor selects the image by its full commit SHA.
 Configure the platform to read the descriptor from this repository and retain

@@ -48,7 +48,6 @@ jobs:
                   retention-days: 7
     publish:
         if: inputs.publish-image && github.event_name == 'push'
-        needs: [checks, image]
         runs-on: ubuntu-24.04
         permissions:
             contents: read
