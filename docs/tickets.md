@@ -148,8 +148,10 @@ interruption controls. Completed tickets and preview fixtures are read-only.
 The Chat composer shows a context ring for the current conversation when Codex
 reports a sample, with the latest used token count, percentage and model context
 limit. The last reported sample is retained across restarts.
-The timeline preserves the reading position and follows new activity when already
-near the bottom. One composer uses a ticket-level draft key, retaining unsent
+The timeline preserves the reading position across tabs and execution phases and
+uses the shared [chat following control](agents.md#following-chat-activity) to
+follow new activity or indicate unseen messages while paused.
+One composer uses a ticket-level draft key, retaining unsent
 text across approval and modal reopening within the board's browser memory.
 
 Messages during running implementation and rebase turns steer the known active

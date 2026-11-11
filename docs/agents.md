@@ -164,6 +164,22 @@ through a serialized, coalesced reader; selected chats recover newly uncertain
 state without replaying messages or approvals. No Markdown or tool HTML is
 executed from conversation text.
 
+### Following chat activity
+
+Standalone chats and ticket Chat timelines initially open at the bottom and follow
+new messages, streaming output and content or viewport resizing. Scrolling more
+than 80 pixels from the bottom pauses following and preserves the reading position.
+A circular down-arrow control floats above the bottom of the history viewport,
+outside its scrolling content and above the composer. New messages or changes to
+message text, including owner messages, make it pulse until the reader clicks
+“Scroll to latest” or manually returns within 80 pixels of the bottom. Either
+action clears unseen activity and resumes following. The control supports keyboard
+activation and visible focus; reduced-motion preferences use a static highlight.
+Initial history loading, identical polling snapshots, status changes and local
+tool expansion do not mark activity unseen. State belongs to each conversation in
+browser memory. Ticket tabs and planner-to-implementer transitions retain the
+timeline's paused reading position.
+
 The conversation follows the Codex desktop layout: right-aligned user bubbles,
 unboxed agent text and consecutive tool calls in one initially collapsed group.
 Each tool expands to its output and displays its actual runtime status when

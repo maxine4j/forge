@@ -105,7 +105,7 @@
 	min-height: 0;
 	flex: 1;
 }
-.agent-conversation > :not(.agent-messages),
+.agent-conversation > :not(.agent-history),
 .agent-sidebar > :not(nav) {
 	flex-shrink: 0;
 }
@@ -121,7 +121,50 @@
 .agent-actions {
 	justify-content: flex-start;
 }
+.agent-history {
+	position: relative;
+	display: flex;
+	min-width: 0;
+	min-height: 0;
+	flex: 1;
+}
+.agent-scroll-latest {
+	position: absolute;
+	bottom: 24px;
+	left: 50%;
+	transform: translateX(-50%);
+	width: 40px;
+	height: 40px;
+	border-radius: 50%;
+	display: grid;
+	place-items: center;
+	padding: 0;
+	background: #25262b;
+	color: #f0f0f2;
+	border: 1px solid #64666f;
+	box-shadow: 0 2px 8px #0006;
+}
+.agent-scroll-latest:focus-visible {
+	outline: 2px solid #82b7ff;
+	outline-offset: 3px;
+}
+.agent-scroll-unseen {
+	border-color: #82b7ff;
+	background: #30486b;
+	animation: agent-latest-pulse 1.5s ease-in-out infinite;
+}
+@keyframes agent-latest-pulse {
+	50% {
+		box-shadow: 0 0 0 6px #82b7ff50;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.agent-scroll-unseen {
+		animation: none;
+	}
+}
 .agent-messages {
+	min-width: 0;
 	min-height: 0;
 	flex: 1;
 	overflow-y: auto;

@@ -623,7 +623,11 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 		element.scrollTop = 80;
 	});
 	await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(80);
+	const latest = modal.getByRole("button", { name: "Scroll to latest", exact: true });
+	await expect(latest).toBeVisible();
+	await expect(latest).not.toHaveClass(/agent-scroll-unseen/);
 	await page.waitForTimeout(1200);
+	await expect(latest).not.toHaveClass(/agent-scroll-unseen/);
 	expect(await history.evaluate((element) => element.scrollTop)).toBe(80);
 	await modal.getByRole("tab", { name: "Details", exact: true }).click();
 	await modal.getByRole("tab", { name: "Chat", exact: true }).click();
@@ -641,6 +645,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	activity.push({ id: "working", role: "assistant", text: "Implementing filtering" });
 	await expect(modal.getByRole("button", { name: "Interrupt", exact: true })).toBeVisible();
 	await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(80);
+	await expect(latest).toHaveClass(/agent-scroll-unseen/);
 	await expect(message).toHaveValue("Retain this draft across approval");
 	await expect(message).toHaveCount(1);
 	await expect(history).toHaveCount(1);

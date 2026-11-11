@@ -4,7 +4,7 @@ import type { Page } from "@playwright/test";
 
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const createdAt = "2026-11-03T00:00:00.000Z";
-const setup = async (page: Page) => {
+const setup = async (page: Page, initialItems: AgentView["items"] = []) => {
 	const views: AgentView[] = [];
 	const writes: string[] = [];
 	const replies: unknown[] = [];
@@ -58,7 +58,7 @@ const setup = async (page: Page) => {
 							createdAt,
 							status: "idle",
 						},
-						items: [],
+						items: [...initialItems],
 						requests: [],
 						truncated: false,
 					};
@@ -407,6 +407,95 @@ test("one-time command and file approvals, clarification and truncation are visi
 		{ requestId: "input", answers: { scope: "Small" } },
 	]);
 });
+
+for (const width of [1280, 448]) {
+	test(`chat follows activity and exposes an accessible paused control at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 900 });
+		const initialItems: AgentView["items"] = Array.from({ length: 40 }, (_, i) => ({
+			id: `message-${i}`,
+			role: "assistant",
+			text: `Message ${i}\n${"Output ".repeat(40)}`,
+		}));
+		initialItems.unshift({
+			id: "tool",
+			role: "activity",
+			title: "Inspect files",
+			text: "Tool output\n".repeat(80),
+			status: "completed",
+		});
+		const fixture = await setup(page, initialItems);
+		await fixture.create();
+		const view = fixture.views[0]!;
+		const history = page.getByLabel("Conversation history", { exact: true });
+		const arrow = page.getByRole("button", { name: "Scroll to latest", exact: true });
+		const bottom = () => history.evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
+		await expect(history.locator("article")).toHaveCount(40);
+		await expect.poll(bottom).toBeLessThan(2);
+		view.items.push({ id: "stream", role: "assistant", text: "Streaming" });
+		await fixture.event();
+		await expect(page.getByText("Streaming", { exact: true })).toBeInViewport();
+		view.items.at(-1)!.text += "\nMore output".repeat(50);
+		await fixture.event();
+		await expect(history).toContainText("More output");
+		await expect.poll(bottom).toBeLessThan(2);
+		await page.setViewportSize({ width, height: 650 });
+		await history.evaluate(
+			() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))),
+		);
+		await expect.poll(bottom).toBeLessThan(2);
+		await history.evaluate((el) => {
+			el.scrollTop = 100;
+		});
+		await expect(arrow).toBeVisible();
+		await expect(arrow).not.toHaveClass(/agent-scroll-unseen/);
+		await history.locator(".agent-tool-group > summary").evaluate((el: HTMLElement) => el.click());
+		await expect(history.locator(".agent-tool-group")).toHaveAttribute("open", "");
+		await expect(arrow).not.toHaveClass(/agent-scroll-unseen/);
+		await expect.poll(() => history.evaluate((el) => el.scrollTop)).toBe(100);
+		const reads = fixture.reads();
+		view.thread.status = "running";
+		await fixture.event();
+		await expect.poll(fixture.reads).toBeGreaterThan(reads);
+		await expect(page.locator(".agent-chat-heading")).toContainText("running");
+		await expect(arrow).not.toHaveClass(/agent-scroll-unseen/);
+		await expect.poll(() => history.evaluate((el) => el.scrollTop)).toBe(100);
+		view.items.at(-1)!.text += "\nUnseen stream";
+		await fixture.event();
+		await expect(arrow).toHaveClass(/agent-scroll-unseen/);
+		await expect.poll(() => history.evaluate((el) => el.scrollTop)).toBe(100);
+		await expect(arrow).toHaveCSS("animation-name", "agent-latest-pulse");
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		await expect(arrow).toHaveCSS("animation-name", "none");
+		await arrow.focus();
+		await expect(arrow).toBeFocused();
+		await arrow.press("Enter");
+		await expect(arrow).toHaveCount(0);
+		await expect.poll(bottom).toBeLessThan(2);
+		await history.evaluate((el) => {
+			el.scrollTop = 100;
+		});
+		await expect(arrow).toBeVisible();
+		view.items.push({ id: "new", role: "user", text: "New message while paused" });
+		await fixture.event();
+		await expect(arrow).toHaveClass(/agent-scroll-unseen/);
+		await history.evaluate((el) => {
+			el.scrollTop = el.scrollHeight;
+		});
+		await expect(arrow).toHaveCount(0);
+		view.items.at(-1)!.text += "\nFollowing again".repeat(40);
+		await fixture.event();
+		await expect(history).toContainText("Following again");
+		await expect.poll(bottom).toBeLessThan(2);
+		await history.evaluate((el) => {
+			el.scrollTop = 100;
+		});
+		await expect(arrow).toBeVisible();
+		await expect(arrow).not.toHaveClass(/agent-scroll-unseen/);
+		await arrow.click();
+		await expect(arrow).toHaveCount(0);
+		await expect.poll(bottom).toBeLessThan(2);
+	});
+}
 
 for (const size of [
 	{ width: 1280, height: 900 },

@@ -7,7 +7,7 @@ import {
 	type AgentView,
 } from "@forge/contracts/agents";
 import { ticketWorkflowSchema, type TicketWorkflow } from "@forge/contracts/tickets";
-import { useEffect, useLayoutEffect, useId, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useLayoutEffect, useId, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate } from "react-router";
 
 import { ResourcePoller } from "../api/resource-poller.ts";
@@ -15,6 +15,14 @@ import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { resolveRoute } from "../navigation/routes.ts";
 import { AgentActivity } from "./agent-activity.tsx";
 import { AgentComposer } from "./agent-composer.tsx";
+
+type ConversationScroll = {
+	top: number;
+	follow: boolean;
+	unseen?: boolean;
+	activity?: Map<string, Map<string, string>>;
+};
+const TimelineActivity = createContext<((id: string, view: AgentView) => void) | undefined>(undefined);
 
 const RequestCard = ({
 	request,
@@ -161,13 +169,41 @@ export const Conversation = ({
 	planText?: string;
 	planAction?: ReactNode;
 	snapshots?: Map<string, AgentView>;
-	scrollState?: { top: number; follow: boolean };
+	scrollState?: ConversationScroll;
 }) => {
 	const [view, setView] = useState<AgentView | undefined>(() => snapshots?.get(id));
 	const [draft, setDraft] = useState(() => drafts?.get(draftKey) ?? "");
 	const messages = useRef<HTMLDivElement>(null);
 	const content = useRef<HTMLDivElement>(null);
-	const position = useRef(scrollState ?? { top: 0, follow: true });
+	const position = useRef<ConversationScroll>(scrollState ?? { top: 0, follow: true });
+	const [following, setFollowing] = useState(scrollState?.follow ?? true);
+	const [unseen, setUnseen] = useState(scrollState?.unseen ?? false);
+	const parentActivity = useContext(TimelineActivity);
+	const recordActivity = (threadId: string, value: AgentView) => {
+		const histories = (position.current.activity ??= new Map());
+		const previous = histories.get(threadId);
+		const next = new Map(value.items.map((item) => [item.id, item.text]));
+		if (
+			(previous || histories.size > 0)
+			&& value.items.some((item) => !previous?.has(item.id) || previous.get(item.id) !== item.text)
+		) {
+			if (!position.current.follow) {
+				position.current.unseen = true;
+				setUnseen(true);
+			}
+		}
+		histories.set(threadId, next);
+	};
+	useLayoutEffect(() => {
+		if (view) (historyOnly ? parentActivity : recordActivity)?.(id, view);
+	});
+	const resumeFollowing = () => {
+		position.current.follow = true;
+		position.current.unseen = false;
+		setFollowing(true);
+		setUnseen(false);
+		scroll();
+	};
 	const scroll = () => {
 		const element = messages.current;
 		if (element && element.clientHeight > 0)
@@ -179,6 +215,7 @@ export const Conversation = ({
 	useEffect(() => {
 		const observer = new ResizeObserver(scroll);
 		if (content.current) observer.observe(content.current);
+		if (messages.current) observer.observe(messages.current);
 		return () => observer.disconnect();
 	}, []);
 	const [error, setError] = useState("");
@@ -370,59 +407,99 @@ export const Conversation = ({
 				</p>
 			)}
 			{view?.truncated && <p className='agent-notice'>Some history or output was omitted.</p>}
-			<div
-				ref={messages}
-				onScroll={() => {
-					const element = messages.current;
-					if (element && element.clientHeight > 0) {
-						position.current.top = element.scrollTop;
-						position.current.follow = element.scrollHeight - element.scrollTop - element.clientHeight < 80;
-					}
-				}}
-				className='agent-messages'
-				tabIndex={0}
-				aria-label='Conversation history'
-			>
-				<div ref={content}>
-					{prefix}
-					{view
-						&& !messagePath
-						&& !loadingHistory
-						&& !historyFailed
-						&& status !== "uncertain"
-						&& !view.items.length && (
-							<p className='agent-empty'>
-								Start a conversation about this project. Each chat works in its own managed worktree.
-							</p>
-						)}
-					<AgentActivity items={view?.items ?? []} planText={planText} planAction={eligiblePlanAction} />
-					{planText && view && !loadingHistory && !view.items.some((item) => item.kind === "plan") && (
-						<AgentActivity
-							items={[{ id: "saved-plan", role: "assistant", kind: "plan", text: planText }]}
-							planText={planText}
-							planAction={eligiblePlanAction}
-						/>
-					)}
-					{suffix}
-					{active && (
-						<p
-							className={`agent-notice ${status === "running" ? "agent-working-highlight" : ""}`}
-							role='status'
-						>
-							{status === "waiting" ? "Waiting for your response" : "Codex is working…"}
-						</p>
-					)}
-					{!readOnly
-						&& view?.requests.map((request) => (
-							<RequestCard
-								key={request.id}
-								request={request}
-								drafts={drafts}
-								busy={busy || readOnly}
-								reply={(input) => act("replies", input)}
+			<div className='agent-history'>
+				<div
+					ref={messages}
+					onScroll={() => {
+						const element = messages.current;
+						if (element && element.clientHeight > 0) {
+							position.current.top = element.scrollTop;
+							position.current.follow =
+								element.scrollHeight - element.scrollTop - element.clientHeight < 80;
+							setFollowing(position.current.follow);
+							if (position.current.follow) {
+								position.current.unseen = false;
+								setUnseen(false);
+							}
+						}
+					}}
+					className='agent-messages'
+					tabIndex={0}
+					aria-label='Conversation history'
+				>
+					<div ref={content}>
+						<TimelineActivity.Provider value={recordActivity}>
+							{prefix}
+							{view
+								&& !messagePath
+								&& !loadingHistory
+								&& !historyFailed
+								&& status !== "uncertain"
+								&& !view.items.length && (
+									<p className='agent-empty'>
+										Start a conversation about this project. Each chat works in its own managed
+										worktree.
+									</p>
+								)}
+							<AgentActivity
+								items={view?.items ?? []}
+								planText={planText}
+								planAction={eligiblePlanAction}
 							/>
-						))}
+							{planText
+								&& view
+								&& !loadingHistory
+								&& !view.items.some((item) => item.kind === "plan") && (
+									<AgentActivity
+										items={[{ id: "saved-plan", role: "assistant", kind: "plan", text: planText }]}
+										planText={planText}
+										planAction={eligiblePlanAction}
+									/>
+								)}
+							{suffix}
+							{active && (
+								<p
+									className={`agent-notice ${status === "running" ? "agent-working-highlight" : ""}`}
+									role='status'
+								>
+									{status === "waiting" ? "Waiting for your response" : "Codex is working…"}
+								</p>
+							)}
+							{!readOnly
+								&& view?.requests.map((request) => (
+									<RequestCard
+										key={request.id}
+										request={request}
+										drafts={drafts}
+										busy={busy || readOnly}
+										reply={(input) => act("replies", input)}
+									/>
+								))}
+						</TimelineActivity.Provider>
+					</div>
 				</div>
+				{!following && (
+					<button
+						type='button'
+						className={`agent-scroll-latest${unseen ? " agent-scroll-unseen" : ""}`}
+						aria-label='Scroll to latest'
+						onClick={resumeFollowing}
+					>
+						<svg
+							width='20'
+							height='20'
+							viewBox='0 0 24 24'
+							fill='none'
+							stroke='currentColor'
+							strokeWidth='1.8'
+							strokeLinecap='round'
+							strokeLinejoin='round'
+							aria-hidden='true'
+						>
+							<path d='M12 4v16m-6-6 6 6 6-6' />
+						</svg>
+					</button>
+				)}
 			</div>
 			{view && (
 				<AgentComposer
