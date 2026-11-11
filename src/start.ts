@@ -48,6 +48,9 @@ import { TerminalRouter } from "./terminal/terminal-router.ts";
 import { TerminalService } from "./terminal/terminal-service.ts";
 import { TerminalSocket } from "./terminal/terminal-socket.ts";
 import { TerminalStore } from "./terminal/terminal-store.ts";
+import { BoardSettingsRouter } from "./tickets/board-settings-router.ts";
+import { BoardSettingsService } from "./tickets/board-settings-service.ts";
+import { BoardSettingsStore } from "./tickets/board-settings-store.ts";
 import { TicketPrompts } from "./tickets/ticket-prompts.ts";
 import { TicketRouter } from "./tickets/ticket-router.ts";
 import { TicketService } from "./tickets/ticket-service.ts";
@@ -187,6 +190,10 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		pool,
 	);
 	lifecycle.register(() => agents.shutdown());
+	const boardStore = new BoardSettingsStore(database);
+	await boardStore.initialize();
+	const boardSettings = new BoardSettingsService(boardStore, agents, pool, access, wakeScheduler);
+	await boardSettings.initialize();
 	const workflowStore = new TicketWorkflowStore(database);
 	await workflowStore.initialize();
 	const workflow = new TicketWorkflowService(
@@ -198,6 +205,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		new TicketPrompts(),
 		access,
 		wakeScheduler,
+		() => boardSettings.dispatchMode(),
 	);
 	const tickets = new TicketService(ticketStore, store, access, () => new Date(), workflow);
 	const actor = { username: config.owner };
@@ -237,6 +245,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		[
 			new AccountRouter(accounts),
 			agentRouter,
+			new BoardSettingsRouter(boardSettings),
 			new TicketRouter(tickets, workflow),
 			new CostRouter(cost),
 			new WorkspaceRouter(workspaces),

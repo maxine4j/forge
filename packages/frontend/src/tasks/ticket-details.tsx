@@ -13,6 +13,8 @@ import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 
 const Markdown = lazy(() => import("react-markdown"));
+const tabLabels = { details: "Details", plan: "Plan", chat: "Chat", history: "Planning history" };
+type TicketTab = keyof typeof tabLabels;
 
 export const ticketLabels: Record<TicketStatus, string> = {
 	backlog: "Backlog",
@@ -47,13 +49,12 @@ export const TicketDetails = ({
 	const fieldId = useId();
 	const poller = useRef<ResourcePoller<TicketWorkflow> | undefined>(undefined);
 	const [job, setJob] = useState<TicketWorkflow>();
-	const [section, setTab] = useState<"details" | "plan" | "chat">();
+	const [section, setTab] = useState<TicketTab>();
 	const [acting, setActing] = useState(false);
 	const [title, setTitle] = useState(ticket.title);
 	const [description, setDescription] = useState(ticket.description);
 	const [error, setError] = useState("");
 	const [archiveError, setArchiveError] = useState("");
-	const [history, setHistory] = useState(false);
 	const [refresh] = useState(() => () => poller.current?.refresh());
 	useEffect(() => {
 		dialog.current?.showModal();
@@ -76,12 +77,27 @@ export const TicketDetails = ({
 		};
 	}, [api, ticket.id]);
 	const currentId = job?.phase === "planning" ? job.plannerId : job?.implementerId;
-	const id = history ? job?.plannerId : currentId;
 	const plan = job?.plan;
+	const hasHistory = !!job?.implementerId && !!job.plannerId;
 	const awaitingReview =
 		ticket.status === "in-progress" && job?.phase === "planning" && job.state === "idle" && !!plan;
-	const tab = section ?? (awaitingReview ? "plan" : currentId ? "chat" : "details");
-	const blocked = history || !job || !["idle", "failed"].includes(job.state) || ticket.status !== "in-progress";
+	const tabs: TicketTab[] = ["details"];
+	if (plan) tabs.push("plan");
+	tabs.push("chat");
+	if (hasHistory) tabs.push("history");
+	const tab = section && tabs.includes(section) ? section : awaitingReview ? "plan" : currentId ? "chat" : "details";
+	const selectTab = (next: TicketTab) => {
+		setTab(next);
+		document.getElementById(`${fieldId}-tab-${next}`)?.focus();
+	};
+	const panel = (name: TicketTab) => ({
+		id: `${fieldId}-panel-${name}`,
+		role: "tabpanel",
+		"aria-labelledby": `${fieldId}-tab-${name}`,
+		hidden: tab !== name,
+		tabIndex: 0,
+	});
+	const blocked = !job || !["idle", "failed"].includes(job.state) || ticket.status !== "in-progress";
 	const target = ticket.status === "backlog" ? "todo" : undefined;
 	const canQueueMerge =
 		ticket.status === "in-progress"
@@ -211,31 +227,34 @@ export const TicketDetails = ({
 							: (job?.state ?? "Loading")}
 				</span>
 			</div>
-			<nav aria-label='Ticket sections' className='ticket-details-tabs'>
-				<button type='button' aria-pressed={tab === "details"} onClick={() => setTab("details")}>
-					Details
-				</button>
-				{plan && (
-					<button type='button' aria-pressed={tab === "plan"} onClick={() => setTab("plan")}>
-						Plan
-					</button>
-				)}
-				<button type='button' aria-pressed={tab === "chat"} onClick={() => setTab("chat")}>
-					Chat
-				</button>
-				{job?.implementerId && job.plannerId && (
+			<div role='tablist' aria-label='Ticket sections' className='ticket-details-tabs'>
+				{tabs.map((name, index) => (
 					<button
+						key={name}
 						type='button'
-						aria-pressed={history}
-						onClick={() => {
-							setHistory(!history);
-							setTab("chat");
+						role='tab'
+						id={`${fieldId}-tab-${name}`}
+						aria-controls={`${fieldId}-panel-${name}`}
+						aria-selected={tab === name}
+						tabIndex={tab === name ? 0 : -1}
+						onClick={() => setTab(name)}
+						onKeyDown={(event) => {
+							const adjacent = {
+								ArrowLeft: index - 1,
+								ArrowRight: index + 1,
+								Home: 0,
+								End: tabs.length - 1,
+							};
+							const next = adjacent[event.key as keyof typeof adjacent];
+							if (typeof next !== "number") return;
+							event.preventDefault();
+							selectTab(tabs.at((next + tabs.length) % tabs.length)!);
 						}}
 					>
-						{history ? "Implementation chat" : "Planning history"}
+						{tabLabels[name]}
 					</button>
-				)}
-			</nav>
+				))}
+			</div>
 			{error && (
 				<p role='alert' className='error'>
 					{error}
@@ -261,40 +280,37 @@ export const TicketDetails = ({
 					Queue merge
 				</button>
 			)}
-			{plan && tab === "plan" && (
-				<Suspense fallback={<p role='status'>Loading plan…</p>}>
-					<div className='ticket-plan'>
-						<div className='ticket-plan-markdown'>
-							<Markdown skipHtml disallowedElements={["img"]}>
-								{plan.text}
-							</Markdown>
-						</div>
-						{awaitingReview && (
-							<div className='ticket-plan-actions'>
-								<button
-									type='button'
-									disabled={acting}
-									onClick={() => {
-										setHistory(false);
-										setTab("chat");
-									}}
-								>
-									Request changes
-								</button>
-								<button
-									type='button'
-									className='primary'
-									disabled={acting}
-									onClick={() => act("approve", { revision: plan.revision }, () => setTab("chat"))}
-								>
-									Approve
-								</button>
+			{plan && (
+				<div className='ticket-plan' {...panel("plan")}>
+					{tab === "plan" && (
+						<Suspense fallback={<p role='status'>Loading plan…</p>}>
+							<div className='ticket-plan-markdown'>
+								<Markdown skipHtml disallowedElements={["img"]}>
+									{plan.text}
+								</Markdown>
 							</div>
-						)}
-					</div>
-				</Suspense>
+							{awaitingReview && (
+								<div className='ticket-plan-actions'>
+									<button type='button' disabled={acting} onClick={() => selectTab("chat")}>
+										Request changes
+									</button>
+									<button
+										type='button'
+										className='primary'
+										disabled={acting}
+										onClick={() =>
+											act("approve", { revision: plan.revision }, () => selectTab("chat"))
+										}
+									>
+										Approve
+									</button>
+								</div>
+							)}
+						</Suspense>
+					)}
+				</div>
 			)}
-			<div className='ticket-fields' hidden={tab !== "details"}>
+			<div className='ticket-fields' {...panel("details")}>
 				<form
 					onSubmit={(event) => {
 						event.preventDefault();
@@ -331,31 +347,41 @@ export const TicketDetails = ({
 					)}
 				</form>
 			</div>
-			<div className='ticket-chat' hidden={tab !== "chat"}>
-				{id ? (
-					<Conversation
-						key={id}
-						id={id}
-						api={api}
-						changed={refresh}
-						selected={tab === "chat"}
-						messagePath={`tickets/${ticket.id}/messages`}
-						blocked={blocked}
-						readOnly={history || ticket.status !== "in-progress"}
-						drafts={drafts}
-						workflowChanged={(value) => {
-							setJob(value);
-							refreshBoard();
-						}}
-					/>
-				) : (
-					<p>
-						{ticket.status === "backlog"
-							? "Move this ticket to Ready for development to start planning."
-							: "Queued for an available agent slot. Up to three agents can run at once."}
-					</p>
-				)}
-			</div>
+			{tabs
+				.filter((name) => name === "chat" || name === "history")
+				.map((name) => {
+					const history = name === "history";
+					const id = history ? job?.plannerId : currentId;
+					return (
+						<div key={name} className='ticket-chat' {...panel(name)}>
+							{id ? (
+								history === (tab === "history") && (
+									<Conversation
+										key={id}
+										id={id}
+										api={api}
+										changed={refresh}
+										selected={tab === name}
+										messagePath={`tickets/${ticket.id}/messages`}
+										blocked={history || blocked}
+										readOnly={history || ticket.status !== "in-progress"}
+										drafts={drafts}
+										workflowChanged={(value) => {
+											setJob(value);
+											refreshBoard();
+										}}
+									/>
+								)
+							) : (
+								<p>
+									{ticket.status === "backlog"
+										? "Move this ticket to Ready for development to queue planning."
+										: "Waiting for a ticket agent to start."}
+								</p>
+							)}
+						</div>
+					);
+				})}
 		</dialog>
 	);
 };

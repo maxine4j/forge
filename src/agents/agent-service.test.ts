@@ -78,7 +78,7 @@ const setup = () => {
 			view.status = "running";
 			view.turnId = "turn";
 		}),
-		interrupt: vi.fn(async () => {}),
+		interrupt: vi.fn(async (_id: string, _turnId: string) => {}),
 		reply: vi.fn(),
 		subscribe: (listener: (key: string) => void) => {
 			changed = listener;
@@ -132,6 +132,58 @@ test("settings persist per chat and discovery always resolves the owned worktree
 	await expect(service.files(owner, thread.id, "x".repeat(501))).rejects.toThrow("invalid-request");
 	await service.shutdown();
 });
+test("stop all interrupts both chat and ticket turns and reports individual failures", async () => {
+	const { service, client, views } = setup();
+	const chat = await service.create(owner, projectId, "Chat");
+	const ticket = await service.createTicketThread(owner, projectId, "Ticket");
+	await service.create(owner, projectId, "Idle");
+	await service.send(owner, chat.thread.id, "Work");
+	await service.dispatch(owner, ticket.thread.id, "Plan");
+	client.interrupt.mockRejectedValueOnce(new AgentError("agent-unavailable")).mockImplementationOnce(async () => {
+		views.get("codex-2")!.status = "interrupted";
+	});
+	await expect(service.stopAll({ username: "outsider" })).rejects.toThrow("Access denied");
+	expect(client.interrupt).not.toHaveBeenCalled();
+	expect(await service.stopAll(owner)).toEqual({ requested: 1, failed: 1 });
+	expect(client.interrupt.mock.calls).toEqual([
+		["codex-1", "turn"],
+		["codex-2", "turn"],
+	]);
+	expect((await service.get(owner, ticket.thread.id)).thread.status).toBe("interrupted");
+	await service.shutdown();
+});
+
+test("a stop during ticket setup holds the turn before sending it to Codex", async () => {
+	const { service, workspaces, client } = setup();
+	const { thread } = await service.createTicketThread(owner, projectId, "Ticket");
+	const resolving = Promise.withResolvers<void>();
+	const proceed = Promise.withResolvers<void>();
+	const resolve = workspaces.resolve;
+	vi.mocked(workspaces.resolve).mockImplementationOnce(async (actor, id) => {
+		resolving.resolve();
+		await proceed.promise;
+		return resolve(actor, id);
+	});
+	let allowed = true;
+	const dispatch = service.dispatch(
+		owner,
+		thread.id,
+		"Plan",
+		{ ticketId: "FORGE-1", phase: "planning" },
+		() => allowed,
+	);
+	const held = expect(dispatch).rejects.toThrow("agent-capacity");
+	await resolving.promise;
+	allowed = false;
+	const stopped = service.stopAll(owner);
+	proceed.resolve();
+	await held;
+	expect(await stopped).toEqual({ requested: 0, failed: 0 });
+	expect(client.send).not.toHaveBeenCalled();
+	expect((await service.get(owner, thread.id)).thread.status).toBe("idle");
+	await service.shutdown();
+});
+
 test("threads have independent verified worktrees and may execute concurrently; same-thread duplicate sends conflict", async () => {
 	const { service, client, workspaces } = setup();
 	const first = await service.create(owner, projectId, "First");

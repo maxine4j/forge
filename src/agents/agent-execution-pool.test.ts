@@ -29,3 +29,19 @@ test("wakes the scheduler only when an occupied slot is released", () => {
 	pool.observe("planner", "completed");
 	expect(wake).toHaveBeenCalledOnce();
 });
+
+test("changing the limit preserves active slots and wakes scheduling when capacity opens", () => {
+	const wake = vi.fn();
+	const pool = new AgentExecutionPool(wake);
+	pool.claim("ticket");
+	pool.claim("chat");
+	pool.setLimit(1);
+	expect(() => pool.claim("next")).toThrow("agent-capacity");
+	pool.observe("ticket", "completed");
+	expect(() => pool.claim("next")).toThrow("agent-capacity");
+	wake.mockClear();
+	pool.setLimit(2);
+	expect(wake).toHaveBeenCalledOnce();
+	pool.claim("next");
+	expect(pool.available()).toBe(false);
+});

@@ -757,6 +757,32 @@
 }
 .ticket-details-tabs {
 	justify-content: flex-start;
+	align-items: stretch;
+	gap: 2px;
+	border-bottom: 1px solid #30363d;
+	overflow-x: auto;
+}
+.ticket-details-tabs button {
+	flex: 0 0 auto;
+	padding: 8px 12px;
+	border: 0;
+	border-bottom: 2px solid transparent;
+	border-radius: 4px 4px 0 0;
+	background: transparent;
+	color: #b1bac4;
+	white-space: nowrap;
+}
+.ticket-details-tabs button:hover,
+.ticket-details-tabs button[aria-selected="true"] {
+	background: #21262d;
+	color: #e6edf3;
+}
+.ticket-details-tabs button[aria-selected="true"] {
+	border-bottom-color: #58a6ff;
+}
+.ticket-details-tabs button:focus-visible {
+	outline: 2px solid #58a6ff;
+	outline-offset: -2px;
 }
 .ticket-fields,
 .ticket-chat,
@@ -890,6 +916,40 @@
 	flex-shrink: 0;
 	white-space: nowrap;
 }
+.board-settings {
+	width: min(460px, calc(100vw - 24px));
+}
+.board-settings form {
+	display: flex;
+	align-items: flex-end;
+	gap: 12px;
+	padding-bottom: 16px;
+	border-bottom: 1px solid #30363d;
+}
+.board-settings form label {
+	flex: 1;
+	min-width: 0;
+	margin: 0;
+}
+.board-settings input[type="range"] {
+	padding: 0;
+	border: 0;
+	background: transparent;
+	accent-color: #58a6ff;
+}
+.board-settings-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+.board-settings .board-stop {
+	color: #ff9b93;
+	border-color: #a94941;
+}
+.board-settings-help {
+	color: #b1bac4;
+	font-size: 13px;
+}
 @media (max-width: 600px) {
 	.task-board-heading {
 		align-items: flex-start;
@@ -897,6 +957,7 @@
 	}
 	.task-board-actions {
 		width: 100%;
+		flex-wrap: wrap;
 	}
 	.kanban-column {
 		flex-basis: 240px;

@@ -1,5 +1,5 @@
 import { createLogger } from "@forge/backend-infrastructure/logger";
-import type { Ticket, MoveTicket, TicketWorkflow } from "@forge/contracts/tickets";
+import type { BoardSettings, Ticket, MoveTicket, TicketWorkflow } from "@forge/contracts/tickets";
 
 import type { IAgentExecutionPool } from "../agents/agent-execution-pool.ts";
 import type { ITicketAgents } from "../agents/agent-service.ts";
@@ -38,6 +38,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		private readonly prompts: ITicketPrompts,
 		private readonly access: IAccessService,
 		private readonly wake: () => void = () => {},
+		private readonly dispatchMode: () => BoardSettings["dispatch"] = () => "running",
 	) {}
 	async archive(actor: Actor, ticket: Ticket, archivedAt: string): Promise<void> {
 		this.access.assertOwner(actor);
@@ -134,13 +135,14 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				try {
 					if (job.state === "running") await this.observe(actor, job);
 					else if (job.state === "merge-queued") await this.merge(actor, job);
-					else if (job.state === "queued" && this.pool.available()) await this.dispatch(actor, ticket, job);
+					else if (job.state === "queued" && this.canDispatch(ticket) && this.pool.available())
+						await this.dispatch(actor, ticket, job);
 				} catch (err) {
-					this.log.error({ err, ticketId: ticket.id }, "Ticket execution needs attention");
 					if (err instanceof AgentError && err.code === "agent-capacity") {
 						if (job.state === "dispatching") await this.store.save({ ...job, state: "queued" });
 						continue;
 					}
+					this.log.error({ err, ticketId: ticket.id }, "Ticket execution needs attention");
 					const state =
 						job.state === "queued" ? "setup-failed" : job.state === "dispatching" ? "uncertain" : "failed";
 					await this.store.save(
@@ -192,6 +194,10 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	private summary({ previousTurnId: _previous, turnId: _turn, ...workflow }: TicketWorkflowRecord): TicketWorkflow {
 		return workflow;
 	}
+	private canDispatch(ticket: Ticket): boolean {
+		const mode = this.dispatchMode();
+		return mode === "running" || (mode === "paused" && ticket.status === "in-progress");
+	}
 	private async dispatch(actor: Actor, ticket: Ticket, job: TicketWorkflowRecord): Promise<void> {
 		const planning = job.phase === "planning";
 		let id = planning ? job.plannerId : job.implementerId;
@@ -220,15 +226,18 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			job.previousTurnId = (await this.agents.get(actor, id)).thread.turnId;
 			job.turnId = undefined;
 			job.state = "dispatching";
-			await this.store.save(job, ticket.status === "todo" ? { status: "in-progress" } : undefined);
+			await this.store.save(job);
 			releaseReservation = false;
-			const view = await this.agents.dispatch(actor, id, this.prompts.build(ticket, job), {
-				ticketId: ticket.id,
-				phase: job.phase,
-			});
+			const view = await this.agents.dispatch(
+				actor,
+				id,
+				this.prompts.build(ticket, job),
+				{ ticketId: ticket.id, phase: job.phase },
+				() => this.canDispatch(ticket),
+			);
 			job.state = "running";
 			job.turnId = view.thread.turnId;
-			await this.store.save(job);
+			await this.store.save(job, ticket.status === "todo" ? { status: "in-progress" } : undefined);
 		} catch (err) {
 			if (releaseReservation) this.pool.observe(id!, "idle");
 			throw err;

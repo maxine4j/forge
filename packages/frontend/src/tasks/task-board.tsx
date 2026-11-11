@@ -13,6 +13,7 @@ import type { FormEvent, PointerEvent } from "react";
 
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { BoardSettingsDialog } from "./board-settings-dialog.tsx";
 import { TicketDetails, ticketLabels } from "./ticket-details.tsx";
 
 const labels = ticketLabels;
@@ -113,6 +114,7 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 	const [error, setError] = useState("");
 	const [notice, setNotice] = useState("");
 	const [editing, setEditing] = useState<Ticket | "new">();
+	const [showSettings, setShowSettings] = useState(false);
 	const [drag, setDrag] = useState<Drag>();
 	const dragging = useRef<Drag | undefined>(undefined);
 	const board = useRef<HTMLDivElement>(null);
@@ -274,6 +276,9 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 					<h2>Board</h2>
 				</div>
 				<div className='task-board-actions'>
+					<button type='button' disabled={!!drag} onClick={() => setShowSettings(true)}>
+						Board settings
+					</button>
 					<button
 						disabled={busy || loading || !!drag}
 						onClick={() => {
@@ -386,6 +391,7 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 					</div>
 				</>
 			)}
+			{showSettings && <BoardSettingsDialog api={api} close={() => setShowSettings(false)} />}
 			{editing && editing !== "new" && (
 				<TicketDetails
 					ticket={tickets.find((ticket) => ticket.id === editing.id) ?? editing}

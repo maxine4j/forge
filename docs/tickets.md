@@ -27,11 +27,21 @@ or pending merge must settle before archiving.
 | In progress           | A fresh Codex planner proposes a plan. The card shows an attention badge and details render the Markdown plan. Request changes opens the planner chat. Approve applies to the displayed revision and queues a fresh implementer in the same worktree. Completed implementation goes to the merge queue. |
 | Done                  | Forge moves the ticket here after confirming its commit is in local main.                                                                                                                                                                                                                               |
 
-The scheduler wakes when tickets enter Ready or Done and when an agent slot is
-released. All execution shares the three-agent pool with [standalone chats](agents.md).
+The scheduler wakes when tickets enter Ready or Done, when an agent slot is
+released, and when settings open new capacity. All execution shares a pool with
+[standalone chats](agents.md).
 Idle chats use no slot. A running agent waiting for structured input or permission
 keeps its slot. Standalone message submissions at capacity retain their drafts.
 Board and conversation selection have no effect on execution.
+
+Board settings apply across projects and persist in SQLite. The concurrency
+limit ranges from 1 to 10 and defaults to 3. Lowering it lets active turns
+finish and holds new turns until a slot opens. Pause new tickets keeps Ready
+tickets queued while in-progress tickets continue. Stop all agents requests
+interruption of active ticket and standalone turns in parallel, reports any
+failures, and holds ticket dispatch until explicitly resumed. Completed turns
+and queued Git merges can still settle. Standalone chats can be started manually
+after the stop request.
 
 The planner receives a short ticket instruction and uses native Codex Plan mode
 for every turn. Forge saves completed plan items as numbered revisions. Followup
@@ -69,12 +79,16 @@ Browser contracts are exported from `@forge/contracts/tickets`:
 | `POST /api/tickets/:id/messages`            | Queue bounded feedback for the current phase.                                       |
 | `POST /api/tickets/:id/merge`               | Queue a legacy review candidate or retry a failed merge.                            |
 | `POST /api/tickets/:id/reconcile`           | Reconcile uncertain execution or retry a failed setup.                              |
+| `GET/PATCH /api/board/settings`             | Read settings or update `maxAgents` and ticket dispatch (`running` or `paused`).    |
+| `POST /api/board/settings/stop`             | Stop ticket dispatch and return interruption request and failure counts.            |
 
 Ticket conversations reuse the private agent read, resume, interrupt, reply and
 SSE APIs. Ticket messages dispatch through the scheduler, and ticket threads stay
 out of the standalone Agents list. Mutations require owner access and exact-origin
 checks. Transition conflicts return 409. Board and ticket details refresh while
-execution continues. Drafts persist in browser memory within the board. Planning
+execution continues. The ticket modal has keyboard-accessible Details, Plan,
+Chat and Planning history tabs when the respective content is available.
+Drafts persist in browser memory within the board. Planning
 history after approval and Done chats are read-only. Preview fixtures are read-only.
 
 ### Ticket cost

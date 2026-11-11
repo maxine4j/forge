@@ -19,8 +19,10 @@ reviews; Codex owns model interaction, tools, agent execution, and conversations
 - Persist important normalized activity and approval state for browser reconnects.
   Reconcile actual Codex state after app-server or application restart before
   dispatching more work. Surface interrupted execution and recovery failures explicitly.
-- A shared execution pool limits Forge to three active agents across projects,
+- A shared execution pool defaults to three active agents across projects,
   standalone chats and all ticket phases, including review followups and rebases.
+  The [ticket board settings](tickets.md#agentic-ticket-board) set the shared limit
+  and can interrupt active turns across projects.
   Running, waiting and uncertain executions retain slots. Completed, failed and
   interrupted turns release slots. Serialize mutations within each thread.
 - Shut down child processes cleanly and reap descendants. Keep the web UI and
@@ -107,7 +109,7 @@ Full turn output must not be bundled into history metadata responses.
 Pending structured requests are bounded per thread. RPC deadlines remain 15 seconds
 and frames are bounded to 16 MiB, including large individual tool results and
 completion notifications; there is no automatic
-turn timeout. The shared three-agent execution limit also applies to these chats;
+turn timeout. The shared execution limit also applies to these chats;
 capacity failures preserve browser drafts for retry. SSE sends 15-second heartbeats,
 disconnects slow consumers and closes on application shutdown. Reconnection reads
 a current snapshot rather than replaying mutations.

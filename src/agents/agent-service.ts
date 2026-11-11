@@ -50,12 +50,22 @@ export interface ITicketAgents {
 		workspaceId?: string,
 		reserveSlot?: boolean,
 	): Promise<AgentView>;
-	dispatch(actor: Actor, id: string, text: string, ticket: TicketUsageScope): Promise<AgentView>;
+	dispatch(
+		actor: Actor,
+		id: string,
+		text: string,
+		ticket: TicketUsageScope,
+		allowed?: () => boolean,
+	): Promise<AgentView>;
 	plan(actor: Actor, id: string, turnId: string): Promise<string | undefined>;
 	get(actor: Actor, id: string): Promise<AgentView>;
 	resume(actor: Actor, id: string): Promise<AgentView>;
 }
-export class AgentService implements IAgentService, ITicketAgents {
+export interface IAgentStop {
+	/** Requests interruption for active reservations. Reports failures individually. */
+	stopAll(actor: Actor): Promise<{ requested: number; failed: number }>;
+}
+export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 	private readonly log = createLogger(AgentService.name);
 	private readonly queues = new Map<string, Promise<unknown>>();
 	private readonly identities = new Map<string, string>();
@@ -131,8 +141,14 @@ export class AgentService implements IAgentService, ITicketAgents {
 		return this.execute(actor, id, text, settings);
 	}
 	/** Ticket scheduler dispatch; the prompt is internal and can include a complete approved plan. */
-	async dispatch(actor: Actor, id: string, text: string, ticket?: TicketUsageScope): Promise<AgentView> {
-		return this.execute(actor, id, text, undefined, ticket);
+	async dispatch(
+		actor: Actor,
+		id: string,
+		text: string,
+		ticket?: TicketUsageScope,
+		allowed?: () => boolean,
+	): Promise<AgentView> {
+		return this.execute(actor, id, text, undefined, ticket, allowed);
 	}
 	async plan(actor: Actor, id: string, turnId: string): Promise<string | undefined> {
 		this.authorize(actor);
@@ -149,18 +165,24 @@ export class AgentService implements IAgentService, ITicketAgents {
 		text: string,
 		settings?: AgentSettings,
 		ticket?: TicketUsageScope,
+		allowed?: () => boolean,
 	): Promise<AgentView> {
 		this.authorize(actor);
 		const input = z.object({ text: z.string().trim().min(1).max(64000) }).safeParse({ text });
 		if (!input.success) throw new AgentError("invalid-request");
-		return this.serialize(id, async () => {
+		const view = await this.serialize(id, async () => {
 			const record = await this.require(id);
+			const previousStatus = record.status;
 			if (["creating", "running", "waiting", "uncertain"].includes(record.status))
 				throw new AgentError("agent-conflict");
 			if (settings) {
 				const parsed = agentSettingsSchema.safeParse(settings);
 				if (!parsed.success) throw new AgentError("invalid-request");
 				Object.assign(record, parsed.data);
+			}
+			if (allowed && !allowed()) {
+				this.pool.observe(id, record.status);
+				throw new AgentError("agent-capacity");
 			}
 			this.pool.claim(id);
 			let contactedRuntime = false;
@@ -181,6 +203,12 @@ export class AgentService implements IAgentService, ITicketAgents {
 				}
 				record.status = "running";
 				await this.store.update(record);
+				if (allowed && !allowed()) {
+					record.status = previousStatus;
+					await this.store.update(record);
+					this.pool.observe(id, previousStatus);
+					return undefined;
+				}
 				await this.client.send(
 					record.codexId,
 					location.path,
@@ -204,6 +232,8 @@ export class AgentService implements IAgentService, ITicketAgents {
 				throw cause;
 			}
 		});
+		if (!view) throw new AgentError("agent-capacity");
+		return view;
 	}
 	async resume(actor: Actor, id: string): Promise<AgentView> {
 		this.authorize(actor);
@@ -228,6 +258,31 @@ export class AgentService implements IAgentService, ITicketAgents {
 			await this.client.interrupt(record.codexId, record.turnId);
 			return this.sync(record);
 		});
+	}
+	async stopAll(actor: Actor): Promise<{ requested: number; failed: number }> {
+		this.authorize(actor);
+		const results = await Promise.allSettled(
+			this.pool.activeIds().map((id) =>
+				this.serialize(id, async () => {
+					const record = await this.require(id);
+					const { thread } = await this.sync(record);
+					if (thread.status === "uncertain" || thread.status === "creating")
+						throw new AgentError("agent-unavailable");
+					if (thread.status !== "running" && thread.status !== "waiting") return false;
+					if (!record.codexId || !thread.turnId) throw new AgentError("agent-unavailable");
+					await this.client.interrupt(record.codexId, thread.turnId);
+					await this.sync(record);
+					return true;
+				}).catch((err: unknown) => {
+					this.log.warn({ err, threadId: id }, "Could not interrupt agent");
+					throw err;
+				}),
+			),
+		);
+		return {
+			requested: results.filter((result) => result.status === "fulfilled" && result.value).length,
+			failed: results.filter((result) => result.status === "rejected").length,
+		};
 	}
 	async reply(actor: Actor, id: string, input: AgentReply): Promise<AgentView> {
 		this.authorize(actor);

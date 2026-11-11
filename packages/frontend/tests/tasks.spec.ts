@@ -7,6 +7,8 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	const threadId = "123e4567-e89b-42d3-a456-426614174010";
 	let messages = 0;
 	let approved = false;
+	let boardSettings = { dispatch: "running", maxAgents: 3 };
+	let stopRequests = 0;
 	const approvals: unknown[] = [];
 	let tickets: {
 		id: string;
@@ -42,6 +44,15 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		async (route) => {
 			const path = new URL(route.request().url()).pathname;
 			const method = route.request().method();
+			if (path === "/api/board/settings") {
+				if (method === "PATCH") boardSettings = { ...boardSettings, ...route.request().postDataJSON() };
+				return route.fulfill({ json: boardSettings });
+			}
+			if (path === "/api/board/settings/stop") {
+				stopRequests++;
+				boardSettings = { ...boardSettings, dispatch: "stopped" };
+				return route.fulfill({ json: { settings: boardSettings, requested: 2, failed: 1 } });
+			}
 			if (path.endsWith("/workflow") || path.endsWith("/messages") || path.endsWith("/approve")) {
 				if (path.endsWith("/messages")) messages++;
 				if (path.endsWith("/approve")) {
@@ -173,6 +184,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 			hold = undefined;
 		},
 		messages: () => messages,
+		stopRequests: () => stopRequests,
 		approvals,
 		setArchiveFailure: (value: boolean) => {
 			failArchive = value;
@@ -216,6 +228,56 @@ test("ticket archive requires confirmation and removes the card only after succe
 	expect(fixture.operations).toEqual(["archive", "archive"]);
 });
 
+test("board settings save the slider and control pause, stop and resume", async ({ page }) => {
+	const fixture = await setup(page);
+	const settings = page.getByRole("button", { name: "Board settings", exact: true });
+	await settings.click();
+	const modal = page.getByRole("dialog", { name: "Board settings" });
+	const slider = modal.getByRole("slider", { name: "Max concurrent agents" });
+	await expect(slider).toHaveValue("3");
+	await slider.focus();
+	await slider.press("ArrowRight");
+	await modal.getByRole("button", { name: "Save limit" }).click();
+	await expect(modal.getByRole("status")).toHaveText("Agent limit saved.");
+	await modal.getByRole("button", { name: "Pause new tickets" }).click();
+	await expect(modal.getByRole("status")).toHaveText("New tickets are paused.");
+	expect(fixture.stopRequests()).toBe(0);
+	await modal.getByRole("button", { name: "Stop all agents" }).click();
+	await expect(modal.getByRole("alert")).toHaveText(
+		"Interruption requested for 2 agents. 1 agent could not be interrupted.",
+	);
+	expect(fixture.stopRequests()).toBe(1);
+	await modal.getByRole("button", { name: "Resume ticket dispatch" }).click();
+	await expect(modal.getByRole("status")).toHaveText("Ticket dispatch resumed.");
+	await modal.getByRole("button", { name: "Close board settings" }).click();
+	await expect(settings).toBeFocused();
+	await settings.click();
+	await expect(slider).toHaveValue("4");
+});
+
+test("ticket sections are keyboard navigable tabs with a labelled active panel", async ({ page }) => {
+	await setup(page, false, true);
+	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	const modal = page.getByRole("dialog", { name: "FORGE-1" });
+	const tablist = modal.getByRole("tablist", { name: "Ticket sections" });
+	const plan = tablist.getByRole("tab", { name: "Plan" });
+	const chat = tablist.getByRole("tab", { name: "Chat" });
+	const details = tablist.getByRole("tab", { name: "Details" });
+	await expect(plan).toHaveAttribute("aria-selected", "true");
+	await plan.focus();
+	await plan.press("ArrowRight");
+	await expect(chat).toBeFocused();
+	await expect(modal.getByRole("tabpanel", { name: "Chat" })).toBeVisible();
+	await expect(modal.getByRole("tabpanel")).toHaveCount(1);
+	await chat.press("ArrowRight");
+	await expect(details).toBeFocused();
+	await expect(details).toHaveAttribute("aria-selected", "true");
+	await details.press("End");
+	await expect(chat).toBeFocused();
+	await chat.press("Home");
+	await expect(modal.getByRole("tabpanel", { name: "Details" })).toBeVisible();
+});
+
 for (const size of [
 	{ width: 1280, height: 900 },
 	{ width: 820, height: 820 },
@@ -234,9 +296,9 @@ for (const size of [
 		await panel.getByLabel("Message", { exact: true }).fill("Include filtering");
 		await panel.getByRole("button", { name: "Send message", exact: true }).click();
 		await expect.poll(fixture.messages).toBe(1);
-		await panel.getByRole("button", { name: "Details", exact: true }).click();
+		await panel.getByRole("tab", { name: "Details", exact: true }).click();
 		await expect(panel.getByLabel("Description", { exact: true })).toHaveValue("Scope");
-		await panel.getByRole("button", { name: "Chat", exact: true }).click();
+		await panel.getByRole("tab", { name: "Chat", exact: true }).click();
 		await page.evaluate(() => {
 			Object.defineProperty(window.visualViewport!, "height", { configurable: true, value: 440 });
 			window.visualViewport!.dispatchEvent(new Event("resize"));
@@ -271,7 +333,8 @@ test("planning history disables execution controls", async ({ page }) => {
 	await setup(page, false, true, true);
 	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
 	await expect(page.getByRole("button", { name: "Interrupt", exact: true })).toBeVisible();
-	await page.getByRole("button", { name: "Planning history", exact: true }).click();
+	await page.getByRole("tab", { name: "Planning history", exact: true }).click();
+	await expect(page.getByRole("tabpanel", { name: "Planning history" })).toBeVisible();
 	await expect(page.getByRole("button", { name: "Interrupt", exact: true })).toHaveCount(0);
 	await expect(page.getByRole("button", { name: "Allow once", exact: true })).toBeDisabled();
 });

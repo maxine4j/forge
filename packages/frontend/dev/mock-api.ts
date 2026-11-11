@@ -1,3 +1,4 @@
+import { defaultBoardSettings } from "@forge/contracts/tickets";
 import type { Plugin } from "vite";
 
 const date = "2026-11-02T00:00:00.000Z";
@@ -33,6 +34,7 @@ class MockApi implements IMockApi {
 
 	constructor() {
 		this.routes.set("/api/projects", () => projects);
+		this.routes.set("/api/board/settings", () => defaultBoardSettings);
 		this.routes.set("/api/accounts", () => ({
 			codex: { connection: "available", account: { name: "owner@example.test" }, login: { state: "completed" } },
 			github: { connection: "available", login: { state: "idle" } },

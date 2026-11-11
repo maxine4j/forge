@@ -21,7 +21,7 @@ export class WorkspaceApi implements IWorkspaceApi {
 			const error = typeof value === "object" && value !== null && "error" in value ? value.error : undefined;
 			const messages: Record<string, string> = {
 				"agent-capacity":
-					"All three agent slots are occupied. Retry when an agent finishes. Your draft is preserved.",
+					"All agent slots are occupied. Retry when an agent finishes. Your draft is preserved.",
 				"agent-not-found": "Chat no longer exists. Refresh the chat list.",
 				"agent-conflict": "Chat changed. Refresh its status before trying again. Your draft is preserved.",
 				"agent-unavailable":

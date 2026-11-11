@@ -27,7 +27,7 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 				sql: "UPDATE ticket_workflows SET record=json_set(record,'$.state','merge-queued') WHERE ticketId IN (SELECT id FROM tickets WHERE status='merging') AND json_extract(record,'$.state')='queued' AND json_extract(record,'$.message') IS NULL",
 			},
 			{
-				sql: "UPDATE tickets SET status='in-progress' WHERE status IN ('in-review','merging') OR (status='todo' AND id IN (SELECT ticketId FROM ticket_workflows WHERE json_extract(record,'$.plannerId') IS NOT NULL OR json_extract(record,'$.state')<>'queued'))",
+				sql: "UPDATE tickets SET status='in-progress' WHERE status IN ('in-review','merging') OR (status='todo' AND id IN (SELECT ticketId FROM ticket_workflows WHERE json_extract(record,'$.state')<>'queued'))",
 			},
 			{
 				sql: "UPDATE ticket_workflows SET record=json_set(record,'$.state','failed') WHERE json_type(record,'$.run') IS NOT NULL AND json_extract(record,'$.state') IN ('dispatching','uncertain')",

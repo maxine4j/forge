@@ -43,3 +43,4 @@ export const ticketWorkflowSchema = z.strictObject({
 });
 export type TicketWorkflow = z.infer<typeof ticketWorkflowSchema>;
 export type { Ticket, TicketStatus, CreateTicket, MoveTicket } from "./types.ts";
+export * from "./board-settings.ts";

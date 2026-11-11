@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import * as files from "@forge/backend-infrastructure/file";
 import { sleep } from "@forge/backend-infrastructure/sleep";
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { AccountProcess } from "../../src/accounts/account-process.ts";
 import { CodexConnection } from "../../src/accounts/codex-connection.ts";
@@ -106,11 +106,25 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		const jobs = new TicketWorkflowStore(db);
 		await jobs.initialize();
 		const merges = new WorkspaceMergeClient(workspaces, git);
-		let workflow = new TicketWorkflowService(jobs, ticketStore, agents, pool, merges, new TicketPrompts(), access);
+		let dispatch: "running" | "paused" | "stopped" = "running";
+		const workflowService = (service: AgentService) =>
+			new TicketWorkflowService(
+				jobs,
+				ticketStore,
+				service,
+				pool,
+				merges,
+				new TicketPrompts(),
+				access,
+				undefined,
+				() => dispatch,
+			);
+		let workflow = workflowService(agents);
 		let tickets = new TicketService(ticketStore, projectsStore, access, () => new Date(), workflow);
 		const restart = async () => {
 			await agents!.shutdown();
 			await agentStore.recover();
+			await jobs.initialize();
 			pool = new AgentExecutionPool();
 			agents = new AgentService(
 				agentStore,
@@ -124,7 +138,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			);
 			await agents.seed(owner);
 			await agents.recover(owner);
-			workflow = new TicketWorkflowService(jobs, ticketStore, agents, pool, merges, new TicketPrompts(), access);
+			workflow = workflowService(agents);
 			tickets = new TicketService(ticketStore, projectsStore, access, () => new Date(), workflow);
 			await workflow.recover(owner);
 		};
@@ -138,8 +152,29 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await workflow.tick(owner);
 		expect((await jobs.get(ticket.id))?.plannerId).toBeUndefined();
 		await agents.interrupt(owner, standalone[0]!.thread.id);
+		dispatch = "paused";
+		await workflow.tick(owner);
+		expect((await ticketStore.get(ticket.id))?.status).toBe("todo");
+		expect((await jobs.get(ticket.id))?.plannerId).toBeUndefined();
+		dispatch = "running";
+		const resolve = workspaces.resolve.bind(workspaces);
+		vi.spyOn(workspaces, "resolve").mockImplementationOnce(async (...args) => {
+			dispatch = "paused";
+			return resolve(...args);
+		});
+		await workflow.tick(owner);
+		const preparedPlanner = (await jobs.get(ticket.id))?.plannerId;
+		expect(preparedPlanner).toBeDefined();
+		expect((await ticketStore.get(ticket.id))?.status).toBe("todo");
+		await restart();
+		await workflow.tick(owner);
+		expect((await ticketStore.get(ticket.id))?.status).toBe("todo");
+		expect((await jobs.get(ticket.id))?.state).toBe("queued");
+		dispatch = "running";
 		await workflow.tick(owner);
 		const planning = (await jobs.get(ticket.id))!;
+		expect(planning.plannerId).toBe(preparedPlanner);
+		dispatch = "paused";
 		const idle = async () => {
 			await workflow.tick(owner);
 			return (await jobs.get(ticket.id))?.state;
@@ -147,9 +182,14 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await expect.poll(idle).toBe("idle");
 		expect((await jobs.get(ticket.id))?.plan?.revision).toBe(1);
 		await workflow.message(owner, (await ticketStore.get(ticket.id))!, "Include filtering");
+		dispatch = "stopped";
+		await workflow.tick(owner);
+		expect((await jobs.get(ticket.id))?.state).toBe("queued");
+		dispatch = "paused";
 		await workflow.tick(owner);
 		await expect.poll(idle).toBe("idle");
 		expect((await jobs.get(ticket.id))?.plan?.revision).toBe(2);
+		dispatch = "running";
 		expect((await tickets.list(owner, project.id)).at(0)).toMatchObject({
 			status: "in-progress",
 			needsAttention: true,
