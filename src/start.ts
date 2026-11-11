@@ -20,7 +20,11 @@ import { AgentService } from "./agents/agent-service.ts";
 import { AgentThreadStore } from "./agents/agent-thread-store.ts";
 import { AccessService } from "./auth/access-service.ts";
 import { CodexAgentClient } from "./codex/codex-agent-client.ts";
+import { CodexUsageClient } from "./codex/codex-usage-client.ts";
 import { Configuration } from "./config/configuration.ts";
+import { CostRouter } from "./cost/cost-router.ts";
+import { CostService } from "./cost/cost-service.ts";
+import { CostStore } from "./cost/cost-store.ts";
 import { SqliteDatabase } from "./database/sqlite-database.ts";
 import { HttpApplication } from "./http/http-application.ts";
 import type { ILifecycle } from "./http/lifecycle.ts";
@@ -77,6 +81,8 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const access = new AccessService(config);
 	const ticketStore = new TicketStore(database);
 	await ticketStore.initialize();
+	const costStore = new CostStore(database);
+	await costStore.initialize(new Date().toISOString());
 	const git = options.git ?? new GitTransport(sleep);
 	const differences = new GitDiffClient(git);
 	const repositories = new RepositoryClient(config.dataDirectory, config.importHosts, files, git);
@@ -148,6 +154,14 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	if (!lifecycle.isOpen()) return;
 	const connection = new CodexConnection(processes, sleep);
 	lifecycle.register(() => connection.close());
+	const usage = new CodexUsageClient(
+		connection,
+		(turn) => costStore.save(turn),
+		() => new Date(),
+		config.cost.monthlyAud,
+	);
+	lifecycle.register(() => usage.close());
+	const cost = new CostService(projects, ticketStore, costStore, usage, config.cost, () => new Date());
 	const codex = new CodexAccountClient(connection, attempts);
 	const github = new GithubAccountClient(processes, sleep, attempts);
 	lifecycle.register(() => github.close());
@@ -158,7 +172,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const pool = new AgentExecutionPool();
 	const agents = new AgentService(
 		agentStore,
-		new CodexAgentClient(connection, files.realpath, randomUUID),
+		new CodexAgentClient(connection, files.realpath, randomUUID, usage),
 		workspaces,
 		projects,
 		access,
@@ -212,6 +226,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			new AccountRouter(accounts),
 			agentRouter,
 			new TicketRouter(tickets, workflow),
+			new CostRouter(cost),
 			new WorkspaceRouter(workspaces),
 			new RepositoryBrowserRouter(
 				new RepositoryBrowserService(

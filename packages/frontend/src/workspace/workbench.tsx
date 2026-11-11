@@ -4,6 +4,7 @@ import { Link, useLocation } from "react-router";
 
 import { AgentChat } from "../agents/agent-chat.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { CostDashboard } from "../cost/cost-dashboard.tsx";
 import { resolveRoute } from "../navigation/routes.ts";
 import { TaskBoard } from "../tasks/task-board.tsx";
 import { RepositoryBrowser } from "./repository-browser.tsx";
@@ -109,7 +110,7 @@ export const Workbench = ({
 	return (
 		<section className='workbench' aria-label='Project'>
 			<div className='project-tabs' role='tablist' aria-label='Project sections'>
-				{["Code", "Tasks", "Agents", "Pipelines", "Terminals"].map((name) => (
+				{["Code", "Tasks", "Agents", "Pipelines", "Terminals", "Cost"].map((name) => (
 					<Link
 						key={name}
 						id={`tab-${name}`}
@@ -148,6 +149,9 @@ export const Workbench = ({
 			</section>
 			<section id='panel-Terminals' role='tabpanel' aria-labelledby='tab-Terminals' hidden={tab !== "Terminals"}>
 				{navigation.opened.includes("terminals") && <ProjectTerminal projectId={project.id} api={api} />}
+			</section>
+			<section id='panel-Cost' role='tabpanel' aria-labelledby='tab-Cost' hidden={tab !== "Cost"}>
+				{tab === "Cost" && <CostDashboard key={project.id} projectId={project.id} api={api} />}
 			</section>
 		</section>
 	);

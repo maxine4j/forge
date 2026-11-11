@@ -11,13 +11,15 @@ import { z } from "zod";
 
 import type { ICodexAgentConnection } from "../accounts/codex-connection.ts";
 import { AgentError } from "../agents/errors.ts";
+import type { UsageScope } from "../cost/types.ts";
+import type { ICodexUsageTracker } from "./codex-usage-client.ts";
 import type { AgentRuntimeView } from "./types.ts";
 export interface ICodexAgentClient {
 	/** Uses persistent Codex history. Failures throw AgentError; requests are never replayed. */
 	start(path: string): Promise<string>;
 	resume(id: string, path: string): Promise<AgentRuntimeView>;
 	read(id: string): AgentRuntimeView;
-	send(id: string, path: string, text: string, settings?: AgentSettings): Promise<void>;
+	send(id: string, path: string, text: string, settings?: AgentSettings, usage?: UsageScope): Promise<void>;
 	options(path: string): Promise<AgentOptions>;
 	files(path: string, query: string): Promise<string[]>;
 	interrupt(id: string, turnId: string): Promise<void>;
@@ -31,10 +33,12 @@ export class CodexAgentClient implements ICodexAgentClient {
 	private readonly listeners = new Set<(id: string) => void>();
 	private readonly revisions = new Map<string, number>();
 	private readonly resuming = new Set<string>();
+	private readonly models = new Map<string, string>();
 	constructor(
 		private readonly connection: ICodexAgentConnection,
 		private readonly realpath: (path: string) => Promise<string>,
 		private readonly generateId: () => string,
+		private readonly usageTracker?: ICodexUsageTracker,
 	) {
 		connection.subscribe((method, params) => this.notification(method, params));
 		connection.subscribeRequests((id, method, params) => this.serverRequest(id, method, params));
@@ -48,6 +52,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			);
 			if (result.thread.cwd !== path) throw new Error("Codex workspace identity mismatch");
 			this.views.set(result.thread.id, this.hydrate(result.thread));
+			if (result.model) this.models.set(result.thread.id, result.model);
 			return result.thread.id;
 		});
 	}
@@ -69,6 +74,8 @@ export class CodexAgentClient implements ICodexAgentClient {
 			);
 			if (result.thread.id !== id || result.thread.cwd !== path)
 				throw new Error("Codex workspace identity mismatch");
+			if (result.model) this.models.set(id, result.model);
+			else this.models.delete(id);
 			const page = z.object({ data: z.array(turnSchema).max(20), nextCursor: z.string().nullable() }).parse(
 				await this.connection.request("thread/turns/list", {
 					threadId: id,
@@ -164,7 +171,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			].slice(0, 100);
 		});
 	}
-	async send(id: string, path: string, text: string, settings?: AgentSettings): Promise<void> {
+	async send(id: string, path: string, text: string, settings?: AgentSettings, usage?: UsageScope): Promise<void> {
 		await this.guard(async () => {
 			const view = this.views.get(id);
 			if (!view || ["running", "waiting", "uncertain"].includes(view.status))
@@ -175,6 +182,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			view.status = "running";
 			delete view.turnId;
 			try {
+				if (usage) this.usageTracker?.track(id, usage, settings?.model ?? this.models.get(id));
 				const result = z.object({ turn: turnSchema }).parse(
 					await this.connection.request("turn/start", {
 						threadId: id,
@@ -596,4 +604,4 @@ const threadSchema = z.object({
 	status: threadStatusSchema,
 	turns: z.array(turnSchema),
 });
-const threadResponse = z.object({ thread: threadSchema });
+const threadResponse = z.object({ thread: threadSchema, model: z.string().optional() });

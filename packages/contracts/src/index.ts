@@ -2,6 +2,7 @@ import { z } from "zod";
 
 export * from "./workspace.ts";
 export * from "./repository.ts";
+export * from "./cost.ts";
 export type {
 	RepositoryCommitInput,
 	Workspace,

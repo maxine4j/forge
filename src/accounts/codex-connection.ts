@@ -51,6 +51,7 @@ const methods = new Map<string, z.ZodType>([
 		}),
 	],
 	["account/read", z.strictObject({ refreshToken: z.boolean().optional() })],
+	["account/rateLimits/read", z.null()],
 	["account/login/start", z.strictObject({ type: z.literal("chatgptDeviceCode") })],
 	["account/login/cancel", z.strictObject({ loginId: z.string().min(1).max(256) })],
 	[
@@ -126,6 +127,7 @@ export class CodexConnection implements ICodexAgentConnection {
 	private buffer = "";
 	private sequence = 0;
 	private readonly pending = new Map<number, PendingRequest>();
+	private readonly expiredQuotaRequests = new Set<number>();
 	private readonly listeners = new Set<AccountNotification>();
 	private readonly requestListeners = new Set<(id: string | number, method: string, params: unknown) => boolean>();
 	private readonly serverRequests = new Set<string | number>();
@@ -214,14 +216,22 @@ export class CodexConnection implements ICodexAgentConnection {
 	}
 	private send(method: string, params: unknown): Promise<unknown> {
 		const handle = this.handle;
-		if (!handle || this.pending.size >= 32) return Promise.reject(new CodexConnectionError());
+		const quotaRead = method === "account/rateLimits/read";
+		if (!handle || this.pending.size >= 32 || (quotaRead && this.expiredQuotaRequests.size >= 32))
+			return Promise.reject(new CodexConnectionError());
 		const id = ++this.sequence;
 		return new Promise((resolve, reject) => {
 			const timer = new AbortController();
 			this.pending.set(id, { resolve, reject, timer });
 			void this.sleep(this.deadlineMs, timer.signal).then(
 				() => {
-					if (this.pending.has(id)) this.disconnect(new Error("Codex request deadline exceeded"));
+					if (!this.pending.has(id)) return;
+					const cause = new Error("Codex request deadline exceeded");
+					if (quotaRead) {
+						this.pending.delete(id);
+						this.expiredQuotaRequests.add(id);
+						reject(new CodexConnectionError({ cause }));
+					} else this.disconnect(cause);
 				},
 				() => {},
 			);
@@ -284,6 +294,7 @@ export class CodexConnection implements ICodexAgentConnection {
 			return;
 		}
 		if (typeof message.id !== "number") throw new Error("Invalid Codex response envelope");
+		if (this.expiredQuotaRequests.delete(message.id)) return;
 		const pending = this.pending.get(message.id);
 		if (!pending) throw new Error("Unexpected Codex response");
 		this.pending.delete(message.id);
@@ -305,6 +316,7 @@ export class CodexConnection implements ICodexAgentConnection {
 			pending.reject(new CodexConnectionError({ cause }));
 		}
 		this.pending.clear();
+		this.expiredQuotaRequests.clear();
 		this.serverRequests.clear();
 		if (handle) {
 			if (!expected) this.log.warn({ err: cause }, "Codex disconnected; pending work will not be replayed");

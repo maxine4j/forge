@@ -92,3 +92,21 @@ ticket guards. Ticket threads are not duplicated in the standalone Agents list.
 Exact-origin and owner checks apply to every API operation. Existing fixed ticket
 errors remain; transition conflicts return 409. The board and ticket view refresh
 while execution continues. Preview fixtures remain read-only.
+
+### Ticket cost
+
+The [Cost tab](agents.md#cost-and-usage) attributes each turn to the ticket and
+phase at dispatch, including review and rebase turns on an implementation thread.
+Each ticket shows recorded token volume and two AUD estimates.
+
+- **Subscription allocation** prorates the monthly plan amount at dispatch over
+  elapsed Codex turn time, splitting turns at UTC calendar month boundaries.
+  Queue time and gaps between turns are excluded. Concurrent turns are priced
+  independently. The allocation estimates a portion of the fixed subscription fee.
+- **API equivalent** applies the published standard text rates for uncached input,
+  cached input, and output to each known model and converts USD to AUD. It uses a
+  dated exchange-rate snapshot. Long-context, service-tier, cache-write and tool
+  fees are outside this base token estimate. Turns with missing duration, token
+  counts or model pricing are flagged in the table.
+
+See [cost settings](development.md#cost-settings) for the monthly amount and FX defaults.

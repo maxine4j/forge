@@ -144,6 +144,42 @@ class MockApi implements IMockApi {
 				},
 			];
 			this.routes.set(`${projectRoot}/tickets`, () => tickets);
+			const usage = { input: 164000, cached: 96000, output: 21000, turns: 8 };
+			const daily = Array.from({ length: 30 }, (_, index) => ({
+				date: new Date(Date.parse(date) - (29 - index) * 86_400_000).toISOString().slice(0, 10),
+				input: index >= 22 ? 20500 : 0,
+				cached: index >= 22 ? 12000 : 0,
+				output: index >= 22 ? 2625 : 0,
+			}));
+			this.routes.set(`${projectRoot}/cost`, () => ({
+				since: `${daily.at(0)!.date}T00:00:00.000Z`,
+				monthlyAud: 30,
+				audPerUsd: 1.44,
+				exchangeDate: date.slice(0, 10),
+				totals: usage,
+				days: daily,
+				phases: [
+					{ phase: "planning", input: 40000, cached: 22000, output: 4000, turns: 3 },
+					{ phase: "implementation", input: 100000, cached: 60000, output: 13000, turns: 4 },
+					{ phase: "review", input: 24000, cached: 14000, output: 4000, turns: 1 },
+				],
+				tickets: tickets.map(({ id, title }, index) => ({
+					id,
+					title,
+					untimedTurns: 0,
+					unpricedTurns: 0,
+					...(index === 1
+						? { ...usage, subscriptionAud: 0.04, apiAud: 0.73 }
+						: { input: 0, cached: 0, output: 0, turns: 0 }),
+				})),
+				limits: {
+					plan: "plus",
+					windows: [
+						{ bucket: "Codex", minutes: 300, usedPercent: 37 },
+						{ bucket: "Codex", minutes: 10080, usedPercent: 64 },
+					],
+				},
+			}));
 			for (const ticket of tickets) {
 				this.routes.set(`/api/tickets/${ticket.id}`, () => ticket);
 				this.routes.set(`/api/tickets/${ticket.id}/workflow`, () => ({

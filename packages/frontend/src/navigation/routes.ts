@@ -10,7 +10,7 @@ export const resolveRoute = (pathname: string): ForgeRoute => {
 	if (
 		projectId
 		&& section
-		&& ["code", "tasks", "agents", "pipelines", "terminals"].includes(section)
+		&& ["code", "tasks", "agents", "pipelines", "terminals", "cost"].includes(section)
 		&& (!threadId || section === "agents")
 	)
 		return { page: "project", projectId, section, ...(threadId ? { threadId } : {}) };

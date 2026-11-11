@@ -6,7 +6,7 @@ test("recognizes projects, configuration, project sections and chat deep links",
 	expect(resolveRoute("/")).toEqual({ page: "projects" });
 	expect(resolveRoute("/projects")).toEqual({ page: "projects" });
 	expect(resolveRoute("/config")).toEqual({ page: "config" });
-	for (const section of ["code", "tasks", "agents", "pipelines", "terminals"])
+	for (const section of ["code", "tasks", "agents", "pipelines", "terminals", "cost"])
 		expect(resolveRoute(`/projects/project/${section}`)).toEqual({
 			page: "project",
 			projectId: "project",

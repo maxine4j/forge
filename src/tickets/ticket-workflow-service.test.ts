@@ -141,6 +141,7 @@ test("planning starts only with capacity, saves revisions, and approval starts f
 	expect(implementation.implementerId).not.toBe(planning.plannerId);
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Updated plan with filtering");
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Red → Green → Refactor");
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[3]).toEqual({ ticketId: ticket.id, phase: "implementation" });
 });
 
 test("implementation and review complete, divergent merge rebases through the pool then fast-forwards to done", async () => {
@@ -167,6 +168,7 @@ test("implementation and review complete, divergent merge rebases through the po
 	expect(f.jobs.get(ticket.id)).toMatchObject({ phase: "rebase", state: "queued" });
 	await f.service.tick(actor);
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Rebase the ticket branch");
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[3]).toEqual({ ticketId: ticket.id, phase: "rebase" });
 	f.complete(id, "Rebased and validated");
 	await f.service.tick(actor);
 	expect(ticket.status).toBe("done");

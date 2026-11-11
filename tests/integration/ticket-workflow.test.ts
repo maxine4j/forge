@@ -14,6 +14,9 @@ import { AgentService } from "../../src/agents/agent-service.ts";
 import { AgentThreadStore } from "../../src/agents/agent-thread-store.ts";
 import { AccessService } from "../../src/auth/access-service.ts";
 import { CodexAgentClient } from "../../src/codex/codex-agent-client.ts";
+import { CodexUsageClient } from "../../src/codex/codex-usage-client.ts";
+import { CostService } from "../../src/cost/cost-service.ts";
+import { CostStore } from "../../src/cost/cost-store.ts";
 import { SqliteDatabase } from "../../src/database/sqlite-database.ts";
 import { ProjectService } from "../../src/projects/project-service.ts";
 import { ProjectStore } from "../../src/projects/project-store.ts";
@@ -54,6 +57,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		sleep,
 	);
 	let agents: AgentService | undefined;
+	let usage: CodexUsageClient | undefined;
 	try {
 		await db.initialize();
 		const access = new AccessService({ owner: "owner", origin: "https://forge.example" });
@@ -79,10 +83,26 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		const agentStore = new AgentThreadStore(db);
 		await agentStore.initialize();
 		let pool = new AgentExecutionPool();
-		const client = new CodexAgentClient(connection, files.realpath, randomUUID);
+		const costStore = new CostStore(db);
+		await costStore.initialize(new Date().toISOString());
+		usage = new CodexUsageClient(
+			connection,
+			(turn) => costStore.save(turn),
+			() => new Date(),
+			30,
+		);
+		const client = new CodexAgentClient(connection, files.realpath, randomUUID, usage);
 		agents = new AgentService(agentStore, client, workspaces, projects, access, randomUUID, () => new Date(), pool);
 		const ticketStore = new TicketStore(db);
 		await ticketStore.initialize();
+		const cost = new CostService(
+			projects,
+			ticketStore,
+			costStore,
+			usage,
+			{ monthlyAud: 30, audPerUsd: 1.44, exchangeDate: "2026-11-10" },
+			() => new Date(),
+		);
 		const jobs = new TicketWorkflowStore(db);
 		await jobs.initialize();
 		const merges = new WorkspaceMergeClient(workspaces, git);
@@ -94,7 +114,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			pool = new AgentExecutionPool();
 			agents = new AgentService(
 				agentStore,
-				new CodexAgentClient(connection, files.realpath, randomUUID),
+				new CodexAgentClient(connection, files.realpath, randomUUID, usage),
 				workspaces,
 				projects,
 				access,
@@ -191,8 +211,26 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await workflow.tick(owner);
 		expect((await ticketStore.get(ticket.id))?.status).toBe("done");
 		expect((await jobs.get(ticket.id))?.resultSha).toBe(completed.resultSha);
+		await expect.poll(async () => (await cost.read(owner, project.id)).totals.input).toBe(6000);
+		const recorded = await cost.read(owner, project.id);
+		expect(recorded.phases.map(({ phase, turns }) => [phase, turns])).toEqual([
+			["planning", 2],
+			["implementation", 1],
+			["review", 2],
+			["rebase", 1],
+		]);
+		expect(recorded.tickets.at(0)).toMatchObject({
+			id: ticket.id,
+			cached: 3000,
+			untimedTurns: 0,
+			unpricedTurns: 0,
+		});
+		expect(recorded.tickets.at(0)?.apiAud).toBeCloseTo(0.02484);
+		expect(recorded.limits?.windows.at(0)).toMatchObject({ minutes: 300, usedPercent: 40 });
+		expect((await cost.read(owner, other.id)).phases.map(({ phase }) => phase)).toEqual(["chat"]);
 	} finally {
 		await agents?.shutdown();
+		await usage?.close();
 		await connection.close();
 		await git.close();
 		await db.close();

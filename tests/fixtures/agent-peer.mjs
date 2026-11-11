@@ -33,11 +33,18 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			turns: [],
 		};
 		threads.set(thread.id, thread);
-		result = { thread };
+		result = { thread, model: "gpt-5.4" };
 	}
+	if (method === "account/rateLimits/read")
+		result = {
+			rateLimits: { limitId: "codex", planType: "plus", primary: { usedPercent: 40, windowDurationMins: 300 } },
+		};
 	if (method === "thread/resume" || method === "thread/read") {
 		const thread = threads.get(params.threadId);
-		result = { thread: { ...thread, turns: params.excludeTurns || !params.includeTurns ? [] : thread.turns } };
+		result = {
+			thread: { ...thread, turns: params.excludeTurns || !params.includeTurns ? [] : thread.turns },
+			model: "gpt-5.4",
+		};
 	}
 	if (method === "thread/turns/list") {
 		const turns = [...threads.get(params.threadId).turns].reverse().slice(0, params.limit);
@@ -64,6 +71,20 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		};
 		thread.turns.push(turn);
 		notify("turn/started", { threadId: thread.id, turn });
+		const breakdown = (turns) => ({
+			inputTokens: 1000 * turns,
+			cachedInputTokens: 500 * turns,
+			outputTokens: 100 * turns,
+			reasoningOutputTokens: 25 * turns,
+			totalTokens: 1100 * turns,
+		});
+		const usage = {
+			threadId: thread.id,
+			turnId: turn.id,
+			tokenUsage: { total: breakdown(thread.turns.length), last: breakdown(1) },
+		};
+		notify("thread/tokenUsage/updated", usage);
+		notify("thread/tokenUsage/updated", usage);
 		notify("item/agentMessage/delta", {
 			threadId: thread.id,
 			turnId: turn.id,
@@ -121,6 +142,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 				text: "FORGE_RESULT\n" + JSON.stringify(artifact),
 			});
 			turn.status = "completed";
+			turn.durationMs = 1000;
 			notify("turn/completed", { threadId: thread.id, turn });
 		}
 	}

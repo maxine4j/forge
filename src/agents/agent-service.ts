@@ -16,6 +16,7 @@ import { z } from "zod";
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
 import type { ICodexAgentClient } from "../codex/codex-agent-client.ts";
+import type { TicketUsageScope } from "../cost/types.ts";
 import type { IProjectService } from "../projects/project-service.ts";
 import type { WorkspaceLocation } from "../workspaces/types.ts";
 import type { IAgentExecutionPool } from "./agent-execution-pool.ts";
@@ -43,7 +44,7 @@ export interface IAgentService {
 }
 export interface ITicketAgents {
 	createTicketThread(actor: Actor, projectId: string, title: string, workspaceId?: string): Promise<AgentView>;
-	dispatch(actor: Actor, id: string, text: string): Promise<AgentView>;
+	dispatch(actor: Actor, id: string, text: string, ticket: TicketUsageScope): Promise<AgentView>;
 	get(actor: Actor, id: string): Promise<AgentView>;
 	resume(actor: Actor, id: string): Promise<AgentView>;
 }
@@ -114,10 +115,19 @@ export class AgentService implements IAgentService, ITicketAgents {
 		this.authorize(actor);
 		if (!agentMessageSchema.safeParse({ text, ...settings }).success) throw new AgentError("invalid-request");
 		if ((await this.require(id)).managed) throw new AgentError("agent-conflict");
-		return this.dispatch(actor, id, text, settings);
+		return this.execute(actor, id, text, settings);
 	}
 	/** Ticket scheduler dispatch; the prompt is internal and can include a complete approved plan. */
-	async dispatch(actor: Actor, id: string, text: string, settings?: AgentSettings): Promise<AgentView> {
+	async dispatch(actor: Actor, id: string, text: string, ticket?: TicketUsageScope): Promise<AgentView> {
+		return this.execute(actor, id, text, undefined, ticket);
+	}
+	private async execute(
+		actor: Actor,
+		id: string,
+		text: string,
+		settings?: AgentSettings,
+		ticket?: TicketUsageScope,
+	): Promise<AgentView> {
 		this.authorize(actor);
 		const input = z.object({ text: z.string().trim().min(1).max(64000) }).safeParse({ text });
 		if (!input.success) throw new AgentError("invalid-request");
@@ -152,6 +162,11 @@ export class AgentService implements IAgentService, ITicketAgents {
 					location.path,
 					input.data.text,
 					agentSettingsSchema.parse({ model: record.model, permissions: record.permissions }),
+					ticket
+						? { projectId: record.projectId, ...ticket }
+						: record.managed
+							? undefined
+							: { projectId: record.projectId, phase: "chat" },
 				);
 				return await this.sync(record);
 			} catch (cause) {

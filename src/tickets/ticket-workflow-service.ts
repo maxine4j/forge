@@ -167,7 +167,10 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			await this.store.save(job);
 		}
 		const id = job.phase === "planning" ? job.plannerId : job.implementerId!;
-		await this.agents.dispatch(actor, id, this.prompts.build(ticket, job));
+		await this.agents.dispatch(actor, id, this.prompts.build(ticket, job), {
+			ticketId: ticket.id,
+			phase: job.phase,
+		});
 		job.state = "running";
 		await this.store.save(job);
 	}

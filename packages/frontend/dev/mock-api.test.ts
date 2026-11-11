@@ -1,6 +1,7 @@
 import {
 	accountsStatusSchema,
 	projectsSchema,
+	projectCostSchema,
 	workspacesSchema,
 	workspaceTreeSchema,
 	workspaceFileSchema,
@@ -44,6 +45,16 @@ const read = async (path: string) => {
 	expect(response.headers.get("cache-control")).toBe("no-store");
 	return response.json();
 };
+
+test("mock cost data uses ticket keys from its project", async () => {
+	const projects = projectsSchema.parse(await read("/api/projects"));
+	for (const project of projects) {
+		const tickets = ticketsSchema.parse(await read(`/api/projects/${project.id}/tickets`));
+		const cost = projectCostSchema.parse(await read(`/api/projects/${project.id}/cost`));
+		expect(cost.tickets.map(({ id }) => id)).toEqual(tickets.map(({ id }) => id));
+		expect(cost.days).toHaveLength(30);
+	}
+});
 
 test("mock chats expose isolated project history and requests while every mutation stays read-only", async () => {
 	for (const project of projectsSchema.parse(await read("/api/projects"))) {

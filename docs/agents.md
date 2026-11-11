@@ -165,3 +165,23 @@ Controlled Chromium tests cover independent threads, activity, interruptions,
 reopening, failed sends/replies, approval/input, reconnects, automatic recovery and
 mobile layout. Screenshots live under `artifacts/forge-browser/`. Authenticated
 live ChatGPT inference remains a separate manual check.
+
+### Cost and usage
+
+The project Cost tab reads `GET /api/projects/:id/cost` through the owner-only
+API. It shows cumulative recorded usage, 7- and 30-day UTC charts by turn start
+date, a breakdown by phase, and [per-ticket estimates](tickets.md#ticket-cost).
+Standalone chats contribute to project usage in their own category. Cached
+input is included in input totals, and reasoning is included in output.
+
+Forge records `thread/tokenUsage/updated` counters and reported turn duration in
+SQLite. Usage updates replace the previous snapshot for the same turn, with the
+first update establishing the baseline from the runtime's last and total counts.
+The tab shows the date tracking began. Older turns lack reliable per-turn token
+and phase data for backfill. Disconnects can leave partial usage and missing
+duration. The endpoint returns normalized counts without conversation content,
+Codex identifiers, or account credentials.
+
+Account-wide quota windows come from `account/rateLimits/read` when available.
+Forge shows the reported window length, percent used, and reset time. The request
+is read-only. A quota timeout leaves the shared execution connection open.

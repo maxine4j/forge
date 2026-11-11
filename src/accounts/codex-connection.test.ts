@@ -43,6 +43,8 @@ describe("CodexConnection", () => {
 									emit({ method: "turn/completed", params: { text } });
 									emit({ id: message.id, result: { data: [{ text }], nextCursor: null } });
 								}
+								if (message.method === "account/rateLimits/read" && message.params === null)
+									emit({ id: message.id, result: { rateLimits: {} } });
 							},
 						};
 					},
@@ -58,6 +60,7 @@ describe("CodexConnection", () => {
 				).resolves.toMatchObject({ data: [{ text }] });
 				expect(notifications).toHaveBeenCalledWith("turn/completed", { text });
 				expect(stop).not.toHaveBeenCalled();
+				await expect(connection.request("account/rateLimits/read", null)).resolves.toEqual({ rateLimits: {} });
 				const pending = connection.request("account/read", {});
 				await Promise.resolve();
 				output("x".repeat(16 * 1024 * 1024 + 1));
@@ -159,6 +162,7 @@ describe("CodexConnection", () => {
 	it("bounds frames and request deadlines, and rejects unsupported methods", async () => {
 		let output: (chunk: string) => void = () => {};
 		let stopped = false;
+		let quotaId: number | undefined;
 		const processes: IAccountProcess = {
 			initialize: async () => {},
 			spawn: (spec) => {
@@ -170,6 +174,7 @@ describe("CodexConnection", () => {
 					},
 					write: (data) => {
 						const message = JSON.parse(data);
+						if (message.method === "account/rateLimits/read") quotaId = message.id;
 						if (message.method === "initialize")
 							output(
 								JSON.stringify({
@@ -189,6 +194,12 @@ describe("CodexConnection", () => {
 		const connection = new CodexConnection(processes, sleep, 10);
 		await connection.initialize();
 		await expect(connection.request("arbitrary/method", {})).rejects.toThrow("Unsupported Codex operation");
+		await expect(connection.request("account/rateLimits/read", null)).rejects.toThrow(
+			"Codex connection unavailable",
+		);
+		expect(stopped).toBe(false);
+		output(JSON.stringify({ id: quotaId, result: { rateLimits: {} } }) + "\n");
+		expect(stopped).toBe(false);
 		await expect(connection.request("account/read", {})).rejects.toThrow("Codex connection unavailable");
 		expect(stopped).toBe(true);
 		await connection.initialize();

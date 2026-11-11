@@ -117,10 +117,16 @@ test("settings persist per chat and discovery always resolves the owned worktree
 	expect(client.files).toHaveBeenCalledWith(`/data/worktrees/${thread.workspaceId}`, "main");
 	await service.send(owner, thread.id, "Work", { model: "test-model", permissions: "approve-for-me" });
 	expect(records.get(thread.id)).toMatchObject({ model: "test-model", permissions: "approve-for-me" });
-	expect(client.send).toHaveBeenCalledWith(expect.any(String), `/data/worktrees/${thread.workspaceId}`, "Work", {
-		model: "test-model",
-		permissions: "approve-for-me",
-	});
+	expect(client.send).toHaveBeenCalledWith(
+		expect.any(String),
+		`/data/worktrees/${thread.workspaceId}`,
+		"Work",
+		{
+			model: "test-model",
+			permissions: "approve-for-me",
+		},
+		{ projectId, phase: "chat" },
+	);
 	expect(workspaces.resolve).toHaveBeenCalledWith(owner, thread.workspaceId);
 	await expect(service.options({ username: "outsider" }, thread.id)).rejects.toThrow();
 	await expect(service.files(owner, thread.id, "x".repeat(501))).rejects.toThrow("invalid-request");

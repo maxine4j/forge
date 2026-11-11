@@ -1342,6 +1342,247 @@ small {
 .feature-empty {
 	margin: 32px 0;
 }
+.cost-dashboard {
+	--cost-muted: #99a6b4;
+	--cost-border: #30363d;
+	--cost-accent: #79b8ff;
+	display: grid;
+	gap: 16px;
+	padding-block: 12px 28px;
+	font-variant-numeric: tabular-nums;
+}
+.cost-dashboard h2,
+.cost-dashboard h3,
+.cost-dashboard p,
+.cost-dashboard dl,
+.cost-dashboard dd {
+	margin: 0;
+}
+.cost-title h2 {
+	font-size: 26px;
+}
+.cost-dashboard h3 {
+	font-size: 15px;
+}
+.cost-heading {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 8px 16px;
+}
+.cost-card {
+	min-width: 0;
+	padding: 16px;
+	border: 1px solid var(--cost-border);
+	border-radius: 10px;
+	background: #161b22;
+}
+.cost-card > p {
+	margin-top: 10px;
+}
+.cost-card > button {
+	margin-top: 10px;
+}
+.cost-muted,
+.cost-dashboard small {
+	color: var(--cost-muted);
+	font-size: 12px;
+}
+.cost-metrics,
+.cost-quota-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(136px, 100%), 1fr));
+	gap: 10px;
+}
+.cost-metrics dt {
+	color: var(--cost-muted);
+	font-size: 12px;
+}
+.cost-metrics dd {
+	font-size: clamp(18px, 2.5vw, 27px);
+	font-weight: 650;
+	overflow-wrap: anywhere;
+}
+.cost-charts {
+	display: grid;
+	grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+	gap: 16px;
+}
+.cost-heading select {
+	background: #0d1117;
+	color: inherit;
+	border: 1px solid var(--cost-border);
+	border-radius: 6px;
+	padding: 5px 8px;
+}
+.cost-trend {
+	display: grid;
+	grid-template-columns: auto minmax(0, 1fr);
+	gap: 8px;
+	margin-top: 16px;
+	min-height: 140px;
+}
+.cost-axis,
+.cost-dates {
+	display: flex;
+	justify-content: space-between;
+	color: var(--cost-muted);
+	font-size: 11px;
+}
+.cost-axis {
+	flex-direction: column;
+	text-align: right;
+}
+.cost-dates {
+	padding-left: 30px;
+	margin-top: 4px;
+}
+.cost-days {
+	display: flex;
+	gap: 3px;
+	border-block: 1px solid var(--cost-border);
+	background: linear-gradient(
+		to bottom,
+		transparent calc(50% - 0.5px),
+		var(--cost-border) 50%,
+		transparent calc(50% + 0.5px)
+	);
+}
+.cost-day {
+	flex: 1;
+	min-width: 0;
+}
+.cost-day-stack {
+	display: flex;
+	flex-direction: column-reverse;
+	height: 100%;
+}
+.cost-day:hover {
+	background: #212936;
+}
+.cost-uncached {
+	background: #6ba7e7;
+}
+.cost-cached {
+	background: #4dc7a2;
+}
+.cost-output {
+	background: #c3a4f4;
+}
+.cost-legend,
+.cost-daily-details ul {
+	list-style: none;
+	padding: 0;
+	margin: 8px 0 0;
+}
+.cost-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px 12px;
+	font-size: 12px;
+}
+.cost-legend span {
+	display: inline-block;
+	width: 8px;
+	height: 8px;
+	margin-right: 5px;
+	border-radius: 2px;
+}
+.cost-daily-details {
+	margin-top: 12px;
+	font-size: 12px;
+	color: var(--cost-muted);
+}
+.cost-daily-details li,
+.cost-phase > div {
+	display: flex;
+	justify-content: space-between;
+	gap: 8px;
+}
+.cost-phases {
+	display: grid;
+	gap: 12px;
+	margin-top: 16px;
+}
+.cost-phase {
+	display: grid;
+	gap: 5px;
+	font-size: 13px;
+}
+.cost-phase strong {
+	white-space: nowrap;
+}
+.cost-bar,
+.cost-bar > span {
+	display: block;
+	height: 6px;
+	border-radius: 4px;
+}
+.cost-bar {
+	background: #2b333e;
+}
+.cost-bar > span {
+	background: var(--cost-accent);
+}
+.cost-quota-grid {
+	grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
+	gap: 16px 28px;
+	margin-top: 12px;
+}
+.cost-quota-grid progress {
+	width: 100%;
+	height: 8px;
+	accent-color: #4dc7a2;
+}
+.cost-plan {
+	text-transform: capitalize;
+	font-size: 12px;
+	color: var(--cost-muted);
+}
+.cost-table-scroll {
+	max-width: 100%;
+	overflow-x: auto;
+	margin-top: 8px;
+}
+.cost-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+.cost-table th,
+.cost-table td {
+	padding: 9px 12px;
+	border-bottom: 1px solid var(--cost-border);
+	text-align: left;
+	vertical-align: top;
+}
+.cost-table th:first-child {
+	min-width: 160px;
+	padding-left: 0;
+	text-align: left;
+}
+.cost-table th button {
+	padding: 3px 0;
+	background: transparent;
+	border-color: transparent;
+	white-space: nowrap;
+}
+.cost-table td .cost-bar {
+	margin-top: 5px;
+	min-width: 64px;
+}
+.cost-table td small {
+	display: block;
+}
+.cost-method {
+	max-width: 74ch;
+}
+@media (max-width: 740px) {
+	.cost-charts {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
 .toolbar {
 	display: flex;
 	align-items: center;

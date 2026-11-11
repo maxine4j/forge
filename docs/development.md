@@ -54,6 +54,19 @@ files return JSON 404 responses. Fixtures are not persisted. Normal Vite mode
 does not install the mock routes, and production builds exclude the mock API
 and banner, including builds invoked with `--mode mock`.
 
+## Cost settings
+
+The [Cost tab](agents.md#cost-and-usage) uses `FORGE_CODEX_MONTHLY_AUD` for the
+monthly subscription amount (default A$30). Update it when the plan price changes.
+Forge retains the configured amount with each recorded turn.
+
+API equivalents use the same dated FX rate throughout the dashboard. Set
+`FORGE_COST_AUD_PER_USD` and `FORGE_COST_EXCHANGE_DATE` (YYYY-MM-DD) together to
+override the default of 1 AUD / 0.6924 USD from the
+[RBA's 10 November 2026 release](https://www.rba.gov.au/statistics/frequency/exchange-rates.html).
+The [model rate table](../src/cost/api-pricing.ts) records the pricing snapshot.
+The read-only frontend preview includes sample usage and quota data.
+
 ## Image and deployment
 
 The runtime uses a digest-pinned `docker/sandbox-templates:codex` base. It retains the

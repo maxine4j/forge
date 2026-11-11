@@ -3,7 +3,7 @@ import { expect, test, vi } from "vitest";
 import type { ICodexAgentConnection } from "../accounts/codex-connection.ts";
 import { CodexAgentClient } from "./codex-agent-client.ts";
 
-const setup = () => {
+const setup = (tracker?: { track: ReturnType<typeof vi.fn> }) => {
 	let notify: (method: string, params: unknown) => void = () => {};
 	let request: (id: string | number, method: string, params: unknown) => boolean = () => false;
 	let sequence = 0;
@@ -11,6 +11,7 @@ const setup = () => {
 	const rpc = vi.fn(async (method: string, params: unknown): Promise<unknown> => {
 		if (method === "thread/start")
 			return {
+				model: "runtime-default",
 				thread: {
 					id: `codex-${++sequence}`,
 					historyMode: "paginated",
@@ -73,6 +74,7 @@ const setup = () => {
 			connection,
 			async (path) => path,
 			() => `request-${++requestSequence}`,
+			tracker,
 		),
 		rpc,
 		respond,
@@ -80,6 +82,16 @@ const setup = () => {
 		request: (id: string | number, method: string, params: unknown) => request(id, method, params),
 	};
 };
+
+test("registers usage attribution and the runtime default model before submitting the turn", async () => {
+	const track = vi.fn();
+	const { client, rpc } = setup({ track });
+	const id = await client.start("/data/worktrees/one");
+	const scope = { projectId: "project", ticketId: "FORGE-1", phase: "implementation" } as const;
+	await client.send(id, "/data/worktrees/one", "Work", undefined, scope);
+	expect(track).toHaveBeenCalledWith(id, scope, "runtime-default");
+	expect(track.mock.invocationCallOrder[0]).toBeLessThan(rpc.mock.invocationCallOrder[1]!);
+});
 
 test("discovers runtime models and enabled worktree skills, searches only that worktree", async () => {
 	const { client, rpc } = setup();
