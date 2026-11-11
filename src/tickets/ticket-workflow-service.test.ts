@@ -63,6 +63,9 @@ const fixture = () => {
 		list: vi.fn(),
 		insert: vi.fn(),
 		update: vi.fn(),
+		archive: vi.fn(async (id: string, archivedAt: string) => {
+			tickets.get(id)!.archivedAt ??= archivedAt;
+		}),
 		move: vi.fn(),
 	};
 	const merges = {
@@ -103,6 +106,31 @@ const fixture = () => {
 	};
 	return { service, jobs, tickets, views, pool, agents, merges, create, complete, wake };
 };
+
+test("archiving serializes with ticket execution and preserves workflow history", async () => {
+	const f = fixture();
+	const queued = f.create();
+	const running = f.create("FORGE-2");
+	const archivedAt = "2026-11-04T00:00:00.000Z";
+	await f.service.move(actor, queued, { status: "todo" });
+	const queuedWorkflow = await f.service.get(actor, queued.id);
+	await f.service.move(actor, running, { status: "todo" });
+	await Promise.all([f.service.archive(actor, queued, archivedAt), f.service.tick(actor)]);
+	expect(f.agents.dispatch).toHaveBeenCalledTimes(1);
+	expect(await f.service.get(actor, queued.id)).toEqual(queuedWorkflow);
+	await expect(f.service.recover(actor, queued.id)).rejects.toThrow("ticket-conflict");
+	await expect(f.service.archive(actor, running, archivedAt)).rejects.toThrow("ticket-conflict");
+	expect(f.tickets.get(running.id)?.archivedAt).toBeUndefined();
+	const current = await f.service.get(actor, running.id);
+	expect(current.state).toBe("running");
+	f.complete(current.plannerId!, "Implement search");
+	await f.service.tick(actor);
+	const idle = await f.service.get(actor, running.id);
+	expect(idle).toMatchObject({ state: "idle", plan: { revision: 1 } });
+	await f.service.archive(actor, running, archivedAt);
+	await expect(f.service.approve(actor, running, 1)).rejects.toThrow("ticket-conflict");
+	expect(await f.service.get(actor, running.id)).toEqual(idle);
+});
 
 test("ready waits for capacity, starts planning in progress, and approves only the displayed revision", async () => {
 	const f = fixture();

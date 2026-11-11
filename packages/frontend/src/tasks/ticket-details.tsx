@@ -26,6 +26,7 @@ export const TicketDetails = ({
 	api,
 	busy,
 	close,
+	archive,
 	save,
 	move,
 	refreshBoard,
@@ -35,12 +36,14 @@ export const TicketDetails = ({
 	api: IWorkspaceApi;
 	busy: boolean;
 	close: () => void;
+	archive: () => Promise<void>;
 	save: (input: CreateTicket) => Promise<void>;
 	move: (id: string, input: MoveTicket) => Promise<void>;
 	refreshBoard: () => void;
 	drafts: Map<string, string>;
 }) => {
 	const dialog = useRef<HTMLDialogElement>(null);
+	const archiveDialog = useRef<HTMLDialogElement>(null);
 	const fieldId = useId();
 	const poller = useRef<ResourcePoller<TicketWorkflow> | undefined>(undefined);
 	const [job, setJob] = useState<TicketWorkflow>();
@@ -49,6 +52,7 @@ export const TicketDetails = ({
 	const [title, setTitle] = useState(ticket.title);
 	const [description, setDescription] = useState(ticket.description);
 	const [error, setError] = useState("");
+	const [archiveError, setArchiveError] = useState("");
 	const [history, setHistory] = useState(false);
 	const [refresh] = useState(() => () => poller.current?.refresh());
 	useEffect(() => {
@@ -111,10 +115,76 @@ export const TicketDetails = ({
 					<h2 id='ticket-details-title'>{ticket.id}</h2>
 					<p>{ticket.title}</p>
 				</div>
-				<button type='button' aria-label='Close ticket' disabled={busy} onClick={close}>
-					✕
-				</button>
+				<div className='ticket-details-actions'>
+					<button
+						type='button'
+						aria-label='Archive ticket'
+						title='Archive ticket'
+						disabled={busy || acting}
+						onClick={() => {
+							setArchiveError("");
+							archiveDialog.current?.showModal();
+						}}
+					>
+						<svg
+							width='16'
+							height='16'
+							viewBox='0 0 24 24'
+							fill='none'
+							stroke='currentColor'
+							strokeWidth='2'
+							strokeLinecap='round'
+							strokeLinejoin='round'
+							aria-hidden='true'
+						>
+							<rect x='3' y='3' width='18' height='5' rx='1' />
+							<path d='M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8m-9 4h4' />
+						</svg>
+					</button>
+					<button type='button' aria-label='Close ticket' disabled={busy} onClick={close}>
+						✕
+					</button>
+				</div>
 			</div>
+			<dialog
+				ref={archiveDialog}
+				className='ticket-dialog ticket-archive-dialog'
+				aria-labelledby={`${fieldId}-archive-title`}
+				aria-describedby={`${fieldId}-archive-description`}
+				onCancel={(event) => {
+					event.stopPropagation();
+					event.preventDefault();
+					if (!busy) archiveDialog.current?.close();
+				}}
+			>
+				<h2 id={`${fieldId}-archive-title`}>Archive {ticket.id}?</h2>
+				<p id={`${fieldId}-archive-description`}>
+					This removes the ticket from the task board and keeps its details and history.
+				</p>
+				{archiveError && (
+					<p role='alert' className='error'>
+						{archiveError}
+					</p>
+				)}
+				<div className='ticket-dialog-actions'>
+					<button type='button' disabled={busy} onClick={() => archiveDialog.current?.close()}>
+						Cancel
+					</button>
+					<button
+						type='button'
+						className='primary'
+						disabled={busy}
+						onClick={() => {
+							setArchiveError("");
+							void archive().catch((err: unknown) =>
+								setArchiveError(err instanceof Error ? err.message : "Cannot archive ticket."),
+							);
+						}}
+					>
+						{busy ? "Archiving…" : "Archive"}
+					</button>
+				</div>
+			</dialog>
 			<div className='ticket-details-toolbar'>
 				<label>
 					Status

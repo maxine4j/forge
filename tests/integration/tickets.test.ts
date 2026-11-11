@@ -108,4 +108,21 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		expect(response.status).toBe(status);
 		expect(Object.keys(await response.json())).toEqual(["error"]);
 	}
+	const archived = await request(`tickets/${ticket.id}/archive`, "POST");
+	expect(archived.status).toBe(200);
+	const archivedTicket = await archived.json();
+	expect(archivedTicket).toMatchObject({
+		id: ticket.id,
+		title: "Edited",
+		description: "New scope",
+		status: "todo",
+		archivedAt: "2026-11-03T00:00:00.000Z",
+	});
+	expect(await (await request(`tickets/${ticket.id}`)).json()).toEqual(archivedTicket);
+	expect(await (await request(`tickets/${ticket.id}/archive`, "POST")).json()).toEqual(archivedTicket);
+	expect(await (await request(listPath)).json()).toEqual([]);
+	expect(await workflowStore.list()).toEqual([]);
+	expect(await (await request(`tickets/${ticket.id}/workflow`)).json()).toMatchObject({ state: "queued" });
+	const next = await request(listPath, "POST", { title: "Next ticket" });
+	expect(await next.json()).toMatchObject({ id: "FORGE-2" });
 });

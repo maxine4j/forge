@@ -10,12 +10,17 @@ import type { IDatabase } from "../database/sqlite-database.ts";
 import { TicketError } from "./errors.ts";
 
 const columns = "id, projectId, title, description, status, createdAt";
+const ticketRowSchema = ticketSchema.extend({
+	archivedAt: ticketSchema.shape.archivedAt.nullable(),
+});
 export interface ITicketStore {
-	/** Allocates an immutable globally increasing key; at most 1000 tickets per project. Failures throw TicketError. */
+	/** Allocates an immutable globally increasing key; at most 1000 active tickets per project. */
 	insert(projectId: string, input: CreateTicket, createdAt: string): Promise<Ticket>;
 	get(id: string): Promise<Ticket | undefined>;
-	/** Ordered by position within each status. */
+	/** Active tickets ordered by position within each status. */
 	list(projectId: string): Promise<Ticket[]>;
+	/** Preserves the first archive timestamp. Throws TicketError if the ticket is missing. */
+	archive(id: string, archivedAt: string): Promise<void>;
 	update(id: string, input: CreateTicket): Promise<void>;
 	/** Atomically inserts before a validated same-project/status ticket, or appends. */
 	move(id: string, input: MoveTicket): Promise<void>;
@@ -27,6 +32,10 @@ export class TicketStore implements ITicketStore {
 			await this.database.run(
 				"CREATE TABLE IF NOT EXISTS tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT GENERATED ALWAYS AS ('FORGE-' || number) STORED UNIQUE, projectId TEXT NOT NULL REFERENCES projects(id), title TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'backlog' CHECK(status IN ('backlog','todo','in-progress','in-review','merging','done')), position INTEGER NOT NULL, createdAt TEXT NOT NULL)",
 			);
+			const archiveColumn = await this.database.all(
+				"SELECT name FROM pragma_table_info('tickets') WHERE name='archivedAt'",
+			);
+			if (!archiveColumn.length) await this.database.run("ALTER TABLE tickets ADD COLUMN archivedAt TEXT");
 			await this.database.run("CREATE INDEX IF NOT EXISTS tickets_board ON tickets(projectId, status, position)");
 		});
 	}
@@ -35,7 +44,7 @@ export class TicketStore implements ITicketStore {
 			const fields = createTicketSchema.parse(input);
 			ticketSchema.pick({ projectId: true, createdAt: true }).parse({ projectId, createdAt });
 			const rows = await this.database.all(
-				`INSERT INTO tickets(projectId,title,description,createdAt,position) SELECT ?,?,?,?,COALESCE((SELECT MAX(position)+1 FROM tickets WHERE projectId=? AND status='backlog'),1) WHERE (SELECT COUNT(*) FROM tickets WHERE projectId=?) < 1000 RETURNING ${columns}`,
+				`INSERT INTO tickets(projectId,title,description,createdAt,position) SELECT ?,?,?,?,COALESCE((SELECT MAX(position)+1 FROM tickets WHERE projectId=? AND status='backlog' AND archivedAt IS NULL),1) WHERE (SELECT COUNT(*) FROM tickets WHERE projectId=? AND archivedAt IS NULL) < 1000 RETURNING ${columns}`,
 				[projectId, fields.title, fields.description, createdAt, projectId, projectId],
 			);
 			return ticketSchema.parse(rows.at(0));
@@ -43,18 +52,31 @@ export class TicketStore implements ITicketStore {
 	}
 	async get(id: string): Promise<Ticket | undefined> {
 		return this.guard(async () => {
-			const rows = await this.database.all(`SELECT ${columns} FROM tickets WHERE id=?`, [id]);
-			return rows.length ? ticketSchema.parse(rows.at(0)) : undefined;
+			const rows = await this.database.all(`SELECT ${columns}, archivedAt FROM tickets WHERE id=?`, [id]);
+			if (!rows.length) return undefined;
+			const { archivedAt, ...ticket } = ticketRowSchema.parse(rows.at(0));
+			return archivedAt ? { ...ticket, archivedAt } : ticket;
 		});
 	}
 	async list(projectId: string): Promise<Ticket[]> {
 		return this.guard(async () =>
 			(
-				await this.database.all(`SELECT ${columns} FROM tickets WHERE projectId=? ORDER BY position,number`, [
-					projectId,
-				])
+				await this.database.all(
+					`SELECT ${columns} FROM tickets WHERE projectId=? AND archivedAt IS NULL ORDER BY position,number`,
+					[projectId],
+				)
 			).map((row) => ticketSchema.parse(row)),
 		);
+	}
+	async archive(id: string, archivedAt: string): Promise<void> {
+		await this.guard(async () => {
+			const timestamp = ticketSchema.shape.archivedAt.unwrap().parse(archivedAt);
+			const changes = await this.database.run("UPDATE tickets SET archivedAt=COALESCE(archivedAt,?) WHERE id=?", [
+				timestamp,
+				id,
+			]);
+			if (changes !== 1) throw new TicketError("ticket-not-found");
+		});
 	}
 	async update(id: string, input: CreateTicket): Promise<void> {
 		await this.guard(async () => {

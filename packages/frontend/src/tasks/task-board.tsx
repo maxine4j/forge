@@ -393,6 +393,15 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 					busy={busy}
 					drafts={drafts}
 					close={() => setEditing(undefined)}
+					archive={() =>
+						mutate(async () => {
+							await api.read(`tickets/${editing.id}/archive`, ticketSchema, "POST");
+							if (!active.current) return;
+							setTickets((current) => current.filter((ticket) => ticket.id !== editing.id));
+							setEditing(undefined);
+							setNotice(`${editing.id} archived.`);
+						})
+					}
 					move={move}
 					refreshBoard={() => poller.current?.refresh()}
 					save={(input) =>

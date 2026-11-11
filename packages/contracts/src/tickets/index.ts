@@ -17,6 +17,7 @@ export const ticketSchema = z.strictObject({
 	description: z.string().max(4000),
 	status: ticketStatusSchema,
 	createdAt: z.iso.datetime(),
+	archivedAt: z.iso.datetime().optional(),
 	needsAttention: z.literal(true).optional(),
 });
 export const ticketsSchema = z.array(ticketSchema).max(1000);

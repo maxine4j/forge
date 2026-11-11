@@ -70,6 +70,9 @@ export class TicketRouter implements IHttpRouter {
 			if (!input.success) throw new TicketError("invalid-request");
 			ctx.body = ticketSchema.parse(await this.service.update(ctx.state.actor, ctx.params["id"]!, input.data));
 		});
+		router.post("/api/tickets/:id/archive", async (ctx) => {
+			ctx.body = ticketSchema.parse(await this.service.archive(ctx.state.actor, ctx.params["id"]!));
+		});
 		router.post("/api/tickets/:id/move", async (ctx) => {
 			const input = moveTicketSchema.safeParse(ctx.request.body);
 			if (!input.success) throw new TicketError("invalid-request");

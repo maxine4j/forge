@@ -21,6 +21,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		{ id: "FORGE-2", projectId, title: "Second task", description: "", status: "backlog", createdAt },
 	];
 	let failMove = false;
+	let failArchive = false;
 	let hold: Promise<void> | undefined;
 	let release = () => {};
 	let held = 0;
@@ -133,6 +134,12 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 			}
 			if (path.startsWith("/api/tickets/")) {
 				const ticket = tickets.find((value) => value.id === path.split("/")[3])!;
+				if (path.endsWith("/archive") && method === "POST") {
+					operations.push("archive");
+					if (failArchive) return route.fulfill({ status: 503, json: { error: "ticket-unavailable" } });
+					tickets = tickets.filter((value) => value.id !== ticket.id);
+					return route.fulfill({ json: { ...ticket, archivedAt: createdAt } });
+				}
 				if (path.endsWith("/move")) {
 					operations.push("move");
 					if (failMove) return route.fulfill({ status: 503, json: { error: "ticket-unavailable" } });
@@ -167,11 +174,47 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		},
 		messages: () => messages,
 		approvals,
+		setArchiveFailure: (value: boolean) => {
+			failArchive = value;
+		},
 		failMoves: () => {
 			failMove = true;
 		},
 	};
 };
+
+test("ticket archive requires confirmation and removes the card only after success", async ({ page }) => {
+	const fixture = await setup(page);
+	const card = page.getByRole("button", { name: "FORGE-1 First task", exact: true });
+	await card.click();
+	const archive = page.getByRole("button", { name: "Archive ticket", exact: true });
+	await archive.click();
+	const confirmation = page.getByRole("dialog", { name: "Archive FORGE-1?" });
+	const cancel = confirmation.getByRole("button", { name: "Cancel", exact: true });
+	const confirm = confirmation.getByRole("button", { name: "Archive", exact: true });
+	await expect(cancel).toBeFocused();
+	await cancel.click();
+	await expect(confirmation).toBeHidden();
+	await expect(archive).toBeFocused();
+	await archive.click();
+	await page.keyboard.press("Escape");
+	await expect(confirmation).toBeHidden();
+	await expect(archive).toBeFocused();
+	expect(fixture.operations).toEqual([]);
+
+	fixture.setArchiveFailure(true);
+	await archive.click();
+	await confirm.click();
+	await expect(confirmation.getByRole("alert")).toHaveText(
+		"Tickets are unavailable. Retry or check the server logs.",
+	);
+	fixture.setArchiveFailure(false);
+	await confirm.click();
+	await expect(page.getByRole("dialog")).toHaveCount(0);
+	await expect(card).toHaveCount(0);
+	await expect(page.getByRole("button", { name: "FORGE-2 Second task", exact: true })).toBeVisible();
+	expect(fixture.operations).toEqual(["archive", "archive"]);
+});
 
 for (const size of [
 	{ width: 1280, height: 900 },

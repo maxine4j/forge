@@ -45,7 +45,7 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 		const jobs: TicketWorkflowRecord[] = [];
 		for (let offset = 0; ; offset += 500) {
 			const page = await this.read(
-				"SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId WHERE t.status NOT IN ('backlog','done') AND json_extract(w.record,'$.state') IN ('queued','running','dispatching','uncertain','merge-queued') ORDER BY CASE json_extract(w.record,'$.state') WHEN 'running' THEN 0 WHEN 'merge-queued' THEN 1 ELSE 2 END,t.position,t.number LIMIT 500 OFFSET ?",
+				"SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId WHERE t.archivedAt IS NULL AND t.status NOT IN ('backlog','done') AND json_extract(w.record,'$.state') IN ('queued','running','dispatching','uncertain','merge-queued') ORDER BY CASE json_extract(w.record,'$.state') WHEN 'running' THEN 0 WHEN 'merge-queued' THEN 1 ELSE 2 END,t.position,t.number LIMIT 500 OFFSET ?",
 				[String(offset)],
 			);
 			jobs.push(...page);
@@ -56,7 +56,7 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 		try {
 			const rows = await this.database.all(
 				`SELECT t.id FROM tickets t JOIN ticket_workflows w ON w.ticketId=t.id
-				 WHERE t.projectId=? AND t.status='in-progress' AND (
+				 WHERE t.projectId=? AND t.archivedAt IS NULL AND t.status='in-progress' AND (
 				   json_extract(w.record,'$.state') IN ('setup-failed','failed','uncertain') OR (
 				     json_extract(w.record,'$.state')='idle' AND (
 				       json_extract(w.record,'$.phase')='review' OR
@@ -82,11 +82,11 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 				...(move
 					? [
 							{
-								sql: "UPDATE tickets SET position=position+1 WHERE projectId=(SELECT projectId FROM tickets WHERE id=?) AND status=? AND position >= (SELECT position FROM tickets WHERE id=?)",
+								sql: "UPDATE tickets SET position=position+1 WHERE projectId=(SELECT projectId FROM tickets WHERE id=?) AND status=? AND archivedAt IS NULL AND position >= (SELECT position FROM tickets WHERE id=?)",
 								parameters: [value.ticketId, move.status, move.beforeId ?? null],
 							},
 							{
-								sql: "UPDATE tickets SET status=?,position=COALESCE((SELECT position-1 FROM tickets WHERE id=?),(SELECT COALESCE(MAX(position),0)+1 FROM tickets WHERE projectId=(SELECT projectId FROM tickets WHERE id=?) AND status=?)) WHERE id=?",
+								sql: "UPDATE tickets SET status=?,position=COALESCE((SELECT position-1 FROM tickets WHERE id=?),(SELECT COALESCE(MAX(position),0)+1 FROM tickets WHERE projectId=(SELECT projectId FROM tickets WHERE id=?) AND status=? AND archivedAt IS NULL)) WHERE id=?",
 								parameters: [
 									move.status,
 									move.beforeId ?? null,

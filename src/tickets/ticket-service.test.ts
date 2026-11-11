@@ -22,6 +22,9 @@ const fixture = () => {
 		update: vi.fn(async (id, input) => {
 			Object.assign(tickets.get(id)!, input);
 		}),
+		archive: vi.fn(async (id: string, archivedAt: string) => {
+			tickets.get(id)!.archivedAt ??= archivedAt;
+		}),
 		move: vi.fn(async (id: string, input: MoveTicket) => {
 			tickets.get(id)!.status = input.status;
 		}),
@@ -43,6 +46,7 @@ const fixture = () => {
 		new AccessService({ owner: "owner", origin: "https://forge.example.com" }),
 		() => now,
 		{
+			archive: async (_actor, ticket, archivedAt) => store.archive(ticket.id, archivedAt),
 			move: async (_actor, ticket, input) => store.move(ticket.id, input),
 			get: vi.fn(),
 			attention: vi.fn(async () => []),
@@ -67,6 +71,27 @@ test("create backlog tickets, edit scope and delegate moves to the workflow", as
 		expect((await service.move(actor, value.id, { status })).status).toBe(status);
 	}
 	expect(await service.list(actor, projectId)).toHaveLength(1);
+});
+
+test("archived tickets can be read but cannot be edited, moved or used as drop targets", async () => {
+	const { service, tickets, store } = fixture();
+	const ticket = await service.create(actor, projectId, { title: "Task", description: "Scope" });
+	const other = { ...ticket, id: "FORGE-2" };
+	tickets.set(other.id, other);
+	await expect(service.archive({ username: "guest" }, ticket.id)).rejects.toThrow("Access denied");
+	expect(store.archive).not.toHaveBeenCalled();
+	const archived = await service.archive(actor, ticket.id);
+	expect(archived).toMatchObject({ ...ticket, archivedAt: now.toISOString() });
+	expect(await service.get(actor, ticket.id)).toEqual(archived);
+	await expect(service.update(actor, ticket.id, { title: "Changed", description: "" })).rejects.toThrow(
+		"ticket-conflict",
+	);
+	await expect(service.move(actor, ticket.id, { status: "todo" })).rejects.toThrow("ticket-conflict");
+	await expect(service.move(actor, other.id, { status: "backlog", beforeId: ticket.id })).rejects.toThrow(
+		"ticket-conflict",
+	);
+	expect(store.update).not.toHaveBeenCalled();
+	expect(store.move).not.toHaveBeenCalled();
 });
 
 test("reject invalid input, missing tickets and invalid drop targets before mutation", async () => {

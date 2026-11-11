@@ -12,5 +12,6 @@ export interface Ticket extends CreateTicket {
 	projectId: string;
 	status: TicketStatus;
 	createdAt: string;
+	archivedAt?: string;
 	needsAttention?: true;
 }

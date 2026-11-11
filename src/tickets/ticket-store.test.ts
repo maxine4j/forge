@@ -34,6 +34,7 @@ test("SQLite allocates global sequential ticket keys, preserves project order an
 		store.insert(projectId, input, createdAt),
 		store.insert(otherId, input, createdAt),
 	]);
+	expect(await store.get(a.id)).toStrictEqual(a);
 	expect([a.id, b.id, c.id]).toEqual(["FORGE-1", "FORGE-2", "FORGE-3"]);
 	expect(a.status).toBe("backlog");
 	await store.move(b.id, { status: "backlog", beforeId: a.id });
@@ -55,4 +56,43 @@ test("SQLite allocates global sequential ticket keys, preserves project order an
 	expect((await persisted.get(a.id))?.title).toBe("Edited");
 	await expect(persisted.insert(projectId, input, "invalid timestamp")).rejects.toThrow("ticket-unavailable");
 	expect(await persisted.list(projectId)).toHaveLength(3);
+});
+
+test("archiving an existing ticket retains its contents and frees board capacity across restarts", async () => {
+	const root = await mkdtemp(join(tmpdir(), "forge-ticket-archive-"));
+	cleanups.push(() => rm(root, { recursive: true, force: true }));
+	const path = join(root, "forge.sqlite");
+	const db = new SqliteDatabase(path);
+	cleanups.push(() => db.close());
+	await db.initialize();
+	const projects = new ProjectStore(db);
+	await projects.initialize();
+	await projects.insert({ id: projectId, name: "Project", status: "ready", createdAt });
+	await db.run(
+		"CREATE TABLE tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT GENERATED ALWAYS AS ('FORGE-' || number) STORED UNIQUE, projectId TEXT NOT NULL REFERENCES projects(id), title TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'backlog', position INTEGER NOT NULL, createdAt TEXT NOT NULL)",
+	);
+	await db.run(
+		"WITH RECURSIVE positions(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM positions WHERE n<1000) INSERT INTO tickets(projectId,title,description,position,createdAt) SELECT ?, 'Original', 'Scope', n, ? FROM positions",
+		[projectId, createdAt],
+	);
+	const store = new TicketStore(db);
+	await store.initialize();
+	expect(await store.list(projectId)).toHaveLength(1000);
+	const original = await store.get("FORGE-1000");
+	expect(original).toMatchObject({ title: "Original", description: "Scope" });
+	const archivedAt = "2026-11-04T00:00:00.000Z";
+	await store.archive("FORGE-1000", archivedAt);
+	await store.archive("FORGE-1000", "2026-11-05T00:00:00.000Z");
+	await db.close();
+
+	const reopened = new SqliteDatabase(path);
+	cleanups.push(() => reopened.close());
+	await reopened.initialize();
+	const persisted = new TicketStore(reopened);
+	await persisted.initialize();
+	expect(await persisted.get("FORGE-1000")).toEqual({ ...original, archivedAt });
+	expect(await persisted.list(projectId)).toHaveLength(999);
+	const created = await persisted.insert(projectId, { title: "New task", description: "" }, createdAt);
+	expect(created.id).toBe("FORGE-1001");
+	expect((await persisted.list(projectId)).at(-1)).toEqual(created);
 });

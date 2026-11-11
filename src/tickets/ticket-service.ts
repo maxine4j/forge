@@ -22,6 +22,8 @@ export interface ITicketService {
 	create(actor: Actor, projectId: string, input: CreateTicket): Promise<Ticket>;
 	get(actor: Actor, id: string): Promise<Ticket>;
 	update(actor: Actor, id: string, input: CreateTicket): Promise<Ticket>;
+	/** Hides the ticket from the board and returns its retained data. */
+	archive(actor: Actor, id: string): Promise<Ticket>;
 	/** Workflow guards apply to every move; done is scheduler-owned. */
 	move(actor: Actor, id: string, input: MoveTicket): Promise<Ticket>;
 }
@@ -67,8 +69,17 @@ export class TicketService implements ITicketService {
 		if (!parsed.success) throw new TicketError("invalid-request");
 		return this.serialize(async () => {
 			const ticket = await this.get(actor, id);
-			if (ticket.status !== "backlog") throw new TicketError("ticket-conflict");
+			if (ticket.archivedAt || ticket.status !== "backlog") throw new TicketError("ticket-conflict");
 			await this.store.update(id, parsed.data);
+			return this.get(actor, id);
+		});
+	}
+	async archive(actor: Actor, id: string): Promise<Ticket> {
+		this.access.assertOwner(actor);
+		return this.serialize(async () => {
+			const ticket = await this.get(actor, id);
+			if (ticket.archivedAt) return ticket;
+			await this.workflow.archive(actor, ticket, this.now().toISOString());
 			return this.get(actor, id);
 		});
 	}
@@ -78,10 +89,12 @@ export class TicketService implements ITicketService {
 		if (!parsed.success) throw new TicketError("invalid-request");
 		return this.serialize(async () => {
 			const ticket = await this.get(actor, id);
+			if (ticket.archivedAt) throw new TicketError("ticket-conflict");
 			if (parsed.data.beforeId) {
 				const target = await this.store.get(parsed.data.beforeId);
 				if (
 					!target
+					|| target.archivedAt
 					|| target.id === id
 					|| target.projectId !== ticket.projectId
 					|| target.status !== parsed.data.status

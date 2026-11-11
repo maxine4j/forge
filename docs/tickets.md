@@ -12,7 +12,13 @@ Tickets belong to ready projects. SQLite allocates immutable global increasing
 keys (`FORGE-1`, ...) across restarts and concurrent creation. New tickets start in
 Backlog. The owner can edit a trimmed title (1–120 characters) and plain-text
 description (0–4000 characters, default empty) while in Backlog. Each project
-retains at most 1000 tickets.
+can have at most 1000 active tickets.
+
+The owner can archive a ticket from its details panel after confirming. Archived
+tickets leave the board and scheduler. Forge retains the key, scope, status,
+workflow history and related data. The ticket and workflow remain readable by ID.
+Queued work can be archived before it starts. A running turn, unresolved dispatch
+or pending merge must settle before archiving.
 
 | Stage                 | Behavior                                                                                                                                                                                                                                                                                                |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -54,8 +60,9 @@ Browser contracts are exported from `@forge/contracts/tickets`:
 
 | Route                                       | Contract                                                                            |
 | ------------------------------------------- | ----------------------------------------------------------------------------------- |
-| `GET/POST /api/projects/:projectId/tickets` | Ordered list with attention flags / create title and description.                   |
+| `GET/POST /api/projects/:projectId/tickets` | Ordered active tickets with attention flags / create title and description.         |
 | `GET/PATCH /api/tickets/:id`                | Read / edit scope in Backlog.                                                       |
+| `POST /api/tickets/:id/archive`             | Archive an eligible ticket and return it with `archivedAt`. Safe to retry.          |
 | `POST /api/tickets/:id/move`                | Reorder or move Backlog to Ready with optional beforeId.                            |
 | `GET /api/tickets/:id/workflow`             | Current plan revision, phase, execution state and Forge conversation/workspace IDs. |
 | `POST /api/tickets/:id/approve`             | Approve the current idle plan with `{revision}`.                                    |

@@ -14,6 +14,8 @@ import type { ITicketWorkflowStore } from "./ticket-workflow-store.ts";
 import type { TicketWorkflowRecord } from "./types.ts";
 
 export interface ITicketWorkflowService {
+	/** Archives between scheduler operations. Active or unresolved execution and pending merges conflict. */
+	archive(actor: Actor, ticket: Ticket, archivedAt: string): Promise<void>;
 	move(actor: Actor, ticket: Ticket, input: MoveTicket): Promise<void>;
 	get(actor: Actor, id: string): Promise<TicketWorkflow>;
 	attention(actor: Actor, projectId: string): Promise<string[]>;
@@ -37,14 +39,24 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		private readonly access: IAccessService,
 		private readonly wake: () => void = () => {},
 	) {}
+	async archive(actor: Actor, ticket: Ticket, archivedAt: string): Promise<void> {
+		this.access.assertOwner(actor);
+		await this.serialize(async () => {
+			const job = await this.record(ticket.id);
+			if (["running", "dispatching", "uncertain", "merge-queued"].includes(job.state))
+				throw new TicketError("ticket-conflict");
+			await this.tickets.archive(ticket.id, archivedAt);
+		});
+	}
 	async move(actor: Actor, ticket: Ticket, input: MoveTicket): Promise<void> {
 		this.access.assertOwner(actor);
 		await this.serialize(async () => {
 			const current = await this.tickets.get(ticket.id);
-			if (!current || current.status !== ticket.status) throw new TicketError("ticket-conflict");
+			if (!current || current.archivedAt || current.status !== ticket.status)
+				throw new TicketError("ticket-conflict");
 			if (input.beforeId) {
 				const before = await this.tickets.get(input.beforeId);
-				if (before?.status !== input.status) throw new TicketError("ticket-conflict");
+				if (before?.archivedAt || before?.status !== input.status) throw new TicketError("ticket-conflict");
 			}
 			const job = await this.record(ticket.id);
 			if (input.status === ticket.status) {
@@ -118,7 +130,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		return this.serialize(async () => {
 			for (const job of await this.store.list()) {
 				const ticket = await this.tickets.get(job.ticketId);
-				if (!ticket || ticket.status === "backlog" || ticket.status === "done") continue;
+				if (!ticket || ticket.archivedAt || ticket.status === "backlog" || ticket.status === "done") continue;
 				try {
 					if (job.state === "running") await this.observe(actor, job);
 					else if (job.state === "merge-queued") await this.merge(actor, job);
@@ -142,7 +154,11 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	async recover(actor: Actor, ticketId?: string): Promise<void> {
 		this.access.assertOwner(actor);
 		return this.serialize(async () => {
-			if (ticketId && !(await this.tickets.get(ticketId))) throw new TicketError("ticket-not-found");
+			if (ticketId) {
+				const ticket = await this.tickets.get(ticketId);
+				if (!ticket) throw new TicketError("ticket-not-found");
+				if (ticket.archivedAt) throw new TicketError("ticket-conflict");
+			}
 			const selected = ticketId ? [await this.record(ticketId)] : await this.store.list();
 			for (const job of selected) {
 				if (ticketId && job.state === "setup-failed") {
@@ -169,7 +185,8 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		return (await this.store.get(id)) ?? { ticketId: id, phase: "planning", state: "idle", mergeAttempts: 0 };
 	}
 	private async inProgress(id: string): Promise<TicketWorkflowRecord> {
-		if ((await this.tickets.get(id))?.status !== "in-progress") throw new TicketError("ticket-conflict");
+		const ticket = await this.tickets.get(id);
+		if (ticket?.archivedAt || ticket?.status !== "in-progress") throw new TicketError("ticket-conflict");
 		return this.record(id);
 	}
 	private summary({ previousTurnId: _previous, turnId: _turn, ...workflow }: TicketWorkflowRecord): TicketWorkflow {
