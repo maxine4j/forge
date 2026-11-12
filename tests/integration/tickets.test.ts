@@ -45,7 +45,8 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		workflowStore,
 		store,
 		{
-			projectOptions: vi.fn(async () => ({ models: [], skills: [] })),
+			assertRepositoryReady: vi.fn(async () => {}),
+			catalogOptions: vi.fn(async () => ({ models: [], skills: [] })),
 			createTicketThread: vi.fn(),
 			dispatch: vi.fn(),
 			steer,
@@ -89,15 +90,49 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 			},
 			...(body === undefined ? {} : { body: JSON.stringify(body) }),
 		});
-	const listPath = `projects/${projectId}/tickets`;
-	const created = await request(listPath, "POST", { title: "First", description: "Scope" });
+	const listPath = "tickets";
+	for (const method of ["GET", "POST"]) {
+		expect(
+			(
+				await request(
+					`projects/${projectId}/tickets`,
+					method,
+					method === "POST" ? { title: "Removed" } : undefined,
+				)
+			).status,
+		).toBe(404);
+	}
+	for (const repositoryIds of [[projectId, projectId], ["123e4567-e89b-42d3-a456-426614174099"]]) {
+		expect((await request(listPath, "POST", { title: "Rejected", repositoryIds })).status).toBe(400);
+	}
+	const unassignedResponse = await request(listPath, "POST", {
+		title: "Unassigned",
+		description: "\u0000".repeat(4000),
+	});
+	expect(unassignedResponse.status).toBe(201);
+	const unassigned = await unassignedResponse.json();
+	expect(unassigned).toMatchObject({ repositoryIds: [] });
+	expect((await request(`tickets/${unassigned.id}/move`, "POST", { status: "todo" })).status).toBe(409);
+	expect((await request(`tickets/${unassigned.id}/model-options`)).status).toBe(200);
+	await request(`tickets/${unassigned.id}/archive`, "POST");
+	const created = await request(listPath, "POST", {
+		title: "First",
+		description: "Scope",
+		repositoryIds: [projectId],
+	});
 	expect(created.status).toBe(201);
 	const ticket = await created.json();
-	expect(ticket).toMatchObject({ id: "FORGE-1", status: "backlog" });
+	expect(ticket).toMatchObject({ id: "FORGE-2", status: "backlog" });
 	expect(await (await request(`tickets/${ticket.id}`)).json()).toEqual(ticket);
-	expect((await request(`tickets/${ticket.id}`, "PATCH", { title: "Edited", description: "New scope" })).status).toBe(
-		200,
-	);
+	expect(
+		(
+			await request(`tickets/${ticket.id}`, "PATCH", {
+				title: "Edited",
+				description: "New scope",
+				repositoryIds: [projectId],
+			})
+		).status,
+	).toBe(200);
 	const moved = await request(`tickets/${ticket.id}/move`, "POST", { status: "todo" });
 	expect(await moved.json()).toMatchObject({ title: "Edited", status: "todo" });
 	expect((await request(`tickets/${ticket.id}/settings`, "PATCH", { permissions: "full-access" })).status).toBe(200);
@@ -142,11 +177,11 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	expect(await workflowStore.list()).toEqual([]);
 	expect(await (await request(`tickets/${ticket.id}/workflow`)).json()).toMatchObject({ state: "queued" });
 	const next = await request(listPath, "POST", { title: "Next ticket" });
-	expect(await next.json()).toMatchObject({ id: "FORGE-2" });
+	expect(await next.json()).toMatchObject({ id: "FORGE-3" });
 	const implementerId = "123e4567-e89b-42d3-a456-426614174010";
 	await workflowStore.save(
 		{
-			ticketId: "FORGE-2",
+			ticketId: "FORGE-3",
 			phase: "implementation",
 			state: "running",
 			mergeAttempts: 0,
@@ -155,7 +190,7 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		},
 		{ status: "in-progress" },
 	);
-	const messagePath = "tickets/FORGE-2/messages";
+	const messagePath = "tickets/FORGE-3/messages";
 	expect((await request(messagePath, "POST", { text: "Focus on tests", expectedTurnId: "active-turn" })).status).toBe(
 		200,
 	);

@@ -55,6 +55,7 @@ interface Draft {
 
 const BranchBrowser = ({
 	root,
+	codePath,
 	repositoryName,
 	branch,
 	api,
@@ -65,6 +66,7 @@ const BranchBrowser = ({
 }: {
 	branchControl: ReactNode;
 	root: string;
+	codePath: string;
 	repositoryName: string;
 	branch: string;
 	api: IWorkspaceApi;
@@ -83,7 +85,7 @@ const BranchBrowser = ({
 		query.set("branch", branch);
 		query.set("view", "commit");
 		query.set("sha", sha);
-		return `/${root.replace(/\/repository$/u, "/code")}?${query}`;
+		return `${codePath}?${query}`;
 	};
 	if (search !== undefined && retainedSearch !== search) setRetainedSearch(search);
 	const navigateCode = (directory: string, file = "", history = false) => {
@@ -91,7 +93,7 @@ const BranchBrowser = ({
 		if (directory) query.set("path", directory);
 		if (file) query.set("file", file);
 		if (history) query.set("view", "history");
-		void navigate(`/${root.replace(/\/repository$/u, "/code")}?${query}`);
+		void navigate(`${codePath}?${query}`);
 	};
 	const editorId = useId();
 	const [tree, setTree] = useState<RepositoryTree>();
@@ -681,7 +683,7 @@ export const RepositoryBrowser = ({
 	const location = useLocation();
 	const navigate = useNavigate();
 	const route = resolveRoute(location.pathname);
-	const inCode = route.page === "project" && route.section === "code";
+	const inCode = route.page === "repo" && route.section === "code";
 	const showingCommit = inCode && new URLSearchParams(location.search).get("view") === "commit";
 	const [branches, setBranches] = useState<RepositoryBranch[]>([]);
 	const [retainedBranch, setRetainedBranch] = useState("");
@@ -723,7 +725,7 @@ export const RepositoryBrowser = ({
 			{!showingCommit && branches.length > 0 && !branchExists && (
 				<p role='alert'>
 					Branch unavailable.{" "}
-					<button onClick={() => void navigate(`/projects/${projectId}/code`)}>Open default branch</button>
+					<button onClick={() => void navigate(`/repos/${projectId}/code`)}>Open default branch</button>
 				</p>
 			)}
 			{error && (
@@ -736,6 +738,7 @@ export const RepositoryBrowser = ({
 				<div key={value} hidden={branch !== value || showingCommit}>
 					<BranchBrowser
 						root={root}
+						codePath={`/repos/${projectId}/code`}
 						repositoryName={repositoryName}
 						branch={value}
 						search={inCode && branch === value && !showingCommit ? location.search : undefined}
@@ -755,7 +758,7 @@ export const RepositoryBrowser = ({
 										const value = event.target.value;
 										void navigate(
 											branchLocations.current.get(value)
-												?? `/projects/${projectId}/code?${new URLSearchParams({ branch: value })}`,
+												?? `/repos/${projectId}/code?${new URLSearchParams({ branch: value })}`,
 										);
 									}}
 								>

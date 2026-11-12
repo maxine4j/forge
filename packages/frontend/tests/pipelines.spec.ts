@@ -114,7 +114,7 @@ test("branch-dependent workflows, default events, submission, live states, histo
 	page,
 }) => {
 	const state = await setup(page);
-	await page.goto(`/projects/${projectId}/pipelines`);
+	await page.goto(`/repos/${projectId}/pipelines`);
 	await expect(page.getByRole("combobox", { name: "Event", exact: true })).toHaveValue("workflow_dispatch");
 	await page.getByRole("combobox", { name: "Branch", exact: true }).selectOption("feature");
 	await expect(page.getByRole("combobox", { name: "Event", exact: true })).toHaveValue("push");
@@ -138,7 +138,7 @@ test("branch-dependent workflows, default events, submission, live states, histo
 });
 test("empty, invalid and unavailable Docker states", async ({ page }) => {
 	const state = await setup(page);
-	await page.goto(`/projects/${projectId}/pipelines`);
+	await page.goto(`/repos/${projectId}/pipelines`);
 	await page.getByRole("combobox", { name: "Branch", exact: true }).selectOption("empty");
 	await expect(page.getByText("No workflows found", { exact: false })).toBeVisible();
 	await page.getByRole("combobox", { name: "Branch", exact: true }).selectOption("invalid");

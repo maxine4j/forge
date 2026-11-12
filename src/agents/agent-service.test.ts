@@ -363,9 +363,9 @@ test("threads have independent verified worktrees and may execute concurrently; 
 test("thinking validates against the runtime catalog before dispatch and persists with the thread", async () => {
 	const { service, client, records, workspaces } = setup();
 	const { thread } = await service.create(owner, projectId, "Thinking");
-	await service.projectOptions(owner, projectId);
+	await service.catalogOptions(owner);
 	expect(workspaces.resolve).not.toHaveBeenCalled();
-	await expect(service.projectOptions({ username: "other" }, projectId)).rejects.toThrow();
+	await expect(service.catalogOptions({ username: "other" })).rejects.toThrow();
 	await expect(service.send(owner, thread.id, "Draft", { model: "invented" })).rejects.toThrow(
 		"unsupported-settings",
 	);

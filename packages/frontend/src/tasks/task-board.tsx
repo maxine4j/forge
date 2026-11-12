@@ -15,17 +15,22 @@ import { useLocation, useSearchParams } from "react-router";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { BoardSettingsDialog } from "./board-settings-dialog.tsx";
-import { TicketDetails, ticketLabels } from "./ticket-details.tsx";
+import { RepositorySelection } from "./repository-selection.tsx";
+import { TicketDetails, ticketLabels, type TicketReadingState } from "./ticket-details.tsx";
 
 const labels = ticketLabels;
 type Drop = { status: TicketStatus; beforeId?: string };
 type Drag = { ticket: Ticket; x: number; y: number; drop?: Drop };
 
 const TicketEditor = ({
+	api,
+	visible,
 	busy,
 	close,
 	save,
 }: {
+	api: IWorkspaceApi;
+	visible: boolean;
 	busy: boolean;
 	close: () => void;
 	save: (input: CreateTicket) => Promise<void>;
@@ -33,13 +38,15 @@ const TicketEditor = ({
 	const dialog = useRef<HTMLDialogElement>(null);
 	const [title, setTitle] = useState("");
 	const [description, setDescription] = useState("");
+	const [repositoryIds, setRepositoryIds] = useState<string[]>([]);
 	const [error, setError] = useState("");
 	useEffect(() => {
-		dialog.current?.showModal();
-	}, []);
+		if (visible) dialog.current?.showModal();
+		else dialog.current?.close();
+	}, [visible]);
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
-		const input = createTicketSchema.safeParse({ title, description });
+		const input = createTicketSchema.safeParse({ title, description, repositoryIds });
 		if (!input.success) {
 			setError("Enter a title up to 120 characters and a description up to 4000 characters.");
 			return;
@@ -90,6 +97,7 @@ const TicketEditor = ({
 						onChange={(event) => setDescription(event.target.value)}
 					/>
 				</label>
+				<RepositorySelection api={api} value={repositoryIds} change={setRepositoryIds} disabled={busy} />
 				{error && (
 					<p role='alert' className='error'>
 						{error}
@@ -108,10 +116,10 @@ const TicketEditor = ({
 	);
 };
 
-export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspaceApi }) => {
+export const TaskBoard = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }) => {
 	const location = useLocation();
 	const [search, setSearch] = useSearchParams();
-	const linkedId = location.pathname === `/projects/${projectId}/tasks` ? search.get("ticket") : null;
+	const linkedId = location.pathname === "/tasks" ? search.get("ticket") : null;
 	const [linked, setLinked] = useState<{ id: string; ticket?: Ticket; error?: string }>();
 	const closeTicket = () => {
 		setCreating(false);
@@ -125,12 +133,7 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 		let current = true;
 		void api.read(`tickets/${encodeURIComponent(linkedId)}`, ticketSchema).then(
 			(ticket) => {
-				if (current)
-					setLinked(
-						ticket.projectId === projectId
-							? { id: linkedId, ticket }
-							: { id: linkedId, error: "Ticket belongs to another project." },
-					);
+				if (current) setLinked({ id: linkedId, ticket });
 			},
 			() => {
 				if (current) setLinked({ id: linkedId, error: "Ticket unavailable." });
@@ -139,7 +142,7 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 		return () => {
 			current = false;
 		};
-	}, [api, projectId, linkedId]);
+	}, [api, linkedId]);
 	const [tickets, setTickets] = useState<Ticket[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [busy, setBusy] = useState(false);
@@ -154,12 +157,13 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 	const active = useRef(true);
 	const locked = useRef(false);
 	const [drafts] = useState(() => new Map<string, string>());
+	const [reading] = useState(() => new Map<string, TicketReadingState>());
 	const poller = useRef<ResourcePoller<Ticket[]> | undefined>(undefined);
 	const load = () => poller.current?.refresh();
 	useEffect(() => {
 		active.current = true;
 		const polling = new ResourcePoller(
-			() => api.read(`projects/${projectId}/tickets`, ticketsSchema),
+			() => api.read("tickets", ticketsSchema),
 			(values) => {
 				setTickets(values);
 				setError("");
@@ -178,7 +182,7 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 			poller.current = undefined;
 			active.current = false;
 		};
-	}, [api, projectId]);
+	}, [api]);
 	const mutate = async (operation: () => Promise<void>) => {
 		if (locked.current) throw new Error("A ticket change is still saving.");
 		locked.current = true;
@@ -190,7 +194,7 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 			await poller.current?.mutate(async () => {
 				try {
 					await operation();
-					return await api.read(`projects/${projectId}/tickets`, ticketsSchema);
+					return await api.read("tickets", ticketsSchema);
 				} catch (error) {
 					failure = error;
 					throw error;
@@ -462,7 +466,7 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 					<button onClick={closeTicket}>Close ticket</button>
 				</p>
 			)}
-			{selectedTicket && (
+			{visible && selectedTicket && (
 				<TicketDetails
 					key={selectedTicket.id}
 					ticket={
@@ -473,6 +477,7 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 					api={api}
 					busy={busy}
 					drafts={drafts}
+					reading={reading}
 					close={closeTicket}
 					archive={() =>
 						mutate(async () => {
@@ -504,16 +509,13 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 			{creating && (
 				<TicketEditor
 					key='new'
+					api={api}
+					visible={visible}
 					busy={busy}
 					close={closeTicket}
 					save={(input) =>
 						mutate(async () => {
-							const updated = await api.read(
-								`projects/${projectId}/tickets`,
-								ticketSchema,
-								"POST",
-								input,
-							);
+							const updated = await api.read("tickets", ticketSchema, "POST", input);
 							if (active.current) {
 								setTickets((current) => [...current, updated]);
 								setNotice(`${updated.id} saved.`);

@@ -125,7 +125,7 @@ const setup = async (page: Page, initialItems: AgentView["items"] = []) => {
 			return route.fulfill({ status: 404, json: {} });
 		},
 	);
-	await page.goto("/");
+	await page.goto("/repos");
 	await page.getByRole("link", { name: "Open Forge", exact: true }).click();
 	await page.getByRole("tab", { name: "Agents", exact: true }).click();
 	const create = async () => {
@@ -301,8 +301,13 @@ test("independent chats retain drafts and running activity across tabs and reope
 	await expect(page.getByRole("button", { name: "Interrupt", exact: true })).toBeEnabled();
 	await fixture.create();
 	const secondUrl = page.url();
-	expect(new URL(secondUrl).pathname).toBe(`/projects/${projectId}/agents/${fixture.views[1]!.thread.id}`);
+	expect(new URL(secondUrl).pathname).toBe(`/repos/${projectId}/agents/${fixture.views[1]!.thread.id}`);
 	await page.getByRole("textbox", { name: "Message", exact: true }).fill("Second draft");
+	for (const destination of ["Tasks", "Costs", "Config"]) {
+		await page.getByRole("link", { name: destination, exact: true }).click();
+		await page.goBack();
+		await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveValue("Second draft");
+	}
 	await page.getByRole("button", { name: "Open chat Chat 1", exact: true }).click();
 	fixture.views[0]!.items.push(
 		{ id: "answer", role: "assistant", text: "I found the entry point." },
@@ -342,7 +347,7 @@ test("unknown chat deep links stay in their project and never create or resume a
 	const fixture = await setup(page);
 	await fixture.create();
 	const writes = fixture.writes.length;
-	await page.goto(`/projects/${projectId}/agents/123e4567-e89b-42d3-a456-426614174099`);
+	await page.goto(`/repos/${projectId}/agents/123e4567-e89b-42d3-a456-426614174099`);
 	await expect(page.getByRole("heading", { name: "Chat unavailable", exact: true })).toBeVisible();
 	await expect(page.getByRole("textbox", { name: "Message", exact: true })).toHaveCount(0);
 	expect(fixture.writes).toHaveLength(writes);
@@ -376,10 +381,10 @@ test("Agents opens the first chat and loads only selected histories without unce
 	await fixture.create();
 	// Unmount the old selected chat before changing runtime state, so its pending
 	// recovery cannot race the new page's first-chat selection.
-	await page.goto("/projects");
+	await page.goto("/repos");
 	for (const view of fixture.views) view.thread.status = "uncertain";
 	const writes = fixture.writes.length;
-	await page.goto(`/projects/${projectId}/agents`);
+	await page.goto(`/repos/${projectId}/agents`);
 	await expect(page.getByRole("button", { name: "Open chat Chat 1", exact: true })).toHaveAttribute(
 		"aria-current",
 		"true",
@@ -704,7 +709,7 @@ test("mobile URLs select one pane, restore focus and support history, reload and
 	fixture.fail(false);
 	await fixture.create();
 	await expect(sidebar).toBeHidden();
-	await page.goto(`/projects/${projectId}/agents/123e4567-e89b-42d3-a456-426614174099`);
+	await page.goto(`/repos/${projectId}/agents/123e4567-e89b-42d3-a456-426614174099`);
 	await expect(page.getByRole("heading", { name: "Chat unavailable", exact: true })).toBeVisible();
 	await expect(sidebar).toBeHidden();
 	await back.click();
@@ -787,7 +792,7 @@ test("mobile loading chat offers explicit list navigation", async ({ page }) => 
 		await pending;
 		await route.fulfill({ json: [] });
 	});
-	await page.goto(`/projects/${projectId}/agents/123e4567-e89b-42d3-a456-426614174099`, {
+	await page.goto(`/repos/${projectId}/agents/123e4567-e89b-42d3-a456-426614174099`, {
 		waitUntil: "domcontentloaded",
 	});
 	await expect(page.getByRole("heading", { name: "Loading chat…", exact: true })).toBeVisible();

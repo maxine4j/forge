@@ -58,6 +58,17 @@ files return JSON 404 responses. Fixtures are not persisted. Normal Vite mode
 does not install the mock routes, and production builds exclude the mock API
 and banner, including builds invoked with `--mode mock`.
 
+## Development databases
+
+FORGE-4 requires a fresh development database. There is no automatic reset,
+legacy schema migration, data conversion or fallback query. Stop Forge and
+explicitly move the old `forge.sqlite`, `forge.sqlite-wal` and `forge.sqlite-shm`
+files together to a backup outside the active data directory before restarting
+against a fresh database. Preserve repository/worktree directories and credential
+homes; resource removal never erases them. Use an isolated data directory for
+throwaway integration tests. See [architecture](architecture.md#persistence-and-recovery)
+and [the board schema](tickets.md#agentic-ticket-board).
+
 ## Local pipeline verification
 
 The image bundles checksum-verified act v0.2.97 for amd64/arm64 alongside the

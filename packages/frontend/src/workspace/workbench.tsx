@@ -6,7 +6,6 @@ import { AgentChat } from "../agents/agent-chat.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { resolveRoute } from "../navigation/routes.ts";
 import { Pipelines } from "../pipelines/pipelines.tsx";
-import { TaskBoard } from "../tasks/task-board.tsx";
 import { RepositoryBrowser } from "./repository-browser.tsx";
 import { WorkspaceTerminal } from "./terminal.tsx";
 
@@ -18,9 +17,9 @@ const ProjectTerminal = ({ projectId, api }: { projectId: string; api: IWorkspac
 	const prepare = useCallback(async () => {
 		const values = await api.read(`projects/${projectId}/workspaces`, workspacesSchema);
 		return (
-			values.find((value) => value.name === "Project files" && value.status !== "archived")
+			values.find((value) => value.name === "Repository files" && value.status !== "archived")
 			?? values.find((value) => value.status !== "archived")
-			?? api.read(`projects/${projectId}/workspaces`, workspaceSchema, "POST", { name: "Project files" })
+			?? api.read(`projects/${projectId}/workspaces`, workspaceSchema, "POST", { name: "Repository files" })
 		);
 	}, [api, projectId]);
 	useEffect(() => {
@@ -82,9 +81,9 @@ export const Workbench = ({
 		locations: Record<string, string>;
 		opened: string[];
 	}>({ section: "code", locations: {}, opened: [] });
-	const section = route.page === "project" ? route.section : navigation.section;
+	const section = route.page === "repo" ? route.section : navigation.section;
 	const url = location.pathname + location.search;
-	if (route.page === "project" && navigation.locations[section] !== url) {
+	if (route.page === "repo" && navigation.locations[section] !== url) {
 		setNavigation({
 			section,
 			locations: { ...navigation.locations, [section]: url },
@@ -92,7 +91,7 @@ export const Workbench = ({
 		});
 	}
 	const tab = section.charAt(0).toUpperCase() + section.slice(1);
-	const codePath = `/projects/${project.id}/code`;
+	const codePath = `/repos/${project.id}/code`;
 	const codeSearch = new URLSearchParams(navigation.locations["code"]?.split("?").at(1));
 	const filesSearch = new URLSearchParams();
 	for (const key of ["branch", "path"]) {
@@ -116,9 +115,9 @@ export const Workbench = ({
 		return () => window.removeEventListener("beforeunload", guard);
 	}, [dirty]);
 	return (
-		<section className='workbench' aria-label='Project'>
-			<div className='project-tabs' role='tablist' aria-label='Project sections'>
-				{["Code", "Tasks", "Agents", "Pipelines", "Terminals"].map((name) => (
+		<section className='workbench' aria-label='Repository'>
+			<div className='project-tabs' role='tablist' aria-label='Repository sections'>
+				{["Code", "Agents", "Pipelines", "Terminals"].map((name) => (
 					<Link
 						key={name}
 						id={`tab-${name}`}
@@ -129,7 +128,7 @@ export const Workbench = ({
 							name === "Code"
 								? codeFiles
 								: (navigation.locations[name.toLowerCase()]
-									?? `/projects/${project.id}/${name.toLowerCase()}`)
+									?? `/repos/${project.id}/${name.toLowerCase()}`)
 						}
 					>
 						{name}
@@ -144,9 +143,6 @@ export const Workbench = ({
 					api={api}
 					dirtyChange={dirtyChange}
 				/>
-			</section>
-			<section id='panel-Tasks' role='tabpanel' aria-labelledby='tab-Tasks' hidden={tab !== "Tasks"}>
-				{navigation.opened.includes("tasks") && <TaskBoard projectId={project.id} api={api} />}
 			</section>
 			<section id='panel-Agents' role='tabpanel' aria-labelledby='tab-Agents' hidden={tab !== "Agents"}>
 				{navigation.opened.includes("agents") && <AgentChat projectId={project.id} api={api} />}

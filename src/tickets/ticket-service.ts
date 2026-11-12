@@ -1,4 +1,3 @@
-import { projectIdSchema } from "@forge/contracts";
 import {
 	createTicketSchema,
 	moveTicketSchema,
@@ -10,7 +9,6 @@ import {
 
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
-import { ProjectNotFoundError, ProjectUnavailableError } from "../projects/errors.ts";
 import type { IProjectStore } from "../projects/project-store.ts";
 import { TicketError } from "./errors.ts";
 import type { ITicketStore } from "./ticket-store.ts";
@@ -18,8 +16,8 @@ import type { ITicketWorkflowService } from "./ticket-workflow-service.ts";
 
 export interface ITicketService {
 	/** Existing owner access applies. Invalid input, missing tickets and invalid destinations throw TicketError. */
-	list(actor: Actor, projectId: string): Promise<Ticket[]>;
-	create(actor: Actor, projectId: string, input: CreateTicket): Promise<Ticket>;
+	list(actor: Actor): Promise<Ticket[]>;
+	create(actor: Actor, input: CreateTicket): Promise<Ticket>;
 	get(actor: Actor, id: string): Promise<Ticket>;
 	update(actor: Actor, id: string, input: CreateTicket): Promise<Ticket>;
 	/** Hides the ticket from the board and returns its retained data. */
@@ -36,13 +34,9 @@ export class TicketService implements ITicketService {
 		private readonly now: () => Date,
 		private readonly workflow: ITicketWorkflowService,
 	) {}
-	async list(actor: Actor, projectId: string): Promise<Ticket[]> {
+	async list(actor: Actor): Promise<Ticket[]> {
 		this.access.assertOwner(actor);
-		await this.requireProject(projectId);
-		const [tickets, summary] = await Promise.all([
-			this.store.list(projectId),
-			this.workflow.boardSummary(actor, projectId),
-		]);
+		const [tickets, summary] = await Promise.all([this.store.list(), this.workflow.boardSummary(actor)]);
 		return tickets.map((ticket) => {
 			if (ticket.status === "backlog" || ticket.status === "done") return ticket;
 			return {
@@ -51,15 +45,15 @@ export class TicketService implements ITicketService {
 			};
 		});
 	}
-	async create(actor: Actor, projectId: string, input: CreateTicket): Promise<Ticket> {
+	async create(actor: Actor, input: CreateTicket): Promise<Ticket> {
 		this.access.assertOwner(actor);
 		const parsed = createTicketSchema.safeParse(input);
 		if (!parsed.success) throw new TicketError("invalid-request");
 		return this.serialize(async () => {
-			await this.requireProject(projectId);
+			await this.requireReferences(parsed.data.repositoryIds);
 			if (parsed.data.executionSettings)
-				await this.workflow.validateSettings(actor, projectId, parsed.data.executionSettings);
-			return this.store.insert(projectId, parsed.data, this.now().toISOString());
+				await this.workflow.validateSettings(actor, parsed.data.executionSettings);
+			return this.store.insert(parsed.data, this.now().toISOString());
 		});
 	}
 	async get(actor: Actor, id: string): Promise<Ticket> {
@@ -67,7 +61,6 @@ export class TicketService implements ITicketService {
 		if (!ticketIdSchema.safeParse(id).success) throw new TicketError("invalid-request");
 		const ticket = await this.store.get(id);
 		if (!ticket) throw new TicketError("ticket-not-found");
-		await this.requireProject(ticket.projectId);
 		return ticket;
 	}
 	async update(actor: Actor, id: string, input: CreateTicket): Promise<Ticket> {
@@ -77,7 +70,8 @@ export class TicketService implements ITicketService {
 		return this.serialize(async () => {
 			const ticket = await this.get(actor, id);
 			if (ticket.archivedAt || ticket.status !== "backlog") throw new TicketError("ticket-conflict");
-			await this.store.update(id, parsed.data);
+			await this.requireReferences(parsed.data.repositoryIds);
+			await this.workflow.update(actor, id, parsed.data);
 			return this.get(actor, id);
 		});
 	}
@@ -99,24 +93,15 @@ export class TicketService implements ITicketService {
 			if (ticket.archivedAt) throw new TicketError("ticket-conflict");
 			if (parsed.data.beforeId) {
 				const target = await this.store.get(parsed.data.beforeId);
-				if (
-					!target
-					|| target.archivedAt
-					|| target.id === id
-					|| target.projectId !== ticket.projectId
-					|| target.status !== parsed.data.status
-				)
+				if (!target || target.archivedAt || target.id === id || target.status !== parsed.data.status)
 					throw new TicketError("ticket-conflict");
 			}
 			await this.workflow.move(actor, ticket, parsed.data);
 			return this.get(actor, id);
 		});
 	}
-	private async requireProject(id: string): Promise<void> {
-		if (!projectIdSchema.safeParse(id).success) throw new TicketError("invalid-request");
-		const project = await this.projects.get(id);
-		if (!project) throw new ProjectNotFoundError();
-		if (project.status !== "ready") throw new ProjectUnavailableError();
+	private async requireReferences(ids: string[]): Promise<void> {
+		for (const id of ids) if (!(await this.projects.get(id))) throw new TicketError("invalid-request");
 	}
 	private serialize<T>(operation: () => Promise<T>): Promise<T> {
 		const next = this.tail.then(operation);

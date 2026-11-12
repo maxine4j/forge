@@ -123,7 +123,7 @@ test.beforeEach(async ({ page }) => {
 			return route.fulfill({ status: 404, json: {} });
 		},
 	);
-	await page.goto("/");
+	await page.goto("/repos");
 	await page.getByRole("link", { name: "Open Forge" }).click();
 });
 

@@ -14,16 +14,16 @@ test("create/import and retry projects while account infrastructure is unavailab
 			await route.fulfill({ status: 201, json: project });
 		} else await route.fulfill({ json: projects });
 	});
-	await page.goto("/");
-	await expect(page.getByText("No projects yet")).toBeVisible();
+	await page.goto("/repos");
+	await expect(page.getByText("No repos yet")).toBeVisible();
 	await expect(page.getByRole("alert")).toHaveCount(0);
-	await page.getByLabel("Project name").fill("Documentation");
+	await page.getByLabel("Repository name").fill("Documentation");
 	await page.getByLabel("Import repository (optional)").fill("https://github.com/example/docs.git");
-	await page.getByRole("button", { name: "Create project", exact: true }).click();
+	await page.getByRole("button", { name: "Create repository", exact: true }).click();
 	await expect(page.getByRole("heading", { name: "Documentation" })).toBeVisible();
 	expect(created).toEqual({ name: "Documentation", source: "https://github.com/example/docs.git" });
 	projects = [{ ...project, status: "failed" }];
-	await page.getByRole("button", { name: "Refresh projects" }).click();
+	await page.getByRole("button", { name: "Refresh repos" }).click();
 	await page.route(`**/api/projects/${id}/retry`, (route) => route.fulfill({ json: project }));
 	await page.getByRole("button", { name: "Retry Documentation" }).click();
 	await expect(page.getByText("Ready", { exact: true })).toBeVisible();
@@ -55,7 +55,7 @@ test("account verification code/link, completion, cancellation, uncertainty and 
 					};
 		return route.fulfill({ json: codex });
 	});
-	await page.goto("/");
+	await page.goto("/repos");
 	await page.getByRole("link", { name: "Config", exact: true }).click();
 	const card = page.getByRole("region", { name: "ChatGPT" });
 	await card.getByRole("button", { name: "Sign in" }).click();
@@ -91,9 +91,9 @@ test("a failed create refreshes durable failed intent for explicit retry", async
 		}
 		return route.fulfill({ json: failed ? [{ ...project, status: "failed" }] : [] });
 	});
-	await page.goto("/");
-	await page.getByLabel("Project name").fill("Documentation");
-	await page.getByRole("button", { name: "Create project", exact: true }).click();
-	await expect(page.getByRole("alert")).toContainText("Project operation failed");
+	await page.goto("/repos");
+	await page.getByLabel("Repository name").fill("Documentation");
+	await page.getByRole("button", { name: "Create repository", exact: true }).click();
+	await expect(page.getByRole("alert")).toContainText("Repository operation failed");
 	await expect(page.getByRole("button", { name: "Retry Documentation" })).toBeVisible({ timeout: 1000 });
 });

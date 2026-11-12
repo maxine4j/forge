@@ -184,7 +184,8 @@ The responsive Agents tab lists and creates project chats, shows conversation an
 tool activity, and supports send, interrupt, one-time approval/denial and structured
 clarification replies. Open chats retain their message and answer drafts across
 thread and project-section selection. Failed writes preserve drafts. Drafts are
-browser memory only and are lost when leaving the project or reloading the page.
+browser memory only. Tasks, Costs and Config visits retain them with the open
+repository workbench; changing repositories or reloading the page discards them.
 Execution continues independently of the selected chat or browser connection.
 At widths up to 700 CSS pixels, the base Agents URL shows only the full-height
 chat list; a chat URL shows only its conversation. Creating a chat opens it after
@@ -280,8 +281,11 @@ live ChatGPT inference remains a separate manual check.
 The global Costs page at `/costs` reads `GET /api/costs` through the owner-only
 API. It shows cumulative recorded usage, 7- and 30-day UTC charts by turn start
 date, a breakdown by phase, and [per-ticket estimates](tickets.md#ticket-cost)
-across all projects, for every ticket, including archived tickets and tickets without usage.
-Ticket rows include project names and links. Summary cards sum known ticket
+for every board ticket, including archived tickets, tickets with no repository
+references and tickets without usage. Ticket rows link directly to
+`/tasks?ticket=:id` and show no single-repository label. Ticket usage is aggregated
+by ticket ID, independently of a turn's execution repository. See
+[board ownership and execution context](tickets.md#agentic-ticket-board). Summary cards sum known ticket
 subscription allocations and API equivalents before formatting, flagging missing
 duration or pricing. Monetary totals are ticket estimates; tokens include chats.
 The page retains manual refresh, retry, and five-minute refresh. Legacy project

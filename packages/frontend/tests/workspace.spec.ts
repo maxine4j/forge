@@ -43,7 +43,7 @@ test("existing file edits remain local, navigation guards drafts, and typing dur
 			return route.fulfill({ status: 404, json: {} });
 		},
 	);
-	await page.goto("/");
+	await page.goto("/repos");
 	await page.getByRole("link", { name: "Open Project" }).click();
 	await page
 		.getByRole("table", { name: "Repository files" })
@@ -54,10 +54,10 @@ test("existing file edits remain local, navigation guards drafts, and typing dur
 	await editor.fill("first snapshot");
 	const fileUrl = page.url();
 	await page.goBack();
-	await expect(page).toHaveURL(`/projects/${projectId}/code`);
+	await expect(page).toHaveURL(`/repos/${projectId}/code`);
 	await page.goBack();
 	await expect(page.getByRole("alert")).toContainText("Uncommitted drafts remain");
-	await expect(page).toHaveURL(`/projects/${projectId}/code`);
+	await expect(page).toHaveURL(`/repos/${projectId}/code`);
 	await page.goForward();
 	await expect(page).toHaveURL(fileUrl);
 	await expect(editor).toContainText("first snapshot");
@@ -66,15 +66,17 @@ test("existing file edits remain local, navigation guards drafts, and typing dur
 	await expect(editor).toContainText("first snapshot");
 	expect(mutations).toEqual([]);
 	await page.getByRole("link", { name: "Forge home", exact: true }).click();
-	await expect(page.getByRole("alert")).toContainText("Uncommitted drafts remain");
+	await expect(page).toHaveURL("/tasks");
+	await page.goBack();
+	await expect(editor).toContainText("first snapshot");
 	await page.getByRole("link", { name: "Costs", exact: true }).click();
 	await expect(page).toHaveURL("/costs");
 	await expect(page.getByRole("link", { name: "Costs", exact: true })).toHaveAttribute("aria-current", "page");
-	await expect(page.getByRole("link", { name: "Projects", exact: true })).not.toHaveAttribute("aria-current");
+	await expect(page.getByRole("link", { name: "Repos", exact: true })).not.toHaveAttribute("aria-current");
 	await page.goBack();
 	await expect(editor).toContainText("first snapshot");
 	await page.getByRole("link", { name: "Config", exact: true }).click();
-	await page.getByRole("link", { name: "Projects", exact: true }).click();
+	await page.getByRole("link", { name: "Repos", exact: true }).click();
 	await expect(page).toHaveURL("/config");
 	await expect(page.getByRole("alert").filter({ hasText: "Uncommitted drafts remain" })).toBeVisible();
 	await page.goBack();
@@ -101,7 +103,7 @@ test("existing file edits remain local, navigation guards drafts, and typing dur
 	await page.getByRole("button", { name: "Discard all drafts" }).click();
 	await expect(editor).toHaveCount(0);
 	await page.getByRole("link", { name: "Forge home", exact: true }).click();
-	await expect(page.getByRole("heading", { name: "Your projects" })).toBeVisible();
+	await expect(page).toHaveURL("/tasks");
 });
 
 test("an empty repository has no fabricated branch or checkout creation", async ({ page }) => {
@@ -117,7 +119,7 @@ test("an empty repository has no fabricated branch or checkout creation", async 
 			return route.fulfill({ json: [] });
 		},
 	);
-	await page.goto("/");
+	await page.goto("/repos");
 	await page.getByRole("link", { name: "Open Empty" }).click();
 	await expect(page.getByText("No branches yet.")).toBeVisible();
 	await expect(page.getByRole("button", { name: "Commit", exact: true })).toHaveCount(0);

@@ -31,8 +31,8 @@ test("quota and first completions survive restart and initialization, including 
 		await projects.insert({ id: projectId, name: "Project", status: "ready", createdAt: date });
 		const tickets = new TicketStore(db);
 		await tickets.initialize();
-		const ticket = await tickets.insert(projectId, { title: "One", description: "" }, date);
-		const legacy = await tickets.insert(projectId, { title: "Legacy", description: "" }, date);
+		const ticket = await tickets.insert({ repositoryIds: [projectId], title: "One", description: "" }, date);
+		const legacy = await tickets.insert({ repositoryIds: [projectId], title: "Legacy", description: "" }, date);
 		await tickets.move(legacy.id, { status: "done" });
 		const workflows = new TicketWorkflowStore(db, () => new Date(date));
 		await workflows.initialize();

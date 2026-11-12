@@ -31,7 +31,6 @@ export interface IAgentWorkspaces {
 	tree(actor: Actor, id: string, path: string): Promise<WorkspaceTree>;
 }
 export interface IAgentService {
-	projectOptions(actor: Actor, projectId: string): Promise<AgentOptions>;
 	/** Owner-only. Creates a dedicated workspace; Codex identifiers stay private. Throws AgentError. */
 	create(actor: Actor, projectId: string, title: string): Promise<AgentView>;
 	list(actor: Actor, projectId: string): Promise<AgentThread[]>;
@@ -46,7 +45,8 @@ export interface IAgentService {
 	shutdown(): Promise<void>;
 }
 export interface ITicketAgents {
-	projectOptions(actor: Actor, projectId: string): Promise<AgentOptions>;
+	catalogOptions(actor: Actor): Promise<AgentOptions>;
+	assertRepositoryReady(actor: Actor, id: string): Promise<void>;
 	steer(actor: Actor, id: string, turnId: string, text: string): Promise<AgentView>;
 	createTicketThread(
 		actor: Actor,
@@ -129,10 +129,13 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		const location = await this.workspaces.resolve(actor, record.workspaceId);
 		return { ...(await this.client.options(location.path)), ...this.defaults() };
 	}
-	async projectOptions(actor: Actor, projectId: string): Promise<AgentOptions> {
+	async catalogOptions(actor: Actor): Promise<AgentOptions> {
 		this.authorize(actor);
-		await this.projects.get(actor, projectId);
 		return { ...(await this.client.options()), ...this.defaults() };
+	}
+	async assertRepositoryReady(actor: Actor, id: string): Promise<void> {
+		this.authorize(actor);
+		if ((await this.projects.get(actor, id)).status !== "ready") throw new AgentError("agent-conflict");
 	}
 	async files(actor: Actor, id: string, query: string): Promise<string[]> {
 		this.authorize(actor);

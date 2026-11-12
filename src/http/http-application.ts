@@ -129,6 +129,9 @@ export class HttpApplication implements IHttpApplication {
 		const settingsBody = bodyParser({ enableTypes: ["json"], jsonLimit: "64kb" });
 		app.use((ctx, next) => {
 			if (ctx.path === "/api/settings" && ctx.method === "PUT") return settingsBody(ctx, next);
+			// Ticket scope can contain up to 1000 UUID references plus escaped description text.
+			if (/^\/api\/tickets(?:\/[^/]+)?$/u.test(ctx.path) && ["POST", "PATCH"].includes(ctx.method))
+				return settingsBody(ctx, next);
 			if (/^\/api\/projects\/[^/]+\/repository\/commit$/u.test(ctx.path) && ctx.method === "POST")
 				return commitBody(ctx, next);
 			if (/^\/api\/workspaces\/[^/]+\/file$/u.test(ctx.path) && ["POST", "PUT"].includes(ctx.method))

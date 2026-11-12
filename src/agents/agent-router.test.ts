@@ -29,7 +29,6 @@ test("owner/origin validation, bounded inputs, safe failures and reconnectable S
 	let changed = () => {};
 	const detach = vi.fn();
 	const service: IAgentService = {
-		projectOptions: vi.fn(async () => ({ models: [], skills: [] })),
 		options: vi.fn(async () => ({ models: [], skills: [] })),
 		files: vi.fn(async () => ["src/main.ts"]),
 		create: vi.fn(async () => view),

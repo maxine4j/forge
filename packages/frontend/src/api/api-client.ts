@@ -84,10 +84,10 @@ export class ApiClient implements IApiClient {
 			const failure = apiErrorSchema.safeParse(value);
 			const messages = {
 				"access-denied": "Access denied. Sign in through PaaS with the configured owner account.",
-				"invalid-request": "Check the project name and credential-free HTTPS import URL.",
-				"project-not-found": "Project no longer exists. Refresh the list.",
+				"invalid-request": "Check the repository name and credential-free HTTPS import URL.",
+				"project-not-found": "Repository no longer exists. Refresh the list.",
 				"project-unavailable":
-					"Project operation failed. Check server storage and import-host configuration, then retry.",
+					"Repository operation failed. Check server storage and import-host configuration, then retry.",
 				"internal-error": "Request failed. Try again.",
 				"workspace-not-found": "Workspace no longer exists. Refresh the list.",
 				"workspace-unavailable": "Workspace unavailable. Check its status and server storage.",

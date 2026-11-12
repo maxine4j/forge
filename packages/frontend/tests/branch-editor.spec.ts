@@ -45,7 +45,7 @@ test("cards open projects; branch drafts stay local until one atomic commit and 
 			return route.fulfill({ status: 404, json: {} });
 		},
 	);
-	await page.goto("/");
+	await page.goto("/repos");
 	const card = page.getByRole("link", { name: "Open Forge", exact: true });
 	await expect(card).toContainText("Created");
 	await card.press("Enter");

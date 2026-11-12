@@ -55,11 +55,11 @@ export class WorkspaceApi implements IWorkspaceApi {
 				"ticket-unavailable": "Tickets are unavailable. Retry or check the server logs.",
 				"invalid-request": "Check the supplied values.",
 				"settings-unavailable": "Forge settings are unavailable. Check the connection and retry.",
-				"workspace-not-found": "Project files no longer exist. Reopen the project.",
+				"workspace-not-found": "Repository files no longer exist. Reopen the repository.",
 				"workspace-conflict":
 					"The branch changed. Your drafts are preserved. Copy them before discarding drafts to reload the branch.",
-				"workspace-unavailable": "Project files unavailable. Retry opening files.",
-				"github-sync-unconfigured": "GitHub sync is unavailable for this project.",
+				"workspace-unavailable": "Repository files unavailable. Retry opening files.",
+				"github-sync-unconfigured": "GitHub sync is unavailable for this repository.",
 				"github-sync-unavailable":
 					"Could not sync with GitHub. Check that both main branches are available and try again.",
 				"github-sync-busy": "GitHub sync is already running. Try again when it finishes.",

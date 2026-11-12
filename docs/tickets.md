@@ -8,15 +8,32 @@ Done. The corresponding API statuses are `backlog`, `todo`, `in-progress` and
 cancellation. Moving from Backlog to Ready for development is available by
 dragging or through the ticket's status menu.
 
-Tickets belong to ready projects. SQLite allocates immutable global increasing
-keys (`FORGE-1`, ...) across restarts and concurrent creation. New tickets start in
-Backlog. The owner can edit a trimmed title (1–120 characters) and plain-text
-description (0–4000 characters, default empty) while in Backlog. Each project
-can have at most 1000 active tickets.
+Tickets belong to the global board, independently of repositories. SQLite allocates
+immutable global increasing keys (`FORGE-1`, ...) across restarts and concurrent
+creation. New tickets start in Backlog, where the owner can edit a trimmed title
+(1–120 characters), plain-text description (0–4000 characters, default empty), and
+ordered `repositoryIds`. Duplicate and unknown references are rejected. Backlog
+allows no references. The first selection is the execution repository; additional
+selections are references only. The GUI supports adding, removing and reordering
+selections. References never filter visibility or determine board position.
+There can be at most 1000 active tickets across the board.
 
+Moving to Ready requires a ready first repository. Dispatch revalidates readiness
+and records `executionRepositoryId` and `workspaceId` in workflow state. Recovery,
+planning, implementation, rebasing and merge reuse that recorded context. Forge
+creates one worktree only; reference repositories do not create extra worktrees.
+There is one persistent order per column, used by creation, moves, transitions,
+completion and queued dispatch. A `beforeId` must name an active ticket in the
+destination column. Scope edits and workflow transitions are serialized together.
+
+This is a fresh database contract: tickets have no repository-owner column.
+`ticket_repositories` stores ordered references with foreign keys and unique
+repository/position constraints; the board index is global. No migration,
+conversion or fallback to repository-scoped tickets is supplied. See
+[development database recreation](development.md#development-databases).
 The owner can archive a ticket from its details panel after confirming. Archived
 tickets leave the board and remain in [Costs](agents.md#cost-and-usage).
-Forge retains the key, scope, status, workflow history and related data. The
+Forge retains the key, scope, references, status, workflow history and related data. The
 ticket and workflow remain readable by ID.
 Queued work can be archived before it starts. A running turn, unresolved dispatch
 or pending merge must settle before archiving.
@@ -72,7 +89,7 @@ ticket-open button. The attention dot is 8px, centered in that same slot. Status
 icons have labels and tooltips “Agent queued” and “Agent working”. The working icon
 remains static when reduced motion is requested.
 
-Board settings apply across projects and persist in SQLite. The concurrency
+Board settings apply across the global board and persist in SQLite. The concurrency
 limit ranges from 1 to 10 and defaults to 3. Lowering it lets active turns
 finish and holds new turns until a slot opens. Pause new tickets keeps Ready
 tickets queued while in-progress tickets continue. Stop all agents requests
@@ -108,31 +125,32 @@ verified candidate. After recording Done, Forge removes the clean
 Done tickets with a recorded candidate are eligible for cleanup on startup,
 including archived tickets. Cleanup preserves uncommitted changes and branches
 whose tip changed, and pending cleanup is retried on startup. Chat history remains
-readable through Codex. At upgrade, existing In review and Merging tickets move to
-In progress. Legacy In review tickets need an explicit Queue merge action and
-already authorized merges resume.
+readable through Codex.
 
 Browser contracts are exported from `@forge/contracts/tickets`:
 
-| Route                                       | Contract                                                                                                       |
-| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| `GET/POST /api/projects/:projectId/tickets` | Ordered active tickets with attention flags and optional derived `agentStatus` / create title and description. |
-| `GET/PATCH /api/tickets/:id`                | Read / edit scope in Backlog.                                                                                  |
-| `POST /api/tickets/:id/archive`             | Archive an eligible ticket and return it with `archivedAt`. Safe to retry.                                     |
-| `POST /api/tickets/:id/move`                | Reorder or move Backlog to Ready with optional beforeId.                                                       |
-| `GET /api/tickets/:id/workflow`             | Current plan revision, phase, execution state and Forge conversation/workspace IDs.                            |
-| `POST /api/tickets/:id/approve`             | Approve the current idle plan with `{revision}`.                                                               |
-| `POST /api/tickets/:id/messages`            | Queue feedback, or steer implementation/rebase with `{text,expectedTurnId}`.                                   |
-| `POST /api/tickets/:id/merge`               | Queue a legacy review candidate or retry a failed merge.                                                       |
-| `POST /api/tickets/:id/reconcile`           | Reconcile uncertain execution or retry a failed setup.                                                         |
-| `GET/PATCH /api/board/settings`             | Read settings or update `maxAgents` and ticket dispatch (`running` or `paused`).                               |
-| `POST /api/board/settings/stop`             | Stop ticket dispatch and return interruption request and failure counts.                                       |
+| Route                                | Contract                                                                                                                         |
+| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| `GET/POST /api/tickets`              | Ordered active tickets with attention flags and optional derived `agentStatus` / create scope and ordered repository references. |
+| `GET/PATCH /api/tickets/:id`         | Read by ticket ID / edit scope and references in Backlog.                                                                        |
+| `POST /api/tickets/:id/archive`      | Archive an eligible ticket and return it with `archivedAt`. Safe to retry.                                                       |
+| `POST /api/tickets/:id/move`         | Reorder or move Backlog to Ready with optional beforeId.                                                                         |
+| `GET /api/tickets/:id/model-options` | Shared model catalog, independent of repository readiness and references.                                                        |
+| `GET /api/tickets/:id/workflow`      | Current plan revision, phase, execution state and Forge conversation/workspace IDs.                                              |
+| `POST /api/tickets/:id/approve`      | Approve the current idle plan with `{revision}`.                                                                                 |
+| `POST /api/tickets/:id/messages`     | Queue feedback, or steer implementation/rebase with `{text,expectedTurnId}`.                                                     |
+| `POST /api/tickets/:id/merge`        | Queue a legacy review candidate or retry a failed merge.                                                                         |
+| `POST /api/tickets/:id/reconcile`    | Reconcile uncertain execution or retry a failed setup.                                                                           |
+| `GET/PATCH /api/board/settings`      | Read settings or update `maxAgents` and ticket dispatch (`running` or `paused`).                                                 |
+| `POST /api/board/settings/stop`      | Stop ticket dispatch and return interruption request and failure counts.                                                         |
 
 Ticket conversations reuse the private agent read, resume, interrupt, reply and
 SSE APIs. Idle and failed ticket messages dispatch through the scheduler, and ticket threads stay
 out of the standalone Agents list. Mutations require owner access and exact-origin
 checks. Transition conflicts return 409. Board and ticket details refresh while
-execution continues. The ticket modal has keyboard-accessible Details, Chat and Cost
+execution continues. The global board opens at `/tasks`; selection uses `/tasks?ticket=:id`. Details,
+workflow, model options and cost load by ticket ID even outside active board
+membership. Removed repository ticket APIs return not-found. The ticket modal has keyboard-accessible Details, Chat and Cost
 tabs. Chat opens by default once planning starts. One scroll container shows the
 planner conversation and native Markdown plan revisions chronologically. Approve
 plan attaches to the latest completed plan only while the workflow is idle;
@@ -250,10 +268,10 @@ cached input and output tokens, turn count and two AUD estimates using the same
 data as the global dashboard. Owner-only `GET /api/tickets/:id/cost` returns only
 that ticket’s usage, estimates, pricing metadata and tracking start date.
 
-Costs links to `/projects/:projectId/tasks?ticket=:ticketId`. The panel loads the
+Costs links to `/tasks?ticket=:ticketId`. The panel loads the
 ticket by ID independently of the active board, including archived tickets.
 Closing clears the query parameter; reload and Back/Forward restore selection.
-Missing tickets and project mismatches show errors. Archived panels retain
+Missing tickets show errors. Archived panels retain
 Details, Chat history and Cost, with editing and execution controls read-only.
 
 - **Subscription allocation** prorates the monthly plan amount at dispatch over

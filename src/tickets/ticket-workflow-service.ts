@@ -1,6 +1,11 @@
 import { createLogger } from "@forge/backend-infrastructure/logger";
-import { agentSettingsSchema, resolveAgentSettings, type AgentSettings } from "@forge/contracts/agents";
-import type { BoardSettings, Ticket, MoveTicket, TicketWorkflow } from "@forge/contracts/tickets";
+import {
+	agentSettingsSchema,
+	resolveAgentSettings,
+	type AgentOptions,
+	type AgentSettings,
+} from "@forge/contracts/agents";
+import type { BoardSettings, Ticket, CreateTicket, MoveTicket, TicketWorkflow } from "@forge/contracts/tickets";
 
 import type { IAgentExecutionPool } from "../agents/agent-execution-pool.ts";
 import type { ITicketAgents } from "../agents/agent-service.ts";
@@ -16,13 +21,15 @@ import type { ITicketWorkflowStore } from "./ticket-workflow-store.ts";
 import type { TicketWorkflowRecord } from "./types.ts";
 
 export interface ITicketWorkflowService {
-	validateSettings(actor: Actor, projectId: string, settings: AgentSettings): Promise<void>;
+	update(actor: Actor, id: string, input: CreateTicket): Promise<void>;
+	options(actor: Actor): Promise<AgentOptions>;
+	validateSettings(actor: Actor, settings: AgentSettings): Promise<void>;
 	settings(actor: Actor, ticket: Ticket, settings: AgentSettings): Promise<void>;
 	/** Archives between scheduler operations. Active or unresolved execution and pending merges conflict. */
 	archive(actor: Actor, ticket: Ticket, archivedAt: string): Promise<void>;
 	move(actor: Actor, ticket: Ticket, input: MoveTicket): Promise<void>;
 	get(actor: Actor, id: string): Promise<TicketWorkflow>;
-	boardSummary(actor: Actor, projectId: string): Promise<Map<string, Pick<Ticket, "agentStatus" | "needsAttention">>>;
+	boardSummary(actor: Actor): Promise<Map<string, Pick<Ticket, "agentStatus" | "needsAttention">>>;
 	approve(actor: Actor, ticket: Ticket, revision: number): Promise<TicketWorkflow>;
 	queueMerge(actor: Actor, ticket: Ticket): Promise<TicketWorkflow>;
 	message(actor: Actor, ticket: Ticket, text: string, expectedTurnId?: string): Promise<TicketWorkflow>;
@@ -34,11 +41,19 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	private tail: Promise<unknown> = Promise.resolve();
 	private readonly settingUp = new Set<string>();
 	private readonly log = createLogger(TicketWorkflowService.name);
-	async validateSettings(actor: Actor, projectId: string, settings: AgentSettings): Promise<void> {
+	async options(actor: Actor): Promise<AgentOptions> {
+		this.access.assertOwner(actor);
+		try {
+			return await this.agents.catalogOptions(actor);
+		} catch (cause) {
+			throw new TicketError("ticket-unavailable", { cause });
+		}
+	}
+	async validateSettings(actor: Actor, settings: AgentSettings): Promise<void> {
 		this.access.assertOwner(actor);
 		const parsed = agentSettingsSchema.safeParse(settings);
 		if (!parsed.success) throw new TicketError("invalid-request");
-		const options = await this.agents.projectOptions(actor, projectId);
+		const options = await this.options(actor);
 		if (!resolveAgentSettings(options, parsed.data).supported) throw new TicketError("unsupported-settings");
 	}
 	async settings(actor: Actor, ticket: Ticket, settings: AgentSettings): Promise<void> {
@@ -48,7 +63,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		await this.serialize(async () => {
 			const current = await this.tickets.get(ticket.id);
 			if (!current || current.archivedAt || current.status === "done") throw new TicketError("ticket-conflict");
-			await this.validateSettings(actor, ticket.projectId, parsed.data);
+			await this.validateSettings(actor, parsed.data);
 			await this.tickets.updateSettings(ticket.id, parsed.data);
 		});
 	}
@@ -64,6 +79,14 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		private readonly wake: () => void = () => {},
 		private readonly dispatchMode: () => BoardSettings["dispatch"] = () => "running",
 	) {}
+	async update(actor: Actor, id: string, input: CreateTicket): Promise<void> {
+		this.access.assertOwner(actor);
+		await this.serialize(async () => {
+			const ticket = await this.tickets.get(id);
+			if (!ticket || ticket.archivedAt || ticket.status !== "backlog") throw new TicketError("ticket-conflict");
+			await this.tickets.update(id, input);
+		});
+	}
 	async archive(actor: Actor, ticket: Ticket, archivedAt: string): Promise<void> {
 		this.access.assertOwner(actor);
 		await this.serialize(async () => {
@@ -87,6 +110,9 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			if (input.status === ticket.status) {
 				await this.store.save(job, input);
 			} else if (ticket.status === "backlog" && input.status === "todo") {
+				const repositoryId = current.repositoryIds[0];
+				if (!repositoryId) throw new TicketError("ticket-conflict");
+				await this.requireExecutionRepository(actor, repositoryId);
 				await this.store.save({ ...job, phase: "planning", state: "queued" }, input);
 			} else {
 				throw new TicketError("ticket-conflict");
@@ -99,12 +125,9 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		if (!(await this.tickets.get(id))) throw new TicketError("ticket-not-found");
 		return this.summary(await this.record(id));
 	}
-	async boardSummary(
-		actor: Actor,
-		projectId: string,
-	): Promise<Map<string, Pick<Ticket, "agentStatus" | "needsAttention">>> {
+	async boardSummary(actor: Actor): Promise<Map<string, Pick<Ticket, "agentStatus" | "needsAttention">>> {
 		this.access.assertOwner(actor);
-		const jobs = await this.store.boardSummary(projectId);
+		const jobs = await this.store.boardSummary();
 		const entries = await Promise.all(
 			jobs.map(async (job) => {
 				const flags: Pick<Ticket, "agentStatus" | "needsAttention"> = {};
@@ -284,8 +307,24 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		const mode = this.dispatchMode();
 		return mode === "running" || (mode === "paused" && ticket.status === "in-progress");
 	}
+	private async requireExecutionRepository(actor: Actor, id: string): Promise<void> {
+		try {
+			await this.agents.assertRepositoryReady(actor, id);
+		} catch (cause) {
+			throw new TicketError("ticket-conflict", { cause });
+		}
+	}
 	private async dispatch(actor: Actor, ticket: Ticket, job: TicketWorkflowRecord): Promise<void> {
-		const settings = (await this.tickets.get(ticket.id))?.executionSettings;
+		const current = await this.tickets.get(ticket.id);
+		if (!current || current.archivedAt) throw new TicketError("ticket-conflict");
+		const repositoryId = job.executionRepositoryId ?? current.repositoryIds[0];
+		if (!repositoryId) throw new TicketError("ticket-conflict");
+		await this.requireExecutionRepository(actor, repositoryId);
+		if (!job.executionRepositoryId) {
+			job.executionRepositoryId = repositoryId;
+			await this.store.save(job);
+		}
+		const settings = current.executionSettings;
 		const planning = job.phase === "planning";
 		let id = planning ? job.plannerId : job.implementerId;
 		let releaseReservation = false;
@@ -295,9 +334,9 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				if (!planning && !job.workspaceId) throw new TicketError("ticket-conflict");
 				const view = await this.agents.createTicketThread(
 					actor,
-					ticket.projectId,
+					repositoryId,
 					`${ticket.id} ${planning ? "planning" : "implementation"}`,
-					planning ? undefined : job.workspaceId,
+					job.workspaceId,
 					true,
 				);
 				id = view.thread.id;

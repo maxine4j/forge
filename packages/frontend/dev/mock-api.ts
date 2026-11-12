@@ -6,7 +6,7 @@ import type { Plugin } from "vite";
 const date = "2026-11-02T00:00:00.000Z";
 const head = "a".repeat(40);
 const baseSha = "b".repeat(40);
-const commit = { sha: head, subject: "Improve project navigation", author: "Owner", date };
+const commit = { sha: head, subject: "Improve repository navigation", author: "Owner", date };
 const empty = { files: [], patch: "", truncated: false };
 const change = {
 	files: [{ path: "src/index.ts", binary: false }],
@@ -16,7 +16,7 @@ const change = {
 const revision = { baseSha, head, mergeBase: baseSha };
 const files: Record<string, string> = {
 	"README.md":
-		"# Forge\n\nA workspace for building your next project.\n\n## Development\n\nRun `pnpm dev` to start the application.\n",
+		"# Forge\n\nA workspace for building your next repository.\n\n## Development\n\nRun `pnpm dev` to start the application.\n",
 	"package.json": '{\n  "name": "forge-demo",\n  "private": true,\n  "scripts": { "dev": "vite" }\n}\n',
 	"src/index.ts": "export const greeting = 'Hello, Forge';\n",
 	"src/style.css": "body {\n  margin: 0;\n  font-family: system-ui, sans-serif;\n}\n",
@@ -49,6 +49,8 @@ export class MockApi implements IMockApi {
 			github: { connection: "available", login: { state: "idle" } },
 		}));
 		const costData: Costs[] = [];
+		const boardTickets: unknown[] = [];
+		this.routes.set("/api/tickets", () => boardTickets);
 		this.routes.set("/api/costs", () => {
 			const first = costData[0]!;
 			return {
@@ -86,7 +88,7 @@ export class MockApi implements IMockApi {
 			const workspace = {
 				id,
 				projectId: project.id,
-				name: "Project files",
+				name: "Repository files",
 				branch: `forge/workspace/${id}`,
 				head,
 				baseSha,
@@ -99,7 +101,7 @@ export class MockApi implements IMockApi {
 				workspaceId: id,
 				branch: workspace.branch,
 				base: "main",
-				title: "Improve project navigation",
+				title: "Improve repository navigation",
 				body: "Simplify browsing files and reviewing changes.",
 				status: "open",
 				createdAt: date,
@@ -109,7 +111,7 @@ export class MockApi implements IMockApi {
 				id: project.id.replace(/0$/, "5"),
 				projectId: project.id,
 				workspaceId: project.id.replace(/0$/, "6"),
-				title: "Review project navigation",
+				title: "Review repository navigation",
 				createdAt: date,
 				status: "waiting",
 			};
@@ -135,7 +137,7 @@ export class MockApi implements IMockApi {
 						role: "activity",
 						title: "Read src/main.ts",
 						status: "completed",
-						text: "Read application routing and project navigation.",
+						text: "Read application routing and repository navigation.",
 					},
 					{
 						id: "answer",
@@ -163,7 +165,7 @@ export class MockApi implements IMockApi {
 			const tickets = [
 				{
 					id: `FORGE-${project.id === projects.at(0)!.id ? 11 : 13}`,
-					projectId: project.id,
+					repositoryIds: [project.id],
 					title: "Add keyboard navigation",
 					description: "Support keyboard shortcuts.",
 					status: "todo",
@@ -172,7 +174,7 @@ export class MockApi implements IMockApi {
 				},
 				{
 					id: `FORGE-${project.id === projects.at(0)!.id ? 12 : 14}`,
-					projectId: project.id,
+					repositoryIds: [project.id],
 					title: "Improve search results",
 					description: "Implement search ranking.",
 					status: "in-progress",
@@ -181,7 +183,7 @@ export class MockApi implements IMockApi {
 				},
 				{
 					id: `FORGE-${project.id === projects.at(0)!.id ? 1 : 4}`,
-					projectId: project.id,
+					repositoryIds: [],
 					title: "Define the next change",
 					description: "Write a small, clear scope before starting work.",
 					status: "backlog",
@@ -189,8 +191,8 @@ export class MockApi implements IMockApi {
 				},
 				{
 					id: `FORGE-${project.id === projects.at(0)!.id ? 2 : 5}`,
-					projectId: project.id,
-					title: "Improve project navigation",
+					repositoryIds: [project.id],
+					title: "Improve repository navigation",
 					description:
 						"Review the completed navigation plan. The orange card and red dot remain until the plan is approved.",
 					status: "in-progress",
@@ -199,15 +201,15 @@ export class MockApi implements IMockApi {
 				},
 				{
 					id: `FORGE-${project.id === projects.at(0)!.id ? 3 : 6}`,
-					projectId: project.id,
-					title: "Set up the project",
+					repositoryIds: [project.id],
+					title: "Set up the repository",
 					description: "Create the initial repository.",
 					status: "done",
 					createdAt: date,
 				},
 				{
 					id: `FORGE-${project.id === projects.at(0)!.id ? 7 : 8}`,
-					projectId: project.id,
+					repositoryIds: [project.id],
 					title: "Explore initial requirements",
 					description: "Capture requirements for the first release.",
 					status: "done",
@@ -215,7 +217,7 @@ export class MockApi implements IMockApi {
 					archivedAt: date,
 				},
 			];
-			this.routes.set(`${projectRoot}/tickets`, () => tickets.filter((ticket) => !ticket.archivedAt));
+			boardTickets.push(...tickets.filter((ticket) => !ticket.archivedAt));
 			const usage = { input: 164000, cached: 96000, output: 21000, turns: 8 };
 			const daily = Array.from({ length: 30 }, (_, index) => ({
 				date: new Date(Date.parse(date) - (29 - index) * 86_400_000).toISOString().slice(0, 10),
@@ -264,8 +266,6 @@ export class MockApi implements IMockApi {
 					{ phase: "review", input: 24000, cached: 14000, output: 4000, turns: 1 },
 				],
 				tickets: tickets.map(({ id, title, archivedAt }, index) => ({
-					projectId: project.id,
-					projectName: project.name,
 					id,
 					title,
 					archivedAt,
@@ -294,6 +294,7 @@ export class MockApi implements IMockApi {
 				}));
 			for (const ticket of tickets) {
 				this.routes.set(`/api/tickets/${ticket.id}`, () => ticket);
+				this.routes.set(`/api/tickets/${ticket.id}/model-options`, () => ({ models: [], skills: [] }));
 				this.routes.set(`/api/tickets/${ticket.id}/workflow`, () => ({
 					ticketId: ticket.id,
 					phase: ticket.status === "done" ? "implementation" : "planning",
@@ -308,7 +309,7 @@ export class MockApi implements IMockApi {
 						? {
 								plan: {
 									revision: 1,
-									text: "## Project navigation\n\n- Keep the active section visible on mobile.\n- Preserve links to each section when the layout changes.",
+									text: "## Repository navigation\n\n- Keep the active section visible on mobile.\n- Preserve links to each section when the layout changes.",
 								},
 							}
 						: {}),

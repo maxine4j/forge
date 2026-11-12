@@ -5,7 +5,12 @@ import { agentSettingsSchema } from "../agents/index.ts";
 export const ticketStatuses = ["backlog", "todo", "in-progress", "done"] as const;
 export const ticketStatusSchema = z.enum(ticketStatuses);
 export const ticketIdSchema = z.string().regex(/^FORGE-[1-9]\d{0,14}$/u);
+export const repositoryIdsSchema = z
+	.array(z.uuid())
+	.max(1000)
+	.refine((ids) => new Set(ids).size === ids.length, "Duplicate repositories");
 export const createTicketSchema = z.strictObject({
+	repositoryIds: repositoryIdsSchema.default([]),
 	executionSettings: agentSettingsSchema.optional(),
 	title: z.string().trim().min(1).max(120),
 	description: z.string().max(4000).default(""),
@@ -20,7 +25,7 @@ export const ticketMessageSchema = z.strictObject({
 export const ticketSchema = z.strictObject({
 	executionSettings: agentSettingsSchema.optional(),
 	id: ticketIdSchema,
-	projectId: z.uuid(),
+	repositoryIds: repositoryIdsSchema,
 	title: z.string().min(1).max(120),
 	description: z.string().max(4000),
 	status: ticketStatusSchema,
@@ -32,6 +37,7 @@ export const ticketSchema = z.strictObject({
 export const ticketsSchema = z.array(ticketSchema).max(1000);
 export const ticketWorkflowSchema = z.strictObject({
 	ticketId: ticketIdSchema,
+	executionRepositoryId: z.uuid().optional(),
 	workspaceId: z.uuid().optional(),
 	plannerId: z.uuid().optional(),
 	implementerId: z.uuid().optional(),

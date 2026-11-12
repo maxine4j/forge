@@ -158,7 +158,8 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			tickets = new TicketService(ticketStore, projectsStore, access, () => new Date(), workflow);
 			await workflow.recover(owner);
 		};
-		const ticket = await tickets.create(owner, project.id, {
+		const ticket = await tickets.create(owner, {
+			repositoryIds: [project.id, other.id],
 			title: "Implement search",
 			description: "Find files",
 		});
@@ -167,7 +168,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await tickets.move(owner, ticket.id, { status: "todo" });
 		await workflow.tick(owner);
 		expect((await jobs.get(ticket.id))?.plannerId).toBeUndefined();
-		expect((await tickets.list(owner, project.id)).at(0)?.agentStatus).toBe("queued");
+		expect((await tickets.list(owner)).at(0)?.agentStatus).toBe("queued");
 		await agents.interrupt(owner, standalone[0]!.thread.id);
 		dispatch = "paused";
 		await workflow.tick(owner);
@@ -175,7 +176,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect((await jobs.get(ticket.id))?.plannerId).toBeUndefined();
 		dispatch = "running";
 		const resolve = workspaces.resolve.bind(workspaces);
-		expect((await tickets.list(owner, project.id)).at(0)?.agentStatus).toBe("queued");
+		expect((await tickets.list(owner)).at(0)?.agentStatus).toBe("queued");
 		vi.spyOn(workspaces, "resolve").mockImplementationOnce(async (...args) => {
 			dispatch = "paused";
 			return resolve(...args);
@@ -183,8 +184,12 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await workflow.tick(owner);
 		const preparedPlanner = (await jobs.get(ticket.id))?.plannerId;
 		expect(preparedPlanner).toBeDefined();
+		expect((await jobs.get(ticket.id))?.executionRepositoryId).toBe(project.id);
+		expect((await workspaces.get(owner, (await jobs.get(ticket.id))!.workspaceId!)).projectId).toBe(project.id);
 		expect((await ticketStore.get(ticket.id))?.status).toBe("todo");
 		await restart();
+		expect((await ticketStore.get(ticket.id))?.repositoryIds).toEqual([project.id, other.id]);
+		expect((await jobs.get(ticket.id))?.executionRepositoryId).toBe(project.id);
 		await workflow.tick(owner);
 		expect((await ticketStore.get(ticket.id))?.status).toBe("todo");
 		expect((await jobs.get(ticket.id))?.state).toBe("queued");
@@ -233,7 +238,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			collaborationMode: { settings: { model: "gpt-5.4", reasoning_effort: "medium" } },
 		});
 		dispatch = "running";
-		expect((await tickets.list(owner, project.id)).at(0)).toMatchObject({
+		expect((await tickets.list(owner)).at(0)).toMatchObject({
 			status: "in-progress",
 			needsAttention: true,
 		});
@@ -259,12 +264,12 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		).trim();
 		await git.run(["-C", path, "update-ref", "refs/heads/main", advanced, main]);
 		await workflow.approve(owner, (await ticketStore.get(ticket.id))!, 2);
-		expect((await tickets.list(owner, project.id)).at(0)).toMatchObject({ agentStatus: "queued" });
-		expect((await tickets.list(owner, project.id)).at(0)?.needsAttention).toBeUndefined();
+		expect((await tickets.list(owner)).at(0)).toMatchObject({ agentStatus: "queued" });
+		expect((await tickets.list(owner)).at(0)?.needsAttention).toBeUndefined();
 		await restart();
 		await workflow.tick(owner);
 		await expect.poll(idle).toBe("merge-queued");
-		expect((await tickets.list(owner, project.id)).at(0)?.agentStatus).toBeUndefined();
+		expect((await tickets.list(owner)).at(0)?.agentStatus).toBeUndefined();
 		const implemented = (await jobs.get(ticket.id))!;
 		expect(implemented.workspaceId).toBe(planning.workspaceId);
 		expect(implemented.implementerId).not.toBe(planning.plannerId);

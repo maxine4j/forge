@@ -15,10 +15,19 @@ import { Conversation } from "../agents/agent-chat.tsx";
 import { AgentOptionsRevision, ExecutionSettings } from "../agents/execution-settings.tsx";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { RepositorySelection } from "./repository-selection.tsx";
 import { TicketCost } from "./ticket-cost.tsx";
 
 const tabLabels = { details: "Details", chat: "Chat", cost: "Cost" };
 type TicketTab = keyof typeof tabLabels;
+export interface TicketReadingState {
+	snapshots: Map<string, AgentView>;
+	scroll: { top: number; follow: boolean };
+	tab?: TicketTab;
+	title: string;
+	description: string;
+	repositoryIds: string[];
+}
 
 export const ticketLabels: Record<TicketStatus, string> = {
 	backlog: "Backlog",
@@ -37,6 +46,7 @@ export const TicketDetails = ({
 	move,
 	refreshBoard,
 	drafts,
+	reading,
 }: {
 	ticket: Ticket;
 	api: IWorkspaceApi;
@@ -47,19 +57,34 @@ export const TicketDetails = ({
 	move: (id: string, input: MoveTicket) => Promise<void>;
 	refreshBoard: () => void;
 	drafts: Map<string, string>;
+	reading: Map<string, TicketReadingState>;
 }) => {
 	const archived = !!ticket.archivedAt;
 	const dialog = useRef<HTMLDialogElement>(null);
-	const [snapshots] = useState(() => new Map<string, AgentView>());
-	const [scrollState] = useState(() => ({ top: 0, follow: true }));
+	const [state] = useState(() => {
+		const saved = reading.get(ticket.id) ?? {
+			snapshots: new Map<string, AgentView>(),
+			scroll: { top: 0, follow: true },
+			title: ticket.title,
+			description: ticket.description,
+			repositoryIds: ticket.repositoryIds,
+		};
+		reading.set(ticket.id, saved);
+		return saved;
+	});
+	const snapshots = state.snapshots;
+	const scrollState = state.scroll;
 	const archiveDialog = useRef<HTMLDialogElement>(null);
 	const fieldId = useId();
 	const poller = useRef<ResourcePoller<TicketWorkflow> | undefined>(undefined);
 	const [job, setJob] = useState<TicketWorkflow>();
-	const [section, setTab] = useState<TicketTab>();
+	const [section, setTab] = useState<TicketTab | undefined>(state.tab);
 	const [acting, setActing] = useState(false);
-	const [title, setTitle] = useState(ticket.title);
-	const [description, setDescription] = useState(ticket.description);
+	const [title, setTitle] = useState(state.title);
+	const [description, setDescription] = useState(state.description);
+	const [repositoryIds, setRepositoryIds] = useState(state.repositoryIds);
+	const unsavedRepositories = JSON.stringify(repositoryIds) !== JSON.stringify(ticket.repositoryIds);
+	Object.assign(state, { title, description, repositoryIds, tab: section });
 	const settingsKey = JSON.stringify(ticket.executionSettings);
 	const [observedSettings, setObservedSettings] = useState(settingsKey);
 	const [savedSettings, setSavedSettings] = useState<AgentSettings>();
@@ -76,7 +101,7 @@ export const TicketDetails = ({
 	useEffect(() => {
 		let current = true;
 		void api
-			.read(`projects/${ticket.projectId}/model-options`, agentOptionsSchema)
+			.read(`tickets/${ticket.id}/model-options`, agentOptionsSchema)
 			.then((value) => {
 				if (current) setOptions(value);
 			})
@@ -86,7 +111,7 @@ export const TicketDetails = ({
 		return () => {
 			current = false;
 		};
-	}, [api, ticket.projectId, optionsRevision]);
+	}, [api, ticket.id, optionsRevision]);
 	const changeSettings = (value: AgentSettings) => {
 		if (archived || savingSettings) return;
 		setSettingsError("");
@@ -263,7 +288,7 @@ export const TicketDetails = ({
 					<select
 						aria-label='Status'
 						value={ticket.status}
-						disabled={archived || busy || !target}
+						disabled={archived || busy || !target || unsavedRepositories}
 						onChange={(event) => {
 							setError("");
 							void move(ticket.id, { status: event.target.value as TicketStatus }).catch((err: unknown) =>
@@ -275,6 +300,7 @@ export const TicketDetails = ({
 						{target && <option value={target}>{ticketLabels[target]}</option>}
 					</select>
 				</label>
+				{unsavedRepositories && <small>Save repository selections before starting planning.</small>}
 				<span role='status'>
 					{awaitingReview
 						? "Plan ready for review"
@@ -347,7 +373,7 @@ export const TicketDetails = ({
 					onSubmit={(event) => {
 						event.preventDefault();
 						if (archived) return;
-						void save({ title, description }).catch((err: unknown) =>
+						void save({ title, description, repositoryIds }).catch((err: unknown) =>
 							setError(err instanceof Error ? err.message : "Cannot save ticket."),
 						);
 					}}
@@ -369,6 +395,12 @@ export const TicketDetails = ({
 						value={description}
 						disabled={archived || busy || ticket.status !== "backlog"}
 						onChange={(event) => setDescription(event.target.value)}
+					/>
+					<RepositorySelection
+						api={api}
+						value={repositoryIds}
+						change={setRepositoryIds}
+						disabled={archived || busy || ticket.status !== "backlog"}
 					/>
 					{!archived && ticket.status === "backlog" && (
 						<button className='primary' disabled={busy}>

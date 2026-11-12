@@ -247,12 +247,9 @@ const TicketCosts = ({ cost }: { cost: Costs }) => {
 							{tickets.map((ticket) => (
 								<tr key={ticket.id}>
 									<th scope='row'>
-										<Link
-											to={`/projects/${ticket.projectId}/tasks?ticket=${encodeURIComponent(ticket.id)}`}
-										>
+										<Link to={`/tasks?ticket=${encodeURIComponent(ticket.id)}`}>
 											<span className='cost-muted'>{ticket.id}</span> {ticket.title}
 										</Link>
-										<small>{ticket.projectName}</small>
 										{ticket.archivedAt && <small>Archived</small>}
 									</th>
 									<td>

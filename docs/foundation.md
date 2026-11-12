@@ -1,5 +1,15 @@
 # Forge access and application foundation
 
+## Navigation
+
+Forge opens the global [Tasks board](tickets.md#agentic-ticket-board) at `/tasks`.
+Global destinations are Tasks, Repos (`/repos`), Costs (`/costs`) and Config
+(`/config`). Repository creation, import, retry and browsing live under Repos.
+Browser routes under `/projects` are removed without redirects. Internal
+repository management APIs keep their `/api/projects` namespace; tickets use
+owner-authorized `GET/POST /api/tickets` and ticket-ID routes instead. See the
+[workspace navigation contract](workspaces.md#slice-2-integrated-manual-workspace-and-pr-review).
+
 ## Account login and application access
 
 Retain the account setup experience from `codex-runner`, without remote-device
@@ -66,9 +76,9 @@ the Codex catalog used to validate changes to `defaultAgentModel` and
 settings or catalog lookups return 503. The owner can clear both defaults or save
 unrelated settings during a catalog outage.
 
-### Projects and repository imports
+### Repositories and imports
 
-The initial project API exposes `GET/POST /api/projects`,
+Repository management retains the internal project API: `GET/POST /api/projects`,
 `GET /api/projects/:id`, and `POST /api/projects/:id/retry`. Inputs and responses
 use `@forge/contracts`. Public project values contain ID, name, creation
 timestamp, and `creating/ready/failed` status. Ready projects eligible for
@@ -165,7 +175,7 @@ tail rather than accumulating without limit. Recreate deployment remains mandato
 to prevent multiple application instances sharing account homes.
 
 Slice 1 serves a responsive React interface from the same application as its API.
-Owners can list/create/import/retry projects and connect ChatGPT/GitHub using
+Owners can list/create/import/retry repositories and connect ChatGPT/GitHub using
 verification links, one-time codes, cancellation, verification and explicit retry.
 Account polling is serialized with actions, aborts on unmount, and never blocks
 project use. Failed creation refreshes durable project intent for explicit retry.

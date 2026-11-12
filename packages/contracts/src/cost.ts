@@ -60,8 +60,6 @@ export const costsSchema = pricingSchema.extend({
 		ticketEstimateSchema.extend({
 			id: z.string(),
 			title: z.string(),
-			projectId: z.string(),
-			projectName: z.string(),
 			archivedAt: z.iso.datetime().optional(),
 		}),
 	),

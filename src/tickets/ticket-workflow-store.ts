@@ -3,15 +3,16 @@ import { z } from "zod";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
 import { TicketError } from "./errors.ts";
+import { boardMoveStatements } from "./ticket-store.ts";
 import { ticketWorkflowRecordSchema, type TicketWorkflowRecord } from "./types.ts";
 
 export interface ITicketWorkflowStore {
 	get(id: string): Promise<TicketWorkflowRecord | undefined>;
-	/** Active jobs in board position order, globally paginated across projects. Idle/failed jobs are read by ID. */
+	/** Active jobs in board position order, globally paginated across the board. Idle/failed jobs are read by ID. */
 	list(): Promise<TicketWorkflowRecord[]>;
 	/** Done tickets with a recorded merge candidate and worktree, including archived tickets. */
 	pendingCleanup(): Promise<TicketWorkflowRecord[]>;
-	boardSummary(projectId: string): Promise<TicketWorkflowRecord[]>;
+	boardSummary(): Promise<TicketWorkflowRecord[]>;
 	/** Persists job intent and any board move in one transaction. */
 	save(record: TicketWorkflowRecord, move?: MoveTicket): Promise<void>;
 }
@@ -27,21 +28,6 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 			},
 			{
 				sql: "CREATE TABLE IF NOT EXISTS ticket_workflows (ticketId TEXT PRIMARY KEY REFERENCES tickets(id), record TEXT NOT NULL)",
-			},
-			{
-				sql: "UPDATE ticket_workflows SET record=json_set(record,'$.phase','review') WHERE ticketId IN (SELECT id FROM tickets WHERE status='in-review')",
-			},
-			{
-				sql: "UPDATE ticket_workflows SET record=json_set(record,'$.state','merge-queued') WHERE ticketId IN (SELECT id FROM tickets WHERE status='merging') AND json_extract(record,'$.state')='queued' AND json_extract(record,'$.message') IS NULL",
-			},
-			{
-				sql: "UPDATE tickets SET status='in-progress' WHERE status IN ('in-review','merging') OR (status='todo' AND id IN (SELECT ticketId FROM ticket_workflows WHERE json_extract(record,'$.state')<>'queued'))",
-			},
-			{
-				sql: "UPDATE ticket_workflows SET record=json_set(record,'$.state','failed') WHERE json_type(record,'$.run') IS NOT NULL AND json_extract(record,'$.state') IN ('dispatching','uncertain')",
-			},
-			{
-				sql: "UPDATE ticket_workflows SET record=json_remove(record,'$.run') WHERE json_type(record,'$.run') IS NOT NULL",
 			},
 		]);
 	}
@@ -60,10 +46,10 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 			if (page.length < 500) return jobs;
 		}
 	}
-	async boardSummary(projectId: string): Promise<TicketWorkflowRecord[]> {
+	async boardSummary(): Promise<TicketWorkflowRecord[]> {
 		return this.read(
-			"SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId WHERE t.projectId=? AND t.archivedAt IS NULL AND t.status IN ('todo','in-progress') ORDER BY t.position,t.number",
-			[projectId],
+			"SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId WHERE t.archivedAt IS NULL AND t.status IN ('todo','in-progress') ORDER BY t.position,t.number",
+			[],
 		);
 	}
 	async pendingCleanup(): Promise<TicketWorkflowRecord[]> {
@@ -94,20 +80,7 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 								sql: "INSERT OR IGNORE INTO ticket_completions(ticketId,completedAt) SELECT id,? FROM tickets WHERE id=? AND status<>'done' AND ?='done'",
 								parameters: [this.now().toISOString(), value.ticketId, move.status],
 							},
-							{
-								sql: "UPDATE tickets SET position=position+1 WHERE projectId=(SELECT projectId FROM tickets WHERE id=?) AND status=? AND archivedAt IS NULL AND position >= (SELECT position FROM tickets WHERE id=?)",
-								parameters: [value.ticketId, move.status, move.beforeId ?? null],
-							},
-							{
-								sql: "UPDATE tickets SET status=?,position=COALESCE((SELECT position-1 FROM tickets WHERE id=?),(SELECT COALESCE(MAX(position),0)+1 FROM tickets WHERE projectId=(SELECT projectId FROM tickets WHERE id=?) AND status=? AND archivedAt IS NULL)) WHERE id=?",
-								parameters: [
-									move.status,
-									move.beforeId ?? null,
-									value.ticketId,
-									move.status,
-									value.ticketId,
-								],
-							},
+							...boardMoveStatements(value.ticketId, move),
 						]
 					: []),
 			]);

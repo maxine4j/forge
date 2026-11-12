@@ -23,8 +23,8 @@ test("workflow intent and board movement are atomic, durable, and scheduled in b
 		await tickets.initialize();
 		let jobs = new TicketWorkflowStore(db);
 		await jobs.initialize();
-		const one = await tickets.insert(projectId, { title: "One", description: "" }, createdAt);
-		const two = await tickets.insert(projectId, { title: "Two", description: "" }, createdAt);
+		const one = await tickets.insert({ repositoryIds: [projectId], title: "One", description: "" }, createdAt);
+		const two = await tickets.insert({ repositoryIds: [projectId], title: "Two", description: "" }, createdAt);
 		const job = {
 			ticketId: one.id,
 			phase: "planning" as const,
@@ -50,26 +50,20 @@ test("workflow intent and board movement are atomic, durable, and scheduled in b
 		await jobs.save({ ...job, state: "idle" });
 		expect((await jobs.list()).map((record) => record.ticketId)).toEqual([two.id]);
 
-		await db.run("UPDATE tickets SET status='in-review' WHERE id=?", [one.id]);
-		await db.run("UPDATE tickets SET status='merging' WHERE id=?", [two.id]);
-		await db.run(
-			"UPDATE ticket_workflows SET record=json_set(record,'$.phase','rebase','$.run',1) WHERE ticketId=?",
-			[two.id],
-		);
+		await jobs.save(job, { status: "in-progress" });
+		await jobs.save({ ...job, ticketId: two.id }, { status: "in-progress", beforeId: one.id });
 		await jobs.initialize();
-		await jobs.initialize();
-		expect((await tickets.get(one.id))?.status).toBe("in-progress");
-		expect((await tickets.get(two.id))?.status).toBe("in-progress");
-		expect(await jobs.get(one.id)).toMatchObject({ phase: "review", state: "idle" });
-		expect(await jobs.get(two.id)).toMatchObject({ phase: "rebase", state: "merge-queued" });
-		expect((await jobs.boardSummary(projectId)).map((record) => record.ticketId)).toEqual([two.id, one.id]);
+		expect((await jobs.boardSummary()).map((record) => record.ticketId)).toEqual([two.id, one.id]);
 		const otherProjectId = "123e4567-e89b-42d3-a456-426614174001";
 		await new ProjectStore(db).insert({ id: otherProjectId, name: "Other", status: "ready", createdAt });
-		const other = await tickets.insert(otherProjectId, { title: "Other", description: "" }, createdAt);
+		const other = await tickets.insert(
+			{ repositoryIds: [otherProjectId], title: "Other", description: "" },
+			createdAt,
+		);
 		await jobs.save({ ...job, ticketId: other.id }, { status: "todo" });
-		expect((await jobs.boardSummary(otherProjectId)).map((record) => record.ticketId)).toEqual([other.id]);
+		expect((await jobs.boardSummary()).map((record) => record.ticketId)).toEqual([two.id, other.id, one.id]);
 		await tickets.archive(one.id, createdAt);
-		expect((await jobs.boardSummary(projectId)).map((record) => record.ticketId)).toEqual([two.id]);
+		expect((await jobs.boardSummary()).map((record) => record.ticketId)).toEqual([two.id, other.id]);
 		await db.run("DROP TRIGGER reject_done");
 		const done = {
 			...(await jobs.get(two.id))!,

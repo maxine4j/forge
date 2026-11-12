@@ -11,6 +11,7 @@ import type { IWorkspaceApi } from "./api/workspace-api.ts";
 import { CostDashboard } from "./cost/cost-dashboard.tsx";
 import { resolveRoute } from "./navigation/routes.ts";
 import { ForgeSettingsForm } from "./settings/settings-form.tsx";
+import { TaskBoard } from "./tasks/task-board.tsx";
 import { Workbench } from "./workspace/workbench.tsx";
 
 const failureMessages = {
@@ -51,7 +52,7 @@ const AccountCard = ({
 				<>
 					<p className='account-name'>{status.account ? status.account.name : "Not signed in"}</p>
 					{status.connection === "unavailable" && (
-						<p className='notice'>Account connection unavailable. Project access is still available.</p>
+						<p className='notice'>Account connection unavailable. Repository access is still available.</p>
 					)}
 					{status.login.failure && <p className='notice'>{failureMessages[status.login.failure]}</p>}
 					{status.login.state === "pending" && (
@@ -106,7 +107,7 @@ const AccountCard = ({
 export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWorkspaceApi }) => {
 	const location = useLocation();
 	const route = resolveRoute(location.pathname);
-	const constrained = route.page === "project" && (route.section === "agents" || route.section === "tasks");
+	const constrained = route.page === "tasks" || (route.page === "repo" && route.section === "agents");
 	const [viewport, setViewport] = useState({ height: window.visualViewport?.height ?? window.innerHeight, top: 0 });
 	useEffect(() => {
 		if (!constrained) return;
@@ -126,13 +127,13 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 		};
 	}, [constrained]);
 	const config = route.page === "config";
-	const global = config || route.page === "costs";
+	const global = config || route.page === "costs" || route.page === "tasks";
 	const [retained, setRetained] = useState<Project>();
 	const [projects, setProjects] = useState<Project[]>();
 	const selected = global
 		? retained
-		: route.page === "project"
-			? projects?.find((project) => project.id === route.projectId && project.status === "ready")
+		: route.page === "repo"
+			? projects?.find((project) => project.id === route.repositoryId && project.status === "ready")
 			: undefined;
 	if (!global && retained !== selected) setRetained(selected);
 	const [dirty, setDirty] = useState(false);
@@ -144,7 +145,8 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 			dirty
 			&& next.page !== "config"
 			&& next.page !== "costs"
-			&& !(next.page === "project" && next.projectId === selected?.id);
+			&& next.page !== "tasks"
+			&& !(next.page === "repo" && next.repositoryId === selected?.id);
 		if (blocked) setNavigationError("Uncommitted drafts remain. Commit or discard them before leaving.");
 		return blocked;
 	});
@@ -193,7 +195,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 		event.preventDefault();
 		const input = createProjectSchema.safeParse({ name, ...(source.trim() ? { source: source.trim() } : {}) });
 		if (!input.success) {
-			setProjectError("Enter a project name (up to 120 characters) and a credential-free HTTPS import URL.");
+			setProjectError("Enter a repository name (up to 120 characters) and a credential-free HTTPS import URL.");
 			return;
 		}
 		setProjectBusy(true);
@@ -235,10 +237,10 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 			{constrained && (
 				<style>{`.shell-constrained { height: ${viewport.height}px; top: ${viewport.top}px; --forge-viewport-height: ${viewport.height}px; --forge-viewport-top: ${viewport.top}px; }`}</style>
 			)}
-			{location.pathname === "/" && <Navigate to='/projects' replace />}
+			{location.pathname === "/" && <Navigate to='/tasks' replace />}
 			<header>
 				<div className='header-identity'>
-					<Link className='brand' to='/projects' aria-label='Forge home'>
+					<Link className='brand' to='/tasks' aria-label='Forge home'>
 						<span aria-hidden='true'>F</span>forge
 					</Link>
 					{selected && !global && (
@@ -253,11 +255,14 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 					)}
 				</div>
 				<nav className='global-nav' aria-label='Forge'>
+					<Link to='/tasks' aria-current={route.page === "tasks" ? "page" : undefined}>
+						Tasks
+					</Link>
 					<Link
-						to='/projects'
-						aria-current={route.page === "projects" || route.page === "project" ? "page" : undefined}
+						to='/repos'
+						aria-current={route.page === "repos" || route.page === "repo" ? "page" : undefined}
 					>
-						Projects
+						Repos
 					</Link>
 					<Link to='/costs' aria-current={route.page === "costs" ? "page" : undefined}>
 						Costs
@@ -268,6 +273,11 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 				</nav>
 			</header>
 			<main>
+				<div className='tasks-view' hidden={route.page !== "tasks"}>
+					<AgentOptionsRevision.Provider value={agentOptionsRevision}>
+						<TaskBoard api={workspaceApi} visible={route.page === "tasks"} />
+					</AgentOptionsRevision.Provider>
+				</div>
 				{route.page === "costs" && <CostDashboard api={workspaceApi} />}
 				{navigationError && dirty && (
 					<p role='alert' className='error'>
@@ -277,19 +287,19 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 				{route.page === "not-found" && (
 					<section>
 						<h1>Page not found</h1>
-						<Link to='/projects'>View projects</Link>
+						<Link to='/repos'>View repos</Link>
 					</section>
 				)}
-				{route.page === "project" && !selected && (
+				{route.page === "repo" && !selected && (
 					<section>
-						<h1>{!projects && !projectError ? "Loading project…" : "Project unavailable"}</h1>
+						<h1>{!projects && !projectError ? "Loading repository…" : "Repository unavailable"}</h1>
 						{projectError && <p role='alert'>{projectError}</p>}
-						<Link to='/projects'>View projects</Link>
+						<Link to='/repos'>View repos</Link>
 					</section>
 				)}
-				<div className='intro' hidden={route.page !== "projects"}>
+				<div className='intro' hidden={route.page !== "repos"}>
 					<div>
-						<h1>Your projects</h1>
+						<h1>Your repos</h1>
 						<p>Build, review, and ship from one place.</p>
 					</div>
 				</div>
@@ -305,12 +315,12 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 						</AgentOptionsRevision.Provider>
 					</div>
 				)}
-				<div className='workspace-grid' hidden={route.page !== "projects"}>
+				<div className='workspace-grid' hidden={route.page !== "repos"}>
 					<section aria-labelledby='projects-heading' className='projects-section'>
 						<div className='section-heading'>
 							<div>
 								<h2 id='projects-heading'>
-									Projects <span className='count'>{projects?.length ?? "—"}</span>
+									Repos <span className='count'>{projects?.length ?? "—"}</span>
 								</h2>
 							</div>
 							<button
@@ -318,7 +328,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 								onClick={() => projectPoller.current?.refresh()}
 								disabled={projectBusy}
 							>
-								Refresh projects
+								Refresh repos
 							</button>
 						</div>
 						{projectError && (
@@ -327,15 +337,15 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 							</p>
 						)}
 						{!projects ? (
-							<div className='empty'>Loading projects…</div>
+							<div className='empty'>Loading repositorys…</div>
 						) : projects.length === 0 ? (
 							<div className='empty'>
 								<span aria-hidden='true'>＋</span>
-								<h3>No projects yet</h3>
+								<h3>No repos yet</h3>
 								<p>
 									Your repositories will live here.
 									<br />
-									Create your first project to get started.
+									Create your first repository to get started.
 								</p>
 							</div>
 						) : (
@@ -379,7 +389,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 										<Link
 											key={project.id}
 											className='project-link'
-											to={`/projects/${project.id}/code`}
+											to={`/repos/${project.id}/code`}
 											aria-label={`Open ${project.name}`}
 										>
 											{card}
@@ -392,10 +402,10 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 						)}
 					</section>
 					<section className='create-card' aria-labelledby='create-heading'>
-						<h2 id='create-heading'>New project</h2>
+						<h2 id='create-heading'>New repository</h2>
 						<p>A fresh repository, or a new home for existing code.</p>
 						<form onSubmit={(event) => void create(event)}>
-							<label htmlFor='project-name'>Project name</label>
+							<label htmlFor='project-name'>Repository name</label>
 							<input
 								id='project-name'
 								value={name}
@@ -422,7 +432,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 								repository.
 							</small>
 							<button className='primary' disabled={projectBusy} type='submit'>
-								{projectBusy ? "Creating project…" : "Create project"}
+								{projectBusy ? "Creating repository…" : "Create repository"}
 								<span aria-hidden='true'>↗</span>
 							</button>
 						</form>

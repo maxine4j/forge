@@ -446,7 +446,7 @@ export const Conversation = ({
 								&& status !== "uncertain"
 								&& !view.items.length && (
 									<p className='agent-empty'>
-										Start a conversation about this project. Each chat works in its own managed
+										Start a conversation about this repository. Each chat works in its own managed
 										worktree.
 									</p>
 								)}
@@ -556,17 +556,17 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 		update();
 		return () => query.removeEventListener("change", update);
 	}, []);
-	const selectFirst = route.page === "project" && route.section === "agents" && !route.threadId;
+	const selectFirst = route.page === "repo" && route.section === "agents" && !route.threadId;
 	const [threads, setThreads] = useState<AgentThread[]>([]);
 	const [loaded, setLoaded] = useState(false);
 	const [opened, setOpened] = useState<string[]>([]);
 	const [retained, setRetained] = useState("");
-	const selected = route.page === "project" && route.section === "agents" ? (route.threadId ?? "") : retained;
+	const selected = route.page === "repo" && route.section === "agents" ? (route.threadId ?? "") : retained;
 	const main = useRef<HTMLDivElement>(null);
 	const createButton = useRef<HTMLButtonElement>(null);
 	const chatButtons = useRef(new Map<string, HTMLButtonElement>());
 	const lastSelected = useRef("");
-	const visible = route.page === "project" && route.section === "agents";
+	const visible = route.page === "repo" && route.section === "agents";
 	useLayoutEffect(() => {
 		if (selected) lastSelected.current = selected;
 		if (!mobile || !visible) return;
@@ -600,14 +600,14 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 	const firstId = threads.at(0)?.id;
 	useEffect(() => {
 		if (!mobile && selectFirst && firstId) {
-			void navigate(`/projects/${projectId}/agents/${firstId}`, { replace: true });
+			void navigate(`/repos/${projectId}/agents/${firstId}`, { replace: true });
 		}
 	}, [mobile, selectFirst, firstId, projectId, navigate]);
 	const open = (id: string) => {
-		void navigate(`/projects/${projectId}/agents/${id}`);
+		void navigate(`/repos/${projectId}/agents/${id}`);
 	};
 	const back = (
-		<button className='agent-back' type='button' onClick={() => void navigate(`/projects/${projectId}/agents`)}>
+		<button className='agent-back' type='button' onClick={() => void navigate(`/repos/${projectId}/agents`)}>
 			Back to chats
 		</button>
 	);
@@ -686,7 +686,7 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 					<div className='agent-welcome'>
 						<h3>Work with Codex</h3>
 						<p>Create or open a chat to get started.</p>
-						<p>Chats keep working while you browse other project sections.</p>
+						<p>Chats keep working while you browse other repository sections.</p>
 					</div>
 				)}
 				{opened
@@ -698,7 +698,7 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 								navigation={back}
 								api={api}
 								changed={refresh}
-								selected={selected === id && route.page === "project" && route.section === "agents"}
+								selected={selected === id && route.page === "repo" && route.section === "agents"}
 							/>
 						</div>
 					))}

@@ -66,21 +66,16 @@ test("mock commit pages expose validated parent links, structured patches and wh
 	}
 });
 
-test("mock cost data uses ticket keys from its project", async () => {
-	const projects = projectsSchema.parse(await read("/api/projects"));
-	for (const project of projects) {
-		const tickets = ticketsSchema.parse(await read(`/api/projects/${project.id}/tickets`));
-		const cost = costsSchema.parse(await read("/api/costs"));
-		expect(
-			cost.tickets.filter((ticket) => !ticket.archivedAt && ticket.projectId === project.id).map(({ id }) => id),
-		).toEqual(tickets.map(({ id }) => id));
-		const archived = cost.tickets.find((ticket) => ticket.archivedAt && ticket.projectId === project.id)!;
-		expect(await read(`/api/tickets/${archived.id}`)).toMatchObject({
-			projectId: project.id,
-			archivedAt: archived.archivedAt,
-		});
-		expect(cost.days).toHaveLength(30);
+test("mock cost data includes every global ticket and archived history", async () => {
+	const tickets = ticketsSchema.parse(await read("/api/tickets"));
+	const cost = costsSchema.parse(await read("/api/costs"));
+	expect(cost.tickets.filter((ticket) => !ticket.archivedAt).map(({ id }) => id)).toEqual(
+		tickets.map(({ id }) => id),
+	);
+	for (const archived of cost.tickets.filter((ticket) => ticket.archivedAt)) {
+		expect(await read(`/api/tickets/${archived.id}`)).toMatchObject({ archivedAt: archived.archivedAt });
 	}
+	expect(cost.days).toHaveLength(30);
 });
 
 test("mock chats expose isolated project history and requests while every mutation stays read-only", async () => {
@@ -109,12 +104,11 @@ test("mock chats expose isolated project history and requests while every mutati
 	}
 });
 
-test("mock boards expose project-scoped tickets across the workflow", async () => {
-	const projects = projectsSchema.parse(await read("/api/projects"));
-	for (const project of projects) {
-		const tickets = ticketsSchema.parse(await read(`/api/projects/${project.id}/tickets`));
+test("mock board exposes global tickets across the workflow", async () => {
+	{
+		const tickets = ticketsSchema.parse(await read("/api/tickets"));
 		expect(tickets.length).toBeGreaterThan(0);
-		expect(tickets.every((ticket) => ticket.projectId === project.id)).toBe(true);
+		expect(tickets.some((ticket) => ticket.repositoryIds.length === 0)).toBe(true);
 		const ticket = tickets.at(0)!;
 		expect(ticketSchema.parse(await read(`/api/tickets/${ticket.id}`))).toEqual(ticket);
 		for (const value of tickets) {
@@ -122,7 +116,7 @@ test("mock boards expose project-scoped tickets across the workflow", async () =
 			expect(workflow.ticketId).toBe(value.id);
 			if (value.needsAttention) {
 				expect(value.needsAttention).toBe(true);
-				expect(workflow.plan?.text).toContain("## Project navigation");
+				expect(workflow.plan?.text).toContain("## Repository navigation");
 			}
 			expect((await fetch(new URL(`/api/tickets/${value.id}/messages`, origin), { method: "POST" })).status).toBe(
 				405,

@@ -1,3 +1,3 @@
 export type ForgeRoute =
-	| { page: "projects" | "config" | "costs" | "not-found" }
-	| { page: "project"; projectId: string; section: string; threadId?: string };
+	| { page: "repos" | "tasks" | "config" | "costs" | "not-found" }
+	| { page: "repo"; repositoryId: string; section: string; threadId?: string };

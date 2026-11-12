@@ -89,7 +89,7 @@ test("terminal automatically creates, fits, reconnects, replaces lost shells and
 			);
 		}
 	});
-	await page.goto("/");
+	await page.goto("/repos");
 	await page.getByRole("link", { name: "Open Project" }).click();
 	await page.getByRole("tab", { name: "Terminals", exact: true }).click();
 	await expect.poll(() => creates).toBe(1);
@@ -118,7 +118,15 @@ test("terminal automatically creates, fits, reconnects, replaces lost shells and
 	await expect.poll(() => attaches).toBe(3);
 	await expect(page.getByText("Output gap through 10. Some terminal output is unavailable.")).toHaveCount(0);
 	const beforeLeaving = disconnected;
-	await page.getByRole("link", { name: "Forge home", exact: true }).click();
+	const retainedAttachments = attaches;
+	for (const destination of ["Tasks", "Costs", "Config"]) {
+		await page.getByRole("link", { name: destination, exact: true }).click();
+		await page.goBack();
+		await expect(page.getByText("Connected", { exact: true })).toBeVisible();
+		expect(disconnected).toBe(beforeLeaving);
+		expect(attaches).toBe(retainedAttachments);
+	}
+	await page.getByRole("link", { name: "Repos", exact: true }).click();
 	await expect.poll(() => disconnected).toBeGreaterThan(beforeLeaving);
 	const detached = attaches;
 	await page.waitForTimeout(1500);

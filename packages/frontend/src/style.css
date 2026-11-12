@@ -600,6 +600,22 @@
 .task-board > :not(.kanban-columns) {
 	flex-shrink: 0;
 }
+.ticket-repositories {
+	min-width: 0;
+}
+.ticket-repositories ol {
+	padding-left: 20px;
+}
+.ticket-repositories li {
+	overflow-wrap: anywhere;
+	margin-bottom: 8px;
+}
+.ticket-repositories button {
+	margin: 4px;
+}
+.ticket-repositories select {
+	max-width: 100%;
+}
 .task-board-heading,
 .task-board-actions,
 .ticket-dialog-heading,
@@ -1208,12 +1224,13 @@ body:has(.shell-constrained) {
 .shell-constrained > header {
 	flex-shrink: 0;
 }
-main:has(> .project-view:not([hidden])) {
+main:has(> .project-view:not([hidden]), > .tasks-view:not([hidden])) {
 	width: 100%;
 	margin: 0 auto;
 	padding: 16px 32px;
 }
 .shell-constrained main,
+.shell-constrained .tasks-view,
 .shell-constrained .project-view,
 .shell-constrained .workbench,
 .shell-constrained [role="tabpanel"]:not([hidden]) {
@@ -1226,7 +1243,7 @@ main:has(> .project-view:not([hidden])) {
 	flex-shrink: 0;
 }
 @media (max-width: 700px) {
-	main:has(> .project-view:not([hidden])) {
+	main:has(> .project-view:not([hidden]), > .tasks-view:not([hidden])) {
 		padding: 8px;
 	}
 	.project-view .project-tabs {

@@ -4,7 +4,11 @@
 
 Forge is an all-in-one agentic development platform: local Git hosting, a Kanban
 board, pull requests, a browser IDE, and Codex agent interaction in one web GUI.
-Users create projects in Forge, with one Git repository per project initially.
+The global Tasks board owns tickets. Repos manages Git repositories independently;
+tickets reference an ordered list and execute in the first selected repository
+once it is ready. See
+[ticket persistence and execution](tickets.md#agentic-ticket-board) and
+[navigation](workspaces.md#slice-2-integrated-manual-workspace-and-pr-review).
 
 - Build using Node.js 24, TypeScript ES
   modules, pnpm, Koa, React, Vite, Zod, Pino, Vitest, Playwright, and Oxc stack.
@@ -66,7 +70,8 @@ HTTP / WebSocket / Git protocol adapters / background tasks
 
 - Git is authoritative for commits, trees, branches, and tags. Bare repositories
   are stored locally on the mounted volume.
-- SQLite holds projects, tickets, plan revisions, PRs, reviews, jobs, execution
+- SQLite holds repositories (internally `projects`), board-owned tickets and ordered
+  repository associations, plan revisions, PRs, reviews, jobs, execution
   state, Codex identifiers, pipeline runs/jobs/steps, and durable application events.
 - Codex owns its conversation history and execution state in its persistent home;
   SQLite stores the identifiers and normalized state needed by Forge. Do not
@@ -199,7 +204,7 @@ file-save conflicts, terminal lifecycle, branch protection, approval invalidatio
 and exact-tested-commit merging. The central E2E scenario is:
 
 ```text
-create project -> ready ticket -> review plan -> agent implementation
+create repository -> board ticket -> select repositories -> ready ticket -> review plan -> agent implementation
 -> Forge fast-forward merge -> done
 ```
 

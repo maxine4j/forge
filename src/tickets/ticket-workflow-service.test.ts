@@ -18,7 +18,8 @@ const fixture = () => {
 	const plans = new Map<string, string>();
 	const pool = new AgentExecutionPool();
 	const agents = {
-		projectOptions: vi.fn(async () => ({
+		assertRepositoryReady: vi.fn(async () => {}),
+		catalogOptions: vi.fn(async () => ({
 			models: [
 				{
 					id: "test-model",
@@ -62,8 +63,7 @@ const fixture = () => {
 		resume: vi.fn<ITicketAgents["resume"]>(async (_actor, id) => structuredClone(views.get(id)!)),
 	};
 	const store = {
-		boardSummary: async (id: string) =>
-			[...jobs.values()].filter((job) => tickets.get(job.ticketId)?.projectId === id),
+		boardSummary: async () => [...jobs.values()],
 		get: async (id: string) => structuredClone(jobs.get(id)),
 		list: async () => [...jobs.values()].map((job) => structuredClone(job)),
 		pendingCleanup: async () =>
@@ -108,7 +108,7 @@ const fixture = () => {
 	const create = (id = "FORGE-1") => {
 		const ticket: Ticket = {
 			id,
-			projectId,
+			repositoryIds: [projectId],
 			title: "Add search",
 			description: "Find files",
 			status: "backlog",
@@ -126,6 +126,52 @@ const fixture = () => {
 	};
 	return { service, jobs, tickets, views, pool, agents, merges, create, complete, wake, cleanup };
 };
+
+test("Ready requires a first ready repository and dispatch revalidates it", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	ticket.repositoryIds = [];
+	await expect(f.service.move(actor, ticket, { status: "todo" })).rejects.toThrow("ticket-conflict");
+	expect(f.jobs.size).toBe(0);
+	ticket.repositoryIds = [projectId];
+	f.agents.assertRepositoryReady.mockRejectedValueOnce(new Error("Repository unavailable"));
+	await expect(f.service.move(actor, ticket, { status: "todo" })).rejects.toThrow("ticket-conflict");
+	await f.service.move(actor, ticket, { status: "todo" });
+	f.agents.assertRepositoryReady.mockRejectedValueOnce(new Error("Repository unavailable"));
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)?.state).toBe("setup-failed");
+	expect(f.agents.createTicketThread).not.toHaveBeenCalled();
+});
+
+test("execution records the first reference and reuses it and its workspace for implementation", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	const first = "123e4567-e89b-42d3-a456-426614174099";
+	ticket.repositoryIds = [first, projectId];
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	const job = f.jobs.get(ticket.id)!;
+	expect(job.executionRepositoryId).toBe(first);
+	expect(f.agents.createTicketThread).toHaveBeenCalledWith(actor, first, `${ticket.id} planning`, undefined, true);
+	f.complete(job.plannerId!, "# Plan");
+	await f.service.tick(actor);
+	await f.service.approve(actor, f.tickets.get(ticket.id)!, 1);
+	// Recovery and later phases use the recorded context even if references change underneath them.
+	f.tickets.get(ticket.id)!.repositoryIds = [projectId];
+	await f.service.recover(actor, ticket.id);
+	await f.service.tick(actor);
+	expect(f.agents.createTicketThread).toHaveBeenLastCalledWith(
+		actor,
+		first,
+		`${ticket.id} implementation`,
+		job.workspaceId,
+		true,
+	);
+	expect(f.jobs.get(ticket.id)?.workspaceId).toBe(job.workspaceId);
+	await expect(
+		f.service.update(actor, ticket.id, { title: "Locked", description: "", repositoryIds: [] }),
+	).rejects.toThrow("ticket-conflict");
+});
 
 test("ticket settings validate before saving and each phase snapshots the current selection", async () => {
 	const f = fixture();
@@ -168,7 +214,7 @@ test("board summary maps execution and attention, checking only the current runn
 		"merge-queued",
 	] as const) {
 		jobs.set(ticket.id, { ...base, state });
-		const flags = (await service.boardSummary(actor, projectId)).get(ticket.id);
+		const flags = (await service.boardSummary(actor)).get(ticket.id);
 		expect(flags).toEqual(
 			state === "queued"
 				? { agentStatus: "queued" }
@@ -183,19 +229,19 @@ test("board summary maps execution and attention, checking only the current runn
 		jobs.set(ticket.id, { ...base, phase, state: "running", plannerId: "planner", implementerId: "implementer" });
 		for (const status of ["running", "waiting"] as const) {
 			agents.get.mockResolvedValueOnce({ thread: { status } } as AgentView);
-			expect((await service.boardSummary(actor, projectId)).get(ticket.id)).toEqual(
+			expect((await service.boardSummary(actor)).get(ticket.id)).toEqual(
 				status === "waiting" ? { needsAttention: true } : { agentStatus: "working" },
 			);
 			expect(agents.get).toHaveBeenLastCalledWith(actor, phase === "planning" ? "planner" : "implementer");
 		}
 	}
 	agents.get.mockRejectedValueOnce(new Error("offline"));
-	expect((await service.boardSummary(actor, projectId)).get(ticket.id)).toEqual({ needsAttention: true });
+	expect((await service.boardSummary(actor)).get(ticket.id)).toEqual({ needsAttention: true });
 	for (const phase of ["planning", "review"] as const) {
 		jobs.set(ticket.id, { ...base, phase, state: "idle", plan: { revision: 1, text: "Plan" } });
-		expect((await service.boardSummary(actor, projectId)).get(ticket.id)).toEqual({ needsAttention: true });
+		expect((await service.boardSummary(actor)).get(ticket.id)).toEqual({ needsAttention: true });
 	}
-	await expect(service.boardSummary({ username: "guest" }, projectId)).rejects.toThrow("Access denied");
+	await expect(service.boardSummary({ username: "guest" })).rejects.toThrow("Access denied");
 });
 
 test("board shows working during thread setup and preserves setup failure attention", async () => {
@@ -216,10 +262,10 @@ test("board shows working during thread setup and preserves setup failure attent
 	});
 	const tick = service.tick(actor);
 	await starting;
-	expect((await service.boardSummary(actor, projectId)).get(ticket.id)).toEqual({ agentStatus: "working" });
+	expect((await service.boardSummary(actor)).get(ticket.id)).toEqual({ agentStatus: "working" });
 	failSetup();
 	await tick;
-	expect((await service.boardSummary(actor, projectId)).get(ticket.id)).toEqual({ needsAttention: true });
+	expect((await service.boardSummary(actor)).get(ticket.id)).toEqual({ needsAttention: true });
 });
 
 test.each(["implementation", "rebase"] as const)(

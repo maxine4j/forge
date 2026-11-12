@@ -16,7 +16,7 @@ afterEach(async () => {
 	for (const cleanup of cleanups.splice(0).reverse()) await cleanup();
 });
 
-test("SQLite allocates global sequential ticket keys, preserves project order and survives reopening", async () => {
+test("SQLite allocates global sequential ticket keys, preserves global order and survives reopening", async () => {
 	const root = await mkdtemp(join(tmpdir(), "forge-tickets-"));
 	cleanups.push(() => rm(root, { recursive: true, force: true }));
 	const path = join(root, "forge.sqlite");
@@ -30,15 +30,15 @@ test("SQLite allocates global sequential ticket keys, preserves project order an
 	await store.initialize();
 	const input = { title: "Task", description: "Details" };
 	const [a, b, c] = await Promise.all([
-		store.insert(projectId, input, createdAt),
-		store.insert(projectId, input, createdAt),
-		store.insert(otherId, input, createdAt),
+		store.insert({ ...input, repositoryIds: [projectId] }, createdAt),
+		store.insert({ ...input, repositoryIds: [projectId] }, createdAt),
+		store.insert({ ...input, repositoryIds: [otherId, projectId] }, createdAt),
 	]);
 	expect(await store.get(a.id)).toStrictEqual(a);
 	expect([a.id, b.id, c.id]).toEqual(["FORGE-1", "FORGE-2", "FORGE-3"]);
 	expect(a.status).toBe("backlog");
 	await store.move(b.id, { status: "backlog", beforeId: a.id });
-	expect((await store.list(projectId)).map((ticket) => ticket.id)).toEqual([b.id, a.id]);
+	expect((await store.list()).map((ticket) => ticket.id)).toEqual([b.id, a.id, c.id]);
 	await store.move(b.id, { status: "done" });
 	await store.update(a.id, { title: "Edited", description: "Updated" });
 	await store.updateSettings(a.id, {
@@ -52,7 +52,7 @@ test("SQLite allocates global sequential ticket keys, preserves project order an
 	await reopened.initialize();
 	const persisted = new TicketStore(reopened);
 	await persisted.initialize();
-	expect(await persisted.get(b.id)).toMatchObject({ status: "done", projectId });
+	expect(await persisted.get(b.id)).toMatchObject({ status: "done", repositoryIds: [projectId] });
 	expect(await persisted.get(a.id)).toMatchObject({ title: "Edited", description: "Updated", status: "backlog" });
 	expect((await persisted.get(a.id))?.executionSettings).toEqual({
 		model: "catalog-model",
@@ -61,13 +61,23 @@ test("SQLite allocates global sequential ticket keys, preserves project order an
 	});
 	await persisted.updateSettings(a.id, {});
 	expect((await persisted.get(a.id))?.executionSettings).toEqual({});
-	expect(await persisted.list(otherId)).toEqual([c]);
+	expect(await persisted.list()).toHaveLength(3);
+	expect((await persisted.get(c.id))?.repositoryIds).toEqual([otherId, projectId]);
+	await expect(persisted.insert({ ...input, repositoryIds: [otherId, otherId] }, createdAt)).rejects.toThrow(
+		"ticket-unavailable",
+	);
+	await expect(
+		persisted.insert({ ...input, repositoryIds: ["123e4567-e89b-42d3-a456-426614174099"] }, createdAt),
+	).rejects.toThrow("ticket-unavailable");
+	expect(await persisted.list()).toHaveLength(3);
 	expect(await persisted.get("FORGE-999")).toBeUndefined();
-	expect((await persisted.insert(projectId, input, createdAt)).id).toBe("FORGE-4");
+	expect((await persisted.insert({ ...input, repositoryIds: [projectId] }, createdAt)).id).toBe("FORGE-4");
 	await expect(persisted.update(a.id, { title: "", description: "" })).rejects.toThrow("ticket-unavailable");
 	expect((await persisted.get(a.id))?.title).toBe("Edited");
-	await expect(persisted.insert(projectId, input, "invalid timestamp")).rejects.toThrow("ticket-unavailable");
-	expect(await persisted.list(projectId)).toHaveLength(3);
+	await expect(persisted.insert({ ...input, repositoryIds: [projectId] }, "invalid timestamp")).rejects.toThrow(
+		"ticket-unavailable",
+	);
+	expect(await persisted.list()).toHaveLength(4);
 });
 
 test("archiving an existing ticket retains its contents and frees board capacity across restarts", async () => {
@@ -80,16 +90,16 @@ test("archiving an existing ticket retains its contents and frees board capacity
 	const projects = new ProjectStore(db);
 	await projects.initialize();
 	await projects.insert({ id: projectId, name: "Project", status: "ready", createdAt });
-	await db.run(
-		"CREATE TABLE tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT GENERATED ALWAYS AS ('FORGE-' || number) STORED UNIQUE, projectId TEXT NOT NULL REFERENCES projects(id), title TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'backlog', position INTEGER NOT NULL, createdAt TEXT NOT NULL)",
-	);
-	await db.run(
-		"WITH RECURSIVE positions(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM positions WHERE n<1000) INSERT INTO tickets(projectId,title,description,position,createdAt) SELECT ?, 'Original', 'Scope', n, ? FROM positions",
-		[projectId, createdAt],
-	);
 	const store = new TicketStore(db);
 	await store.initialize();
-	expect(await store.list(projectId)).toHaveLength(1000);
+	await db.run(
+		"WITH RECURSIVE positions(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM positions WHERE n<1000) INSERT INTO tickets(title,description,position,createdAt) SELECT 'Original','Scope',n,? FROM positions",
+		[createdAt],
+	);
+	await expect(store.insert({ title: "Over capacity", description: "" }, createdAt)).rejects.toThrow(
+		"ticket-unavailable",
+	);
+	expect(await store.list()).toHaveLength(1000);
 	const original = await store.get("FORGE-1000");
 	expect(original?.executionSettings).toBeUndefined();
 	expect(original).toMatchObject({ title: "Original", description: "Scope" });
@@ -104,27 +114,30 @@ test("archiving an existing ticket retains its contents and frees board capacity
 	const persisted = new TicketStore(reopened);
 	await persisted.initialize();
 	expect(await persisted.get("FORGE-1000")).toEqual({ ...original, archivedAt });
-	expect(await persisted.list(projectId)).toHaveLength(999);
-	const created = await persisted.insert(projectId, { title: "New task", description: "" }, createdAt);
+	expect(await persisted.list()).toHaveLength(999);
+	const created = await persisted.insert(
+		{ repositoryIds: [projectId], title: "New task", description: "" },
+		createdAt,
+	);
 	expect(created.id).toBe("FORGE-1001");
-	expect((await persisted.list(projectId)).at(-1)).toEqual(created);
+	expect((await persisted.list()).at(-1)).toEqual(created);
 	const otherProject = "123e4567-e89b-42d3-a456-426614174099";
 	await new ProjectStore(reopened).insert({ id: otherProject, name: "Other", status: "ready", createdAt });
-	const otherTicket = await persisted.insert(otherProject, { title: "Other task", description: "" }, createdAt);
+	await persisted.archive("FORGE-1", archivedAt);
+	const otherTicket = await persisted.insert(
+		{ repositoryIds: [otherProject], title: "Other task", description: "" },
+		createdAt,
+	);
 	const costTickets = await persisted.listForCost();
 	expect(costTickets).toHaveLength(1002);
 	expect(costTickets).toContainEqual({
 		id: otherTicket.id,
 		title: "Other task",
-		projectId: otherProject,
-		projectName: "Other",
 	});
 	expect(costTickets).toContainEqual({
 		id: "FORGE-1000",
 		title: "Original",
-		projectId,
-		projectName: "Project",
 		archivedAt,
 	});
-	expect(costTickets).toContainEqual({ id: created.id, title: "New task", projectId, projectName: "Project" });
+	expect(costTickets).toContainEqual({ id: created.id, title: "New task" });
 });

@@ -5,7 +5,7 @@ import { MockApi } from "../dev/mock-api.ts";
 const id = "123e4567-e89b-42d3-a456-426614174000";
 const sha = "a".repeat(40),
 	parent = "b".repeat(40);
-const code = `/projects/${id}/code`;
+const code = `/repos/${id}/code`;
 const commitUrl = `${code}?branch=main&view=commit&sha=${sha}`;
 test.beforeEach(async ({ page }) => {
 	page.on("pageerror", (error) => {
@@ -25,7 +25,7 @@ for (const mobile of [false, true])
 	test(`commit layout and controls on ${mobile ? "mobile" : "desktop"}`, async ({ page }, testInfo) => {
 		if (mobile) await page.setViewportSize({ width: 390, height: 844 });
 		await page.goto(commitUrl);
-		await expect(page.getByRole("heading", { name: "Improve project navigation" })).toBeVisible();
+		await expect(page.getByRole("heading", { name: "Improve repository navigation" })).toBeVisible();
 		await expect(page.locator(".commit-patch .addition").first()).toBeVisible();
 		await expect(page.getByText("Binary or non-UTF-8 content — no text preview.")).toBeVisible();
 		await page.locator(".commit-file").last().scrollIntoViewIfNeeded();
@@ -68,7 +68,7 @@ test("history links retain context and drafts across parent and browser navigati
 	await expect(editor).toBeVisible();
 	await editor.fill("const retainedDraft = true;");
 	await page.getByRole("button", { name: "Commit history", exact: true }).click();
-	const subject = page.getByRole("link", { name: "Improve project navigation", exact: true });
+	const subject = page.getByRole("link", { name: "Improve repository navigation", exact: true });
 	await expect(subject).toHaveAttribute("href", new RegExp(`path=src&file=src%2Findex.ts&view=commit&sha=${sha}`));
 	await expect(page.getByRole("link", { name: "aaaaaaa", exact: true })).toHaveAttribute(
 		"href",
@@ -79,7 +79,7 @@ test("history links retain context and drafts across parent and browser navigati
 	await expect(page).toHaveURL(new RegExp(`sha=${parent}`));
 	await expect(page.getByRole("heading", { name: "Initialize project" })).toBeVisible();
 	await page.goBack();
-	await expect(page.getByRole("heading", { name: "Improve project navigation" })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "Improve repository navigation" })).toBeVisible();
 	await page.goForward();
 	await expect(page.getByRole("heading", { name: "Initialize project" })).toBeVisible();
 	await page.getByRole("link", { name: "Back to history" }).click();

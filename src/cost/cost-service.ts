@@ -13,10 +13,8 @@ import { weeklyBudget } from "./weekly-budget.ts";
 
 export interface ICostTickets {
 	/** Includes archived tickets and tickets without recorded usage. */
-	listForCost(): Promise<
-		{ id: string; title: string; projectId: string; projectName: string; archivedAt?: string }[]
-	>;
-	get(id: string): Promise<{ id: string; projectId: string } | undefined>;
+	listForCost(): Promise<{ id: string; title: string; archivedAt?: string }[]>;
+	get(id: string): Promise<{ id: string } | undefined>;
 }
 
 export interface ICostService {
@@ -71,7 +69,7 @@ export class CostService implements ICostService {
 			const day = byDay.get(turn.startedAt.slice(0, 10));
 			if (day) this.add(day, tokens);
 			const ticket = turn.ticketId ? byTicket.get(turn.ticketId) : undefined;
-			if (!ticket || ticket.projectId !== turn.projectId) continue;
+			if (!ticket) continue;
 			this.add(ticket, tokens);
 			this.estimate(ticket, turn);
 		}
@@ -113,7 +111,7 @@ export class CostService implements ICostService {
 		const { since, turns } = await this.store.read(ticketId);
 		const ticket = { ...empty(), untimedTurns: 0, unpricedTurns: 0 };
 		for (const turn of turns) {
-			if (turn.ticketId !== ticketId || turn.projectId !== metadata.projectId) continue;
+			if (turn.ticketId !== ticketId) continue;
 			this.add(ticket, { input: turn.input ?? 0, cached: turn.cached ?? 0, output: turn.output ?? 0 });
 			this.estimate(ticket, turn);
 		}

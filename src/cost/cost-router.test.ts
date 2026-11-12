@@ -37,7 +37,7 @@ test("cost route uses owner access, removes project routes and returns browser-s
 		new AccessService({ owner: "owner", origin: "https://forge.test" }),
 		{
 			listForCost: async () => [],
-			get: async (id) => (id === "FORGE-1" ? { id, projectId: "project" } : undefined),
+			get: async (id) => (id === "FORGE-1" ? { id } : undefined),
 		},
 		{ read: history },
 		{ limits: async () => undefined },

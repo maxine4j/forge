@@ -41,11 +41,6 @@ export class AgentRouter {
 				ctx.body = { error: error.code };
 			}
 		});
-		router.get("/api/projects/:projectId/model-options", async (ctx) => {
-			ctx.body = agentOptionsSchema.parse(
-				await this.service.projectOptions(ctx.state.actor, ctx.params["projectId"]!),
-			);
-		});
 		router.get("/api/projects/:projectId/agents", async (ctx) => {
 			ctx.body = agentThreadsSchema.parse(await this.service.list(ctx.state.actor, ctx.params["projectId"]!));
 		});

@@ -148,23 +148,23 @@ the workspace store and completes recovery before listening.
 
 ## Slice 2 integrated manual workspace and PR review
 
-Forge uses a dark GitHub-style layout throughout, including the editor, forms,
-diffs and account setup. Global navigation contains Projects at `/projects`, [Costs](agents.md#cost-and-usage)
-at `/costs`, and Config at `/config`; ChatGPT/GitHub status, device-code login, cancellation and retry live
-only on Config. Account errors never clutter project views. Switching to Config or Costs
-preserves the open project and its unsaved drafts.
+Forge uses a dark GitHub-style layout throughout. Global navigation is Tasks
+(`/tasks`), Repos (`/repos`), [Costs](agents.md#cost-and-usage) (`/costs`), and Config
+(`/config`). ChatGPT/GitHub account login and settings live on Config. Visiting
+Tasks, Costs or Config keeps the repository workbench mounted, including editor
+and chat drafts, reading position and terminal connections. Navigation that would
+discard uncommitted code is guarded.
 
-Projects retains creation/import/retry. The entire ready project card opens the
-project as a normal link using pointer or keyboard activation; there is no dedicated Open button.
-Opening a ready project shows its identity
-and five section tabs, in order: Code, Tasks, Agents, Pipelines, Terminals.
-The global header shows `forge / projectName` at every screen size; there is no
-separate project heading. The Forge home link returns to Projects.
-Code is the default. Tasks shows the [ticket board](tickets.md#agentic-ticket-board).
-Agents shows [interactive chats](agents.md#interactive-agents). Pipelines is not
-available yet.
+Repos provides listing, creation, import and retry. Ready repository cards link to
+`/repos/:repositoryId/code`. Repository sections are Code, Agents, Pipelines and
+Terminals. The header shows `forge / repositoryName` inside a repository. The home
+link opens Tasks, and `/` replaces its history entry with `/tasks`. The
+[global ticket board](tickets.md#agentic-ticket-board) is independent of the
+repository workbench. Code is the default repository section; Agents provides
+[interactive chats](agents.md#interactive-agents), and Pipelines provides
+[local workflows](git-and-ci.md#manual-local-pipelines).
 Tab navigation stays usable on narrow screens without widening the page.
-All project tabs share the Tasks and Agents spacing below the global header:
+All repository tabs share the Agents spacing below the global header:
 16px on desktop and 8px at widths up to 700px, with matching tab padding and
 spacing below the tab bar.
 Agents and Tasks fill the remaining visible viewport on laptop, slab-phone and
@@ -182,13 +182,15 @@ independent content, the chat composer stays visible, and only the conversation
 log scrolls within the chat view. Planning history remains readable after starting
 the fresh implementation conversation.
 
-React Router uses the browser History API for `/projects/:projectId/code`,
-`/tasks`, `/agents`, `/pipelines` and `/terminals` under the same project prefix.
-An individual chat uses `/projects/:projectId/agents/:threadId`. Code selection
+React Router uses the browser History API for `/repos/:repositoryId/code`,
+`/agents`, `/pipelines` and `/terminals` under the same repository prefix.
+An individual chat uses `/repos/:repositoryId/agents/:threadId`.
+Task selection uses `/tasks?ticket=:id`. Removed `/projects` browser routes and
+repository Tasks/Cost sections show not-found without redirects. Code selection
 uses URL query parameters: `branch` is the exact Git branch name, `path` is the
 directory, `file` is the repository-relative active file, and `view=history` opens
 branch commit history. Query values are URL encoded, including slashes in branch
-names. `/` replaces its history entry with `/projects`. Unknown routes and
+names. `/` replaces its history entry with `/tasks`. Unknown routes and
 unavailable projects/branches show explicit states rather than a different view.
 Project cards and section tabs expose real links, supporting new tabs and copied
 URLs. Direct links, reloads and browser Back/Forward restore the URL's view;
@@ -208,7 +210,7 @@ select the first chat from the base URL. Resizing an open chat preserves it;
 widening the list selects the first chat. Visited conversations remain mounted
 and running through list and section navigation, retaining drafts and reading
 position. Only the visible pane participates in keyboard navigation.
-URL navigation within a project and to Config or Costs retains local editor/chat drafts and
+URL navigation within a repository and to Tasks, Config or Costs retains local editor/chat drafts and
 visited terminals. Project exit, including browser history and global navigation,
 blocks while code drafts remain uncommitted; commit or discard them first.
 Reload/unload retains the native unsaved-code warning. Draft contents are not
@@ -263,7 +265,7 @@ log reads, and the existing 256 KiB text-file bound. Symlinks, submodules, binar
 content and restricted metadata cannot be opened as code. Errors reuse the safe
 workspace/file error contract. Repository HTML is displayed as text, never executed.
 
-History subjects and short SHAs link to `/projects/:id/code?branch=…&view=commit&sha=…`,
+History subjects and short SHAs link to `/repos/:id/code?branch=…&view=commit&sha=…`,
 retaining `path` and `file` for return navigation. Commit pages preserve mounted
 editor drafts. `diff=unified|split` (default unified) and
 `ignoreWhitespace=true|false` (default false) retain rendering preferences in the

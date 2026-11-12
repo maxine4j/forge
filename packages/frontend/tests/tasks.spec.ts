@@ -35,7 +35,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	const approvals: unknown[] = [];
 	let tickets: {
 		id: string;
-		projectId: string;
+		repositoryIds: string[];
 		title: string;
 		description: string;
 		status: string;
@@ -44,8 +44,15 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		needsAttention?: true;
 		agentStatus?: "queued" | "working";
 	}[] = [
-		{ id: "FORGE-1", projectId, title: "First task", description: "Scope", status: "backlog", createdAt },
-		{ id: "FORGE-2", projectId, title: "Second task", description: "", status: "backlog", createdAt },
+		{
+			id: "FORGE-1",
+			repositoryIds: [projectId],
+			title: "First task",
+			description: "Scope",
+			status: "backlog",
+			createdAt,
+		},
+		{ id: "FORGE-2", repositoryIds: [], title: "Second task", description: "", status: "backlog", createdAt },
 	];
 	let failMove = false;
 	let failArchive = false;
@@ -58,7 +65,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	if (crowded)
 		tickets = Array.from({ length: 60 }, (_, i) => ({
 			id: `FORGE-${i + 1}`,
-			projectId,
+			repositoryIds: [projectId],
 			title: `Task ${i + 1}`,
 			description: "Scope",
 			status: i < 30 ? "backlog" : "todo",
@@ -179,7 +186,17 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 				});
 			}
 			if (path === "/api/projects")
-				return route.fulfill({ json: [{ id: projectId, name: "Forge", status: "ready", createdAt }] });
+				return route.fulfill({
+					json: [
+						{ id: projectId, name: "Forge", status: "ready", createdAt },
+						{
+							id: "123e4567-e89b-42d3-a456-426614174001",
+							name: "Reference repo",
+							status: "ready",
+							createdAt,
+						},
+					],
+				});
 			if (path === "/api/accounts")
 				return route.fulfill({
 					json: {
@@ -190,9 +207,9 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 			if (path.endsWith("/tickets")) {
 				if (method === "POST") {
 					const ticket = {
+						repositoryIds: [],
 						...route.request().postDataJSON(),
 						id: `FORGE-${tickets.length + 1}`,
-						projectId,
 						status: "backlog",
 						createdAt,
 					};
@@ -232,9 +249,9 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		},
 	);
 	await page.goto("/");
-	await page.getByRole("link", { name: "Open Forge", exact: true }).click();
-	await page.getByRole("tab", { name: "Tasks", exact: true }).click();
+	await expect(page).toHaveURL("/tasks");
 	return {
+		tickets: () => tickets,
 		setDocker: (value: Partial<DockerOverview>) => {
 			docker = { ...docker, ...value };
 		},
@@ -271,6 +288,59 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	};
 };
 
+test("global board creates unassigned tickets and saves ordered references", async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	const f = await setup(page);
+	await expect(page).toHaveTitle("Forge");
+	await expect(page.getByRole("link", { name: "Tasks", exact: true })).toHaveAttribute("aria-current", "page");
+	await expect(page.getByRole("tab", { name: "Tasks", exact: true })).toHaveCount(0);
+	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
+	let dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
+	await dialog.getByLabel("Title", { exact: true }).fill("No repositories needed");
+	await dialog.getByRole("button", { name: "Create", exact: true }).click();
+	await expect(page.getByRole("button", { name: "FORGE-3 No repositories needed", exact: true })).toBeVisible();
+	expect(f.tickets().find((ticket) => ticket.id === "FORGE-3")?.repositoryIds).toEqual([]);
+	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
+	dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
+	await dialog.getByLabel("Title", { exact: true }).fill("Several repositories");
+	await dialog.getByLabel("Add repository").selectOption(projectId);
+	const first = "123e4567-e89b-42d3-a456-426614174001";
+	await dialog.getByLabel("Add repository").selectOption(first);
+	await dialog.getByRole("button", { name: "Move repository 2 up", exact: true }).click();
+	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+	await expect(dialog.getByText("Reference repo · Execution repository", { exact: true })).toBeVisible();
+	await dialog.getByRole("button", { name: "Create", exact: true }).click();
+	expect(f.tickets().find((ticket) => ticket.id === "FORGE-4")?.repositoryIds).toEqual([first, projectId]);
+	await page.reload();
+	await page.getByRole("button", { name: "FORGE-4 Several repositories", exact: true }).click();
+	const details = page.getByRole("dialog", { name: "FORGE-4", exact: true });
+	await expect(details.getByText("Reference repo · Execution repository", { exact: true })).toBeVisible();
+	await details.getByRole("button", { name: "Move repository 2 up", exact: true }).click();
+	await details.getByRole("button", { name: "Save", exact: true }).click();
+	expect(f.tickets().find((ticket) => ticket.id === "FORGE-4")?.repositoryIds).toEqual([projectId, first]);
+	await expect(page.getByRole("button", { name: "FORGE-3 No repositories needed", exact: true })).toBeVisible();
+});
+
+test("board creation drafts survive visits to Repos and removed browser routes show not-found", async ({ page }) => {
+	await setup(page);
+	await page.getByRole("link", { name: "Repos", exact: true }).click();
+	await expect(page.locator("main")).not.toContainText(/\bProjects?\b/u);
+	await page.getByRole("link", { name: "Tasks", exact: true }).click();
+	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
+	await dialog.getByLabel("Title", { exact: true }).fill("Keep this board draft");
+	await page.goBack();
+	await expect(page).toHaveURL("/repos");
+	await expect(dialog).toBeHidden();
+	await page.goForward();
+	await expect(dialog.getByLabel("Title", { exact: true })).toHaveValue("Keep this board draft");
+	await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+	for (const path of ["/projects", `/projects/${projectId}/code`, `/repos/${projectId}/tasks`]) {
+		await page.goto(path);
+		await expect(page.getByRole("heading", { name: "Page not found", exact: true })).toBeVisible();
+	}
+});
+
 test("Backlog execution settings save before moving to Ready and survive reopening", async ({ page }) => {
 	await setup(page);
 	const open = page.getByRole("button", { name: "FORGE-1 First task", exact: true });
@@ -290,6 +360,7 @@ test("ticket Details and chat share settings and support skill and file completi
 	await setup(page, false, true);
 	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
 	const panel = page.getByRole("dialog");
+	await expect(panel.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
 	await panel.getByRole("combobox", { name: "Thinking level", exact: true }).selectOption("high");
 	await panel.getByRole("tab", { name: "Details", exact: true }).click();
 	await expect(panel.getByRole("combobox", { name: "Thinking level", exact: true })).toHaveValue("high");
@@ -899,6 +970,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 		expectedTurnId: "implementation-turn",
 	});
 	await expect(modal.getByText("Retain this draft across approval", { exact: true })).toBeAttached();
+	await latest.click();
 	await expect(modal.getByText("Retain this draft across approval", { exact: true })).toBeInViewport();
 	const submitted = submissions.length;
 	const recovered = resumes;
@@ -910,9 +982,18 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	state = "merge-queued";
 	done = true;
 	await expect(send).toBeDisabled();
-	await page.route(`**/api/projects/${projectId}/tickets`, (route) =>
+	await page.route("**/api/tickets", (route) =>
 		route.fulfill({
-			json: [{ id: "FORGE-1", projectId, title: "First task", description: "Scope", status: "done", createdAt }],
+			json: [
+				{
+					id: "FORGE-1",
+					repositoryIds: [projectId],
+					title: "First task",
+					description: "Scope",
+					status: "done",
+					createdAt,
+				},
+			],
 		}),
 	);
 	await expect(message).toBeDisabled();
@@ -1019,7 +1100,7 @@ test("create and edit tickets; status menu queues planning and survives reopenin
 		page.getByRole("region", { name: "Ready for development", exact: true }).getByText("Updated task"),
 	).toBeAttached();
 	await page.reload();
-	await expect(page).toHaveURL(`/projects/${projectId}/tasks`);
+	await expect(page).toHaveURL(`/tasks`);
 	await expect(
 		page.getByRole("region", { name: "Ready for development", exact: true }).getByText("Updated task"),
 	).toBeAttached();
@@ -1037,6 +1118,10 @@ test("desktop drop zones reorder cards and move to an empty column; failures pre
 	await page.mouse.move(rect.x + 80, rect.y + 4, { steps: 8 });
 	await expect(page.locator(".ticket-drop-placeholder")).toBeVisible();
 	await page.mouse.up();
+	await expect(
+		page.getByRole("region", { name: "Backlog", exact: true }).locator(".ticket-card").first(),
+	).toContainText("FORGE-2");
+	await page.reload();
 	await expect(
 		page.getByRole("region", { name: "Backlog", exact: true }).locator(".ticket-card").first(),
 	).toContainText("FORGE-2");
@@ -1140,7 +1225,7 @@ for (const archived of [false, true]) {
 		await setup(page);
 		const ticket = {
 			id: "FORGE-9",
-			projectId,
+			repositoryIds: [projectId],
 			title: "Linked ticket",
 			description: "Linked scope",
 			status: "backlog",
@@ -1151,7 +1236,7 @@ for (const archived of [false, true]) {
 		await page.route("**/api/tickets/FORGE-9/workflow", (route) =>
 			route.fulfill({ json: { ticketId: ticket.id, phase: "planning", state: "idle", mergeAttempts: 0 } }),
 		);
-		await page.goto(`/projects/${projectId}/tasks?ticket=FORGE-9`);
+		await page.goto(`/tasks?ticket=FORGE-9`);
 		const modal = page.getByRole("dialog", { name: "FORGE-9" });
 		await expect(modal).toBeVisible();
 		await expect(modal.getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
@@ -1166,21 +1251,22 @@ for (const archived of [false, true]) {
 		await page.reload();
 		await expect(modal).toBeVisible();
 		await modal.getByRole("button", { name: "Close ticket" }).click();
-		await expect(page).toHaveURL(`/projects/${projectId}/tasks`);
+		await expect(page).toHaveURL(`/tasks`);
 		await expect(modal).toHaveCount(0);
 		await page.goBack();
 		await expect(modal).toBeVisible();
 		await page.goForward();
 		await expect(modal).toHaveCount(0);
-		await page.goto(`/projects/${projectId}/tasks?ticket=FORGE-9`);
+		await page.goto(`/tasks?ticket=FORGE-9`);
 		await expect(modal).toBeVisible();
 		await modal.getByRole("button", { name: "Close ticket" }).click();
 		await page.route("**/api/tickets/FORGE-9", (route) =>
-			route.fulfill({ json: { ...ticket, projectId: "123e4567-e89b-42d3-a456-426614174099" } }),
+			route.fulfill({ json: { ...ticket, repositoryIds: [] } }),
 		);
-		await page.goto(`/projects/${projectId}/tasks?ticket=FORGE-9`);
-		await expect(page.getByRole("alert")).toContainText("Ticket belongs to another project.");
-		await page.goto(`/projects/${projectId}/tasks?ticket=FORGE-999`);
+		await page.goto(`/tasks?ticket=FORGE-9`);
+		await expect(modal).toBeVisible();
+		await modal.getByRole("button", { name: "Close ticket" }).click();
+		await page.goto(`/tasks?ticket=FORGE-999`);
 		await expect(page.getByRole("alert")).toContainText("Ticket unavailable.");
 	});
 }
@@ -1191,7 +1277,7 @@ test("archived ticket chat retains history and disables input and execution", as
 		route.fulfill({
 			json: {
 				id: "FORGE-9",
-				projectId,
+				repositoryIds: [projectId],
 				title: "Archived history",
 				description: "Scope",
 				status: "in-progress",
@@ -1212,7 +1298,7 @@ test("archived ticket chat retains history and disables input and execution", as
 			},
 		}),
 	);
-	await page.goto(`/projects/${projectId}/tasks?ticket=FORGE-9`);
+	await page.goto(`/tasks?ticket=FORGE-9`);
 	const modal = page.getByRole("dialog", { name: "FORGE-9" });
 	await expect(modal.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
 	await expect(modal.getByText("Planning message 0: implement search with tests.", { exact: true })).toBeAttached();

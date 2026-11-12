@@ -41,8 +41,6 @@ const cost = {
 		{
 			id: "FORGE-2",
 			title: "Search",
-			projectId,
-			projectName: "Forge",
 			...tokens,
 			subscriptionAud: 0.015,
 			apiAud: 0.09,
@@ -52,8 +50,6 @@ const cost = {
 		{
 			id: "FORGE-1",
 			title: "Cleanup",
-			projectId,
-			projectName: "Forge",
 			archivedAt: since,
 			input: 0,
 			cached: 0,
@@ -98,7 +94,7 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	);
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.goto("/costs");
-	await expect(page.getByRole("link", { name: "Projects", exact: true })).not.toHaveAttribute("aria-current");
+	await expect(page.getByRole("link", { name: "Repos", exact: true })).not.toHaveAttribute("aria-current");
 	await expect(page.getByRole("link", { name: "Costs" })).toHaveAttribute("aria-current", "page");
 	await expect(page.getByRole("alert")).toHaveText("Cost data is unavailable.");
 	unavailable = false;
@@ -127,7 +123,7 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	await page.getByRole("button", { name: "Ticket", exact: true }).click();
 	await expect(page.getByRole("row").nth(1)).toContainText("FORGE-1");
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-	await expect(ticket.getByRole("link")).toHaveAttribute("href", `/projects/${projectId}/tasks?ticket=FORGE-2`);
+	await expect(ticket.getByRole("link")).toHaveAttribute("href", `/tasks?ticket=FORGE-2`);
 	const previousReads = costReads;
 	await page.clock.fastForward(300_000);
 	await expect.poll(() => costReads).toBeGreaterThan(previousReads);
@@ -141,10 +137,10 @@ test("legacy project Cost paths show the unknown-route view", async ({ page }) =
 		(url) => url.pathname.startsWith("/api/"),
 		(route) => route.fulfill({ status: 404, json: {} }),
 	);
-	await page.goto(`/projects/${projectId}/cost`);
+	await page.goto(`/repos/${projectId}/cost`);
 	await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
-	await expect(page.getByRole("link", { name: "Projects", exact: true })).not.toHaveAttribute("aria-current");
-	await expect(page).toHaveURL(`/projects/${projectId}/cost`);
+	await expect(page.getByRole("link", { name: "Repos", exact: true })).not.toHaveAttribute("aria-current");
+	await expect(page).toHaveURL(`/repos/${projectId}/cost`);
 });
 
 test("Costs links open archived tickets outside the active board", async ({ page }) => {
@@ -162,12 +158,12 @@ test("Costs links open archived tickets outside the active board", async ({ page
 						github: { connection: "available", login: { state: "idle" } },
 					},
 				});
-			if (path === `/api/projects/${projectId}/tickets`) return route.fulfill({ json: [] });
+			if (path === "/api/tickets") return route.fulfill({ json: [] });
 			if (path === "/api/tickets/FORGE-1")
 				return route.fulfill({
 					json: {
 						id: "FORGE-1",
-						projectId,
+						repositoryIds: [],
 						title: "Cleanup",
 						description: "Archived scope",
 						status: "done",
@@ -187,7 +183,7 @@ test("Costs links open archived tickets outside the active board", async ({ page
 		.getByRole("row", { name: /FORGE-1 Cleanup/ })
 		.getByRole("link")
 		.click();
-	await expect(page).toHaveURL(`/projects/${projectId}/tasks?ticket=FORGE-1`);
+	await expect(page).toHaveURL(`/tasks?ticket=FORGE-1`);
 	const panel = page.getByRole("dialog", { name: "FORGE-1" });
 	await expect(panel).toBeVisible();
 	await expect(panel.getByLabel("Description", { exact: true })).toHaveValue("Archived scope");

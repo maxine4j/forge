@@ -7,7 +7,7 @@ test("initial phase prompts include only the scope needed for that phase and fol
 	const prompts = new TicketPrompts();
 	const ticket: Ticket = {
 		id: "FORGE-1",
-		projectId: "123e4567-e89b-42d3-a456-426614174000",
+		repositoryIds: ["123e4567-e89b-42d3-a456-426614174000"],
 		title: "Search files",
 		description: "Filter by extension.",
 		status: "in-progress",

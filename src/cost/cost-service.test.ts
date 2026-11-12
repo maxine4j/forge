@@ -24,6 +24,7 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 		{
 			...planning,
 			turnId: "two",
+			projectId: "another-execution-repository",
 			phase: "review",
 			durationMs: 0,
 			model: "unknown",
@@ -66,11 +67,11 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 	const service = new CostService(
 		access,
 		{
-			get: async () => ({ id: "FORGE-1", projectId: "a" }),
+			get: async () => ({ id: "FORGE-1" }),
 			listForCost: async () => [
-				{ projectId: "a", projectName: "One", id: "FORGE-1", title: "Search", archivedAt: startedAt },
-				{ projectId: "b", projectName: "Two", id: "FORGE-2", title: "Waiting" },
-				{ projectId: "b", projectName: "Two", id: "FORGE-3", title: "Other" },
+				{ id: "FORGE-1", title: "Search", archivedAt: startedAt },
+				{ id: "FORGE-2", title: "Waiting" },
+				{ id: "FORGE-3", title: "Other" },
 			],
 		},
 		{ read: async () => ({ since: startedAt, turns }) },

@@ -13,13 +13,19 @@ const fixture = () => {
 	const tickets = new Map<string, Ticket>();
 	const store = {
 		updateSettings: vi.fn(),
-		insert: vi.fn(async (projectId, input, createdAt) => {
-			const value: Ticket = { ...input, projectId, createdAt, id: "FORGE-1", status: "backlog" };
+		insert: vi.fn(async (input, createdAt) => {
+			const value: Ticket = {
+				...input,
+				repositoryIds: input.repositoryIds ?? [],
+				createdAt,
+				id: "FORGE-1",
+				status: "backlog",
+			};
 			tickets.set(value.id, value);
 			return value;
 		}),
 		get: vi.fn(async (id) => tickets.get(id)),
-		list: vi.fn(async (id) => [...tickets.values()].filter((ticket) => ticket.projectId === id)),
+		list: vi.fn(async () => [...tickets.values()]),
 		update: vi.fn(async (id, input) => {
 			Object.assign(tickets.get(id)!, input);
 		}),
@@ -48,6 +54,8 @@ const fixture = () => {
 		new AccessService({ owner: "owner", origin: "https://forge.example.com" }),
 		() => now,
 		{
+			options: vi.fn(),
+			update: async (_actor, id, input) => store.update(id, input),
 			settings: vi.fn(),
 			validateSettings: vi.fn(),
 			archive: async (_actor, ticket, archivedAt) => store.archive(ticket.id, archivedAt),
@@ -64,9 +72,47 @@ const fixture = () => {
 	return { service, tickets, store, projects, summary };
 };
 
+test("global access and scope validation are independent of repository readiness", async () => {
+	const { service, projects, store } = fixture();
+	const ticket = await service.create(actor, { title: "Unassigned", description: "" });
+	expect(ticket.repositoryIds).toEqual([]);
+	await service.list(actor);
+	await service.get(actor, ticket.id);
+	expect(projects.get).not.toHaveBeenCalled();
+	for (const action of [
+		() => service.list({ username: "guest" }),
+		() => service.get({ username: "guest" }, ticket.id),
+		() => service.create({ username: "guest" }, { title: "Denied", description: "" }),
+	])
+		await expect(action()).rejects.toThrow("Access denied");
+	projects.get.mockResolvedValueOnce(undefined!);
+	await expect(
+		service.create(actor, { title: "Unknown", description: "", repositoryIds: [projectId] }),
+	).rejects.toThrow("invalid-request");
+	await expect(
+		service.update(actor, ticket.id, {
+			title: "Duplicate",
+			description: "",
+			repositoryIds: [projectId, projectId],
+		}),
+	).rejects.toThrow("invalid-request");
+	expect(store.insert).toHaveBeenCalledTimes(1);
+	expect(store.update).not.toHaveBeenCalled();
+});
+
+test("references never limit visibility or same-column drop targets", async () => {
+	const { service, tickets } = fixture();
+	const ticket = await service.create(actor, { title: "Task", description: "" });
+	tickets.set("FORGE-2", { ...ticket, id: "FORGE-2", repositoryIds: [projectId] });
+	expect(await service.list(actor)).toHaveLength(2);
+	await expect(service.move(actor, ticket.id, { status: "backlog", beforeId: "FORGE-2" })).resolves.toMatchObject({
+		id: ticket.id,
+	});
+});
+
 test("create backlog tickets, edit scope and delegate moves to the workflow", async () => {
 	const { service } = fixture();
-	const value = await service.create(actor, projectId, { title: " Task ", description: "Scope" });
+	const value = await service.create(actor, { repositoryIds: [projectId], title: " Task ", description: "Scope" });
 	expect(value).toMatchObject({ id: "FORGE-1", title: "Task", status: "backlog" });
 	expect(await service.update(actor, value.id, { title: "Edited", description: "New scope" })).toMatchObject({
 		title: "Edited",
@@ -74,21 +120,21 @@ test("create backlog tickets, edit scope and delegate moves to the workflow", as
 	for (const status of ["todo", "in-progress", "done", "backlog"] as const) {
 		expect((await service.move(actor, value.id, { status })).status).toBe(status);
 	}
-	expect(await service.list(actor, projectId)).toHaveLength(1);
+	expect(await service.list(actor)).toHaveLength(1);
 });
 
 test("ready tickets without workflows retain their queued status; inactive cards have no icon", async () => {
 	const { service, tickets } = fixture();
-	const ticket = await service.create(actor, projectId, { title: "Task", description: "" });
+	const ticket = await service.create(actor, { repositoryIds: [projectId], title: "Task", description: "" });
 	for (const status of ["backlog", "todo", "in-progress", "done"] as const) {
 		tickets.set(ticket.id, { ...ticket, status });
-		expect((await service.list(actor, projectId))[0]?.agentStatus).toBe(status === "todo" ? "queued" : undefined);
+		expect((await service.list(actor))[0]?.agentStatus).toBe(status === "todo" ? "queued" : undefined);
 	}
 });
 
 test("list combines workflow status and attention while excluding inactive columns", async () => {
 	const { service, tickets, summary } = fixture();
-	const ticket = await service.create(actor, projectId, { title: "Task", description: "" });
+	const ticket = await service.create(actor, { repositoryIds: [projectId], title: "Task", description: "" });
 	for (const status of ["backlog", "todo", "in-progress", "done"] as const) {
 		tickets.set(ticket.id, { ...ticket, status });
 		for (const flags of [
@@ -98,7 +144,7 @@ test("list combines workflow status and attention while excluding inactive colum
 			{},
 		]) {
 			summary.set(ticket.id, flags);
-			expect((await service.list(actor, projectId))[0]).toEqual({
+			expect((await service.list(actor))[0]).toEqual({
 				...ticket,
 				status,
 				...(status === "todo" || status === "in-progress" ? flags : {}),
@@ -109,7 +155,7 @@ test("list combines workflow status and attention while excluding inactive colum
 
 test("archived tickets can be read but cannot be edited, moved or used as drop targets", async () => {
 	const { service, tickets, store } = fixture();
-	const ticket = await service.create(actor, projectId, { title: "Task", description: "Scope" });
+	const ticket = await service.create(actor, { repositoryIds: [projectId], title: "Task", description: "Scope" });
 	const other = { ...ticket, id: "FORGE-2" };
 	tickets.set(other.id, other);
 	await expect(service.archive({ username: "guest" }, ticket.id)).rejects.toThrow("Access denied");
@@ -130,10 +176,12 @@ test("archived tickets can be read but cannot be edited, moved or used as drop t
 
 test("reject invalid input, missing tickets and invalid drop targets before mutation", async () => {
 	const { service, tickets, store } = fixture();
-	await expect(service.create(actor, projectId, { title: " ", description: "" })).rejects.toThrow("invalid-request");
+	await expect(service.create(actor, { repositoryIds: [projectId], title: " ", description: "" })).rejects.toThrow(
+		"invalid-request",
+	);
 	await expect(service.get(actor, "FORGE-999")).rejects.toThrow("ticket-not-found");
-	const ticket = await service.create(actor, projectId, { title: "Task", description: "" });
-	tickets.set("FORGE-2", { ...ticket, id: "FORGE-2", projectId: "123e4567-e89b-42d3-a456-426614174001" });
+	const ticket = await service.create(actor, { repositoryIds: [projectId], title: "Task", description: "" });
+	tickets.set("FORGE-2", { ...ticket, id: "FORGE-2", status: "todo" });
 	await expect(service.move(actor, ticket.id, { status: "backlog", beforeId: "FORGE-2" })).rejects.toThrow(
 		"ticket-conflict",
 	);

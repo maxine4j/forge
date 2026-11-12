@@ -44,7 +44,7 @@ test("Config persists agent defaults, instructions and Git identity and can clea
 				})
 			: route.fulfill({ status: 503, json: { error: "settings-unavailable" } }),
 	);
-	await page.goto("/projects");
+	await page.goto("/repos");
 	await page.getByRole("link", { name: "Config", exact: true }).click();
 	await expect(page).toHaveURL(/\/config$/u);
 	await expect(page.getByRole("button", { name: "Refresh accounts" })).toBeVisible();

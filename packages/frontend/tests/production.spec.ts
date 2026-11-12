@@ -79,7 +79,7 @@ test("integrated production bundle styles editor/terminal on desktop/mobile and 
 						json: [
 							{
 								id: "FORGE-1",
-								projectId,
+								repositoryIds: [projectId],
 								title: "Production ticket",
 								description: "Scope",
 								status: "backlog",
@@ -134,7 +134,7 @@ test("integrated production bundle styles editor/terminal on desktop/mobile and 
 			});
 		});
 		const response = await page.goto(
-			`http://127.0.0.1:${address.port}/projects/${projectId}/code?branch=main&file=file.ts`,
+			`http://127.0.0.1:${address.port}/repos/${projectId}/code?branch=main&file=file.ts`,
 		);
 		expect(response?.headers()["cache-control"]).toBe("no-store");
 		expect(response?.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
@@ -165,7 +165,7 @@ test("integrated production bundle styles editor/terminal on desktop/mobile and 
 		expect(contrast.length).toBeGreaterThan(0);
 		for (const ratio of contrast) expect(ratio).toBeGreaterThanOrEqual(4.5);
 		await page.screenshot({ path: "../../artifacts/forge/files-desktop.png", fullPage: true });
-		await page.getByRole("tab", { name: "Tasks", exact: true }).click();
+		await page.getByRole("link", { name: "Tasks", exact: true }).click();
 		await page.getByRole("button", { name: "Drag FORGE-1", exact: true }).hover();
 		await page.mouse.down();
 		const target = (await page.getByRole("region", { name: "Ready for development", exact: true }).boundingBox())!;
@@ -175,6 +175,7 @@ test("integrated production bundle styles editor/terminal on desktop/mobile and 
 		await page.screenshot({ path: "../../artifacts/forge/tasks-production-drag.png" });
 		await page.keyboard.press("Escape");
 		await page.mouse.up();
+		await page.goBack();
 		await page.getByRole("tab", { name: "Terminals", exact: true }).click();
 		await expect(page.getByRole("region", { name: "Terminal", exact: true }).getByRole("button")).toHaveCount(0);
 		await expect(page.locator(".xterm-rows")).toContainText("Production terminal output");

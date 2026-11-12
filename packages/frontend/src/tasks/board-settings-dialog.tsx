@@ -145,7 +145,7 @@ export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close:
 						</button>
 					</div>
 					<p className='board-settings-help'>
-						Stop interrupts ticket agents and standalone chats across projects.
+						Stop interrupts ticket agents and standalone chats throughout Forge.
 					</p>
 				</>
 			) : error ? (
