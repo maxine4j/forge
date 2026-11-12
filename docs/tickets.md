@@ -166,6 +166,11 @@ reply controls. See the [agent protocol contract](agents.md#interactive-agents).
 
 ### Ticket cost
 
+The account-wide [weekly budget capacity methodology](agents.md#weekly-budget-capacity)
+uses first-time Done timestamps recorded atomically with workflow updates. Archived
+completions count; legacy completion timestamps are left unknown. Capacity appears
+in project Cost and does not constrain scheduling or add a board indicator.
+
 The [project Cost tab](agents.md#cost-and-usage) attributes each turn to the
 ticket and phase at dispatch, including rebase turns on an implementation thread
 and historical review turns. The ticket's Cost tab shows its recorded input,

@@ -95,6 +95,7 @@ export class CodexUsageClient implements ICodexUsageTracker, ICodexLimits {
 						window
 							? [
 									{
+										bucketId: key,
 										bucket: bucket.limitName ?? bucket.limitId ?? key,
 										usedPercent: window.usedPercent,
 										...(window.windowDurationMins ? { minutes: window.windowDurationMins } : {}),

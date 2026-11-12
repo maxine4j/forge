@@ -68,6 +68,7 @@ test("returns reported quota windows and omits private account data", async () =
 		rateLimits: {},
 		rateLimitsByLimitId: {
 			codex: {
+				limitName: "Display name",
 				planType: "plus",
 				primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 1794355200 },
 				secondary: { usedPercent: 75, windowDurationMins: 10080 },
@@ -83,8 +84,14 @@ test("returns reported quota windows and omits private account data", async () =
 	expect(await client.limits()).toEqual({
 		plan: "plus",
 		windows: [
-			{ bucket: "codex", minutes: 300, usedPercent: 25, resetsAt: "2026-11-11T00:00:00.000Z" },
-			{ bucket: "codex", minutes: 10080, usedPercent: 75 },
+			{
+				bucketId: "codex",
+				bucket: "Display name",
+				minutes: 300,
+				usedPercent: 25,
+				resetsAt: "2026-11-11T00:00:00.000Z",
+			},
+			{ bucketId: "codex", bucket: "Display name", minutes: 10080, usedPercent: 75 },
 		],
 	});
 	expect(request).toHaveBeenCalledWith("account/rateLimits/read", null);

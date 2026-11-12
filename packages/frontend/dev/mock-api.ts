@@ -185,6 +185,33 @@ export class MockApi implements IMockApi {
 				output: index >= 22 ? 2625 : 0,
 			}));
 			this.routes.set(`${projectRoot}/cost`, () => ({
+				weeklyBudget: {
+					defaultBucketId: "codex",
+					buckets: [
+						{
+							bucketId: "codex",
+							bucket: "Codex",
+							remainingPercent: 40,
+							lastObservedAt: date,
+							resetsAt: new Date(Date.parse(date) + 86_400_000).toISOString(),
+							fresh: true,
+							additionalTickets: 8,
+							completedTickets: 3,
+							coverageHours: 24,
+							consumption: 15,
+							periodStart: new Date(Date.parse(date) - 86_400_000).toISOString(),
+							periodEnd: date,
+							observations: Array.from({ length: 289 }, (_, index) => ({
+								bucketId: "codex",
+								bucket: "Codex",
+								minutes: 10080,
+								observedAt: new Date(Date.parse(date) - (288 - index) * 300_000).toISOString(),
+								usedPercent: 45 + (index * 15) / 288,
+								resetsAt: new Date(Date.parse(date) + 86_400_000).toISOString(),
+							})),
+						},
+					],
+				},
 				since: `${daily.at(0)!.date}T00:00:00.000Z`,
 				monthlyAud: 30,
 				audPerUsd: 1.44,

@@ -16,9 +16,15 @@ export interface ITicketWorkflowStore {
 	save(record: TicketWorkflowRecord, move?: MoveTicket): Promise<void>;
 }
 export class TicketWorkflowStore implements ITicketWorkflowStore {
-	constructor(private readonly database: IDatabase) {}
+	constructor(
+		private readonly database: IDatabase,
+		private readonly now: () => Date = () => new Date(),
+	) {}
 	async initialize(): Promise<void> {
 		await this.database.transaction([
+			{
+				sql: "CREATE TABLE IF NOT EXISTS ticket_completions (ticketId TEXT PRIMARY KEY REFERENCES tickets(id), completedAt TEXT NOT NULL)",
+			},
 			{
 				sql: "CREATE TABLE IF NOT EXISTS ticket_workflows (ticketId TEXT PRIMARY KEY REFERENCES tickets(id), record TEXT NOT NULL)",
 			},
@@ -84,6 +90,10 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 				},
 				...(move
 					? [
+							{
+								sql: "INSERT OR IGNORE INTO ticket_completions(ticketId,completedAt) SELECT id,? FROM tickets WHERE id=? AND status<>'done' AND ?='done'",
+								parameters: [this.now().toISOString(), value.ticketId, move.status],
+							},
 							{
 								sql: "UPDATE tickets SET position=position+1 WHERE projectId=(SELECT projectId FROM tickets WHERE id=?) AND status=? AND archivedAt IS NULL AND position >= (SELECT position FROM tickets WHERE id=?)",
 								parameters: [value.ticketId, move.status, move.beforeId ?? null],

@@ -46,6 +46,7 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 		{ limits: async () => undefined },
 		{ monthlyAud: 30, audPerUsd: 1.5, exchangeDate: "2026-11-10" },
 		() => new Date("2026-11-01T00:00:00Z"),
+		{ save: async () => {}, read: async () => ({ observations: [], completions: [] }) },
 	);
 	const result = await service.read({ username: "owner" }, "a");
 	expect(projects.get).toHaveBeenCalledWith({ username: "owner" }, "a");
@@ -65,4 +66,5 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 	expect(result.tickets.at(1)).toMatchObject({ id: "FORGE-2", turns: 0 });
 	expect(result.tickets.at(1)?.apiAud).toBeUndefined();
 	expect(result.limits).toBeUndefined();
+	expect(result.weeklyBudget).toEqual({ buckets: [], defaultBucketId: undefined });
 });

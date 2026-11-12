@@ -251,3 +251,33 @@ load stored history without resuming Codex in a removed worktree.
 Account-wide quota windows come from `account/rateLimits/read` when available.
 Forge shows the reported window length, percent used, and reset time. The request
 is read-only. A quota timeout leaves the shared execution connection open.
+
+#### Weekly budget capacity
+
+The owner-only Cost response additionally returns `weeklyBudget`: account-wide
+weekly bucket series, a default bucket ID, remaining percentage, reset and last
+observation timestamps, freshness, and an additional-ticket estimate or an
+unavailable reason (`learning`, `stale`, `reset-passed`). Existing cost fields remain.
+Bucket identities are stored separately from display names. SQLite retains samples
+across restarts; the collector samples at startup and every five minutes without
+requiring an open dashboard. Missing quota data leaves token and cost views usable.
+The open dashboard also refreshes every five minutes and supports manual Refresh.
+
+Each bucket uses the trailing 28 days of observations across all projects. Valid
+intervals are consecutive samples in the same reset cycle, at most fifteen minutes
+apart, with no counter decrease. Consumption sums positive percentage-point changes;
+the denominator counts first-time Done transitions in those intervals, including
+archived tickets. Historical completion times remain unknown. At least 24 observed
+hours, three completions and positive consumption are required. Capacity is
+`floor(remaining percentage / (consumption / completions))`: 40% remaining with
+5 percentage points per ticket gives approximately eight additional tickets.
+Fresh exhausted allowance shows zero; samples older than fifteen minutes or past
+reset suppress estimates. The response includes sample size and observed period.
+
+The responsive SVG shows recorded current-cycle history, gaps over fifteen minutes,
+and a dashed linear reference from 100% at window start to 0% at reset. It never
+invents a starting observation. Older reset cycles remain separate in expandable
+timestamp/value data. A labelled selector defaults to the lowest remaining bucket.
+This is budget capacity, not a guarantee of completing work in the remaining time:
+standalone chats, other account activity and changing ticket complexity affect it.
+It imposes no spending cap or scheduler enforcement.

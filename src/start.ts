@@ -25,6 +25,8 @@ import { Configuration } from "./config/configuration.ts";
 import { CostRouter } from "./cost/cost-router.ts";
 import { CostService } from "./cost/cost-service.ts";
 import { CostStore } from "./cost/cost-store.ts";
+import { QuotaCollector } from "./cost/quota-collector.ts";
+import { QuotaStore } from "./cost/quota-store.ts";
 import { SqliteDatabase } from "./database/sqlite-database.ts";
 import { HttpApplication } from "./http/http-application.ts";
 import type { ILifecycle } from "./http/lifecycle.ts";
@@ -185,7 +187,17 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		config.cost.monthlyAud,
 	);
 	lifecycle.register(() => usage.close());
-	const cost = new CostService(projects, ticketStore, costStore, usage, config.cost, () => new Date());
+	const quotas = new QuotaStore(database);
+	await quotas.initialize();
+	const collector = new QuotaCollector(
+		usage,
+		quotas,
+		() => new Date(),
+		sleep,
+		(err) => log.warn({ err }, "Weekly quota collection failed"),
+	);
+	lifecycle.register(() => collector.close());
+	const cost = new CostService(projects, ticketStore, costStore, usage, config.cost, () => new Date(), quotas);
 	const codex = new CodexAccountClient(connection, attempts);
 	const github = new GithubAccountClient(processes, sleep, attempts);
 	lifecycle.register(() => github.close());
@@ -215,8 +227,9 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	await boardStore.initialize();
 	const boardSettings = new BoardSettingsService(boardStore, agents, pool, access, wakeScheduler);
 	await boardSettings.initialize();
-	const workflowStore = new TicketWorkflowStore(database);
+	const workflowStore = new TicketWorkflowStore(database, () => new Date());
 	await workflowStore.initialize();
+	collector.start();
 	const workflow = new TicketWorkflowService(
 		workflowStore,
 		ticketStore,

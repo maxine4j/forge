@@ -2,6 +2,7 @@ import { projectCostSchema, type ProjectCost } from "@forge/contracts";
 import { useEffect, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { WeeklyBudgetChart } from "./weekly-budget.tsx";
 
 const number = new Intl.NumberFormat("en-AU");
 const shortNumber = new Intl.NumberFormat("en-AU", { notation: "compact" });
@@ -295,6 +296,10 @@ const TicketCosts = ({ cost }: { cost: ProjectCost }) => {
 
 export const CostDashboard = ({ projectId, api }: { projectId: string; api: IWorkspaceApi }) => {
 	const [attempt, setAttempt] = useState(0);
+	useEffect(() => {
+		const timer = window.setInterval(() => setAttempt((value) => value + 1), 300_000);
+		return () => window.clearInterval(timer);
+	}, []);
 	const [result, setResult] = useState<{ attempt: number; value?: ProjectCost }>();
 	useEffect(() => {
 		let current = true;
@@ -352,6 +357,7 @@ export const CostDashboard = ({ projectId, api }: { projectId: string; api: IWor
 							<dd>{number.format(cost.totals.output)}</dd>
 						</div>
 					</dl>
+					<WeeklyBudgetChart budget={cost.weeklyBudget} />
 					<UsageCharts cost={cost} />
 					<Quotas limits={cost.limits} />
 					<TicketCosts cost={cost} />

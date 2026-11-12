@@ -34,5 +34,5 @@ export type UsageTurn = UsageSnapshot & { turnId: string };
 
 export interface AccountLimits {
 	plan?: string;
-	windows: { bucket: string; minutes?: number; usedPercent: number; resetsAt?: string }[];
+	windows: { bucketId?: string; bucket: string; minutes?: number; usedPercent: number; resetsAt?: string }[];
 }

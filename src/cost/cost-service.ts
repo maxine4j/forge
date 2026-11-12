@@ -4,7 +4,9 @@ import type { Actor } from "../auth/types.ts";
 import type { ICodexLimits } from "../codex/codex-usage-client.ts";
 import { apiCostAud } from "./api-pricing.ts";
 import type { ICostHistory } from "./cost-store.ts";
+import type { IQuotaStore } from "./quota-store.ts";
 import type { CostSettings, TokenCounts, UsageTurn } from "./types.ts";
+import { weeklyBudget } from "./weekly-budget.ts";
 
 export interface ICostProjects {
 	/** Checks owner access and project existence. */
@@ -31,6 +33,7 @@ export class CostService implements ICostService {
 		private readonly codex: ICodexLimits,
 		private readonly settings: CostSettings,
 		private readonly now: () => Date,
+		private readonly quotas?: IQuotaStore,
 	) {}
 
 	async read(actor: Actor, projectId: string): Promise<ProjectCost> {
@@ -76,6 +79,7 @@ export class CostService implements ICostService {
 			else ticket.apiAud = (ticket.apiAud ?? 0) + api;
 		}
 		return {
+			weeklyBudget: this.quotas ? await this.readWeeklyBudget() : undefined,
 			since,
 			totals,
 			phases: [...phases.values()].filter((phase) => phase.turns),
@@ -84,6 +88,11 @@ export class CostService implements ICostService {
 			limits,
 			...this.settings,
 		};
+	}
+	private async readWeeklyBudget() {
+		const now = this.now();
+		const history = await this.quotas!.read(new Date(now.getTime() - 28 * dayMs).toISOString());
+		return weeklyBudget(history.observations, history.completions, now);
 	}
 
 	private add(summary: TokenCounts & { turns?: number }, tokens: TokenCounts): void {
