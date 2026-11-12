@@ -9,6 +9,7 @@ import {
 import { useEffect, useId, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { DockerSettings } from "./docker-settings.tsx";
 
 export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close: () => void }) => {
 	const dialog = useRef<HTMLDialogElement>(null);
@@ -160,6 +161,7 @@ export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close:
 			) : (
 				<p role='status'>Loading board settings…</p>
 			)}
+			<DockerSettings api={api} />
 			{notice && <p role='status'>{notice}</p>}
 			{error && (
 				<p role='alert' className='error'>

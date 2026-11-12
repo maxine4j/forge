@@ -75,7 +75,8 @@ The read-only frontend preview includes sample usage and quota data.
 
 The runtime uses a digest-pinned `docker/sandbox-templates:codex` base. It retains the
 template's preinstalled development tooling, including Git, gh, Python, Go and uv,
-and runs as `agent`, UID/GID 1000. Forge supplies its tested Node 24.22.0 runtime,
+and runs the application as `agent`, UID/GID 1000, under a root Docker supervisor.
+Forge supplies its tested Node 24.22.0 runtime,
 lockfile-pinned Codex 0.164.0 (first on PATH), nvm 0.40.8 and the template's tini
 as PID 1. Nvm lives at
 `/opt/nvm`, writable by the runtime user, with Node 24.22.0 preinstalled and set
@@ -88,6 +89,48 @@ The supplied system Node still runs Forge itself. Template digest or dependency
 changes require revalidation. Tini
 reaps orphaned descendants. Process-group cleanup covers ordinary descendants;
 deliberately escaped live processes are outside that application-level boundary.
+
+### Docker workloads
+
+The image bundles Docker Engine/CLI 28.5.2, Compose 2.39.4 and Buildx 0.28.0,
+without adding application dependencies or removing development tools. Tini stays
+PID 1; `main.ts` composes a privileged supervisor which starts dockerd as root and
+Forge as UID/GID 1000 with supplementary groups cleared. Docker startup or runtime
+failure leaves HTTP and [Board controls](tickets.md#docker-containers) available.
+Shutdown allows Forge 18 seconds before Docker's 7 seconds, within the deployment's
+30-second timeout. Docker is not automatically restarted after failure.
+The pinned Docker image's `dind` helper prepares nested cgroups and mount
+propagation before executing the daemon.
+
+`resources.app.privileged: true` is the agreed descriptor contract. Deployment
+requires the owner's separate PaaS implementation of that field first. Local
+image smoke tests require a Docker host able to run `--privileged` containers.
+Privileged DinD and agent access to its root daemon expand Forge's trust boundary
+to the host kernel, despite the application remaining nonroot; this is trusted
+owner execution, not hostile workload isolation. See [architecture](architecture.md)
+and [agent execution](agents.md#interactive-agents).
+
+Docker listens only on `unix:///run/forge/docker.sock` (agent group, mode 0660).
+No host socket mount or Docker TCP listener is configured. Backend CLI calls
+always use that endpoint, with curated environments, argument arrays, a 4 MiB
+output limit and 15-second deadlines (120 seconds for pruning). Workspaces used
+as bind mounts refer to paths inside Forge, so `/data/worktrees/...` is available
+to the internal daemon. Cleanup never traverses or deletes bind-mounted paths.
+
+Daemon data lives at `/var/lib/forge-docker` and runtime state under
+`/run/forge-docker`, outside persistent `/data`. Startup removes those fixed roots,
+the socket and pidfile before starting dockerd. No Docker storage volume is
+declared, persistent or anonymous. Restart and container replacement discard
+workloads, images, volumes and caches while preserving `/data` and credentials.
+The classic image store is selected explicitly with `containerd-snapshotter=false`
+and the VFS storage driver. VFS copies complete layers, with substantially higher
+disk usage and I/O costs than copy-on-write drivers; watch the outer writable
+filesystem's capacity. No automatic resource limits or ticket cleanup are implied.
+
+The privileged image smoke covers nested builds, Compose, networking, bind mounts,
+statistics, both cleanup modes, shared-resource survival, the internal socket,
+UID 1000, restart disposal and persistent data/credentials. These require real
+privileged Docker validation; mocked browser and service tests cannot prove them.
 
 The image includes a Forge-managed identity file from Git's system configuration.
 Saving a name and email in [Config](foundation.md#forge-settings) updates the

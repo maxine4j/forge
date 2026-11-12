@@ -1,3 +1,4 @@
+import type { DockerOverview, DockerOperation } from "@forge/contracts/docker";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -22,6 +23,15 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	let approved = false;
 	let boardSettings = { dispatch: "running", maxAgents: 3 };
 	let stopRequests = 0;
+	let dockerReads = 0;
+	const dockerCleanups: string[] = [];
+	let docker: DockerOverview = {
+		available: true,
+		containers: [],
+		statisticsAt: createdAt,
+		statisticsStale: false,
+		operation: null,
+	};
 	const approvals: unknown[] = [];
 	let tickets: {
 		id: string;
@@ -59,6 +69,27 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		async (route) => {
 			const path = new URL(route.request().url()).pathname;
 			const method = route.request().method();
+			if (path === "/api/board/docker") {
+				dockerReads++;
+				return route.fulfill({ json: docker });
+			}
+			if (path.startsWith("/api/board/docker/") && path.endsWith("/cleanup")) {
+				const target = path.includes("/containers/") ? path.split("/")[5]! : "all";
+				dockerCleanups.push(target);
+				docker = {
+					...docker,
+					operation: {
+						id: "123e4567-e89b-42d3-a456-426614174099",
+						target,
+						status: "running",
+						progress: "Removing containers",
+						failures: [],
+						retained: [],
+						remaining: null,
+					},
+				};
+				return route.fulfill({ status: 202, json: docker.operation });
+			}
 			if (path.endsWith("/model-options") || path.endsWith("/options"))
 				return route.fulfill({ json: modelOptions });
 			if (path.endsWith("/files")) return route.fulfill({ json: ["src/main.ts", "README.md"] });
@@ -204,6 +235,11 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	await page.getByRole("link", { name: "Open Forge", exact: true }).click();
 	await page.getByRole("tab", { name: "Tasks", exact: true }).click();
 	return {
+		setDocker: (value: Partial<DockerOverview>) => {
+			docker = { ...docker, ...value };
+		},
+		dockerReads: () => dockerReads,
+		dockerCleanups,
 		setAgentStatus: (agentStatus?: "queued" | "working", needsAttention?: true) => {
 			tickets[0]!.status = "in-progress";
 			tickets[0]!.agentStatus = agentStatus;
@@ -442,6 +478,125 @@ test("board settings save the slider and control pause, stop and resume", async 
 	await expect(settings).toBeFocused();
 	await settings.click();
 	await expect(slider).toHaveValue("4");
+});
+
+test("Docker statistics, cleanup progress and retries stay independent of agent controls", async ({ page }) => {
+	const fixture = await setup(page);
+	const id = "a".repeat(64);
+	fixture.setDocker({
+		containers: [
+			{
+				id,
+				name: "unattributed",
+				image: "app:latest",
+				status: "running",
+				ports: "8080:80/tcp",
+				stats: {
+					cpu: "2.50%",
+					memory: "12MiB / 1GiB",
+					network: "1kB / 2kB",
+					block: "3kB / 4kB",
+					processes: "5",
+				},
+			},
+		],
+	});
+	await page.getByRole("button", { name: "Board settings", exact: true }).click();
+	const section = page.getByRole("region", { name: "Docker containers" });
+	await expect(section.getByText("unattributed", { exact: false })).toBeVisible();
+	for (const value of ["aaaaaaaaaaaa", "2.50%", "12MiB / 1GiB", "1kB / 2kB", "3kB / 4kB", "5"])
+		await expect(section.getByText(value, { exact: true })).toBeVisible();
+	await section.getByRole("button", { name: "Kill and clean up", exact: true }).click();
+	await expect(section.getByRole("status")).toContainText("Cleanup running");
+	expect(fixture.dockerCleanups).toEqual([id]);
+	expect(fixture.stopRequests()).toBe(0);
+	await expect(page.getByRole("button", { name: "Stop all agents", exact: true })).toBeEnabled();
+	const operation: DockerOperation = {
+		id: "123e4567-e89b-42d3-a456-426614174099",
+		target: id,
+		status: "partial",
+		progress: "Cleanup finished",
+		failures: ["Remove volume named"],
+		retained: ["image: shared (shared)"],
+		remaining: { containers: [], images: ["shared"], networks: [], volumes: ["named"], buildCache: [] },
+	};
+	fixture.setDocker({ containers: [], operation });
+	await section.getByRole("button", { name: "Refresh Docker" }).click();
+	await expect(section.getByText("Remove volume named", { exact: true })).toBeVisible();
+	await expect(section.getByText("image: shared (shared)", { exact: true })).toBeVisible();
+	await section.getByRole("button", { name: "Retry Docker cleanup" }).click();
+	expect(fixture.dockerCleanups).toEqual([id, id]);
+	fixture.setDocker({ operation: { ...operation, status: "completed", failures: [] }, statisticsStale: true });
+	await section.getByRole("button", { name: "Refresh Docker" }).click();
+	await expect(section.getByText("Statistics are stale or unavailable.")).toBeVisible();
+	await expect(section.getByText(/No running containers/)).toBeVisible();
+	await expect(section.getByRole("button", { name: "Kill all and clean Docker" })).toBeEnabled();
+	await section.getByRole("button", { name: "Kill all and clean Docker" }).click();
+	expect(fixture.dockerCleanups.at(-1)).toBe("all");
+	expect(fixture.stopRequests()).toBe(0);
+});
+
+test("Docker polls only while settings are visible and open, and unavailable Docker leaves Stop all agents enabled", async ({
+	page,
+}) => {
+	await page.clock.install();
+	const fixture = await setup(page);
+	await page.getByRole("button", { name: "Board settings", exact: true }).click();
+	const section = page.getByRole("region", { name: "Docker containers" });
+	await expect(section.getByText(/No running containers/)).toBeVisible();
+	const first = fixture.dockerReads();
+	await page.clock.fastForward(5100);
+	await expect.poll(fixture.dockerReads).toBe(first + 1);
+	await expect(section.getByRole("button", { name: "Refresh Docker" })).toBeEnabled();
+	await page.evaluate(() => {
+		Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+		document.dispatchEvent(new Event("visibilitychange"));
+	});
+	await page.clock.fastForward(15000);
+	expect(fixture.dockerReads()).toBe(first + 1);
+	fixture.setDocker({ available: false, statisticsStale: true });
+	await page.evaluate(() => {
+		Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+		document.dispatchEvent(new Event("visibilitychange"));
+	});
+	await expect(section.getByText(/Docker unavailable/)).toBeVisible();
+	await expect(page.getByRole("button", { name: "Stop all agents", exact: true })).toBeEnabled();
+	await page.getByRole("button", { name: "Close board settings" }).click();
+	const closed = fixture.dockerReads();
+	await page.clock.fastForward(15000);
+	expect(fixture.dockerReads()).toBe(closed);
+});
+
+test("Docker refreshes do not overlap and closing cancels a pending poll", async ({ page }) => {
+	await page.clock.install();
+	await setup(page);
+	await page.getByRole("button", { name: "Board settings", exact: true }).click();
+	await expect(
+		page.getByRole("region", { name: "Docker containers" }).getByText(/No running containers/),
+	).toBeVisible();
+	let reads = 0;
+	let release!: () => void;
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	await page.route("**/api/board/docker", async (route) => {
+		reads++;
+		await held;
+		await route
+			.fulfill({
+				json: { available: true, containers: [], statisticsAt: null, statisticsStale: false, operation: null },
+			})
+			.catch(() => {});
+	});
+	await page.getByRole("button", { name: "Refresh Docker" }).click();
+	await expect.poll(() => reads).toBe(1);
+	await page.clock.fastForward(15000);
+	expect(reads).toBe(1);
+	await expect(page.getByRole("button", { name: "Refresh Docker" })).toBeDisabled();
+	await page.getByRole("button", { name: "Close board settings" }).click();
+	release();
+	await page.clock.fastForward(15000);
+	expect(reads).toBe(1);
 });
 
 test("ticket sections are keyboard navigable tabs with a labelled active panel", async ({ page }) => {

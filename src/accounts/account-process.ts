@@ -5,6 +5,7 @@ import { chmod, isFileError, lstat, mkdir } from "@forge/backend-infrastructure/
 import { createLogger } from "@forge/backend-infrastructure/logger";
 import type { ISleep } from "@forge/backend-infrastructure/sleep";
 
+import { DOCKER_HOST } from "../docker/docker-command.ts";
 import type {
 	AccountProcessConfiguration,
 	AccountProcessHandle,
@@ -67,6 +68,7 @@ export class AccountProcess implements IAccountProcess {
 				stdio: ["pipe", "pipe", "pipe"],
 				cwd: this.config.dataDirectory,
 				env: {
+					DOCKER_HOST,
 					PATH: this.config.path,
 					HOME: this.config.dataDirectory,
 					LANG: "C",

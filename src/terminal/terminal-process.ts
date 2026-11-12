@@ -1,6 +1,7 @@
 import { isFileError } from "@forge/backend-infrastructure/file";
 import type { ISleep } from "@forge/backend-infrastructure/sleep";
 
+import { DOCKER_HOST } from "../docker/docker-command.ts";
 import { TerminalError } from "./errors.ts";
 import type { ITerminalInventory } from "./terminal-inventory.ts";
 import type { TerminalIdentity, TerminalProcessHandle, TerminalProcessSpec } from "./types.ts";
@@ -26,6 +27,7 @@ export class TerminalProcess implements ITerminalProcess {
 				rows: spec.rows,
 				name: "xterm-256color",
 				env: {
+					DOCKER_HOST,
 					PATH: this.path,
 					HOME: spec.path,
 					LANG: "C.UTF-8",

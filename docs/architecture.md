@@ -14,8 +14,12 @@ Users create projects in Forge, with one Git repository per project initially.
   built frontend, HTTP API, live connections, Git HTTPS endpoints, and background
   scheduler. Codex CLI, Git, terminals, and project commands run as child
   processes inside that same container; this is not literally one OS process.
-- Do not add a separate runner service, execution container, Docker socket
-  dependency, custom model-provider layer, or custom agent tool-execution loop.
+- A root supervisor runs a dedicated Docker daemon alongside the nonroot Forge
+  process. Workload containers are disposable and share Forge's trusted-owner
+  boundary. Never mount a host Docker socket. See [deployment](development.md#docker-workloads)
+  and [Board cleanup](tickets.md#docker-containers).
+- Do not add a separate runner service, custom model-provider layer, or custom
+  agent tool-execution loop.
 - Ask the owner before adding third-party dependencies. Pin Codex CLI and any new
   dependencies to tested versions.
 
@@ -96,8 +100,9 @@ Worktrees isolate working files, not processes or shared Git metadata. Do not cl
 hostile multi-tenant isolation or that branch protection prevents arbitrary shell
 commands from mutating accessible storage. Use Codex's supported workspace sandbox
 and approval controls where verified in the pinned runtime; do not automatically
-copy `codex-runner`'s full-access defaults. Avoid passwordless sudo and unnecessary
-privileges. Define resource/output/time limits for child processes. Remote CI does
+copy `codex-runner`'s full-access defaults. Privileged Docker-in-Docker expands the
+trust boundary to the host kernel even though Forge and its agents remain UID/GID 1000. Avoid passwordless sudo and additional privileges. Define
+resource/output/time limits for child processes. Remote CI does
 not remove local costs for dependency installation, agent commands, or terminals.
 
 Deliver in slices:

@@ -104,10 +104,11 @@ model and permission mode. `Ask` uses `on-request` with the `user` reviewer,
 risk assessment, not Forge automatically accepting approval callbacks. Chat
 settings persist with thread metadata and apply to subsequent turns; changes in
 the composer take effect on its next submitted message. The
-nonroot Forge container is the execution boundary; Codex does not create nested
-Bubblewrap namespaces, so execution requires no host user-namespace sysctls,
-privileged mode or relaxed container security profiles. Commands have the
-container's filesystem and network access, including shared project data and
+Forge container is a trusted-owner execution boundary; Codex does not create nested
+Bubblewrap namespaces. Forge and agents run as UID/GID 1000, while the
+[Docker supervisor and daemon](development.md#docker-workloads) run as root in a
+privileged container. This expands the trust boundary to the host kernel.
+Commands have the container's filesystem and network access, including shared project data and
 credential homes. Worktrees do not isolate agents from each other or Forge.
 This slice supports one-time command/file approval or denial and replies to
 structured user-input questions. Approval replies grant no additional session-wide
@@ -116,6 +117,20 @@ are explicitly rejected. Approval callbacks belong to a particular live connecti
 thread and turn; disconnects invalidate them. Worktrees remain a trusted-owner
 boundary, not process isolation or protection from deliberately modifying shared
 Git metadata.
+
+Codex's curated process environment explicitly supplies
+`DOCKER_HOST=unix:///run/forge/docker.sock`, as do workspace terminals. CLI,
+Compose and SDK workloads use the internal daemon; no host Docker socket or TCP
+listener is supplied. Docker state and caches are disposable. [Board Docker
+cleanup](tickets.md#docker-containers) leaves agent executions, chats and dispatch
+settings unchanged. A stopped daemon does not stop Forge or its agents.
+
+Future attribution should use Docker labels for project, ticket, workspace,
+thread and execution IDs, injected by an execution-scoped endpoint or wrapper
+covering CLI, Compose and SDK clients. The shared Codex app-server makes
+process-wide variables unsuitable for per-agent attribution; instruction-only
+labels would be best-effort. This release adds no attribution database, ownership
+inference, automatic ticket cleanup, or attribution UI.
 
 Browser-safe schemas are exported from `@forge/contracts/agents`:
 

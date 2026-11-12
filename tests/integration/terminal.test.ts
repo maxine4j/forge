@@ -37,6 +37,8 @@ describe.skipIf(process.platform !== "linux")("real PTY", () => {
 			await vi.waitFor(() => expect(output).toMatch(/BASH:\d+\.\d+/));
 			child.write('printf \'DIR:%s HIST:%s KEY:%s\\n\' "$PWD" "$HISTFILE" "$OPENAI_API_KEY"\r');
 			await vi.waitFor(() => expect(output).toContain(`DIR:${path} HIST:/dev/null KEY:`));
+			child.write("printf 'DOCKER:%s\\n' \"$DOCKER_HOST\"\r");
+			await vi.waitFor(() => expect(output).toContain("DOCKER:unix:///run/forge/docker.sock"));
 			child.resize(101, 37);
 			child.write("stty size\r");
 			await vi.waitFor(() => expect(output).toContain("37 101"));

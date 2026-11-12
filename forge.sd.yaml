@@ -4,6 +4,7 @@ metadata:
 resources:
     app:
         type: web
+        privileged: true
         image: ghcr.io/maxine4j/forge:${COMMIT_ID:40}
         replicas: 1
         rolloutStrategy: recreate

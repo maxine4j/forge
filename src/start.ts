@@ -28,6 +28,10 @@ import { CostStore } from "./cost/cost-store.ts";
 import { QuotaCollector } from "./cost/quota-collector.ts";
 import { QuotaStore } from "./cost/quota-store.ts";
 import { SqliteDatabase } from "./database/sqlite-database.ts";
+import { DockerClient } from "./docker/docker-client.ts";
+import { DockerCommand } from "./docker/docker-command.ts";
+import { DockerRouter } from "./docker/docker-router.ts";
+import { DockerService } from "./docker/docker-service.ts";
 import { HttpApplication } from "./http/http-application.ts";
 import type { ILifecycle } from "./http/lifecycle.ts";
 import { StaticAssets } from "./http/static-assets.ts";
@@ -91,6 +95,9 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	await store.initialize();
 	if (!lifecycle.isOpen()) return;
 	const access = new AccessService(config);
+	const dockerCommand = new DockerCommand(sleep);
+	lifecycle.register(() => dockerCommand.close());
+	const docker = new DockerService(new DockerClient(dockerCommand), access, randomUUID, () => new Date());
 	const settingsStore = new SettingsStore(database);
 	await settingsStore.initialize();
 	const settings = new SettingsService(
@@ -282,6 +289,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			new SettingsRouter(settings),
 			agentRouter,
 			new BoardSettingsRouter(boardSettings),
+			new DockerRouter(docker),
 			new TicketRouter(tickets, workflow),
 			new CostRouter(cost),
 			new WorkspaceRouter(workspaces),

@@ -164,6 +164,59 @@ to idle/failed turns. Queued, dispatching and uncertain execution disable sendin
 with status text. Structured input and permission requests retain their dedicated
 reply controls. See the [agent protocol contract](agents.md#interactive-agents).
 
+### Docker containers
+
+The global Board settings dialog has a separate Docker containers section for
+every running container in Forge's internal daemon, including unattributed
+workloads. It shows name, short ID, image, state, ports, CPU, memory usage/limit,
+network and block I/O, and process count. While open and visible, it polls five
+seconds after each completed request without overlapping polls; manual refresh
+is also available. Closing cancels requests and polling. Unavailable Docker,
+missing/stale statistics and no running containers are distinct states.
+
+Owner-only routes (mutations also require the configured origin):
+
+| Route                                           | Contract                                                                                  |
+| ----------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `GET /api/board/docker`                         | Availability, running summaries, latest statistics and latest cleanup operation.          |
+| `POST /api/board/docker/containers/:id/cleanup` | Full 64-character Docker ID; returns operation with ID immediately (202).                 |
+| `POST /api/board/docker/cleanup`                | Kill all and clean Docker; returns operation immediately (202).                           |
+| `GET /api/board/docker/operations/:id`          | Progress, completion/partial failures, retained shared resources and remaining resources. |
+
+Only one cleanup runs at a time; overlapping requests return `docker-busy` (409).
+Operations run independently of browser connections. The latest 100 operations
+and up to 100 target snapshots for retry are held in memory; application restart
+forgets them and rereads the daemon. Inspection output, environment variables,
+credentials and bind paths are never returned. Errors name failed steps without
+returning raw CLI output. Statistics may be stale; the last successful sample
+time is displayed. Docker failures do not disable the existing Board controls.
+
+Individual cleanup snapshots the container's image, Docker volumes and custom
+networks before force-removing it (including anonymous volumes). It removes
+named volumes, custom networks and all image tags only when remaining containers,
+including stopped containers, do not reference them. Shared resources are
+reported and retained; Docker also refuses in-use volume/network/image removal.
+Already-removed resources succeed. Failed steps remain explicit and can be
+retried; snapshots allow retries after the container has gone within this
+application lifetime. Bind-mounted source directories and Forge data are never
+deleted. Sibling resources and unattributable caches require global cleanup.
+
+Kill all force-removes running and stopped containers, then runs
+[`docker system prune -a --volumes --force`](https://docs.docker.com/reference/cli/docker/system/prune/)
+and [`docker volume prune -a --force`](https://docs.docker.com/reference/cli/docker/volume/prune/).
+This includes unused images, custom networks, build cache and named volumes.
+It remains available with no running containers. The daemon stays running for
+subsequent workloads. Cleanup rechecks and reports remaining containers, images,
+volumes, networks and build cache. Agents can create workloads concurrently, so
+completion does not promise an empty daemon. Docker workload data is disposable.
+Both cleanup modes leave agents, standalone chats and dispatch settings unchanged;
+Stop all agents remains a separate control.
+
+See [deployment and storage](development.md#docker-workloads), the
+[trust boundary](architecture.md) and [deferred execution attribution](agents.md).
+This release adds no labels, ownership inference, attribution UI or automatic
+ticket cleanup.
+
 ### Ticket execution settings
 
 Tickets accept optional `executionSettings: {model?, reasoningEffort?, permissions?}`
