@@ -134,9 +134,13 @@ credentials. Intent precedes login. After application restart, an interrupted
 attempt remains uncertain alongside the verified current account until explicit
 cancel/retry. An uncertain Codex attempt resets the old app-server connection
 before another login; late notifications cannot complete a replacement attempt.
-GitHub login uses `gh auth login --web --insecure-storage` against `github.com`
-with HTTPS Git, validates the known device prompt, bounds prompt/verification
-commands to 15 seconds and 64 KiB output, and stops an outstanding login after
+GitHub login uses `gh auth login --web --insecure-storage --scopes workflow`
+against `github.com` with HTTPS Git. The `workflow` scope supplements the CLI's default scopes so
+authenticated pushes can update `.github/workflows/*`, including through
+[Code tab sync](git-and-ci.md#sync-forge-main-with-github). Each owner-initiated
+login requests this scope; existing credentials are preserved without automatic
+refresh or scope detection. Login validates the known device prompt, bounds
+prompt/verification commands to 15 seconds and 64 KiB output, and stops an outstanding login after
 a local 15-minute deadline. This deadline is not a provider code-expiry claim.
 
 Account process initialization creates/restricts `/data/codex` and `/data/github`

@@ -95,6 +95,8 @@ export class GithubAccountClient implements IAccountProvider {
 					"https",
 					"--web",
 					"--insecure-storage",
+					"--scopes",
+					"workflow",
 				],
 				outputLimit: 65536,
 				onOutput: acceptPrompt,

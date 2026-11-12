@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { GitTransport } from "./git-transport.ts";
 
@@ -73,11 +73,13 @@ test("system Git executes without a shell and rejects forbidden protocols with s
 });
 
 test("GitHub transport scopes gh credentials to github.com and its dedicated config directory", async () => {
+	vi.stubEnv("GH_TOKEN", "ambient-gh-token");
+	vi.stubEnv("GITHUB_TOKEN", "ambient-github-token");
 	const configuration = {
 		executable: process.execPath,
 		prefix: [
 			"-e",
-			"process.stdout.write(JSON.stringify({args:process.argv.slice(1),home:process.env.GH_CONFIG_DIR,token:process.env.GH_TOKEN}))",
+			"process.stdout.write(JSON.stringify({args:process.argv.slice(1),home:process.env.GH_CONFIG_DIR,token:process.env.GH_TOKEN,githubToken:process.env.GITHUB_TOKEN}))",
 			"--",
 		],
 	};
@@ -90,8 +92,11 @@ test("GitHub transport scopes gh credentials to github.com and its dedicated con
 		expect(generic.args).not.toContain("credential.https://github.com.helper=!gh auth git-credential");
 		expect(authenticated.home).toBe("/forge/github");
 		expect(authenticated.token).toBeUndefined();
+		expect(authenticated.githubToken).toBeUndefined();
+		expect(authenticated.args).toContain("credential.helper=");
 		expect(authenticated.args).toContain("credential.https://github.com.helper=!gh auth git-credential");
 	} finally {
+		vi.unstubAllEnvs();
 		await Promise.all([git.close(), github.close()]);
 	}
 });

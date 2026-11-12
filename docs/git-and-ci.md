@@ -34,7 +34,12 @@ Forge remains a TypeScript implementation, not a Forgejo deployment or fork.
 The owner can sync a ready Forge project imported from
 `https://github.com/maxine4j/forge` through its [Code page](workspaces.md#slice-2-integrated-manual-workspace-and-pr-review).
 The saved import source identifies the repository. GitHub HTTPS requests use
-the GitHub CLI credential helper and the persistent account configured in Forge.
+`gh auth git-credential`, scoped to `github.com`, and the persistent account in
+`<dataDirectory>/github` via `GH_CONFIG_DIR`. Remote comparison, fetch, and push
+all use this authenticated transport, which excludes ambient GitHub tokens.
+Credentials remain in the helper rather than being copied into arguments,
+remote URLs, or application storage. [GitHub login](foundation.md#account-login-and-application-access)
+requests the additional `workflow` scope for workflow-file pushes.
 
 Owner-only `GET /api/projects/:id/repository/github-sync` reports `ready`
 with ahead and behind counts, `unavailable` if the comparison failed, or

@@ -41,14 +41,17 @@ const setup = async () => {
 	await push(remote);
 	const readRef = async (repo: string) => (await git.run(["-C", repo, "rev-parse", "refs/heads/main"])).trim();
 	const hooks: { beforeUpdate?: () => Promise<void>; beforePush?: () => Promise<void> } = {};
+	const remoteCommands: string[][] = [];
 	const localGit = {
 		run: async (args: string[], input?: string) => {
+			expect(args).not.toContain(remoteUrl);
 			if (args.includes("update-ref")) await hooks.beforeUpdate?.();
 			return git.run(args, input);
 		},
 	};
 	const remoteGit = {
 		run: async (args: string[]) => {
+			remoteCommands.push(args);
 			if (args.includes("push")) await hooks.beforePush?.();
 			expect(args).toContain(remoteUrl);
 			return git.run([
@@ -59,11 +62,11 @@ const setup = async () => {
 		},
 	};
 	const client = new GithubSyncClient(root, repositories, localGit, remoteGit);
-	return { client, first, run, commit, push, local, remote, readRef, hooks, git };
+	return { client, first, run, commit, push, local, remote, readRef, hooks, git, remoteCommands };
 };
 
 test("counts live drift and fast-forwards in both directions", async () => {
-	const { client, commit, push, local, remote, readRef } = await setup();
+	const { client, commit, push, local, remote, readRef, remoteCommands } = await setup();
 	expect(await client.status(id)).toEqual({ ahead: 0, behind: 0 });
 	const remoteHead = await commit("remote", "remote");
 	await push(remote);
@@ -75,6 +78,9 @@ test("counts live drift and fast-forwards in both directions", async () => {
 	expect(await client.status(id)).toEqual({ ahead: 1, behind: 0 });
 	expect(await client.sync(id)).toEqual({ outcome: "synced", head: localHead });
 	expect(await readRef(remote)).toBe(localHead);
+	for (const command of ["ls-remote", "fetch", "push"]) {
+		expect(remoteCommands.some((args) => args.includes(command))).toBe(true);
+	}
 });
 
 test.each([false, true])("handles divergent histories (conflict: %s)", async (conflict) => {

@@ -88,6 +88,18 @@ describe("GithubAccountClient", () => {
 					verified = true;
 					return { done: Promise.resolve(0), write: () => {}, stop: async () => {} };
 				}
+				expect(spec.arguments).toEqual([
+					"auth",
+					"login",
+					"--hostname",
+					"github.com",
+					"--git-protocol",
+					"https",
+					"--web",
+					"--insecure-storage",
+					"--scopes",
+					"workflow",
+				]);
 				queueMicrotask(() =>
 					spec.onOutput(
 						"! First copy your one-time code: ABCD-EFGH\nOpen this URL to continue in your web browser: https://github.com/login/device\n",
