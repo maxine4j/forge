@@ -77,6 +77,12 @@ HTTP / WebSocket / Git protocol adapters / background tasks
   SQLite stores the identifiers and normalized state needed by Forge. Do not
   invent a second authoritative conversation store.
 - Store larger attachments and execution artifacts outside SQLite.
+- Epics have an independent SQLite key sequence (`EPIC-n`); tickets use `TASK-n`
+  and an indexed nullable foreign key to an epic. Epic completion is derived from
+  non-archived children, never persisted. Epic store/service/router modules live
+  under `src/epics`; membership updates use the ticket workflow serialization and
+  scope transaction. See [epic contracts](tickets.md#epics-and-grouped-backlog) and
+  [fresh database setup](development.md#development-databases).
 - Use SQLite WAL mode, foreign keys, bounded transactions, and serialized writes
   on a local filesystem. Expose an asynchronous database contract. Evaluate the
   pinned Node release's built-in SQLite support before selecting an adapter.

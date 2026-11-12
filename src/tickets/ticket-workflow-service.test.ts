@@ -105,7 +105,7 @@ const fixture = () => {
 		new AccessService({ owner: "owner", origin: "https://forge.example" }),
 		wake,
 	);
-	const create = (id = "FORGE-1") => {
+	const create = (id = "TASK-1") => {
 		const ticket: Ticket = {
 			id,
 			repositoryIds: [projectId],
@@ -321,7 +321,7 @@ test.each(["implementation", "rebase"] as const)(
 test("archiving serializes with ticket execution and preserves workflow history", async () => {
 	const f = fixture();
 	const queued = f.create();
-	const running = f.create("FORGE-2");
+	const running = f.create("TASK-2");
 	const archivedAt = "2026-11-04T00:00:00.000Z";
 	await f.service.move(actor, queued, { status: "todo" });
 	const queuedWorkflow = await f.service.get(actor, queued.id);

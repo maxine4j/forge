@@ -154,7 +154,7 @@ test("registers usage attribution and the runtime default model before submittin
 	const track = vi.fn();
 	const { client, rpc } = setup({ track });
 	const id = await client.start("/data/worktrees/one");
-	const scope = { projectId: "project", ticketId: "FORGE-1", phase: "implementation" } as const;
+	const scope = { projectId: "project", ticketId: "TASK-1", phase: "implementation" } as const;
 	await client.send(id, "/data/worktrees/one", "Work", undefined, scope);
 	expect(track).toHaveBeenCalledWith(id, scope, "runtime-default");
 	expect(track.mock.invocationCallOrder[0]).toBeLessThan(rpc.mock.invocationCallOrder[1]!);
@@ -196,7 +196,7 @@ test("steering uses the pinned active-turn protocol without starting or reviving
 	const id = await client.start("/data/worktrees/one");
 	await client.send(id, "/data/worktrees/one", "Implement", undefined, {
 		projectId: "project",
-		ticketId: "FORGE-1",
+		ticketId: "TASK-1",
 		phase: "implementation",
 	});
 	await expect(client.steer(id, "stale", "Feedback")).rejects.toThrow("agent-conflict");
@@ -291,7 +291,7 @@ test("native plans have identical browser items while streaming, completed and r
 test("planning uses native collaboration mode and captures only a completed plan item from its turn", async () => {
 	const { client, rpc, notify } = setup();
 	const id = await client.start("/data/worktrees/one");
-	const scope = { projectId: "project", ticketId: "FORGE-1", phase: "planning" } as const;
+	const scope = { projectId: "project", ticketId: "TASK-1", phase: "planning" } as const;
 	await client.send(id, "/data/worktrees/one", "Plan this ticket", undefined, scope);
 	expect(rpc).toHaveBeenLastCalledWith(
 		"turn/start",
@@ -429,7 +429,7 @@ test("ticket planning sends thinking, permissions and structured skills", async 
 		"/data/worktrees/one",
 		"$review ticket",
 		{ model: "catalog", reasoningEffort: "high", permissions: "full-access" },
-		{ projectId: "project", ticketId: "FORGE-1", phase: "planning" },
+		{ projectId: "project", ticketId: "TASK-1", phase: "planning" },
 	);
 	expect(rpc).toHaveBeenLastCalledWith(
 		"turn/start",

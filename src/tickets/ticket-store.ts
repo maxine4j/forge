@@ -10,9 +10,10 @@ import { z } from "zod";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
 import type { SqlStatement } from "../database/types.ts";
+import { epicTable } from "../epics/epic-store.ts";
 import { TicketError } from "./errors.ts";
 
-const columns = `id, title, description, status, createdAt, archivedAt, executionSettings,
+const columns = `id, epicId, title, description, status, createdAt, archivedAt, executionSettings,
  (SELECT json_group_array(repositoryId) FROM (SELECT repositoryId FROM ticket_repositories WHERE ticketId=tickets.id ORDER BY position)) AS repositoryIds`;
 const rowSchema = ticketSchema.extend({
 	repositoryIds: z.string().transform((value) => JSON.parse(value)),
@@ -61,8 +62,9 @@ export class TicketStore implements ITicketStore {
 	async initialize(): Promise<void> {
 		await this.guard(() =>
 			this.database.transaction([
+				epicTable,
 				{
-					sql: "CREATE TABLE IF NOT EXISTS tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT GENERATED ALWAYS AS ('FORGE-' || number) STORED UNIQUE, title TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'backlog' CHECK(status IN ('backlog','todo','in-progress','done')), position INTEGER NOT NULL, createdAt TEXT NOT NULL, archivedAt TEXT, executionSettings TEXT)",
+					sql: "CREATE TABLE IF NOT EXISTS tickets (number INTEGER PRIMARY KEY AUTOINCREMENT, id TEXT GENERATED ALWAYS AS ('TASK-' || number) STORED UNIQUE, epicId TEXT REFERENCES epics(id), title TEXT NOT NULL, description TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'backlog' CHECK(status IN ('backlog','todo','in-progress','done')), position INTEGER NOT NULL, createdAt TEXT NOT NULL, archivedAt TEXT, executionSettings TEXT)",
 				},
 				{
 					sql: "CREATE TABLE IF NOT EXISTS ticket_repositories (ticketId TEXT NOT NULL REFERENCES tickets(id), repositoryId TEXT NOT NULL REFERENCES projects(id), position INTEGER NOT NULL CHECK(position>=0), PRIMARY KEY(ticketId,repositoryId), UNIQUE(ticketId,position))",
@@ -70,6 +72,7 @@ export class TicketStore implements ITicketStore {
 				{
 					sql: "CREATE INDEX IF NOT EXISTS tickets_board ON tickets(status,position,number) WHERE archivedAt IS NULL",
 				},
+				{ sql: "CREATE INDEX IF NOT EXISTS tickets_epic ON tickets(epicId)" },
 				{
 					sql: "CREATE TRIGGER IF NOT EXISTS tickets_capacity BEFORE INSERT ON tickets WHEN (SELECT COUNT(*) FROM tickets WHERE archivedAt IS NULL)>=1000 BEGIN SELECT RAISE(ABORT,'Board capacity reached'); END",
 				},
@@ -83,12 +86,13 @@ export class TicketStore implements ITicketStore {
 				ticketSchema.shape.createdAt.parse(createdAt);
 				await this.database.transaction([
 					{
-						sql: "INSERT INTO tickets(title,description,createdAt,executionSettings,position) VALUES(?,?,?,?,COALESCE((SELECT MAX(position)+1 FROM tickets WHERE status='backlog' AND archivedAt IS NULL),1))",
+						sql: "INSERT INTO tickets(title,description,createdAt,executionSettings,epicId,position) VALUES(?,?,?,?,?,COALESCE((SELECT MAX(position)+1 FROM tickets WHERE status='backlog' AND archivedAt IS NULL),1))",
 						parameters: [
 							fields.title,
 							fields.description,
 							createdAt,
 							fields.executionSettings ? JSON.stringify(fields.executionSettings) : null,
+							fields.epicId ?? null,
 						],
 					},
 					{
@@ -158,6 +162,9 @@ export class TicketStore implements ITicketStore {
 					parameters: [fields.title, fields.description, id],
 				},
 				...associations(id, fields.repositoryIds),
+				...(fields.epicId === undefined
+					? []
+					: [{ sql: "UPDATE tickets SET epicId=? WHERE id=?", parameters: [fields.epicId, id] }]),
 			]);
 		});
 	}

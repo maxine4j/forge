@@ -19,7 +19,7 @@ test("records cumulative changes once per turn and preserves the dispatch phase"
 		() => new Date("2026-11-11T00:00:00Z"),
 		30,
 	);
-	const scope = { projectId: "project", ticketId: "FORGE-1", phase: "review" } as const;
+	const scope = { projectId: "project", ticketId: "TASK-1", phase: "review" } as const;
 	client.track("thread", scope, "gpt-5.4");
 	const breakdown = (inputTokens: number, outputTokens: number) => ({
 		inputTokens,

@@ -18,7 +18,7 @@ const fixture = () => {
 				...input,
 				repositoryIds: input.repositoryIds ?? [],
 				createdAt,
-				id: "FORGE-1",
+				id: "TASK-1",
 				status: "backlog",
 			};
 			tickets.set(value.id, value);
@@ -68,6 +68,7 @@ const fixture = () => {
 			tick: vi.fn(),
 			recover: vi.fn(),
 		},
+		{ get: vi.fn() },
 	);
 	return { service, tickets, store, projects, summary };
 };
@@ -103,9 +104,9 @@ test("global access and scope validation are independent of repository readiness
 test("references never limit visibility or same-column drop targets", async () => {
 	const { service, tickets } = fixture();
 	const ticket = await service.create(actor, { title: "Task", description: "" });
-	tickets.set("FORGE-2", { ...ticket, id: "FORGE-2", repositoryIds: [projectId] });
+	tickets.set("TASK-2", { ...ticket, id: "TASK-2", repositoryIds: [projectId] });
 	expect(await service.list(actor)).toHaveLength(2);
-	await expect(service.move(actor, ticket.id, { status: "backlog", beforeId: "FORGE-2" })).resolves.toMatchObject({
+	await expect(service.move(actor, ticket.id, { status: "backlog", beforeId: "TASK-2" })).resolves.toMatchObject({
 		id: ticket.id,
 	});
 });
@@ -113,7 +114,7 @@ test("references never limit visibility or same-column drop targets", async () =
 test("create backlog tickets, edit scope and delegate moves to the workflow", async () => {
 	const { service } = fixture();
 	const value = await service.create(actor, { repositoryIds: [projectId], title: " Task ", description: "Scope" });
-	expect(value).toMatchObject({ id: "FORGE-1", title: "Task", status: "backlog" });
+	expect(value).toMatchObject({ id: "TASK-1", title: "Task", status: "backlog" });
 	expect(await service.update(actor, value.id, { title: "Edited", description: "New scope" })).toMatchObject({
 		title: "Edited",
 	});
@@ -156,7 +157,7 @@ test("list combines workflow status and attention while excluding inactive colum
 test("archived tickets can be read but cannot be edited, moved or used as drop targets", async () => {
 	const { service, tickets, store } = fixture();
 	const ticket = await service.create(actor, { repositoryIds: [projectId], title: "Task", description: "Scope" });
-	const other = { ...ticket, id: "FORGE-2" };
+	const other = { ...ticket, id: "TASK-2" };
 	tickets.set(other.id, other);
 	await expect(service.archive({ username: "guest" }, ticket.id)).rejects.toThrow("Access denied");
 	expect(store.archive).not.toHaveBeenCalled();
@@ -179,16 +180,16 @@ test("reject invalid input, missing tickets and invalid drop targets before muta
 	await expect(service.create(actor, { repositoryIds: [projectId], title: " ", description: "" })).rejects.toThrow(
 		"invalid-request",
 	);
-	await expect(service.get(actor, "FORGE-999")).rejects.toThrow("ticket-not-found");
+	await expect(service.get(actor, "TASK-999")).rejects.toThrow("ticket-not-found");
 	const ticket = await service.create(actor, { repositoryIds: [projectId], title: "Task", description: "" });
-	tickets.set("FORGE-2", { ...ticket, id: "FORGE-2", status: "todo" });
-	await expect(service.move(actor, ticket.id, { status: "backlog", beforeId: "FORGE-2" })).rejects.toThrow(
+	tickets.set("TASK-2", { ...ticket, id: "TASK-2", status: "todo" });
+	await expect(service.move(actor, ticket.id, { status: "backlog", beforeId: "TASK-2" })).rejects.toThrow(
 		"ticket-conflict",
 	);
 	await expect(service.move(actor, ticket.id, { status: "done", beforeId: ticket.id })).rejects.toThrow(
 		"ticket-conflict",
 	);
-	await expect(service.move(actor, ticket.id, { status: "done", beforeId: "FORGE-999" })).rejects.toThrow(
+	await expect(service.move(actor, ticket.id, { status: "done", beforeId: "TASK-999" })).rejects.toThrow(
 		"ticket-conflict",
 	);
 	expect(store.move).not.toHaveBeenCalled();

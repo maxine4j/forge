@@ -2,16 +2,20 @@ import {
 	createTicketSchema,
 	ticketSchema,
 	ticketsSchema,
+	epicsSchema,
+	epicDetailSchema,
+	type EpicSummary,
 	type CreateTicket,
 	type MoveTicket,
 	type Ticket,
 } from "@forge/contracts/tickets";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation, useSearchParams } from "react-router";
 
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { BoardSettingsDialog } from "./board-settings-dialog.tsx";
+import { EpicDetails, EpicSelection } from "./epic-details.tsx";
 import { RepositorySelection } from "./repository-selection.tsx";
 import { TaskBacklog } from "./task-backlog.tsx";
 import { TaskBoard } from "./task-board.tsx";
@@ -22,17 +26,22 @@ const TicketEditor = ({
 	busy,
 	close,
 	save,
+	epics,
+	initialEpic,
 }: {
 	api: IWorkspaceApi;
 	visible: boolean;
 	busy: boolean;
 	close: () => void;
 	save: (input: CreateTicket) => Promise<void>;
+	epics: EpicSummary[];
+	initialEpic: string | null;
 }) => {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const [title, setTitle] = useState("");
 	const [description, setDescription] = useState("");
 	const [repositoryIds, setRepositoryIds] = useState<string[]>([]);
+	const [epicId, setEpicId] = useState(initialEpic);
 	const [error, setError] = useState("");
 	useEffect(() => {
 		if (visible) dialog.current?.showModal();
@@ -40,7 +49,7 @@ const TicketEditor = ({
 	}, [visible]);
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
-		const input = createTicketSchema.safeParse({ title, description, repositoryIds });
+		const input = createTicketSchema.safeParse({ title, description, repositoryIds, epicId });
 		if (!input.success) {
 			setError("Enter a title up to 120 characters and a description up to 4000 characters.");
 			return;
@@ -92,6 +101,7 @@ const TicketEditor = ({
 					/>
 				</label>
 				<RepositorySelection api={api} value={repositoryIds} change={setRepositoryIds} disabled={busy} />
+				<EpicSelection epics={epics} value={epicId} change={setEpicId} disabled={busy} />
 				{error && (
 					<p role='alert' className='error'>
 						{error}
@@ -114,6 +124,45 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 	const location = useLocation();
 	const [search, setSearch] = useSearchParams();
 	const linkedId = location.pathname === "/tasks" ? search.get("ticket") : null;
+	const epicLink = location.pathname === "/tasks" ? search.get("epic") : null;
+	const [epics, setEpics] = useState<EpicSummary[]>([]);
+	const [creatingEpic, setCreatingEpic] = useState(false);
+	const [initialEpic, setInitialEpic] = useState<string | null>(null);
+	const [collapsed, setCollapsed] = useState<string[]>(() => {
+		try {
+			const value: unknown = JSON.parse(localStorage.getItem("forge.epics.collapsed.v1") ?? "[]");
+			return Array.isArray(value)
+				? value.filter((id): id is string => typeof id === "string" && /^EPIC-[1-9]\d*$/u.test(id))
+				: [];
+		} catch {
+			return [];
+		}
+	});
+	const toggleEpic = (id: string) => {
+		setCollapsed((current) => {
+			const next = current.includes(id) ? current.filter((value) => value !== id) : [...current, id];
+			try {
+				localStorage.setItem("forge.epics.collapsed.v1", JSON.stringify(next));
+			} catch {
+				/* Storage can be unavailable. */
+			}
+			return next;
+		});
+	};
+	const closeEpic = () => {
+		setCreatingEpic(false);
+		const next = new URLSearchParams(search);
+		next.delete("epic");
+		setSearch(next);
+	};
+	const openEpic = (id: string) => {
+		rememberFocus();
+		const next = new URLSearchParams(search);
+		next.set("view", "backlog");
+		next.delete("ticket");
+		next.set("epic", id);
+		setSearch(next);
+	};
 	const [linked, setLinked] = useState<{ id: string; ticket?: Ticket; error?: string }>();
 	const closeTicket = () => {
 		setCreating(false);
@@ -169,13 +218,22 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 	const locked = useRef(false);
 	const [drafts] = useState(() => new Map<string, string>());
 	const [reading] = useState(() => new Map<string, TicketReadingState>());
-	const poller = useRef<ResourcePoller<Ticket[]> | undefined>(undefined);
+	type Collection = { tickets: Ticket[]; epics: EpicSummary[] };
+	const poller = useRef<ResourcePoller<Collection> | undefined>(undefined);
+	const readCollection = useCallback(async (): Promise<Collection> => {
+		const [tickets, epics] = await Promise.all([
+			api.read("tickets", ticketsSchema),
+			api.read("epics", epicsSchema),
+		]);
+		return { tickets, epics };
+	}, [api]);
 	const load = () => poller.current?.refresh();
 	useEffect(() => {
 		active.current = true;
 		const polling = new ResourcePoller(
-			() => api.read("tickets", ticketsSchema),
-			(values) => {
+			readCollection,
+			({ tickets: values, epics }) => {
+				setEpics(epics);
 				setTickets(values);
 				setLinked((current) => {
 					const ticket = values.find((value) => value.id === current?.id);
@@ -197,7 +255,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 			poller.current = undefined;
 			active.current = false;
 		};
-	}, [api]);
+	}, [api, readCollection]);
 	const mutate = async (operation: () => Promise<void>) => {
 		if (locked.current) throw new Error("A ticket change is still saving.");
 		locked.current = true;
@@ -209,7 +267,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 			await poller.current?.mutate(async () => {
 				try {
 					await operation();
-					return await api.read("tickets", ticketsSchema);
+					return await readCollection();
 				} catch (error) {
 					failure = error;
 					throw error;
@@ -238,7 +296,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 	const opener = useRef<HTMLElement | null>(null);
 	const wasOpen = useRef(false);
 	useEffect(() => {
-		if (linkedId || creating) {
+		if (linkedId || creating || epicLink || creatingEpic) {
 			wasOpen.current = true;
 			return;
 		}
@@ -247,7 +305,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		const target = opener.current;
 		if (target?.isConnected && !target.matches(":disabled")) target.focus();
 		else document.getElementById(`tasks-tab-${view}`)?.focus();
-	}, [linkedId, creating, busy, view]);
+	}, [linkedId, creating, epicLink, creatingEpic, busy, view]);
 	const rememberFocus = () => {
 		opener.current = document.activeElement as HTMLElement;
 	};
@@ -255,11 +313,19 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		rememberFocus();
 		const next = new URLSearchParams(search);
 		next.set("ticket", ticket.id);
+		next.delete("epic");
 		setSearch(next);
 	};
 	const create = () => {
 		rememberFocus();
+		setInitialEpic(null);
 		setCreating(true);
+	};
+	const createInEpic = (id: string) => {
+		rememberFocus();
+		setInitialEpic(id);
+		setCreating(true);
+		closeEpic();
 	};
 	const refresh = () => {
 		setLoading(true);
@@ -324,6 +390,15 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 							/>
 						) : (
 							<TaskBacklog
+								epics={epics}
+								collapsed={collapsed}
+								toggleEpic={toggleEpic}
+								openEpic={openEpic}
+								createEpic={() => {
+									rememberFocus();
+									setCreatingEpic(true);
+								}}
+								createInEpic={createInEpic}
 								tickets={tickets}
 								busy={busy}
 								loading={loading}
@@ -346,6 +421,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 			)}
 			{visible && selectedTicket && (
 				<TicketDetails
+					epics={epics}
 					key={selectedTicket.id}
 					ticket={
 						selectedTicket.archivedAt
@@ -386,6 +462,8 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 			)}
 			{creating && (
 				<TicketEditor
+					epics={epics}
+					initialEpic={initialEpic}
 					key='new'
 					api={api}
 					visible={visible}
@@ -402,6 +480,53 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 					}
 				/>
 			)}
+			{visible
+				&& (creatingEpic || epicLink)
+				&& !creating
+				&& !linkedId
+				&& (() => {
+					const epic = epics.find((value) => value.id === epicLink);
+					if (!creatingEpic && !epic)
+						return (
+							<p role='alert'>
+								{error || (loading ? "Loading epic…" : "Epic unavailable.")}{" "}
+								<button onClick={refresh}>Retry</button>
+								<button onClick={closeEpic}>Close epic</button>
+							</p>
+						);
+					return (
+						<EpicDetails
+							key={epic?.id ?? "new-epic"}
+							epic={epic}
+							tickets={tickets.filter((ticket) => ticket.epicId === epic?.id && !ticket.archivedAt)}
+							busy={busy}
+							error={error}
+							close={closeEpic}
+							refresh={refresh}
+							open={open}
+							create={() => epic && createInEpic(epic.id)}
+							save={(input) =>
+								mutate(async () => {
+									const saved = await api.read(
+										epic ? `epics/${epic.id}` : "epics",
+										epicDetailSchema,
+										epic ? "PATCH" : "POST",
+										input,
+									);
+									setEpics((current) =>
+										current.some((value) => value.id === saved.id)
+											? current.map((value) => (value.id === saved.id ? saved : value))
+											: [...current, saved],
+									);
+									if (!epic) {
+										setCreatingEpic(false);
+										openEpic(saved.id);
+									}
+								})
+							}
+						/>
+					);
+				})()}
 		</div>
 	);
 };

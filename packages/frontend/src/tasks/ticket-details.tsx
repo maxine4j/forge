@@ -8,6 +8,7 @@ import {
 	type CreateTicket,
 	type MoveTicket,
 	type TicketWorkflow,
+	type EpicSummary,
 } from "@forge/contracts/tickets";
 import { useContext, useEffect, useRef, useState, useId } from "react";
 
@@ -15,8 +16,12 @@ import { Conversation } from "../agents/agent-chat.tsx";
 import { AgentOptionsRevision, ExecutionSettings } from "../agents/execution-settings.tsx";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { EpicSelection } from "./epic-details.tsx";
 import { RepositorySelection } from "./repository-selection.tsx";
 import { TicketCost } from "./ticket-cost.tsx";
+import { ticketLabels } from "./ticket-labels.ts";
+
+export { ticketLabels } from "./ticket-labels.ts";
 
 const tabLabels = { details: "Details", chat: "Chat", cost: "Cost" };
 type TicketTab = keyof typeof tabLabels;
@@ -27,14 +32,8 @@ export interface TicketReadingState {
 	title: string;
 	description: string;
 	repositoryIds: string[];
+	epicId?: string | null;
 }
-
-export const ticketLabels: Record<TicketStatus, string> = {
-	backlog: "Backlog",
-	todo: "Ready for development",
-	"in-progress": "In progress",
-	done: "Done",
-};
 
 export const TicketDetails = ({
 	ticket,
@@ -47,6 +46,7 @@ export const TicketDetails = ({
 	refreshBoard,
 	drafts,
 	reading,
+	epics,
 }: {
 	ticket: Ticket;
 	api: IWorkspaceApi;
@@ -58,6 +58,7 @@ export const TicketDetails = ({
 	refreshBoard: () => void;
 	drafts: Map<string, string>;
 	reading: Map<string, TicketReadingState>;
+	epics: EpicSummary[];
 }) => {
 	const archived = !!ticket.archivedAt;
 	const dialog = useRef<HTMLDialogElement>(null);
@@ -68,6 +69,7 @@ export const TicketDetails = ({
 			title: ticket.title,
 			description: ticket.description,
 			repositoryIds: ticket.repositoryIds,
+			epicId: ticket.epicId ?? null,
 		};
 		reading.set(ticket.id, saved);
 		return saved;
@@ -83,8 +85,9 @@ export const TicketDetails = ({
 	const [title, setTitle] = useState(state.title);
 	const [description, setDescription] = useState(state.description);
 	const [repositoryIds, setRepositoryIds] = useState(state.repositoryIds);
+	const [epicId, setEpicId] = useState(state.epicId ?? null);
 	const unsavedRepositories = JSON.stringify(repositoryIds) !== JSON.stringify(ticket.repositoryIds);
-	Object.assign(state, { title, description, repositoryIds, tab: section });
+	Object.assign(state, { title, description, repositoryIds, epicId, tab: section });
 	const settingsKey = JSON.stringify(ticket.executionSettings);
 	const [observedSettings, setObservedSettings] = useState(settingsKey);
 	const [savedSettings, setSavedSettings] = useState<AgentSettings>();
@@ -374,7 +377,7 @@ export const TicketDetails = ({
 					onSubmit={(event) => {
 						event.preventDefault();
 						if (archived || ticket.status !== "backlog") return;
-						const input = createTicketSchema.safeParse({ title, description, repositoryIds });
+						const input = createTicketSchema.safeParse({ title, description, repositoryIds, epicId });
 						if (!input.success) {
 							setScopeError(
 								"Enter a title up to 120 characters and a description up to 4000 characters.",
@@ -409,6 +412,12 @@ export const TicketDetails = ({
 						api={api}
 						value={repositoryIds}
 						change={setRepositoryIds}
+						disabled={archived || busy || ticket.status !== "backlog"}
+					/>
+					<EpicSelection
+						epics={epics}
+						value={ticket.status === "backlog" && !archived ? epicId : (ticket.epicId ?? null)}
+						change={setEpicId}
 						disabled={archived || busy || ticket.status !== "backlog"}
 					/>
 					{!archived && ticket.status === "backlog" && (

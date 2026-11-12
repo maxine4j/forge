@@ -101,7 +101,7 @@ test("real Git/SQLite and a stdio peer run concurrent agents only in owned workt
 		);
 		const managed = await agents.createTicketThread(owner, project.id, "Ticket implementation");
 		const running = await agents.dispatch(owner, managed.thread.id, "Keep working", {
-			ticketId: "FORGE-1",
+			ticketId: "TASK-1",
 			phase: "implementation",
 		});
 		const turnId = running.thread.turnId!;
@@ -228,7 +228,7 @@ test("pinned Codex starts and resumes a Plan mode turn without an inner sandbox 
 			{ permissions: "approve-for-me" },
 			{
 				projectId: "probe",
-				ticketId: "FORGE-1",
+				ticketId: "TASK-1",
 				phase: "planning",
 			},
 		);

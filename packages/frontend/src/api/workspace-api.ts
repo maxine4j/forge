@@ -53,6 +53,8 @@ export class WorkspaceApi implements IWorkspaceApi {
 				"ticket-conflict":
 					"This transition is not available. Wait for the current work or plan before retrying.",
 				"ticket-unavailable": "Tickets are unavailable. Retry or check the server logs.",
+				"epic-not-found": "Epic no longer exists. Refresh the backlog.",
+				"epic-unavailable": "Epics are unavailable. Refresh and retry. Your edits are preserved.",
 				"invalid-request": "Check the supplied values.",
 				"settings-unavailable": "Forge settings are unavailable. Check the connection and retry.",
 				"workspace-not-found": "Repository files no longer exist. Reopen the repository.",

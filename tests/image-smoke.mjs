@@ -250,15 +250,31 @@ try {
 		400,
 	);
 	assert.equal(JSON.parse(request(`/api/projects/${project.id}/agents`, { headers }).body)[0].id, chat.thread.id);
-	const createdTicket = request(`/api/projects/${project.id}/tickets`, {
+	const createdEpic = request("/api/epics", {
 		method: "POST",
 		headers,
-		body: JSON.stringify({ title: "Persistent ticket", description: "Simple scope" }),
+		body: JSON.stringify({ title: "Persistent epic" }),
+	});
+	assert.equal(createdEpic.status, 201);
+	const epic = JSON.parse(createdEpic.body);
+	assert.equal(epic.id, "EPIC-1");
+	assert.equal(epic.complete, false);
+	const createdTicket = request("/api/tickets", {
+		method: "POST",
+		headers,
+		body: JSON.stringify({
+			title: "Persistent ticket",
+			description: "Simple scope",
+			repositoryIds: [project.id],
+			epicId: epic.id,
+		}),
 	});
 	assert.equal(createdTicket.status, 201);
 	const ticket = JSON.parse(createdTicket.body);
-	assert.equal(ticket.id, "FORGE-1");
+	assert.equal(ticket.id, "TASK-1");
 	assert.equal(ticket.status, "backlog");
+	assert.equal(ticket.epicId, epic.id);
+	assert.equal(JSON.parse(request(`/api/epics/${epic.id}`, { headers }).body).children[0].id, ticket.id);
 	assert.equal(
 		request(`/api/tickets/${ticket.id}/move`, { method: "POST", headers, body: JSON.stringify({ status: "done" }) })
 			.status,
@@ -396,6 +412,8 @@ try {
 	assert.equal(JSON.parse(request("/api/projects", { headers }).body)[0].id, project.id);
 	assert.equal(JSON.parse(request(`/api/agents/${chat.thread.id}`, { headers }).body).thread.status, "idle");
 	assert.equal(JSON.parse(request(`/api/tickets/${ticket.id}`, { headers }).body).status, "backlog");
+	assert.equal(JSON.parse(request(`/api/tickets/${ticket.id}`, { headers }).body).epicId, epic.id);
+	assert.equal(JSON.parse(request(`/api/epics/${epic.id}`, { headers }).body).total, 1);
 	const persistedPr = request(`/api/pull-requests/${pr.id}`, { headers });
 	assert.equal(persistedPr.status, 200);
 	assert.equal(JSON.parse(persistedPr.body).approval, "approved");

@@ -9,6 +9,7 @@ import {
 
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
+import type { IEpicStore } from "../epics/epic-store.ts";
 import type { IProjectStore } from "../projects/project-store.ts";
 import { TicketError } from "./errors.ts";
 import type { ITicketStore } from "./ticket-store.ts";
@@ -33,6 +34,7 @@ export class TicketService implements ITicketService {
 		private readonly access: IAccessService,
 		private readonly now: () => Date,
 		private readonly workflow: ITicketWorkflowService,
+		private readonly epics: Pick<IEpicStore, "get">,
 	) {}
 	async list(actor: Actor): Promise<Ticket[]> {
 		this.access.assertOwner(actor);
@@ -51,6 +53,7 @@ export class TicketService implements ITicketService {
 		if (!parsed.success) throw new TicketError("invalid-request");
 		return this.serialize(async () => {
 			await this.requireReferences(parsed.data.repositoryIds);
+			await this.requireEpic(parsed.data.epicId);
 			if (parsed.data.executionSettings)
 				await this.workflow.validateSettings(actor, parsed.data.executionSettings);
 			return this.store.insert(parsed.data, this.now().toISOString());
@@ -71,6 +74,7 @@ export class TicketService implements ITicketService {
 			const ticket = await this.get(actor, id);
 			if (ticket.archivedAt || ticket.status !== "backlog") throw new TicketError("ticket-conflict");
 			await this.requireReferences(parsed.data.repositoryIds);
+			await this.requireEpic(parsed.data.epicId);
 			await this.workflow.update(actor, id, parsed.data);
 			return this.get(actor, id);
 		});
@@ -102,6 +106,9 @@ export class TicketService implements ITicketService {
 	}
 	private async requireReferences(ids: string[]): Promise<void> {
 		for (const id of ids) if (!(await this.projects.get(id))) throw new TicketError("invalid-request");
+	}
+	private async requireEpic(id: string | null | undefined): Promise<void> {
+		if (id && !(await this.epics.get(id))) throw new TicketError("invalid-request");
 	}
 	private serialize<T>(operation: () => Promise<T>): Promise<T> {
 		const next = this.tail.then(operation);

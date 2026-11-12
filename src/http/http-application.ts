@@ -6,6 +6,7 @@ import Koa from "koa";
 import { AccessDeniedError, type IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
 import { DockerError } from "../docker/docker-command.ts";
+import { EpicError } from "../epics/errors.ts";
 import { InvalidProjectError, ProjectNotFoundError, ProjectUnavailableError } from "../projects/errors.ts";
 import type { IProjectRouter } from "../projects/project-router.ts";
 import { SettingsError } from "../settings/settings-service.ts";
@@ -46,6 +47,9 @@ export class HttpApplication implements IHttpApplication {
 								: err.code === "docker-operation-not-found"
 									? 404
 									: 503;
+					ctx.body = { error: err.code };
+				} else if (err instanceof EpicError) {
+					ctx.status = err.code === "invalid-request" ? 400 : err.code === "epic-not-found" ? 404 : 503;
 					ctx.body = { error: err.code };
 				} else if (err instanceof SettingsError) {
 					ctx.status = err.code === "invalid-request" || err.code === "unsupported-settings" ? 400 : 503;
@@ -130,7 +134,7 @@ export class HttpApplication implements IHttpApplication {
 		app.use((ctx, next) => {
 			if (ctx.path === "/api/settings" && ctx.method === "PUT") return settingsBody(ctx, next);
 			// Ticket scope can contain up to 1000 UUID references plus escaped description text.
-			if (/^\/api\/tickets(?:\/[^/]+)?$/u.test(ctx.path) && ["POST", "PATCH"].includes(ctx.method))
+			if (/^\/api\/(?:tickets|epics)(?:\/[^/]+)?$/u.test(ctx.path) && ["POST", "PATCH"].includes(ctx.method))
 				return settingsBody(ctx, next);
 			if (/^\/api\/projects\/[^/]+\/repository\/commit$/u.test(ctx.path) && ctx.method === "POST")
 				return commitBody(ctx, next);

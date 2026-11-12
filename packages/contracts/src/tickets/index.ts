@@ -4,12 +4,14 @@ import { agentSettingsSchema } from "../agents/index.ts";
 
 export const ticketStatuses = ["backlog", "todo", "in-progress", "done"] as const;
 export const ticketStatusSchema = z.enum(ticketStatuses);
-export const ticketIdSchema = z.string().regex(/^FORGE-[1-9]\d{0,14}$/u);
+export const ticketIdSchema = z.string().regex(/^TASK-[1-9]\d{0,14}$/u);
+export const epicIdSchema = z.string().regex(/^EPIC-[1-9]\d{0,14}$/u);
 export const repositoryIdsSchema = z
 	.array(z.uuid())
 	.max(1000)
 	.refine((ids) => new Set(ids).size === ids.length, "Duplicate repositories");
 export const createTicketSchema = z.strictObject({
+	epicId: epicIdSchema.nullable().optional(),
 	repositoryIds: repositoryIdsSchema.default([]),
 	executionSettings: agentSettingsSchema.optional(),
 	title: z.string().trim().min(1).max(120),
@@ -23,6 +25,7 @@ export const ticketMessageSchema = z.strictObject({
 	expectedTurnId: z.string().min(1).max(256).optional(),
 });
 export const ticketSchema = z.strictObject({
+	epicId: epicIdSchema.nullable().optional(),
 	executionSettings: agentSettingsSchema.optional(),
 	id: ticketIdSchema,
 	repositoryIds: repositoryIdsSchema,
@@ -35,6 +38,25 @@ export const ticketSchema = z.strictObject({
 	agentStatus: z.enum(["queued", "working"]).optional(),
 });
 export const ticketsSchema = z.array(ticketSchema).max(1000);
+export const editEpicSchema = createTicketSchema.pick({ title: true, description: true });
+export const epicSchema = editEpicSchema.extend({ id: epicIdSchema, createdAt: z.iso.datetime() });
+export const epicSummarySchema = epicSchema.extend({
+	counts: z.strictObject({
+		backlog: z.number().int().nonnegative(),
+		todo: z.number().int().nonnegative(),
+		"in-progress": z.number().int().nonnegative(),
+		done: z.number().int().nonnegative(),
+	}),
+	total: z.number().int().nonnegative(),
+	done: z.number().int().nonnegative(),
+	complete: z.boolean(),
+});
+export const epicsSchema = z.array(epicSummarySchema);
+export const epicDetailSchema = epicSummarySchema.extend({ children: ticketsSchema });
+export type Epic = z.infer<typeof epicSchema>;
+export type EditEpic = z.input<typeof editEpicSchema>;
+export type EpicSummary = z.infer<typeof epicSummarySchema>;
+export type EpicDetail = z.infer<typeof epicDetailSchema>;
 export const ticketWorkflowSchema = z.strictObject({
 	ticketId: ticketIdSchema,
 	executionRepositoryId: z.uuid().optional(),

@@ -37,7 +37,7 @@ test("cost route uses owner access, removes project routes and returns browser-s
 		new AccessService({ owner: "owner", origin: "https://forge.test" }),
 		{
 			listForCost: async () => [],
-			get: async (id) => (id === "FORGE-1" ? { id } : undefined),
+			get: async (id) => (id === "TASK-1" ? { id } : undefined),
 		},
 		{ read: history },
 		{ limits: async () => undefined },
@@ -59,17 +59,17 @@ test("cost route uses owner access, removes project routes and returns browser-s
 		expect((await get(`/api/projects/${id}/cost`, "owner")).status).toBe(404);
 		expect(await (await get("/api/costs", "owner")).json()).toEqual(response);
 		expect(read).toHaveBeenCalledExactlyOnceWith({ username: "owner" });
-		expect((await get("/api/tickets/FORGE-1/cost", "outsider")).status).toBe(403);
+		expect((await get("/api/tickets/TASK-1/cost", "outsider")).status).toBe(403);
 		expect((await get("/api/tickets/invalid/cost", "owner")).status).toBe(400);
-		expect((await get("/api/tickets/FORGE-2/cost", "owner")).status).toBe(404);
-		expect(await (await get("/api/tickets/FORGE-1/cost", "owner")).json()).toEqual({
+		expect((await get("/api/tickets/TASK-2/cost", "owner")).status).toBe(404);
+		expect(await (await get("/api/tickets/TASK-1/cost", "owner")).json()).toEqual({
 			...settings,
 			since: response.since,
 			ticket: response.ticketEstimates,
 		});
-		expect(history).toHaveBeenCalledExactlyOnceWith("FORGE-1");
+		expect(history).toHaveBeenCalledExactlyOnceWith("TASK-1");
 		await expect(service.read({ username: "outsider" })).rejects.toThrow("Access denied");
-		await expect(service.readTicket({ username: "outsider" }, "FORGE-1")).rejects.toThrow("Access denied");
+		await expect(service.readTicket({ username: "outsider" }, "TASK-1")).rejects.toThrow("Access denied");
 	} finally {
 		server.close();
 		await once(server, "close");

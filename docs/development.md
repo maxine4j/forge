@@ -20,6 +20,9 @@ account setup states and project recovery controls. They do not claim production
 ingress authentication or live login. Install the repository's pinned Chromium
 with `pnpm --filter @forge/frontend exec playwright install chromium` if
 needed. Screenshots/diagnostics live under ignored `artifacts/forge*/`.
+Epic coverage includes grouped unfinished rows, empty/completed sections, dialog
+editing and child navigation, membership selectors, polling, keyboard disclosure,
+storage recovery and mobile layouts. See [the epic contract](tickets.md#epics-and-grouped-backlog).
 The image smoke uses a disposable Docker volume and internal container HTTP,
 with no host ports. It checks nonroot execution, restricted directories, real
 Git/SQLite recovery, synthetic credential-home file persistence, bundled Codex
@@ -60,7 +63,8 @@ and banner, including builds invoked with `--mode mock`.
 
 ## Development databases
 
-FORGE-4 requires a fresh development database. There is no automatic reset,
+FORGE-6 requires a fresh development database for epics, nullable ticket membership
+and the independent `TASK-n` and `EPIC-n` sequences. There is no automatic reset,
 legacy schema migration, data conversion or fallback query. Stop Forge and
 explicitly move the old `forge.sqlite`, `forge.sqlite-wal` and `forge.sqlite-shm`
 files together to a backup outside the active data directory before restarting
@@ -68,6 +72,8 @@ against a fresh database. Preserve repository/worktree directories and credentia
 homes; resource removal never erases them. Use an isolated data directory for
 throwaway integration tests. See [architecture](architecture.md#persistence-and-recovery)
 and [the board schema](tickets.md#agentic-ticket-board).
+Legacy `FORGE-n` keys are not supported. Back up the database before recreation;
+never delete an active database or credential homes as part of an upgrade.
 
 ## Local pipeline verification
 

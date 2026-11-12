@@ -612,6 +612,21 @@
 	border: 1px solid #30363d;
 	border-radius: 6px;
 }
+.epic-controls {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 0.5rem;
+	text-align: left;
+}
+.epic-controls button {
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+.backlog-table .epic-heading th {
+	position: static;
+	width: auto;
+}
 .backlog-table {
 	width: 100%;
 	min-width: 600px;

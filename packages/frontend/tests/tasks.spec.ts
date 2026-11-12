@@ -1,4 +1,5 @@
 import type { DockerOverview, DockerOperation } from "@forge/contracts/docker";
+import type { Epic } from "@forge/contracts/tickets";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -35,6 +36,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	const approvals: unknown[] = [];
 	let tickets: {
 		id: string;
+		epicId?: string | null;
 		repositoryIds: string[];
 		title: string;
 		description: string;
@@ -46,16 +48,17 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		agentStatus?: "queued" | "working";
 	}[] = [
 		{
-			id: "FORGE-1",
+			id: "TASK-1",
 			repositoryIds: [projectId],
 			title: "First task",
 			description: "Scope",
 			status: "backlog",
 			createdAt,
 		},
-		{ id: "FORGE-2", repositoryIds: [], title: "Second task", description: "", status: "backlog", createdAt },
+		{ id: "TASK-2", repositoryIds: [], title: "Second task", description: "", status: "backlog", createdAt },
 	];
 	let failMove = false;
+	const epics: Epic[] = [];
 	let failArchive = false;
 	let failSave = false;
 	let failList = false;
@@ -67,7 +70,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	if (agentic && !review) tickets[0]!.needsAttention = true;
 	if (crowded)
 		tickets = Array.from({ length: 60 }, (_, i) => ({
-			id: `FORGE-${i + 1}`,
+			id: `TASK-${i + 1}`,
 			repositoryIds: [projectId],
 			title: `Task ${i + 1}`,
 			description: "Scope",
@@ -79,6 +82,36 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		async (route) => {
 			const path = new URL(route.request().url()).pathname;
 			const method = route.request().method();
+			if (path === "/api/epics" || path.startsWith("/api/epics/")) {
+				if (method !== "GET" && failSave)
+					return route.fulfill({ status: 503, json: { error: "epic-unavailable" } });
+				let epic = epics.find((value) => value.id === path.split("/")[3]);
+				if (method === "POST") {
+					epic = { ...route.request().postDataJSON(), id: `EPIC-${epics.length + 1}`, createdAt };
+					epics.push(epic!);
+				} else if (method === "PATCH" && epic) Object.assign(epic, route.request().postDataJSON());
+				const summarize = (value: Epic) => {
+					const children = tickets.filter((ticket) => !ticket.archivedAt && ticket.epicId === value.id);
+					const counts = { backlog: 0, todo: 0, "in-progress": 0, done: 0 };
+					for (const child of children) counts[child.status as keyof typeof counts]++;
+					return {
+						...value,
+						counts,
+						total: children.length,
+						done: counts.done,
+						complete: children.length > 0 && counts.done === children.length,
+					};
+				};
+				if (method === "GET" && path === "/api/epics") return route.fulfill({ json: epics.map(summarize) });
+				if (!epic) return route.fulfill({ status: 404, json: { error: "epic-not-found" } });
+				return route.fulfill({
+					status: method === "POST" ? 201 : 200,
+					json: {
+						...summarize(epic),
+						children: tickets.filter((ticket) => !ticket.archivedAt && ticket.epicId === epic!.id),
+					},
+				});
+			}
 			if (path === "/api/board/docker") {
 				dockerReads++;
 				return route.fulfill({ json: docker });
@@ -213,7 +246,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 					const ticket = {
 						repositoryIds: [],
 						...route.request().postDataJSON(),
-						id: `FORGE-${tickets.length + 1}`,
+						id: `TASK-${tickets.length + 1}`,
 						status: "backlog",
 						createdAt,
 					};
@@ -259,6 +292,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	await page.goto("/");
 	await expect(page).toHaveURL("/tasks");
 	return {
+		epics,
 		tickets: () => tickets,
 		failSaves: (value: boolean) => {
 			failSave = value;
@@ -312,10 +346,10 @@ test("task views persist URL selection, history and ticket deep links with keybo
 	await expect(backlog).toBeFocused();
 	await expect(page).toHaveURL("/tasks?view=backlog");
 	await expect(page.getByRole("tabpanel", { name: "Backlog", exact: true })).toBeVisible();
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
-	await expect(page).toHaveURL("/tasks?view=backlog&ticket=FORGE-1");
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	await expect(page).toHaveURL("/tasks?view=backlog&ticket=TASK-1");
 	await page.reload();
-	const dialog = page.getByRole("dialog", { name: "FORGE-1", exact: true });
+	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 	await expect(dialog).toBeVisible();
 	await dialog.getByRole("button", { name: "Close ticket" }).click();
 	await expect(page).toHaveURL("/tasks?view=backlog");
@@ -330,9 +364,9 @@ test("task views persist URL selection, history and ticket deep links with keybo
 	await expect(page).toHaveURL("/tasks");
 	await page.goBack();
 	await expect(backlog).toHaveAttribute("aria-selected", "true");
-	await page.goto("/tasks?view=unknown&ticket=FORGE-2");
+	await page.goto("/tasks?view=unknown&ticket=TASK-2");
 	await expect(board).toHaveAttribute("aria-selected", "true");
-	await expect(page.getByRole("dialog", { name: "FORGE-2", exact: true })).toBeVisible();
+	await expect(page.getByRole("dialog", { name: "TASK-2", exact: true })).toBeVisible();
 });
 
 test("backlog filters unfinished tickets in API order and polling retains an open completed or archived ticket", async ({
@@ -341,26 +375,188 @@ test("backlog filters unfinished tickets in API order and polling retains an ope
 	const f = await setup(page);
 	f.tickets()[0]!.status = "todo";
 	f.tickets()[0]!.agentStatus = "queued";
-	f.tickets().push({ ...f.tickets()[0]!, id: "FORGE-3", status: "done" });
-	f.tickets().push({ ...f.tickets()[0]!, id: "FORGE-4", status: "in-progress", needsAttention: true });
-	f.tickets().push({ ...f.tickets()[0]!, id: "FORGE-5", status: "backlog", archivedAt: createdAt });
+	f.tickets().push({ ...f.tickets()[0]!, id: "TASK-3", status: "done" });
+	f.tickets().push({ ...f.tickets()[0]!, id: "TASK-4", status: "in-progress", needsAttention: true });
+	f.tickets().push({ ...f.tickets()[0]!, id: "TASK-5", status: "backlog", archivedAt: createdAt });
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
 	const table = page.getByRole("table");
 	await expect(page.getByRole("status").filter({ hasText: "3 unfinished tickets" })).toBeVisible();
-	await expect(table.locator("tbody tr td:first-child")).toHaveText(["FORGE-1", "FORGE-2", "FORGE-4"]);
+	await expect(table.locator("tbody tr td:first-child")).toHaveText(["TASK-1", "TASK-2", "TASK-4"]);
 	await expect(table.getByRole("img", { name: "Agent queued" })).toHaveCount(1);
 	await expect(table.getByRole("img", { name: "Action required" })).toHaveCount(1);
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
-	const dialog = page.getByRole("dialog", { name: "FORGE-1", exact: true });
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 	await expect(dialog.getByLabel("Title", { exact: true })).toBeDisabled();
 	f.tickets()[0]!.status = "done";
-	await expect(table.locator("tbody tr")).toHaveCount(2);
+	await expect(table.locator("tbody tr:has(td)")).toHaveCount(2);
 	await expect(dialog).toBeVisible();
 	await expect(dialog.getByLabel("Status", { exact: true })).toHaveValue("done");
 	Object.assign(f.tickets()[0]!, { archivedAt: createdAt });
 	await expect(dialog).toContainText("Archived · Read only");
 	await dialog.getByRole("button", { name: "Close ticket" }).click();
 	await expect(page.getByRole("tab", { name: "Backlog", exact: true })).toBeFocused();
+});
+
+test("epic groups include empty and completed sections, preserve collapse through polling, views and reload", async ({
+	page,
+}) => {
+	const f = await setup(page);
+	f.epics.push(
+		...[1, 2, 3].map((number) => ({
+			id: `EPIC-${number}`,
+			title: `Epic ${number}`,
+			description: "Scope",
+			createdAt,
+		})),
+	);
+	f.tickets()[0]!.epicId = "EPIC-1";
+	f.tickets().push({ ...f.tickets()[0]!, id: "TASK-3", status: "done", epicId: "EPIC-3" });
+	f.tickets().push({ ...f.tickets()[0]!, id: "TASK-4", status: "done", epicId: "EPIC-1" });
+	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+	await expect(page.locator(".epic-heading")).toHaveText([
+		"No epic",
+		/EPIC-1.*1 unfinished.*1\/2 Done/,
+		/EPIC-2.*0 unfinished.*0\/0 Done/,
+		/EPIC-3.*0 unfinished.*1\/1 Done.*Complete/,
+	]);
+	const collapse = page.getByRole("button", { name: "Collapse EPIC-1", exact: true });
+	await collapse.focus();
+	await collapse.press("Enter");
+	const expand = page.getByRole("button", { name: "Expand EPIC-1", exact: true });
+	await expect(expand).toHaveAttribute("aria-expanded", "false");
+	await expect(expand).toHaveAttribute("aria-controls", "children-EPIC-1");
+	await expect(page.getByRole("button", { name: "TASK-1 First task", exact: true })).toBeHidden();
+	f.tickets()[0]!.title = "Polled title";
+	await page.waitForTimeout(1200);
+	await expect(expand).toHaveAttribute("aria-expanded", "false");
+	await page.getByRole("tab", { name: "Board", exact: true }).click();
+	await expect(page.getByRole("button", { name: "TASK-1 Polled title", exact: true })).toBeVisible();
+	await expect(page.locator(".kanban-card").filter({ hasText: "EPIC-1" })).toHaveCount(0);
+	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+	await expect(expand).toHaveAttribute("aria-expanded", "false");
+	await page.reload();
+	await expect(expand).toHaveAttribute("aria-expanded", "false");
+	await expand.focus();
+	await expand.press("Space");
+	await expect(page.getByRole("button", { name: "TASK-1 Polled title", exact: true })).toBeVisible();
+	await page.evaluate(() => localStorage.setItem("forge.epics.collapsed.v1", "malformed"));
+	await page.reload();
+	await expect(page.getByRole("button", { name: "Collapse EPIC-1", exact: true })).toBeVisible();
+});
+
+test("epic details edit with retry, restore history, link Done children and preselect ticket creation", async ({
+	page,
+}) => {
+	const f = await setup(page);
+	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+	await page.getByRole("button", { name: "Create epic", exact: true }).click();
+	let dialog = page.getByRole("dialog", { name: "Create epic", exact: true });
+	await dialog.getByLabel("Title", { exact: true }).fill("First milestone");
+	await dialog.getByLabel("Description", { exact: true }).fill("Epic scope");
+	f.failSaves(true);
+	await dialog.getByRole("button", { name: "Create", exact: true }).click();
+	await expect(dialog.getByRole("alert")).toContainText("Epics are unavailable");
+	await expect(dialog.getByLabel("Description", { exact: true })).toHaveValue("Epic scope");
+	f.failSaves(false);
+	f.failLists(true);
+	await dialog.getByRole("button", { name: "Create", exact: true }).click();
+	dialog = page.getByRole("dialog", { name: "EPIC-1", exact: true });
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByRole("alert")).toContainText("Tickets are unavailable");
+	await expect(dialog.getByLabel("Description", { exact: true })).toHaveValue("Epic scope");
+	f.failLists(false);
+	await dialog.getByRole("button", { name: "Refresh", exact: true }).click();
+	await expect(dialog.getByRole("alert")).toHaveCount(0);
+	await expect(page).toHaveURL("/tasks?view=backlog&epic=EPIC-1");
+	await dialog.getByLabel("Title", { exact: true }).fill("Edited milestone");
+	await page.waitForTimeout(1200);
+	await expect(dialog.getByLabel("Title", { exact: true })).toHaveValue("Edited milestone");
+	f.failSaves(true);
+	await dialog.getByRole("button", { name: "Save epic", exact: true }).click();
+	await expect(dialog.getByRole("alert")).toBeVisible();
+	f.failSaves(false);
+	await dialog.getByRole("button", { name: "Save epic", exact: true }).click();
+	await expect.poll(() => f.epics[0]?.title).toBe("Edited milestone");
+	await dialog.getByRole("button", { name: "Create ticket", exact: true }).click();
+	const editor = page.getByRole("dialog", { name: "Create ticket", exact: true });
+	await expect(editor.getByLabel("Epic", { exact: true })).toHaveValue("EPIC-1");
+	await editor.getByLabel("Title", { exact: true }).fill("Epic child");
+	await editor.getByRole("button", { name: "Create", exact: true }).click();
+	await expect(editor).toHaveCount(0);
+	expect(f.tickets().at(-1)?.epicId).toBe("EPIC-1");
+	f.tickets().at(-1)!.status = "done";
+	await page.getByRole("button", { name: "EPIC-1 · Edited milestone", exact: true }).click();
+	await expect(dialog.getByRole("status")).toHaveText("1/1 Done · Complete");
+	await expect(dialog.getByText("Done", { exact: false }).last()).toBeVisible();
+	await dialog.getByRole("button", { name: "TASK-3 Epic child", exact: true }).click();
+	await expect(page.getByRole("dialog", { name: "TASK-3", exact: true })).toBeVisible();
+	await page.goBack();
+	await expect(dialog).toBeVisible();
+	await page.reload();
+	await expect(dialog.getByLabel("Title", { exact: true })).toHaveValue("Edited milestone");
+	await dialog.getByRole("button", { name: "Close epic", exact: true }).click();
+	await page.goBack();
+	await expect(dialog).toBeVisible();
+});
+
+test("epic selector assigns, removes and reassigns drafts and becomes read-only at Ready on narrow screens", async ({
+	page,
+}) => {
+	const f = await setup(page);
+	f.epics.push(
+		...[1, 2].map((number) => ({
+			id: `EPIC-${number}`,
+			title: `Milestone ${number}`,
+			description: "Scope",
+			createdAt,
+		})),
+	);
+	await page.setViewportSize({ width: 390, height: 844 });
+	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+	for (const epicId of ["EPIC-1", "EPIC-2", ""]) {
+		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+		await dialog.getByLabel("Epic", { exact: true }).selectOption(epicId);
+		await dialog.getByRole("button", { name: "Save", exact: true }).click();
+		await expect(dialog).toHaveCount(0);
+		expect(f.tickets()[0]!.epicId).toBe(epicId || null);
+	}
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await dialog.getByLabel("Status", { exact: true }).selectOption("todo");
+	await expect(dialog.getByLabel("Epic", { exact: true })).toBeDisabled();
+	await dialog.getByRole("button", { name: "Close ticket", exact: true }).click();
+	await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
+	await page.getByRole("button", { name: "EPIC-1 · Milestone 1", exact: true }).click();
+	await expect(page.getByRole("dialog", { name: "EPIC-1", exact: true })).toBeVisible();
+	await page.screenshot({ path: "../../artifacts/forge-browser/epic-mobile.png" });
+});
+
+test("epic disclosure works without browser storage and section creation preselects its epic", async ({ page }) => {
+	await page.addInitScript(() => {
+		Object.defineProperty(window, "localStorage", {
+			get: () => {
+				throw new Error("Storage unavailable");
+			},
+		});
+	});
+	const f = await setup(page);
+	f.epics.push({ id: "EPIC-1", title: "Milestone", description: "", createdAt });
+	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+	const header = page.locator(".epic-heading").filter({ hasText: "EPIC-1" });
+	await header.getByRole("button", { name: "Collapse EPIC-1", exact: true }).click();
+	await expect(header.getByRole("button", { name: "Expand EPIC-1", exact: true })).toHaveAttribute(
+		"aria-expanded",
+		"false",
+	);
+	await header.getByRole("button", { name: "Create ticket", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
+	await expect(dialog.getByLabel("Epic", { exact: true })).toHaveValue("EPIC-1");
+	await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+	await expect(header.getByRole("button", { name: "Expand EPIC-1", exact: true })).toHaveAttribute(
+		"aria-expanded",
+		"false",
+	);
 });
 
 test("backlog creation and scope saves retain failed drafts and share changes with Board", async ({ page }) => {
@@ -379,10 +575,10 @@ test("backlog creation and scope saves retain failed drafts and share changes wi
 	await dialog.getByRole("button", { name: "Create", exact: true }).click();
 	await expect(dialog).toHaveCount(0);
 	await expect(create).toBeFocused();
-	const open = page.getByRole("button", { name: "FORGE-3 New task", exact: true });
+	const open = page.getByRole("button", { name: "TASK-3 New task", exact: true });
 	await open.focus();
 	await open.press("Enter");
-	dialog = page.getByRole("dialog", { name: "FORGE-3", exact: true });
+	dialog = page.getByRole("dialog", { name: "TASK-3", exact: true });
 	await dialog.getByLabel("Title", { exact: true }).fill("   ");
 	await dialog.getByRole("button", { name: "Save", exact: true }).click();
 	await expect(dialog.getByRole("alert")).toContainText("Enter a title");
@@ -397,10 +593,10 @@ test("backlog creation and scope saves retain failed drafts and share changes wi
 	f.failSaves(false);
 	await dialog.getByRole("button", { name: "Save", exact: true }).click();
 	await expect(dialog).toHaveCount(0);
-	await expect(page.getByRole("button", { name: "FORGE-3 Updated task", exact: true })).toBeFocused();
+	await expect(page.getByRole("button", { name: "TASK-3 Updated task", exact: true })).toBeFocused();
 	await page.getByRole("tab", { name: "Board", exact: true }).click();
-	await expect(page.getByRole("button", { name: "FORGE-3 Updated task", exact: true })).toBeVisible();
-	await page.getByRole("button", { name: "FORGE-3 Updated task", exact: true }).click();
+	await expect(page.getByRole("button", { name: "TASK-3 Updated task", exact: true })).toBeVisible();
+	await page.getByRole("button", { name: "TASK-3 Updated task", exact: true }).click();
 	await dialog.getByLabel("Status", { exact: true }).selectOption("todo");
 	await expect(dialog.getByLabel("Title", { exact: true })).toBeDisabled();
 	await dialog.getByRole("button", { name: "Close ticket" }).click();
@@ -415,7 +611,7 @@ test("switching views shares tickets and the single pending list request", async
 	await page.getByRole("button", { name: "Refresh board", exact: true }).click();
 	await expect.poll(f.held).toBe(1);
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
-	await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(2);
+	await expect(page.getByRole("table").locator("tbody tr:has(td)")).toHaveCount(2);
 	await expect(page.getByRole("status")).toHaveText("Loading tickets…");
 	await page.getByRole("tab", { name: "Board", exact: true }).click();
 	await expect(page.locator(".ticket-card")).toHaveCount(2);
@@ -428,7 +624,7 @@ test("switching views shares tickets and the single pending list request", async
 test("backlog has loading, empty and recoverable list errors", async ({ page }) => {
 	const f = await setup(page);
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
-	await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(2);
+	await expect(page.getByRole("table").locator("tbody tr:has(td)")).toHaveCount(2);
 	f.blockReads();
 	await page.getByRole("button", { name: "Refresh", exact: true }).click();
 	await expect(page.getByRole("status")).toHaveText("Loading tickets…");
@@ -450,7 +646,7 @@ for (const width of [1280, 390]) {
 		const f = await setup(page, true);
 		f.tickets()[0]!.title = "Long ticket title ".repeat(6);
 		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
-		await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(60);
+		await expect(page.getByRole("table").locator("tbody tr:has(td)")).toHaveCount(60);
 		await expect(page.getByRole("alert")).toHaveCount(0);
 		const scroll = page.getByRole("region", { name: "Unfinished tickets" });
 		await expect.poll(() => scroll.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
@@ -475,8 +671,8 @@ test("global board creates unassigned tickets and saves ordered references", asy
 	let dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
 	await dialog.getByLabel("Title", { exact: true }).fill("No repositories needed");
 	await dialog.getByRole("button", { name: "Create", exact: true }).click();
-	await expect(page.getByRole("button", { name: "FORGE-3 No repositories needed", exact: true })).toBeVisible();
-	expect(f.tickets().find((ticket) => ticket.id === "FORGE-3")?.repositoryIds).toEqual([]);
+	await expect(page.getByRole("button", { name: "TASK-3 No repositories needed", exact: true })).toBeVisible();
+	expect(f.tickets().find((ticket) => ticket.id === "TASK-3")?.repositoryIds).toEqual([]);
 	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
 	dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
 	await dialog.getByLabel("Title", { exact: true }).fill("Several repositories");
@@ -487,15 +683,15 @@ test("global board creates unassigned tickets and saves ordered references", asy
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 	await expect(dialog.getByText("Reference repo · Execution repository", { exact: true })).toBeVisible();
 	await dialog.getByRole("button", { name: "Create", exact: true }).click();
-	expect(f.tickets().find((ticket) => ticket.id === "FORGE-4")?.repositoryIds).toEqual([first, projectId]);
+	expect(f.tickets().find((ticket) => ticket.id === "TASK-4")?.repositoryIds).toEqual([first, projectId]);
 	await page.reload();
-	await page.getByRole("button", { name: "FORGE-4 Several repositories", exact: true }).click();
-	const details = page.getByRole("dialog", { name: "FORGE-4", exact: true });
+	await page.getByRole("button", { name: "TASK-4 Several repositories", exact: true }).click();
+	const details = page.getByRole("dialog", { name: "TASK-4", exact: true });
 	await expect(details.getByText("Reference repo · Execution repository", { exact: true })).toBeVisible();
 	await details.getByRole("button", { name: "Move repository 2 up", exact: true }).click();
 	await details.getByRole("button", { name: "Save", exact: true }).click();
-	expect(f.tickets().find((ticket) => ticket.id === "FORGE-4")?.repositoryIds).toEqual([projectId, first]);
-	await expect(page.getByRole("button", { name: "FORGE-3 No repositories needed", exact: true })).toBeVisible();
+	expect(f.tickets().find((ticket) => ticket.id === "TASK-4")?.repositoryIds).toEqual([projectId, first]);
+	await expect(page.getByRole("button", { name: "TASK-3 No repositories needed", exact: true })).toBeVisible();
 });
 
 test("board creation drafts survive visits to Repos and removed browser routes show not-found", async ({ page }) => {
@@ -520,7 +716,7 @@ test("board creation drafts survive visits to Repos and removed browser routes s
 
 test("Backlog execution settings save before moving to Ready and survive reopening", async ({ page }) => {
 	await setup(page);
-	const open = page.getByRole("button", { name: "FORGE-1 First task", exact: true });
+	const open = page.getByRole("button", { name: "TASK-1 First task", exact: true });
 	await open.click();
 	const panel = page.getByRole("dialog");
 	await panel.getByRole("combobox", { name: "Model", exact: true }).selectOption("test-model");
@@ -535,7 +731,7 @@ test("Backlog execution settings save before moving to Ready and survive reopeni
 
 test("ticket Details and chat share settings and support skill and file completion", async ({ page }) => {
 	await setup(page, false, true);
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const panel = page.getByRole("dialog");
 	await expect(panel.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
 	await panel.getByRole("combobox", { name: "Thinking level", exact: true }).selectOption("high");
@@ -556,7 +752,7 @@ test("ticket Details and chat share settings and support skill and file completi
 	const pendingSave = new Promise<void>((resolve) => {
 		releaseSave = resolve;
 	});
-	await page.route("**/api/tickets/FORGE-1/settings", async (route) => {
+	await page.route("**/api/tickets/TASK-1/settings", async (route) => {
 		await pendingSave;
 		await route.fulfill({ status: 400, json: { error: "unsupported-settings" } });
 	});
@@ -572,11 +768,11 @@ test("ticket Details and chat share settings and support skill and file completi
 
 test("ticket archive requires confirmation and removes the card only after success", async ({ page }) => {
 	const fixture = await setup(page);
-	const card = page.getByRole("button", { name: "FORGE-1 First task", exact: true });
+	const card = page.getByRole("button", { name: "TASK-1 First task", exact: true });
 	await card.click();
 	const archive = page.getByRole("button", { name: "Archive ticket", exact: true });
 	await archive.click();
-	const confirmation = page.getByRole("dialog", { name: "Archive FORGE-1?" });
+	const confirmation = page.getByRole("dialog", { name: "Archive TASK-1?" });
 	const cancel = confirmation.getByRole("button", { name: "Cancel", exact: true });
 	const confirm = confirmation.getByRole("button", { name: "Archive", exact: true });
 	await expect(cancel).toBeFocused();
@@ -599,14 +795,14 @@ test("ticket archive requires confirmation and removes the card only after succe
 	await confirm.click();
 	await expect(page.getByRole("dialog")).toHaveCount(0);
 	await expect(card).toHaveCount(0);
-	await expect(page.getByRole("button", { name: "FORGE-2 Second task", exact: true })).toBeVisible();
+	await expect(page.getByRole("button", { name: "TASK-2 Second task", exact: true })).toBeVisible();
 	expect(fixture.operations).toEqual(["archive", "archive"]);
 });
 
 test("agent icons poll from queued to working to idle, and attention takes precedence", async ({ page }) => {
 	test.setTimeout(60_000);
 	const fixture = await setup(page);
-	const card = page.locator('[data-ticket-id="FORGE-1"]');
+	const card = page.locator('[data-ticket-id="TASK-1"]');
 	fixture.setAgentStatus("queued");
 	const clock = card.getByRole("img", { name: "Agent queued" });
 	await expect(clock).toBeVisible();
@@ -658,7 +854,7 @@ test("agent icons poll from queued to working to idle, and attention takes prece
 	await expect(card.getByRole("img")).toHaveCount(0);
 	fixture.setAgentStatus("queued");
 	await expect(clock).toBeVisible();
-	await card.getByRole("button", { name: "Drag FORGE-1", exact: true }).hover();
+	await card.getByRole("button", { name: "Drag TASK-1", exact: true }).hover();
 	await page.mouse.down();
 	await page.mouse.move(bounds!.x + 80, bounds!.y + 10, { steps: 8 });
 	await expect(page.locator(".ticket-drag-preview")).toBeVisible();
@@ -678,7 +874,7 @@ test("mobile agent icons reserve room for long titles and metadata", async ({ pa
 		"Long title with many words to wrap across the narrow mobile ticket card and preserve room for the status icon",
 	);
 	fixture.setAgentStatus("working");
-	const card = page.locator('[data-ticket-id="FORGE-1"]');
+	const card = page.locator('[data-ticket-id="TASK-1"]');
 	const spinner = card.getByRole("img", { name: "Agent working" });
 	await expect(spinner).toBeVisible();
 	const icon = await spinner.boundingBox();
@@ -849,8 +1045,8 @@ test("Docker refreshes do not overlap and closing cancels a pending poll", async
 
 test("ticket sections are keyboard navigable tabs with a labelled active panel", async ({ page }) => {
 	await setup(page, false, true);
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
-	const modal = page.getByRole("dialog", { name: "FORGE-1" });
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const modal = page.getByRole("dialog", { name: "TASK-1" });
 	const tablist = modal.getByRole("tablist", { name: "Ticket sections" });
 	const chat = tablist.getByRole("tab", { name: "Chat" });
 	const details = tablist.getByRole("tab", { name: "Details" });
@@ -875,8 +1071,8 @@ test("ticket sections are keyboard navigable tabs with a labelled active panel",
 
 test("ticket chat shows the current context window", async ({ page }) => {
 	await setup(page, false, true);
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
-	const modal = page.getByRole("dialog", { name: "FORGE-1" });
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const modal = page.getByRole("dialog", { name: "TASK-1" });
 	const ring = modal.getByRole("button", { name: "Context window" });
 	await expect(ring).toBeVisible();
 	await ring.focus();
@@ -887,7 +1083,7 @@ test("ticket chat shows the current context window", async ({ page }) => {
 test("ticket Cost shows this ticket's estimates and token counts", async ({ page }) => {
 	await setup(page, false, true);
 	const totals = { input: 1800, cached: 600, output: 200, turns: 2 };
-	await page.route("**/api/tickets/FORGE-1/cost", (route) =>
+	await page.route("**/api/tickets/TASK-1/cost", (route) =>
 		route.fulfill({
 			json: {
 				since: createdAt,
@@ -899,7 +1095,7 @@ test("ticket Cost shows this ticket's estimates and token counts", async ({ page
 				days: [],
 				ticket: {
 					...totals,
-					id: "FORGE-1",
+					id: "TASK-1",
 					title: "First task",
 					subscriptionAud: 0.015,
 					apiAud: 0.09,
@@ -909,8 +1105,8 @@ test("ticket Cost shows this ticket's estimates and token counts", async ({ page
 			},
 		}),
 	);
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
-	const modal = page.getByRole("dialog", { name: "FORGE-1" });
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const modal = page.getByRole("dialog", { name: "TASK-1" });
 	await expect(modal.getByRole("tab", { name: "Cost" })).toBeVisible();
 	await modal.getByRole("tab", { name: "Cost" }).click();
 	const cost = modal.getByRole("tabpanel", { name: "Cost" });
@@ -927,7 +1123,7 @@ for (const size of [
 	test(`ticket chat is separate from scope and fits the keyboard viewport at ${size.width}px`, async ({ page }) => {
 		await page.setViewportSize(size);
 		const fixture = await setup(page, false, true);
-		await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 		const panel = page.getByRole("dialog");
 		await panel.getByRole("tab", { name: "Chat", exact: true }).click();
 		await expect(panel.getByLabel("Message", { exact: true })).toBeVisible();
@@ -967,18 +1163,18 @@ for (const size of [
 
 test("ticket message drafts survive closing and reopening", async ({ page }) => {
 	await setup(page, false, true);
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	await page.getByRole("tab", { name: "Chat", exact: true }).click();
 	await page.getByLabel("Message", { exact: true }).fill("Keep this feedback");
 	await page.getByRole("button", { name: "Close ticket", exact: true }).click();
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	await page.getByRole("tab", { name: "Chat", exact: true }).click();
 	await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Keep this feedback");
 });
 
 test("combined chat has one set of live execution controls", async ({ page }) => {
 	await setup(page, false, true, true);
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	await expect(page.getByText("Applies to next turn", { exact: true })).toBeVisible();
 	await expect(page.getByRole("button", { name: "Interrupt", exact: true })).toHaveCount(1);
 	await expect(page.getByRole("tab", { name: "Planning history", exact: true })).toHaveCount(0);
@@ -1004,7 +1200,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	const plans = [{ id: "plan-1", role: "assistant", kind: "plan", text: "# Initial plan\n\nAdd **search**." }];
 	const activity: { id: string; role: string; text: string }[] = [];
 	const workflow = () => ({
-		ticketId: "FORGE-1",
+		ticketId: "TASK-1",
 		plannerId: planner,
 		...(started ? { implementerId: implementer } : {}),
 		phase,
@@ -1013,7 +1209,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 		plan: { revision, text: plans[revision - 1]!.text },
 		...(phase !== "planning" ? { approvedRevision: revision } : {}),
 	});
-	await page.route("**/api/tickets/FORGE-1/{workflow,messages,approve}", async (route) => {
+	await page.route("**/api/tickets/TASK-1/{workflow,messages,approve}", async (route) => {
 		const path = new URL(route.request().url()).pathname;
 		if (path.endsWith("/approve")) {
 			expect(route.request().postDataJSON()).toEqual({ revision: 2 });
@@ -1076,8 +1272,8 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 			},
 		});
 	});
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
-	const modal = page.getByRole("dialog", { name: "FORGE-1", exact: true });
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const modal = page.getByRole("dialog", { name: "TASK-1", exact: true });
 	const message = modal.getByLabel("Message", { exact: true });
 	const send = modal.getByRole("button", { name: "Send message", exact: true });
 	await expect(modal.getByRole("tab")).toHaveCount(3);
@@ -1137,7 +1333,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	await expect(modal.getByRole("alert")).toBeVisible();
 	await expect(message).toHaveValue("Retain this draft across approval");
 	await modal.getByRole("button", { name: "Close ticket" }).click();
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	await expect(message).toHaveValue("Retain this draft across approval");
 	reject = false;
 	await send.click();
@@ -1163,7 +1359,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 		route.fulfill({
 			json: [
 				{
-					id: "FORGE-1",
+					id: "TASK-1",
 					repositoryIds: [projectId],
 					title: "First task",
 					description: "Scope",
@@ -1181,20 +1377,20 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 
 test("ticket input drafts survive closing and reopening", async ({ page }) => {
 	await setup(page, false, true, true);
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	await page.getByLabel("Which files?", { exact: true }).fill("Only search files");
 	await page.getByRole("button", { name: "Close ticket", exact: true }).click();
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	await expect(page.getByLabel("Which files?", { exact: true })).toHaveValue("Only search files");
 });
 
 test("board writes wait for an in-flight refresh", async ({ page }) => {
 	const f = await setup(page);
-	await expect(page.getByRole("button", { name: "FORGE-1 First task", exact: true })).toBeVisible();
+	await expect(page.getByRole("button", { name: "TASK-1 First task", exact: true })).toBeVisible();
 	f.blockReads();
 	await page.getByRole("button", { name: "Refresh board", exact: true }).click();
 	await expect.poll(f.held).toBeGreaterThan(0);
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	await page.getByLabel("Status", { exact: true }).selectOption("todo");
 	// Give the request transport time to expose an incorrectly concurrent write.
 	await page.waitForTimeout(100);
@@ -1211,7 +1407,7 @@ for (const size of [
 	test(`task columns scroll independently with fixed headings at ${size.width}px`, async ({ page }) => {
 		await page.setViewportSize(size);
 		await setup(page, true);
-		await expect(page.getByRole("button", { name: "FORGE-30 Task 30", exact: true })).toHaveCount(1);
+		await expect(page.getByRole("button", { name: "TASK-30 Task 30", exact: true })).toHaveCount(1);
 		const check = async (height: number) => {
 			const board = page.locator(".kanban-columns");
 			await expect
@@ -1226,7 +1422,7 @@ for (const size of [
 				el.scrollTop = el.scrollHeight;
 			});
 			expect((await heading.boundingBox())!.y).toBeCloseTo(top, 0);
-			await expect(draft.getByRole("button", { name: "FORGE-30 Task 30", exact: true })).toBeInViewport();
+			await expect(draft.getByRole("button", { name: "TASK-30 Task 30", exact: true })).toBeInViewport();
 			expect(await page.locator('[data-drop-status="todo"]').evaluate((el) => el.scrollTop)).toBe(0);
 			expect(
 				await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight && scrollY === 0),
@@ -1265,11 +1461,11 @@ test("create and edit tickets; status menu queues planning and survives reopenin
 	await dialog.getByLabel("Title", { exact: true }).fill("New task");
 	await dialog.getByLabel("Description", { exact: true }).fill("Simple scope");
 	await dialog.getByRole("button", { name: "Create", exact: true }).click();
-	await expect(page.getByRole("button", { name: "FORGE-3 New task", exact: true })).toBeVisible();
-	await page.getByRole("button", { name: "FORGE-3 New task", exact: true }).click();
+	await expect(page.getByRole("button", { name: "TASK-3 New task", exact: true })).toBeVisible();
+	await page.getByRole("button", { name: "TASK-3 New task", exact: true }).click();
 	await dialog.getByLabel("Title", { exact: true }).fill("Updated task");
 	await dialog.getByRole("button", { name: "Save", exact: true }).click();
-	await page.getByRole("button", { name: "FORGE-3 Updated task", exact: true }).click();
+	await page.getByRole("button", { name: "TASK-3 Updated task", exact: true }).click();
 	await dialog.getByLabel("Status", { exact: true }).selectOption("todo");
 	await expect(dialog.getByLabel("Status", { exact: true })).toHaveValue("todo");
 	await dialog.getByRole("button", { name: "Close ticket", exact: true }).click();
@@ -1285,10 +1481,10 @@ test("create and edit tickets; status menu queues planning and survives reopenin
 
 test("desktop drop zones reorder cards and move to an empty column; failures preserve the board", async ({ page }) => {
 	const fixture = await setup(page);
-	await expect(page.getByRole("button", { name: "FORGE-1 First task", exact: true })).toBeVisible();
+	await expect(page.getByRole("button", { name: "TASK-1 First task", exact: true })).toBeVisible();
 	await page.screenshot({ path: "../../artifacts/forge-browser/tasks-desktop.png" });
-	const handle = page.getByRole("button", { name: "Drag FORGE-2", exact: true });
-	const first = page.getByRole("button", { name: "FORGE-1 First task", exact: true });
+	const handle = page.getByRole("button", { name: "Drag TASK-2", exact: true });
+	const first = page.getByRole("button", { name: "TASK-1 First task", exact: true });
 	await handle.hover();
 	await page.mouse.down();
 	const rect = (await first.boundingBox())!;
@@ -1297,11 +1493,11 @@ test("desktop drop zones reorder cards and move to an empty column; failures pre
 	await page.mouse.up();
 	await expect(
 		page.getByRole("region", { name: "Backlog", exact: true }).locator(".ticket-card").first(),
-	).toContainText("FORGE-2");
+	).toContainText("TASK-2");
 	await page.reload();
 	await expect(
 		page.getByRole("region", { name: "Backlog", exact: true }).locator(".ticket-card").first(),
-	).toContainText("FORGE-2");
+	).toContainText("TASK-2");
 	const ready = page.getByRole("region", { name: "Ready for development", exact: true });
 	await handle.hover();
 	await page.mouse.down();
@@ -1310,7 +1506,7 @@ test("desktop drop zones reorder cards and move to an empty column; failures pre
 	await page.mouse.up();
 	await expect(ready.getByText("Second task")).toBeVisible();
 	fixture.failMoves();
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	await page.getByLabel("Status", { exact: true }).selectOption("todo");
 	await expect(page.getByRole("dialog").getByRole("alert")).toBeVisible();
 	await expect(page.getByLabel("Status", { exact: true })).toHaveValue("backlog");
@@ -1319,7 +1515,7 @@ test("desktop drop zones reorder cards and move to an empty column; failures pre
 test("drag edge scrolling and cancellation preserve ticket state", async ({ page }) => {
 	await page.setViewportSize({ width: 820, height: 820 });
 	await setup(page);
-	const handle = page.getByRole("button", { name: "Drag FORGE-1", exact: true });
+	const handle = page.getByRole("button", { name: "Drag TASK-1", exact: true });
 	await handle.hover();
 	await page.mouse.down();
 	const bounds = (await page.locator(".kanban-columns").boundingBox())!;
@@ -1344,7 +1540,7 @@ test("mobile touch drag and status dropdown work without widening the page", asy
 	const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
 	const page = await context.newPage();
 	await setup(page);
-	const handle = (await page.getByRole("button", { name: "Drag FORGE-1", exact: true }).boundingBox())!;
+	const handle = (await page.getByRole("button", { name: "Drag TASK-1", exact: true }).boundingBox())!;
 	const ready = (await page.getByRole("region", { name: "Ready for development", exact: true }).boundingBox())!;
 	const client = await context.newCDPSession(page);
 	const x = handle.x + handle.width / 2;
@@ -1359,7 +1555,7 @@ test("mobile touch drag and status dropdown work without widening the page", asy
 	await expect(
 		page.getByRole("region", { name: "Ready for development", exact: true }).getByText("First task"),
 	).toBeAttached();
-	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	await expect(page.getByLabel("Status", { exact: true })).toHaveValue("todo");
 	await page.screenshot({ path: "../../artifacts/forge-browser/tasks-mobile.png" });
 	await page.getByRole("button", { name: "Close ticket", exact: true }).click();
@@ -1378,13 +1574,13 @@ test("a plan needs attention on the four-column board and approval submits the d
 		"In progress",
 		"Done",
 	]);
-	const card = page.locator('[data-ticket-id="FORGE-1"]');
+	const card = page.locator('[data-ticket-id="TASK-1"]');
 	const dot = card.getByRole("img", { name: "Action required" });
 	await expect(dot).toBeVisible();
-	await card.getByRole("button", { name: "FORGE-1 First task" }).click();
+	await card.getByRole("button", { name: "TASK-1 First task" }).click();
 	await page.getByRole("button", { name: "Close ticket" }).click();
 	await expect(dot).toBeVisible();
-	await card.getByRole("button", { name: "FORGE-1 First task" }).click();
+	await card.getByRole("button", { name: "TASK-1 First task" }).click();
 	const panel = page.getByRole("dialog");
 	await expect(panel.getByRole("heading", { name: "Search plan" })).toBeVisible();
 	await expect(panel.getByRole("listitem")).toHaveText("Add filtering.");
@@ -1401,7 +1597,7 @@ for (const archived of [false, true]) {
 	test(`ticket deep links support reload, closing and history (archived: ${archived})`, async ({ page }) => {
 		await setup(page);
 		const ticket = {
-			id: "FORGE-9",
+			id: "TASK-9",
 			repositoryIds: [projectId],
 			title: "Linked ticket",
 			description: "Linked scope",
@@ -1409,12 +1605,12 @@ for (const archived of [false, true]) {
 			createdAt,
 			...(archived ? { archivedAt: createdAt } : {}),
 		};
-		await page.route("**/api/tickets/FORGE-9", (route) => route.fulfill({ json: ticket }));
-		await page.route("**/api/tickets/FORGE-9/workflow", (route) =>
+		await page.route("**/api/tickets/TASK-9", (route) => route.fulfill({ json: ticket }));
+		await page.route("**/api/tickets/TASK-9/workflow", (route) =>
 			route.fulfill({ json: { ticketId: ticket.id, phase: "planning", state: "idle", mergeAttempts: 0 } }),
 		);
-		await page.goto(`/tasks?ticket=FORGE-9`);
-		const modal = page.getByRole("dialog", { name: "FORGE-9" });
+		await page.goto(`/tasks?ticket=TASK-9`);
+		const modal = page.getByRole("dialog", { name: "TASK-9" });
 		await expect(modal).toBeVisible();
 		await expect(modal.getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
 		if (archived) {
@@ -1434,26 +1630,24 @@ for (const archived of [false, true]) {
 		await expect(modal).toBeVisible();
 		await page.goForward();
 		await expect(modal).toHaveCount(0);
-		await page.goto(`/tasks?ticket=FORGE-9`);
+		await page.goto(`/tasks?ticket=TASK-9`);
 		await expect(modal).toBeVisible();
 		await modal.getByRole("button", { name: "Close ticket" }).click();
-		await page.route("**/api/tickets/FORGE-9", (route) =>
-			route.fulfill({ json: { ...ticket, repositoryIds: [] } }),
-		);
-		await page.goto(`/tasks?ticket=FORGE-9`);
+		await page.route("**/api/tickets/TASK-9", (route) => route.fulfill({ json: { ...ticket, repositoryIds: [] } }));
+		await page.goto(`/tasks?ticket=TASK-9`);
 		await expect(modal).toBeVisible();
 		await modal.getByRole("button", { name: "Close ticket" }).click();
-		await page.goto(`/tasks?ticket=FORGE-999`);
+		await page.goto(`/tasks?ticket=TASK-999`);
 		await expect(page.getByRole("alert")).toContainText("Ticket unavailable.");
 	});
 }
 
 test("archived ticket chat retains history and disables input and execution", async ({ page }) => {
 	await setup(page, false, true);
-	await page.route("**/api/tickets/FORGE-9", (route) =>
+	await page.route("**/api/tickets/TASK-9", (route) =>
 		route.fulfill({
 			json: {
-				id: "FORGE-9",
+				id: "TASK-9",
 				repositoryIds: [projectId],
 				title: "Archived history",
 				description: "Scope",
@@ -1463,10 +1657,10 @@ test("archived ticket chat retains history and disables input and execution", as
 			},
 		}),
 	);
-	await page.route("**/api/tickets/FORGE-9/workflow", (route) =>
+	await page.route("**/api/tickets/TASK-9/workflow", (route) =>
 		route.fulfill({
 			json: {
-				ticketId: "FORGE-9",
+				ticketId: "TASK-9",
 				phase: "planning",
 				state: "idle",
 				mergeAttempts: 0,
@@ -1475,8 +1669,8 @@ test("archived ticket chat retains history and disables input and execution", as
 			},
 		}),
 	);
-	await page.goto(`/tasks?ticket=FORGE-9`);
-	const modal = page.getByRole("dialog", { name: "FORGE-9" });
+	await page.goto(`/tasks?ticket=TASK-9`);
+	const modal = page.getByRole("dialog", { name: "TASK-9" });
 	await expect(modal.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
 	await expect(modal.getByText("Planning message 0: implement search with tests.", { exact: true })).toBeAttached();
 	await expect(modal.getByLabel("Message", { exact: true })).toBeDisabled();

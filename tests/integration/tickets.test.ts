@@ -9,6 +9,9 @@ import { afterEach, expect, test, vi } from "vitest";
 import { AgentExecutionPool } from "../../src/agents/agent-execution-pool.ts";
 import { AccessService } from "../../src/auth/access-service.ts";
 import { SqliteDatabase } from "../../src/database/sqlite-database.ts";
+import { EpicRouter } from "../../src/epics/epic-router.ts";
+import { EpicService } from "../../src/epics/epic-service.ts";
+import { EpicStore } from "../../src/epics/epic-store.ts";
 import { HttpApplication } from "../../src/http/http-application.ts";
 import { ProjectRouter } from "../../src/projects/project-router.ts";
 import { ProjectService } from "../../src/projects/project-service.ts";
@@ -60,7 +63,17 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		new TicketPrompts(),
 		access,
 	);
-	const service = new TicketService(store, projects, access, () => new Date("2026-11-03T00:00:00.000Z"), workflow);
+	const epics = new EpicStore(db);
+	await epics.initialize();
+	const epicService = new EpicService(epics, store, access, () => new Date("2026-11-03T00:00:00.000Z"));
+	const service = new TicketService(
+		store,
+		projects,
+		access,
+		() => new Date("2026-11-03T00:00:00.000Z"),
+		workflow,
+		epics,
+	);
 	const projectService = new ProjectService(
 		projects,
 		{ prepare: async () => {}, verify: async () => {} },
@@ -70,7 +83,7 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	);
 	const server = createServer(
 		new HttpApplication(new ProjectRouter(projectService), access)
-			.create([new TicketRouter(service, workflow)])
+			.create([new TicketRouter(service, workflow), new EpicRouter(epicService)])
 			.callback(),
 	);
 	cleanups.push(
@@ -122,7 +135,7 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	});
 	expect(created.status).toBe(201);
 	const ticket = await created.json();
-	expect(ticket).toMatchObject({ id: "FORGE-2", status: "backlog" });
+	expect(ticket).toMatchObject({ id: "TASK-2", status: "backlog" });
 	expect(await (await request(`tickets/${ticket.id}`)).json()).toEqual(ticket);
 	expect(
 		(
@@ -150,12 +163,12 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	]);
 	for (const [path, method, body, status] of [
 		[listPath, "POST", { title: " " }, 400],
-		[`tickets/${ticket.id}`, "PATCH", { title: "Task", id: "FORGE-99" }, 400],
+		[`tickets/${ticket.id}`, "PATCH", { title: "Task", id: "TASK-99" }, 400],
 		[`tickets/${ticket.id}/move`, "POST", { status: "invented" }, 400],
 		[`tickets/${ticket.id}/approve`, "POST", { revision: 0 }, 400],
 		[`tickets/${ticket.id}/approve`, "POST", { revision: 1 }, 409],
 		[`tickets/${ticket.id}/move`, "POST", { status: "done", beforeId: ticket.id }, 409],
-		["tickets/FORGE-999", "GET", undefined, 404],
+		["tickets/TASK-999", "GET", undefined, 404],
 	] as const) {
 		const response = await request(path, method, body);
 		expect(response.status).toBe(status);
@@ -177,11 +190,11 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	expect(await workflowStore.list()).toEqual([]);
 	expect(await (await request(`tickets/${ticket.id}/workflow`)).json()).toMatchObject({ state: "queued" });
 	const next = await request(listPath, "POST", { title: "Next ticket" });
-	expect(await next.json()).toMatchObject({ id: "FORGE-3" });
+	expect(await next.json()).toMatchObject({ id: "TASK-3" });
 	const implementerId = "123e4567-e89b-42d3-a456-426614174010";
 	await workflowStore.save(
 		{
-			ticketId: "FORGE-3",
+			ticketId: "TASK-3",
 			phase: "implementation",
 			state: "running",
 			mergeAttempts: 0,
@@ -190,7 +203,7 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		},
 		{ status: "in-progress" },
 	);
-	const messagePath = "tickets/FORGE-3/messages";
+	const messagePath = "tickets/TASK-3/messages";
 	expect((await request(messagePath, "POST", { text: "Focus on tests", expectedTurnId: "active-turn" })).status).toBe(
 		200,
 	);
@@ -216,4 +229,151 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 			).status,
 		).toBe(403);
 	expect(steer).toHaveBeenCalledTimes(1);
+
+	// Independent epic identities and strict CRUD transport contracts.
+	const epic = await (await request("epics", "POST", { title: "  First epic  " })).json();
+	expect(epic).toMatchObject({
+		id: "EPIC-1",
+		title: "First epic",
+		description: "",
+		total: 0,
+		done: 0,
+		complete: false,
+		children: [],
+	});
+	const other = await (await request("epics", "POST", { title: "Other epic", description: "Scope" })).json();
+	expect(other.id).toBe("EPIC-2");
+	for (const body of [
+		{ title: " " },
+		{ title: "x".repeat(121) },
+		{ title: "Epic", description: "x".repeat(4001) },
+		{ title: "Epic", epicId: epic.id },
+		{ title: "Epic", complete: true },
+	]) {
+		expect((await request("epics", "POST", body)).status).toBe(400);
+		expect((await request(`epics/${epic.id}`, "PATCH", body)).status).toBe(400);
+	}
+	expect((await request("epics/EPIC-999")).status).toBe(404);
+	expect((await request("epics/TASK-1")).status).toBe(400);
+	const draft = await (
+		await request("tickets", "POST", { title: "Child", epicId: epic.id, repositoryIds: [projectId] })
+	).json();
+	const patch = (epicId?: string | null) =>
+		request(`tickets/${draft.id}`, "PATCH", {
+			title: "Edited child",
+			description: "Scope",
+			repositoryIds: [projectId],
+			...(epicId === undefined ? {} : { epicId }),
+		});
+	expect(await (await patch()).json()).toMatchObject({ epicId: epic.id });
+	expect(await (await patch(other.id)).json()).toMatchObject({ epicId: other.id });
+	expect(await (await patch(null)).json()).toMatchObject({ epicId: null });
+	expect((await patch("EPIC-999")).status).toBe(400);
+	expect((await request("tickets", "POST", { title: "Unknown", epicId: "EPIC-999" })).status).toBe(400);
+	await patch(epic.id);
+	const child2 = await (await request("tickets", "POST", { title: "Second child", epicId: epic.id })).json();
+	const child3 = await (await request("tickets", "POST", { title: "Third child", epicId: epic.id })).json();
+	await store.move(child2.id, { status: "in-progress" });
+	await store.move(child3.id, { status: "done" });
+	let detail = await (await request(`epics/${epic.id}`)).json();
+	expect(detail).toMatchObject({
+		total: 3,
+		done: 1,
+		complete: false,
+		counts: { backlog: 1, todo: 0, "in-progress": 1, done: 1 },
+	});
+	expect(detail.children.map((child: { id: string }) => child.id)).toEqual(
+		(await store.list()).filter((child) => child.epicId === epic.id).map((child) => child.id),
+	);
+	await store.archive(child2.id, "2026-11-03T00:00:00.000Z");
+	await patch(null);
+	detail = await (await request(`epics/${epic.id}`)).json();
+	expect(detail).toMatchObject({ total: 1, done: 1, complete: true });
+	expect(
+		await (
+			await request(`epics/${epic.id}`, "PATCH", { title: "Completed but editable", description: "New" })
+		).json(),
+	).toMatchObject({ title: "Completed but editable", complete: true });
+	await patch(epic.id);
+	expect(await (await request(`epics/${epic.id}`)).json()).toMatchObject({ complete: false, total: 2 });
+
+	// Workflow serialization makes the race resolve to one whole edit before Ready,
+	// or a rejected edit after Ready. Positions are unaffected by membership edits.
+	const before = (await store.list()).map((ticket) => ticket.id);
+	await patch(other.id);
+	expect((await store.list()).map((ticket) => ticket.id)).toEqual(before);
+	await Promise.all([
+		service.move({ username: "owner" }, draft.id, { status: "todo" }),
+		service
+			.update({ username: "owner" }, draft.id, {
+				title: "Raced edit",
+				description: "Race",
+				repositoryIds: [projectId],
+				epicId: epic.id,
+			})
+			.then(
+				() => {
+					throw new Error("Edit passed Ready");
+				},
+				(error: unknown) => expect(error).toMatchObject({ code: "ticket-conflict" }),
+			),
+	]);
+	expect(await store.get(draft.id)).toMatchObject({ status: "todo", title: "Edited child", epicId: other.id });
+	expect((await patch(null)).status).toBe(409);
+	await store.archive(draft.id, "2026-11-03T00:00:00.000Z");
+	expect((await patch(epic.id)).status).toBe(409);
+	expect((await request(`tickets/${child3.id}`, "PATCH", { title: "Done", epicId: null })).status).toBe(409);
+	const summaries = await (await request("epics")).json();
+	expect(summaries.map((value: { id: string }) => value.id)).toEqual([epic.id, other.id]);
+	expect(summaries[1]).toMatchObject({ total: 0, complete: false });
+	// Exercise the workflow boundary directly, independent of the HTTP service queue.
+	const owner = { username: "owner" };
+	const raced = await service.create(owner, {
+		title: "Workflow race",
+		description: "Before",
+		repositoryIds: [projectId],
+		epicId: epic.id,
+	});
+	await Promise.all([
+		workflow.update(owner, raced.id, {
+			title: "Whole edit",
+			description: "After",
+			repositoryIds: [projectId],
+			epicId: other.id,
+		}),
+		workflow.move(owner, raced, { status: "todo" }),
+	]);
+	expect(await store.get(raced.id)).toMatchObject({
+		title: "Whole edit",
+		description: "After",
+		epicId: other.id,
+		status: "todo",
+	});
+	await expect(
+		workflow.update(owner, raced.id, { title: "Late edit", description: "", epicId: null }),
+	).rejects.toMatchObject({ code: "ticket-conflict" });
+	for (const path of ["epics", `epics/${epic.id}`]) {
+		for (const method of ["GET", path === "epics" ? "POST" : "PATCH"]) {
+			const denied = await fetch(`http://127.0.0.1:${address.port}/api/${path}`, {
+				method,
+				headers: {
+					"x-webauth-user": "stranger",
+					origin: "https://forge.example.com",
+					"content-type": "application/json",
+				},
+				...(method === "GET" ? {} : { body: JSON.stringify({ title: "Denied" }) }),
+			});
+			expect(denied.status).toBe(403);
+		}
+		const deniedOrigin = await fetch(`http://127.0.0.1:${address.port}/api/${path}`, {
+			method: path === "epics" ? "POST" : "PATCH",
+			headers: {
+				"x-webauth-user": "owner",
+				origin: "https://other.example.com",
+				"content-type": "application/json",
+			},
+			body: JSON.stringify({ title: "Denied" }),
+		});
+		expect(deniedOrigin.status).toBe(403);
+	}
 });

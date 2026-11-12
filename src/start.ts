@@ -32,6 +32,9 @@ import { DockerClient } from "./docker/docker-client.ts";
 import { DockerCommand } from "./docker/docker-command.ts";
 import { DockerRouter } from "./docker/docker-router.ts";
 import { DockerService } from "./docker/docker-service.ts";
+import { EpicRouter } from "./epics/epic-router.ts";
+import { EpicService } from "./epics/epic-service.ts";
+import { EpicStore } from "./epics/epic-store.ts";
 import { HttpApplication } from "./http/http-application.ts";
 import type { ILifecycle } from "./http/lifecycle.ts";
 import { StaticAssets } from "./http/static-assets.ts";
@@ -135,6 +138,8 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	await settings.initialize();
 	if (!lifecycle.isOpen()) return;
 	const ticketStore = new TicketStore(database);
+	const epicStore = new EpicStore(database);
+	await epicStore.initialize();
 	await ticketStore.initialize();
 	const identity = () => settings.gitIdentity();
 	const git = options.git ?? new GitTransport(sleep, { identity });
@@ -273,7 +278,8 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		wakeScheduler,
 		() => boardSettings.dispatchMode(),
 	);
-	const tickets = new TicketService(ticketStore, store, access, () => new Date(), workflow);
+	const tickets = new TicketService(ticketStore, store, access, () => new Date(), workflow, epicStore);
+	const epics = new EpicService(epicStore, ticketStore, access, () => new Date());
 	const actor = { username: config.owner };
 	await agents.seed(actor);
 	const workflowAbort = new AbortController();
@@ -316,6 +322,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			new DockerRouter(docker),
 			new PipelineRouter(pipelines),
 			new TicketRouter(tickets, workflow),
+			new EpicRouter(epics),
 			new CostRouter(cost),
 			new WorkspaceRouter(workspaces),
 			new GithubSyncRouter(

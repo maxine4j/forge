@@ -7,7 +7,7 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 	const startedAt = "2026-10-31T23:00:00.000Z";
 	const planning: UsageTurn = {
 		projectId: "a",
-		ticketId: "FORGE-1",
+		ticketId: "TASK-1",
 		threadId: "one",
 		turnId: "one",
 		phase: "planning",
@@ -45,7 +45,7 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 		{
 			...planning,
 			projectId: "b",
-			ticketId: "FORGE-3",
+			ticketId: "TASK-3",
 			durationMs: undefined,
 			model: "unknown",
 			input: 10,
@@ -56,7 +56,7 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 	turns.push({
 		...planning,
 		projectId: "b",
-		ticketId: "FORGE-3",
+		ticketId: "TASK-3",
 		turnId: "four",
 		durationMs: 1000,
 		input: 100,
@@ -67,11 +67,11 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 	const service = new CostService(
 		access,
 		{
-			get: async () => ({ id: "FORGE-1" }),
+			get: async () => ({ id: "TASK-1" }),
 			listForCost: async () => [
-				{ id: "FORGE-1", title: "Search", archivedAt: startedAt },
-				{ id: "FORGE-2", title: "Waiting" },
-				{ id: "FORGE-3", title: "Other" },
+				{ id: "TASK-1", title: "Search", archivedAt: startedAt },
+				{ id: "TASK-2", title: "Waiting" },
+				{ id: "TASK-3", title: "Other" },
 			],
 		},
 		{ read: async () => ({ since: startedAt, turns }) },
@@ -89,13 +89,13 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 	expect(result.days.at(-1)).toMatchObject({ date: "2026-11-01", input: 0 });
 	expect(result.tickets.at(0)?.subscriptionAud).toBeCloseTo(30 / (31 * 24) + 30 / (30 * 24));
 	expect(result.tickets.at(0)).toMatchObject({
-		id: "FORGE-1",
+		id: "TASK-1",
 		archivedAt: startedAt,
 		apiAud: 4.3125,
 		unpricedTurns: 1,
 		turns: 2,
 	});
-	expect(result.tickets.at(1)).toMatchObject({ id: "FORGE-2", turns: 0 });
+	expect(result.tickets.at(1)).toMatchObject({ id: "TASK-2", turns: 0 });
 	expect(result.tickets.at(1)?.apiAud).toBeUndefined();
 	expect(result.limits).toBeUndefined();
 	expect(result.ticketEstimates).toMatchObject({ unpricedTurns: 2, untimedTurns: 1, turns: 4 });
@@ -104,7 +104,7 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 		30 / (31 * 24) + 30 / (30 * 24) + (30 * 1000) / (31 * 86400000),
 		8,
 	);
-	const scoped = await service.readTicket({ username: "owner" }, "FORGE-1");
+	const scoped = await service.readTicket({ username: "owner" }, "TASK-1");
 	expect(scoped.ticket).toEqual(expect.objectContaining({ turns: 2, apiAud: 4.3125 }));
 	await expect(service.readTicket({ username: "owner" }, "invalid")).rejects.toThrow();
 	expect(result.weeklyBudget).toEqual({ buckets: [], defaultBucketId: undefined });

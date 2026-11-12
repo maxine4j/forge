@@ -19,6 +19,7 @@ import { CodexUsageClient } from "../../src/codex/codex-usage-client.ts";
 import { CostService } from "../../src/cost/cost-service.ts";
 import { CostStore } from "../../src/cost/cost-store.ts";
 import { SqliteDatabase } from "../../src/database/sqlite-database.ts";
+import { EpicStore } from "../../src/epics/epic-store.ts";
 import { ProjectService } from "../../src/projects/project-service.ts";
 import { ProjectStore } from "../../src/projects/project-store.ts";
 import { GitDiffClient } from "../../src/repositories/git-diff-client.ts";
@@ -135,7 +136,14 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				() => dispatch,
 			);
 		let workflow = workflowService(agents);
-		let tickets = new TicketService(ticketStore, projectsStore, access, () => new Date(), workflow);
+		let tickets = new TicketService(
+			ticketStore,
+			projectsStore,
+			access,
+			() => new Date(),
+			workflow,
+			new EpicStore(db),
+		);
 		const restart = async () => {
 			await agents!.shutdown();
 			await agentStore.recover();
@@ -155,7 +163,14 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			await agents.seed(owner);
 			await agents.recover(owner);
 			workflow = workflowService(agents);
-			tickets = new TicketService(ticketStore, projectsStore, access, () => new Date(), workflow);
+			tickets = new TicketService(
+				ticketStore,
+				projectsStore,
+				access,
+				() => new Date(),
+				workflow,
+				new EpicStore(db),
+			);
 			await workflow.recover(owner);
 		};
 		const ticket = await tickets.create(owner, {

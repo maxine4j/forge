@@ -9,7 +9,7 @@ including existing archived-ticket links from [Costs](#ticket-cost).
 
 Backlog is a compact Key, Title and Status table of non-archived tickets in
 Backlog, Ready for development and In progress; Done is excluded. Its visible
-count and rows follow the existing API order and shared one-second polling.
+count follows shared one-second polling; rows retain API order within epic sections.
 Both views use the same collection, create/details dialogs, status transitions,
 archive controls and attention/agent indicators. Polling removes completed or
 archived rows without closing an open ticket. The table scrolls with a sticky
@@ -20,14 +20,15 @@ in Backlog status, regardless of selected view; Ready and In progress retain
 their chat workflow. Inline editing, search, sorting, table reordering, bulk
 actions, sprints, priorities and assignees are deferred.
 
-The board has four columns: Backlog, Ready for development, In progress and
+See [epics and grouped backlog](#epics-and-grouped-backlog) for grouping and
+membership. The board has four columns: Backlog, Ready for development, In progress and
 Done. The corresponding API statuses are `backlog`, `todo`, `in-progress` and
 `done`. Cards support pointer and touch reordering, edge scrolling and
 cancellation. Moving from Backlog to Ready for development is available by
 dragging or through the ticket's status menu.
 
 Tickets belong to the global board, independently of repositories. SQLite allocates
-immutable global increasing keys (`FORGE-1`, ...) across restarts and concurrent
+immutable global increasing keys (`TASK-1`, ...) across restarts and concurrent
 creation. New tickets start in Backlog, where the owner can edit a trimmed title
 (1–120 characters), plain-text description (0–4000 characters, default empty), and
 ordered `repositoryIds`. Duplicate and unknown references are rejected. Backlog
@@ -199,6 +200,43 @@ browser retains its draft and refreshes status. Planning messages remain limited
 to idle/failed turns. Queued, dispatching and uncertain execution disable sending
 with status text. Structured input and permission requests retain their dedicated
 reply controls. See the [agent protocol contract](agents.md#interactive-agents).
+
+### Epics and grouped backlog
+
+Epics have independent increasing `EPIC-n` keys, a trimmed 1–120 character title,
+a plain-text description up to 4000 characters (default empty) and creation time.
+They remain editable after completion. They never enter Kanban or scheduling.
+No deletion, archiving, nesting or custom epic ordering is supported.
+
+Owner-only `GET/POST /api/epics` list or create epics; `GET/PATCH /api/epics/:id`
+read or edit an epic. Mutations require the configured origin. Create and edit
+accept `{title, description?}`. Lists return `counts` by ticket status, `total`,
+`done` and derived `complete`; detail responses add non-archived `children` in
+ticket order, including Done children. Empty epics are incomplete; an epic is
+complete only when all its non-archived children are Done. Archived children
+never contribute. Adding or moving an unfinished draft can change completion.
+
+Ticket create/edit accepts optional nullable `epicId`. Omission during editing
+preserves membership, `null` removes it, and an existing epic ID assigns or moves
+it. Unknown IDs are rejected. Only non-archived Backlog tickets can change scope
+or membership. Both persist atomically inside the workflow serialization boundary
+shared with Ready transitions. Membership never changes ticket positions.
+
+Backlog shows No epic first, then every epic in increasing numeric order,
+including empty and completed epics. Each section preserves the unfinished-ticket
+filter and ticket order. Headers show key, title, unfinished count and Done/total,
+with separate disclosure and details buttons. Disclosures have `aria-expanded`
+and `aria-controls`; collapsed IDs use browser storage key
+`forge.epics.collapsed.v1`, tolerating malformed or unavailable storage. One-second
+polling and mutations refresh tickets and epic summaries together, preserving
+collapse state and unsaved dialog edits. Errors remain retryable in open dialogs.
+
+Create epic opens an editable dialog with progress and child links. The URL
+`/tasks?view=backlog&epic=EPIC-n` restores it on reload and Back/Forward. Ticket
+creation and draft editing offer an optional Epic selector with No epic; later
+statuses show membership read-only. Create ticket in an epic header or its details
+preselects that epic. See [persistence](architecture.md#persistence-and-recovery)
+and the required [database backup and recreation](development.md#development-databases).
 
 ### Docker containers
 

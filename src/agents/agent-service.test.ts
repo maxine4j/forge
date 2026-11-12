@@ -218,7 +218,7 @@ test("standalone submissions cannot race an ongoing stop", async () => {
 test("completed managed conversations load history and saved context after worktree removal", async () => {
 	const f = setup();
 	const { thread } = await f.service.createTicketThread(owner, projectId, "Implementation");
-	await f.service.dispatch(owner, thread.id, "Implement", { ticketId: "FORGE-1", phase: "implementation" });
+	await f.service.dispatch(owner, thread.id, "Implement", { ticketId: "TASK-1", phase: "implementation" });
 	const codexId = f.records.get(thread.id)!.codexId!;
 	Object.assign(f.views.get(codexId)!, { status: "completed", contextWindow: { used: 4200, max: 128000 } });
 	f.changed(codexId);
@@ -243,7 +243,7 @@ test("completed managed conversations load history and saved context after workt
 test("ticket steering checks authorization, ownership and active turn without claiming another slot", async () => {
 	const f = setup();
 	const { thread } = await f.service.createTicketThread(owner, projectId, "Implementation");
-	await f.service.dispatch(owner, thread.id, "Implement", { ticketId: "FORGE-1", phase: "implementation" });
+	await f.service.dispatch(owner, thread.id, "Implement", { ticketId: "TASK-1", phase: "implementation" });
 	await expect(f.service.steer({ username: "stranger" }, thread.id, "turn", "Feedback")).rejects.toThrow();
 	await expect(f.service.steer(owner, thread.id, "stale", "Feedback")).rejects.toThrow("agent-conflict");
 	await expect(f.service.steer(owner, thread.id, "turn", "   ")).rejects.toThrow("invalid-request");
@@ -333,7 +333,7 @@ test("a stop during ticket setup holds the turn before sending it to Codex", asy
 		owner,
 		thread.id,
 		"Plan",
-		{ ticketId: "FORGE-1", phase: "planning" },
+		{ ticketId: "TASK-1", phase: "planning" },
 		() => allowed,
 	);
 	const held = expect(dispatch).rejects.toThrow("agent-capacity");
@@ -390,7 +390,7 @@ test("existing chats and tickets inherit updated defaults without saving them as
 	const { service, client, records } = setup(() => defaults);
 	const { thread: chat } = await service.create(owner, projectId, "Chat");
 	const { thread: planner } = await service.createTicketThread(owner, projectId, "Ticket");
-	const ticket = { ticketId: "FORGE-1", phase: "planning" } as const;
+	const ticket = { ticketId: "TASK-1", phase: "planning" } as const;
 	const expectTurn = (text: string, model: string, reasoningEffort?: string) => {
 		expect(client.send).toHaveBeenLastCalledWith(
 			expect.any(String),
@@ -434,7 +434,7 @@ test("unsupported ticket overrides release the reservation before starting a tur
 	const { thread } = await service.createTicketThread(owner, projectId, "Ticket", undefined, true);
 	expect(pool.activeIds()).toEqual([thread.id]);
 	await expect(
-		service.dispatch(owner, thread.id, "Plan", { ticketId: "FORGE-1", phase: "planning" }, undefined, {
+		service.dispatch(owner, thread.id, "Plan", { ticketId: "TASK-1", phase: "planning" }, undefined, {
 			reasoningEffort: "high",
 		}),
 	).rejects.toThrow("unsupported-settings");

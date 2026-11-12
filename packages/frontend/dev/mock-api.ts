@@ -51,6 +51,7 @@ export class MockApi implements IMockApi {
 		const costData: Costs[] = [];
 		const boardTickets: unknown[] = [];
 		this.routes.set("/api/tickets", () => boardTickets);
+		this.routes.set("/api/epics", () => []);
 		this.routes.set("/api/costs", () => {
 			const first = costData[0]!;
 			return {
@@ -164,7 +165,7 @@ export class MockApi implements IMockApi {
 			}));
 			const tickets = [
 				{
-					id: `FORGE-${project.id === projects.at(0)!.id ? 11 : 13}`,
+					id: `TASK-${project.id === projects.at(0)!.id ? 11 : 13}`,
 					repositoryIds: [project.id],
 					title: "Add keyboard navigation",
 					description: "Support keyboard shortcuts.",
@@ -173,7 +174,7 @@ export class MockApi implements IMockApi {
 					createdAt: date,
 				},
 				{
-					id: `FORGE-${project.id === projects.at(0)!.id ? 12 : 14}`,
+					id: `TASK-${project.id === projects.at(0)!.id ? 12 : 14}`,
 					repositoryIds: [project.id],
 					title: "Improve search results",
 					description: "Implement search ranking.",
@@ -182,7 +183,7 @@ export class MockApi implements IMockApi {
 					createdAt: date,
 				},
 				{
-					id: `FORGE-${project.id === projects.at(0)!.id ? 1 : 4}`,
+					id: `TASK-${project.id === projects.at(0)!.id ? 1 : 4}`,
 					repositoryIds: [],
 					title: "Define the next change",
 					description: "Write a small, clear scope before starting work.",
@@ -190,7 +191,7 @@ export class MockApi implements IMockApi {
 					createdAt: date,
 				},
 				{
-					id: `FORGE-${project.id === projects.at(0)!.id ? 2 : 5}`,
+					id: `TASK-${project.id === projects.at(0)!.id ? 2 : 5}`,
 					repositoryIds: [project.id],
 					title: "Improve repository navigation",
 					description:
@@ -200,7 +201,7 @@ export class MockApi implements IMockApi {
 					createdAt: date,
 				},
 				{
-					id: `FORGE-${project.id === projects.at(0)!.id ? 3 : 6}`,
+					id: `TASK-${project.id === projects.at(0)!.id ? 3 : 6}`,
 					repositoryIds: [project.id],
 					title: "Set up the repository",
 					description: "Create the initial repository.",
@@ -208,7 +209,7 @@ export class MockApi implements IMockApi {
 					createdAt: date,
 				},
 				{
-					id: `FORGE-${project.id === projects.at(0)!.id ? 7 : 8}`,
+					id: `TASK-${project.id === projects.at(0)!.id ? 7 : 8}`,
 					repositoryIds: [project.id],
 					title: "Explore initial requirements",
 					description: "Capture requirements for the first release.",

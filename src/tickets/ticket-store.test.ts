@@ -35,7 +35,7 @@ test("SQLite allocates global sequential ticket keys, preserves global order and
 		store.insert({ ...input, repositoryIds: [otherId, projectId] }, createdAt),
 	]);
 	expect(await store.get(a.id)).toStrictEqual(a);
-	expect([a.id, b.id, c.id]).toEqual(["FORGE-1", "FORGE-2", "FORGE-3"]);
+	expect([a.id, b.id, c.id]).toEqual(["TASK-1", "TASK-2", "TASK-3"]);
 	expect(a.status).toBe("backlog");
 	await store.move(b.id, { status: "backlog", beforeId: a.id });
 	expect((await store.list()).map((ticket) => ticket.id)).toEqual([b.id, a.id, c.id]);
@@ -70,8 +70,8 @@ test("SQLite allocates global sequential ticket keys, preserves global order and
 		persisted.insert({ ...input, repositoryIds: ["123e4567-e89b-42d3-a456-426614174099"] }, createdAt),
 	).rejects.toThrow("ticket-unavailable");
 	expect(await persisted.list()).toHaveLength(3);
-	expect(await persisted.get("FORGE-999")).toBeUndefined();
-	expect((await persisted.insert({ ...input, repositoryIds: [projectId] }, createdAt)).id).toBe("FORGE-4");
+	expect(await persisted.get("TASK-999")).toBeUndefined();
+	expect((await persisted.insert({ ...input, repositoryIds: [projectId] }, createdAt)).id).toBe("TASK-4");
 	await expect(persisted.update(a.id, { title: "", description: "" })).rejects.toThrow("ticket-unavailable");
 	expect((await persisted.get(a.id))?.title).toBe("Edited");
 	await expect(persisted.insert({ ...input, repositoryIds: [projectId] }, "invalid timestamp")).rejects.toThrow(
@@ -100,12 +100,12 @@ test("archiving an existing ticket retains its contents and frees board capacity
 		"ticket-unavailable",
 	);
 	expect(await store.list()).toHaveLength(1000);
-	const original = await store.get("FORGE-1000");
+	const original = await store.get("TASK-1000");
 	expect(original?.executionSettings).toBeUndefined();
 	expect(original).toMatchObject({ title: "Original", description: "Scope" });
 	const archivedAt = "2026-11-04T00:00:00.000Z";
-	await store.archive("FORGE-1000", archivedAt);
-	await store.archive("FORGE-1000", "2026-11-05T00:00:00.000Z");
+	await store.archive("TASK-1000", archivedAt);
+	await store.archive("TASK-1000", "2026-11-05T00:00:00.000Z");
 	await db.close();
 
 	const reopened = new SqliteDatabase(path);
@@ -113,17 +113,17 @@ test("archiving an existing ticket retains its contents and frees board capacity
 	await reopened.initialize();
 	const persisted = new TicketStore(reopened);
 	await persisted.initialize();
-	expect(await persisted.get("FORGE-1000")).toEqual({ ...original, archivedAt });
+	expect(await persisted.get("TASK-1000")).toEqual({ ...original, archivedAt });
 	expect(await persisted.list()).toHaveLength(999);
 	const created = await persisted.insert(
 		{ repositoryIds: [projectId], title: "New task", description: "" },
 		createdAt,
 	);
-	expect(created.id).toBe("FORGE-1001");
+	expect(created.id).toBe("TASK-1001");
 	expect((await persisted.list()).at(-1)).toEqual(created);
 	const otherProject = "123e4567-e89b-42d3-a456-426614174099";
 	await new ProjectStore(reopened).insert({ id: otherProject, name: "Other", status: "ready", createdAt });
-	await persisted.archive("FORGE-1", archivedAt);
+	await persisted.archive("TASK-1", archivedAt);
 	const otherTicket = await persisted.insert(
 		{ repositoryIds: [otherProject], title: "Other task", description: "" },
 		createdAt,
@@ -135,7 +135,7 @@ test("archiving an existing ticket retains its contents and frees board capacity
 		title: "Other task",
 	});
 	expect(costTickets).toContainEqual({
-		id: "FORGE-1000",
+		id: "TASK-1000",
 		title: "Original",
 		archivedAt,
 	});

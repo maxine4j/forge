@@ -74,11 +74,12 @@ test("integrated production bundle styles editor/terminal on desktop/mobile and 
 				if (path.endsWith("/branches")) return route.fulfill({ json: [{ name: "main", sha: head }] });
 				if (path.endsWith("/workspaces")) return route.fulfill({ json: [workspace] });
 				if (path.endsWith("/pull-requests")) return route.fulfill({ json: [] });
+				if (path.endsWith("/epics")) return route.fulfill({ json: [] });
 				if (path.endsWith("/tickets"))
 					return route.fulfill({
 						json: [
 							{
-								id: "FORGE-1",
+								id: "TASK-1",
 								repositoryIds: [projectId],
 								title: "Production ticket",
 								description: "Scope",
@@ -166,7 +167,7 @@ test("integrated production bundle styles editor/terminal on desktop/mobile and 
 		for (const ratio of contrast) expect(ratio).toBeGreaterThanOrEqual(4.5);
 		await page.screenshot({ path: "../../artifacts/forge/files-desktop.png", fullPage: true });
 		await page.getByRole("link", { name: "Tasks", exact: true }).click();
-		await page.getByRole("button", { name: "Drag FORGE-1", exact: true }).hover();
+		await page.getByRole("button", { name: "Drag TASK-1", exact: true }).hover();
 		await page.mouse.down();
 		const target = (await page.getByRole("region", { name: "Ready for development", exact: true }).boundingBox())!;
 		await page.mouse.move(target.x + 80, target.y + 120);

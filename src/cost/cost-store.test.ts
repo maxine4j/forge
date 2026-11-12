@@ -16,7 +16,7 @@ test("persists one usage snapshot per turn across restarts and reads all project
 		threadId: "thread",
 		turnId: "turn",
 		phase: "planning",
-		ticketId: "FORGE-1",
+		ticketId: "TASK-1",
 		startedAt: date,
 		monthlyAud: 30,
 		input: 20,
@@ -36,14 +36,14 @@ test("persists one usage snapshot per turn across restarts and reads all project
 		await db.initialize();
 		const reopened = new CostStore(db);
 		await reopened.initialize("2026-11-12T00:00:00.000Z");
-		expect(await reopened.read("FORGE-1")).toEqual({
+		expect(await reopened.read("TASK-1")).toEqual({
 			since: date,
 			turns: [
 				{ ...record, output: 10, durationMs: 1000 },
 				{ ...record, projectId: "b", threadId: "other" },
 			],
 		});
-		expect((await reopened.read("FORGE-2")).turns).toHaveLength(0);
+		expect((await reopened.read("TASK-2")).turns).toHaveLength(0);
 		await db.run(
 			`WITH RECURSIVE turns(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM turns WHERE n<1000)
 			 INSERT INTO codex_usage(projectId,threadId,turnId,record)

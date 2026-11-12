@@ -7,6 +7,15 @@ test("board exposes exactly four workflow stages", () => {
 	expect(moveTicketSchema.safeParse({ status: "planning" }).success).toBe(false);
 });
 
+test("membership is optional, nullable or an epic key and ticket keys use TASK", () => {
+	expect(updateTicketSchema.parse({ title: "Draft" })).not.toHaveProperty("epicId");
+	for (const epicId of [null, "EPIC-1", "EPIC-100"])
+		expect(createTicketSchema.parse({ title: "Draft", epicId }).epicId).toBe(epicId);
+	for (const epicId of ["EPIC-0", "EPIC-01", "TASK-1", "missing", 1])
+		expect(createTicketSchema.safeParse({ title: "Draft", epicId }).success).toBe(false);
+	expect(moveTicketSchema.safeParse({ status: "todo", beforeId: "FORGE-1" }).success).toBe(false);
+});
+
 test("ticket settings are optional on creation and independent of scope edits", () => {
 	const input = {
 		title: "Ticket",
@@ -33,12 +42,12 @@ test("tickets have bounded plain fields, immutable keys and explicit manual move
 		{ title: "Task", status: "done" },
 	])
 		expect(createTicketSchema.safeParse(value).success).toBe(false);
-	expect(moveTicketSchema.parse({ status: "done", beforeId: "FORGE-2" })).toEqual({
+	expect(moveTicketSchema.parse({ status: "done", beforeId: "TASK-2" })).toEqual({
 		status: "done",
-		beforeId: "FORGE-2",
+		beforeId: "TASK-2",
 	});
 	expect(moveTicketSchema.safeParse({ status: "unknown" }).success).toBe(false);
-	expect(ticketSchema.safeParse({ id: "FORGE-0" }).success).toBe(false);
+	expect(ticketSchema.safeParse({ id: "TASK-0" }).success).toBe(false);
 });
 
 test("tickets have ordered references and reject ownership and duplicates", () => {
