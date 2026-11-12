@@ -41,6 +41,11 @@ test("SQLite allocates global sequential ticket keys, preserves project order an
 	expect((await store.list(projectId)).map((ticket) => ticket.id)).toEqual([b.id, a.id]);
 	await store.move(b.id, { status: "done" });
 	await store.update(a.id, { title: "Edited", description: "Updated" });
+	await store.updateSettings(a.id, {
+		model: "catalog-model",
+		reasoningEffort: "high",
+		permissions: "approve-for-me",
+	});
 	await db.close();
 	const reopened = new SqliteDatabase(path);
 	cleanups.push(() => reopened.close());
@@ -49,6 +54,13 @@ test("SQLite allocates global sequential ticket keys, preserves project order an
 	await persisted.initialize();
 	expect(await persisted.get(b.id)).toMatchObject({ status: "done", projectId });
 	expect(await persisted.get(a.id)).toMatchObject({ title: "Edited", description: "Updated", status: "backlog" });
+	expect((await persisted.get(a.id))?.executionSettings).toEqual({
+		model: "catalog-model",
+		reasoningEffort: "high",
+		permissions: "approve-for-me",
+	});
+	await persisted.updateSettings(a.id, {});
+	expect((await persisted.get(a.id))?.executionSettings).toEqual({});
 	expect(await persisted.list(otherId)).toEqual([c]);
 	expect(await persisted.get("FORGE-999")).toBeUndefined();
 	expect((await persisted.insert(projectId, input, createdAt)).id).toBe("FORGE-4");
@@ -79,6 +91,7 @@ test("archiving an existing ticket retains its contents and frees board capacity
 	await store.initialize();
 	expect(await store.list(projectId)).toHaveLength(1000);
 	const original = await store.get("FORGE-1000");
+	expect(original?.executionSettings).toBeUndefined();
 	expect(original).toMatchObject({ title: "Original", description: "Scope" });
 	const archivedAt = "2026-11-04T00:00:00.000Z";
 	await store.archive("FORGE-1000", archivedAt);

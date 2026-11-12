@@ -12,6 +12,7 @@ const now = new Date("2026-11-03T00:00:00.000Z");
 const fixture = () => {
 	const tickets = new Map<string, Ticket>();
 	const store = {
+		updateSettings: vi.fn(),
 		insert: vi.fn(async (projectId, input, createdAt) => {
 			const value: Ticket = { ...input, projectId, createdAt, id: "FORGE-1", status: "backlog" };
 			tickets.set(value.id, value);
@@ -47,6 +48,8 @@ const fixture = () => {
 		new AccessService({ owner: "owner", origin: "https://forge.example.com" }),
 		() => now,
 		{
+			settings: vi.fn(),
+			validateSettings: vi.fn(),
 			archive: async (_actor, ticket, archivedAt) => store.archive(ticket.id, archivedAt),
 			move: async (_actor, ticket, input) => store.move(ticket.id, input),
 			get: vi.fn(),

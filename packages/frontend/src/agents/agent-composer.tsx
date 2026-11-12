@@ -8,6 +8,7 @@ import {
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { ExecutionSettings } from "./execution-settings.tsx";
 
 const number = new Intl.NumberFormat("en-AU");
 
@@ -56,6 +57,9 @@ export const AgentComposer = ({
 	settings,
 	contextWindow,
 	configurable = true,
+	completions = true,
+	settingsChanged,
+	settingsDisabled = false,
 }: {
 	id: string;
 	api: IWorkspaceApi;
@@ -67,6 +71,9 @@ export const AgentComposer = ({
 	settings: AgentSettings;
 	contextWindow?: AgentContextWindow;
 	configurable?: boolean;
+	completions?: boolean;
+	settingsChanged?: (settings: AgentSettings) => void;
+	settingsDisabled?: boolean;
 }) => {
 	const inputId = useId();
 	const listId = useId();
@@ -80,16 +87,22 @@ export const AgentComposer = ({
 	const [options, setOptions] = useState<AgentOptions>();
 	const [error, setError] = useState("");
 	const [attempt, setAttempt] = useState(0);
-	const [model, setModel] = useState(settings.model ?? "");
-	const [permissions, setPermissions] = useState<NonNullable<AgentSettings["permissions"]>>(
-		settings.permissions ?? "ask",
-	);
+	const settingsKey = JSON.stringify([settings.model, settings.reasoningEffort, settings.permissions]);
+	const [localSelection, setSelection] = useState<{ source: string; value: AgentSettings }>({
+		source: settingsKey,
+		value: settings,
+	});
+	const selection = settingsChanged || localSelection.source !== settingsKey ? settings : localSelection.value;
+	const selectSettings = (value: AgentSettings) => {
+		setSelection({ source: settingsKey, value });
+		settingsChanged?.(value);
+	};
 	const [cursor, setCursor] = useState(0);
 	const [dismissed, setDismissed] = useState(false);
 	const [selected, setSelected] = useState(0);
 	const [fileResult, setFileResult] = useState<{ query: string; files: string[]; error: string }>();
 	useEffect(() => {
-		if (!configurable) return;
+		if (!configurable && !completions) return;
 		let current = true;
 		void api
 			.read(`agents/${id}/options`, agentOptionsSchema)
@@ -105,9 +118,9 @@ export const AgentComposer = ({
 		return () => {
 			current = false;
 		};
-	}, [api, id, attempt, configurable]);
+	}, [api, id, attempt, configurable, completions]);
 	const match = /(?:^|\s)([$@])([^\s$@]*)$/.exec(draft.slice(0, cursor));
-	const trigger = !dismissed && configurable ? match?.[1] : undefined;
+	const trigger = !dismissed && completions ? match?.[1] : undefined;
 	const query = match?.[2] ?? "";
 	useEffect(() => {
 		if (trigger !== "@") return;
@@ -141,6 +154,24 @@ export const AgentComposer = ({
 				)
 			: files.map((name) => ({ name, description: "" }));
 	const visible = Boolean(trigger);
+	const form = useRef<HTMLFormElement>(null);
+	useLayoutEffect(() => {
+		if (!visible) return;
+		const measure = () => {
+			const top = form.current?.getBoundingClientRect().top ?? 0;
+			form.current?.style.setProperty(
+				"--completion-height",
+				`${Math.max(0, top - (window.visualViewport?.offsetTop ?? 0) - 8)}px`,
+			);
+		};
+		measure();
+		window.visualViewport?.addEventListener("resize", measure);
+		window.addEventListener("resize", measure);
+		return () => {
+			window.visualViewport?.removeEventListener("resize", measure);
+			window.removeEventListener("resize", measure);
+		};
+	}, [visible]);
 	const update = (value: string, position: number) => {
 		change(value);
 		setCursor(position);
@@ -159,13 +190,12 @@ export const AgentComposer = ({
 		update(value, start + insertion.length);
 		setDismissed(true);
 	};
-	const selectedModel = model || options?.models.find((model) => model.isDefault)?.id || "";
 	const submit = () => {
-		if (sendable && !disabled && draft.trim())
-			send({ ...(selectedModel ? { model: selectedModel } : {}), permissions });
+		if (sendable && !disabled && draft.trim()) send({ permissions: "ask", ...selection });
 	};
 	return (
 		<form
+			ref={form}
 			className='agent-composer'
 			onSubmit={(event) => {
 				event.preventDefault();
@@ -259,42 +289,16 @@ export const AgentComposer = ({
 				}}
 			/>
 			<div className='agent-composer-footer'>
-				<div className='agent-composer-settings'>
-					{configurable && (
-						<>
-							<select
-								aria-label='Model'
-								value={selectedModel}
-								disabled={disabled || !sendable || !options}
-								onChange={(event) => setModel(event.target.value)}
-							>
-								{!selectedModel && <option value=''>Default model</option>}
-								{settings.model && !options?.models.some((value) => value.id === settings.model) && (
-									<option value={settings.model}>{settings.model}</option>
-								)}
-								{options?.models.map((model) => (
-									<option key={model.id} value={model.id}>
-										{model.name}
-									</option>
-								))}
-							</select>
-							<select
-								aria-label='Permissions'
-								value={permissions}
-								disabled={disabled || !sendable}
-								onChange={(event) => {
-									const value = event.target.value;
-									if (value === "ask" || value === "approve-for-me" || value === "full-access")
-										setPermissions(value);
-								}}
-							>
-								<option value='approve-for-me'>Approve for me</option>
-								<option value='ask'>Ask</option>
-								<option value='full-access'>Full access</option>
-							</select>
-						</>
-					)}
-				</div>
+				{configurable ? (
+					<ExecutionSettings
+						settings={selection}
+						options={options}
+						disabled={disabled || settingsDisabled}
+						change={selectSettings}
+					/>
+				) : (
+					<div />
+				)}
 				<div className='agent-composer-actions'>
 					{contextWindow && <ContextWindow {...contextWindow} />}
 					<button

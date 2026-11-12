@@ -73,7 +73,13 @@ const setup = async (page: Page, initialItems: AgentView["items"] = []) => {
 					return route.fulfill({
 						json: {
 							models: [
-								{ id: "test-model", name: "Test model", isDefault: true },
+								{
+									id: "test-model",
+									name: "Test model",
+									isDefault: true,
+									supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }],
+									defaultReasoningEffort: "high",
+								},
 								{ id: "other-model", name: "Other model", isDefault: false },
 							],
 							skills: [
@@ -186,6 +192,22 @@ test("default model can replace an explicit model and completion dismisses witho
 	const request = page.waitForRequest((request) => request.url().endsWith("/messages"));
 	await message.press("Enter");
 	expect((await request).postDataJSON()).toMatchObject({ model: "test-model", permissions: "ask" });
+});
+
+test("standalone thinking uses catalog levels and resets on incompatible model changes", async ({ page }) => {
+	const fixture = await setup(page);
+	await fixture.create();
+	const thinking = page.getByRole("combobox", { name: "Thinking level", exact: true });
+	await thinking.selectOption("high");
+	await page.getByRole("combobox", { name: "Model", exact: true }).selectOption("other-model");
+	await expect(thinking).toHaveValue("");
+	await page.getByRole("combobox", { name: "Model", exact: true }).selectOption("");
+	await thinking.selectOption("high");
+	await page.getByRole("textbox", { name: "Message", exact: true }).fill("Think carefully");
+	const request = page.waitForRequest((request) => request.url().endsWith("/messages"));
+	await page.getByRole("button", { name: "Send message", exact: true }).click();
+	expect((await request).postDataJSON()).toMatchObject({ reasoningEffort: "high" });
+	expect((await request).postDataJSON()).not.toHaveProperty("model");
 });
 
 test("consecutive tools share a collapsed group with statuses and agent messages have no bubbles", async ({ page }) => {

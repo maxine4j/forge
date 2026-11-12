@@ -41,7 +41,7 @@ export class HttpApplication implements IHttpApplication {
 					ctx.body = { error: err.code };
 				} else if (err instanceof TicketError) {
 					ctx.status =
-						err.code === "invalid-request"
+						err.code === "invalid-request" || err.code === "unsupported-settings"
 							? 400
 							: err.code === "ticket-not-found"
 								? 404

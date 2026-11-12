@@ -25,13 +25,18 @@ export class AgentRouter {
 	) {}
 	create(): Router<{ actor: Actor }> {
 		const router = new Router<{ actor: Actor }>();
+		router.get("/api/projects/:projectId/model-options", async (ctx) => {
+			ctx.body = agentOptionsSchema.parse(
+				await this.service.projectOptions(ctx.state.actor, ctx.params["projectId"]!),
+			);
+		});
 		router.use(async (ctx, next) => {
 			try {
 				await next();
 			} catch (error) {
 				if (!(error instanceof AgentError)) throw error;
 				ctx.status =
-					error.code === "invalid-request"
+					error.code === "invalid-request" || error.code === "unsupported-settings"
 						? 400
 						: error.code === "agent-not-found"
 							? 404

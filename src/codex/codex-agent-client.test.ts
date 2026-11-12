@@ -220,6 +220,36 @@ test("steering uses the pinned active-turn protocol without starting or reviving
 	expect(rpc.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(1);
 });
 
+test("ticket steering resolves structured skills without replacing active settings", async () => {
+	const { client, rpc } = setup();
+	const id = await client.start("/data/worktrees/one");
+	await client.send(id, "/data/worktrees/one", "Implement", {
+		model: "catalog",
+		reasoningEffort: "high",
+		permissions: "full-access",
+	});
+	rpc.mockResolvedValueOnce({
+		data: [
+			{
+				cwd: "/data/worktrees/one",
+				skills: [{ name: "review", description: "Review", path: "/skills/review/SKILL.md", enabled: true }],
+				errors: [],
+			},
+		],
+	});
+	rpc.mockResolvedValueOnce({ turnId: "turn-1" });
+	await client.steer(id, "turn-1", "$review tests", "/data/worktrees/one");
+	expect(rpc).toHaveBeenLastCalledWith("turn/steer", {
+		threadId: id,
+		expectedTurnId: "turn-1",
+		input: [
+			{ type: "text", text: "$review tests", text_elements: [] },
+			{ type: "skill", name: "review", path: "/skills/review/SKILL.md" },
+		],
+	});
+	expect(rpc.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(1);
+});
+
 test("steering failures are never replayed and do not create activity or change turn identity", async () => {
 	const { client, rpc } = setup();
 	const id = await client.start("/data/worktrees/one");
@@ -266,7 +296,10 @@ test("planning uses native collaboration mode and captures only a completed plan
 	expect(rpc).toHaveBeenLastCalledWith(
 		"turn/start",
 		expect.objectContaining({
-			collaborationMode: { mode: "plan", settings: { model: "runtime-default", developer_instructions: null } },
+			collaborationMode: {
+				mode: "plan",
+				settings: { model: "runtime-default", reasoning_effort: null, developer_instructions: null },
+			},
 		}),
 	);
 	notify("item/plan/delta", { threadId: id, turnId: "turn-1", itemId: "plan", delta: "Partial" });
@@ -377,6 +410,43 @@ test("an interrupted turn stops unfinished tool animations, including reloaded h
 	rpc.mockResolvedValueOnce({ data: [{ id: "turn", status: "interrupted", items: [item] }], nextCursor: null });
 	rpc.mockResolvedValueOnce({ data: [{ turnId: "turn", item }], nextCursor: null });
 	expect((await client.resume(id, "/data/worktrees/one")).items[0]).toMatchObject({ status: "interrupted" });
+});
+
+test("ticket planning sends thinking, permissions and structured skills", async () => {
+	const { client, rpc } = setup();
+	const id = await client.start("/data/worktrees/one");
+	rpc.mockResolvedValueOnce({
+		data: [
+			{
+				cwd: "/data/worktrees/one",
+				skills: [{ name: "review", description: "Review", path: "/skills/review/SKILL.md", enabled: true }],
+				errors: [],
+			},
+		],
+	});
+	await client.send(
+		id,
+		"/data/worktrees/one",
+		"$review ticket",
+		{ model: "catalog", reasoningEffort: "high", permissions: "full-access" },
+		{ projectId: "project", ticketId: "FORGE-1", phase: "planning" },
+	);
+	expect(rpc).toHaveBeenLastCalledWith(
+		"turn/start",
+		expect.objectContaining({
+			model: "catalog",
+			effort: "high",
+			approvalPolicy: "never",
+			collaborationMode: {
+				mode: "plan",
+				settings: { model: "catalog", reasoning_effort: "high", developer_instructions: null },
+			},
+			input: [
+				{ type: "text", text: "$review ticket", text_elements: [] },
+				{ type: "skill", name: "review", path: "/skills/review/SKILL.md" },
+			],
+		}),
+	);
 });
 
 test("explicit skills resolve from the worktree catalog and are supplied as structured inputs", async () => {

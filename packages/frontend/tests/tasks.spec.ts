@@ -6,6 +6,19 @@ const createdAt = "2026-11-03T00:00:00.000Z";
 const setup = async (page: Page, crowded = false, agentic = false, review = false) => {
 	const threadId = "123e4567-e89b-42d3-a456-426614174010";
 	let messages = 0;
+	const modelOptions = {
+		models: [
+			{
+				id: "test-model",
+				name: "Test model",
+				isDefault: true,
+				supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }],
+				defaultReasoningEffort: "high",
+			},
+			{ id: "other-model", name: "Other model", isDefault: false, supportedReasoningEfforts: [] },
+		],
+		skills: [{ name: "review", description: "Review changes" }],
+	};
 	let approved = false;
 	let boardSettings = { dispatch: "running", maxAgents: 3 };
 	let stopRequests = 0;
@@ -17,6 +30,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		description: string;
 		status: string;
 		createdAt: string;
+		executionSettings?: import("@forge/contracts/agents").AgentSettings;
 		needsAttention?: true;
 		agentStatus?: "queued" | "working";
 	}[] = [
@@ -45,6 +59,14 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		async (route) => {
 			const path = new URL(route.request().url()).pathname;
 			const method = route.request().method();
+			if (path.endsWith("/model-options") || path.endsWith("/options"))
+				return route.fulfill({ json: modelOptions });
+			if (path.endsWith("/files")) return route.fulfill({ json: ["src/main.ts", "README.md"] });
+			if (path.startsWith("/api/tickets/") && path.endsWith("/settings")) {
+				const ticket = tickets.find((value) => value.id === path.split("/")[3])!;
+				ticket.executionSettings = route.request().postDataJSON();
+				return route.fulfill({ json: ticket });
+			}
 			if (path === "/api/board/settings") {
 				if (method === "PATCH") boardSettings = { ...boardSettings, ...route.request().postDataJSON() };
 				return route.fulfill({ json: boardSettings });
@@ -212,6 +234,57 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		},
 	};
 };
+
+test("Backlog execution settings save before moving to Ready and survive reopening", async ({ page }) => {
+	await setup(page);
+	const open = page.getByRole("button", { name: "FORGE-1 First task", exact: true });
+	await open.click();
+	const panel = page.getByRole("dialog");
+	await panel.getByRole("combobox", { name: "Model", exact: true }).selectOption("test-model");
+	await panel.getByRole("combobox", { name: "Thinking level", exact: true }).selectOption("high");
+	await panel.getByRole("combobox", { name: "Permissions", exact: true }).selectOption("approve-for-me");
+	await panel.getByRole("combobox", { name: "Status", exact: true }).selectOption("todo");
+	await panel.getByRole("button", { name: "Close ticket" }).click();
+	await open.click();
+	await expect(panel.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("test-model");
+	await expect(panel.getByRole("combobox", { name: "Thinking level", exact: true })).toHaveValue("high");
+});
+
+test("ticket Details and chat share settings and support skill and file completion", async ({ page }) => {
+	await setup(page, false, true);
+	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	const panel = page.getByRole("dialog");
+	await panel.getByRole("combobox", { name: "Thinking level", exact: true }).selectOption("high");
+	await panel.getByRole("tab", { name: "Details", exact: true }).click();
+	await expect(panel.getByRole("combobox", { name: "Thinking level", exact: true })).toHaveValue("high");
+	await panel.getByRole("combobox", { name: "Model", exact: true }).selectOption("other-model");
+	await panel.getByRole("tab", { name: "Chat", exact: true }).click();
+	await expect(panel.getByRole("combobox", { name: "Thinking level", exact: true })).toHaveValue("");
+	const message = panel.getByRole("textbox", { name: "Message", exact: true });
+	await message.fill("Use $rev");
+	await panel.getByRole("option", { name: /review.*Review changes/ }).click();
+	await expect(message).toHaveValue("Use $review ");
+	await message.press("@");
+	await expect(panel.getByRole("option", { name: "src/main.ts", exact: true })).toBeVisible();
+	await message.press("Tab");
+	await expect(message).toHaveValue("Use $review @src/main.ts ");
+	let releaseSave = () => {};
+	const pendingSave = new Promise<void>((resolve) => {
+		releaseSave = resolve;
+	});
+	await page.route("**/api/tickets/FORGE-1/settings", async (route) => {
+		await pendingSave;
+		await route.fulfill({ status: 400, json: { error: "unsupported-settings" } });
+	});
+	await panel.getByRole("combobox", { name: "Model", exact: true }).selectOption("test-model");
+	await expect(panel.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
+	releaseSave();
+	await expect(panel.getByRole("alert")).toContainText("selected model or thinking level is unavailable");
+	await expect(message).toHaveValue("Use $review @src/main.ts ");
+	await panel.getByRole("tab", { name: "Details", exact: true }).click();
+	await panel.getByRole("tab", { name: "Chat", exact: true }).click();
+	await expect(message).toHaveValue("Use $review @src/main.ts ");
+});
 
 test("ticket archive requires confirmation and removes the card only after success", async ({ page }) => {
 	const fixture = await setup(page);
@@ -458,6 +531,12 @@ for (const size of [
 		const panel = page.getByRole("dialog");
 		await panel.getByRole("tab", { name: "Chat", exact: true }).click();
 		await expect(panel.getByLabel("Message", { exact: true })).toBeVisible();
+		if (size.width === 390) {
+			const timeline = await panel.locator(".agent-messages").boundingBox();
+			const composerTop = (await panel.locator(".agent-composer").boundingBox())!.y;
+			const panelTop = (await panel.boundingBox())!.y;
+			expect(timeline!.height / (composerTop - panelTop)).toBeGreaterThanOrEqual(0.6);
+		}
 		await expect(
 			panel.getByText("Planning message 0: implement search with tests.", { exact: true }),
 		).toBeAttached();
@@ -500,6 +579,7 @@ test("ticket message drafts survive closing and reopening", async ({ page }) => 
 test("combined chat has one set of live execution controls", async ({ page }) => {
 	await setup(page, false, true, true);
 	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	await expect(page.getByText("Applies to next turn", { exact: true })).toBeVisible();
 	await expect(page.getByRole("button", { name: "Interrupt", exact: true })).toHaveCount(1);
 	await expect(page.getByRole("tab", { name: "Planning history", exact: true })).toHaveCount(0);
 	await expect(page.getByRole("button", { name: "Allow once", exact: true })).toHaveCount(1);

@@ -1,3 +1,4 @@
+import { agentSettingsSchema, type AgentSettings } from "@forge/contracts/agents";
 import {
 	createTicketSchema,
 	ticketSchema,
@@ -5,16 +6,24 @@ import {
 	type MoveTicket,
 	type Ticket,
 } from "@forge/contracts/tickets";
+import { z } from "zod";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
 import { TicketError } from "./errors.ts";
 
-const columns = "id, projectId, title, description, status, createdAt";
+const columns = "id, projectId, title, description, status, createdAt, executionSettings";
+const settingsColumn = z
+	.string()
+	.nullable()
+	.transform((value) => (value === null ? undefined : agentSettingsSchema.parse(JSON.parse(value))));
+const readTicketSchema = ticketSchema.extend({ executionSettings: settingsColumn });
 const ticketRowSchema = ticketSchema.extend({
+	executionSettings: settingsColumn,
 	archivedAt: ticketSchema.shape.archivedAt.nullable(),
 });
 const costTicketRowSchema = ticketRowSchema.pick({ id: true, title: true, archivedAt: true });
 export interface ITicketStore {
+	updateSettings(id: string, settings: AgentSettings): Promise<void>;
 	/** Allocates an immutable globally increasing key; at most 1000 active tickets per project. */
 	insert(projectId: string, input: CreateTicket, createdAt: string): Promise<Ticket>;
 	get(id: string): Promise<Ticket | undefined>;
@@ -37,6 +46,10 @@ export class TicketStore implements ITicketStore {
 				"SELECT name FROM pragma_table_info('tickets') WHERE name='archivedAt'",
 			);
 			if (!archiveColumn.length) await this.database.run("ALTER TABLE tickets ADD COLUMN archivedAt TEXT");
+			const settings = await this.database.all(
+				"SELECT name FROM pragma_table_info('tickets') WHERE name='executionSettings'",
+			);
+			if (!settings.length) await this.database.run("ALTER TABLE tickets ADD COLUMN executionSettings TEXT");
 			await this.database.run("CREATE INDEX IF NOT EXISTS tickets_board ON tickets(projectId, status, position)");
 		});
 	}
@@ -45,10 +58,18 @@ export class TicketStore implements ITicketStore {
 			const fields = createTicketSchema.parse(input);
 			ticketSchema.pick({ projectId: true, createdAt: true }).parse({ projectId, createdAt });
 			const rows = await this.database.all(
-				`INSERT INTO tickets(projectId,title,description,createdAt,position) SELECT ?,?,?,?,COALESCE((SELECT MAX(position)+1 FROM tickets WHERE projectId=? AND status='backlog' AND archivedAt IS NULL),1) WHERE (SELECT COUNT(*) FROM tickets WHERE projectId=? AND archivedAt IS NULL) < 1000 RETURNING ${columns}`,
-				[projectId, fields.title, fields.description, createdAt, projectId, projectId],
+				`INSERT INTO tickets(projectId,title,description,createdAt,executionSettings,position) SELECT ?,?,?,?,?,COALESCE((SELECT MAX(position)+1 FROM tickets WHERE projectId=? AND status='backlog' AND archivedAt IS NULL),1) WHERE (SELECT COUNT(*) FROM tickets WHERE projectId=? AND archivedAt IS NULL) < 1000 RETURNING ${columns}`,
+				[
+					projectId,
+					fields.title,
+					fields.description,
+					createdAt,
+					fields.executionSettings ? JSON.stringify(fields.executionSettings) : null,
+					projectId,
+					projectId,
+				],
 			);
-			return ticketSchema.parse(rows.at(0));
+			return readTicketSchema.parse(rows.at(0));
 		});
 	}
 	async get(id: string): Promise<Ticket | undefined> {
@@ -66,7 +87,7 @@ export class TicketStore implements ITicketStore {
 					`SELECT ${columns} FROM tickets WHERE projectId=? AND archivedAt IS NULL ORDER BY position,number`,
 					[projectId],
 				)
-			).map((row) => ticketSchema.parse(row)),
+			).map((row) => readTicketSchema.parse(row)),
 		);
 	}
 	async listForCost(projectId: string): Promise<{ id: string; title: string; archivedAt?: string }[]> {
@@ -102,6 +123,17 @@ export class TicketStore implements ITicketStore {
 				(await this.database.run("UPDATE tickets SET title=?,description=? WHERE id=?", [
 					fields.title,
 					fields.description,
+					id,
+				])) !== 1
+			)
+				throw new TicketError("ticket-not-found");
+		});
+	}
+	async updateSettings(id: string, settings: AgentSettings): Promise<void> {
+		await this.guard(async () => {
+			if (
+				(await this.database.run("UPDATE tickets SET executionSettings=? WHERE id=?", [
+					JSON.stringify(agentSettingsSchema.parse(settings)),
 					id,
 				])) !== 1
 			)

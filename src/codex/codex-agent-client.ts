@@ -24,10 +24,10 @@ export interface ICodexAgentClient {
 	loadHistory(id: string): Promise<AgentRuntimeView>;
 	read(id: string): AgentRuntimeView;
 	send(id: string, path: string, text: string, settings?: AgentSettings, usage?: UsageScope): Promise<void>;
-	options(path: string): Promise<AgentOptions>;
+	options(path?: string): Promise<AgentOptions>;
 	files(path: string, query: string): Promise<string[]>;
 	interrupt(id: string, turnId: string): Promise<void>;
-	steer(id: string, turnId: string, text: string): Promise<void>;
+	steer(id: string, turnId: string, text: string, path?: string): Promise<void>;
 	reply(id: string, input: AgentReply): void;
 	subscribe(listener: (id: string) => void): () => void;
 }
@@ -39,6 +39,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 	private readonly revisions = new Map<string, number>();
 	private readonly resuming = new Set<string>();
 	private readonly models = new Map<string, string>();
+	private defaultModel: string | undefined;
 	private readonly creations = new Map<object, number>();
 	private readonly settled = new Set<string>();
 	private readonly initialEpoch: number;
@@ -213,7 +214,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 		if (!view) throw new AgentError("agent-unavailable");
 		return structuredClone(view);
 	}
-	async options(path: string): Promise<AgentOptions> {
+	async options(path?: string): Promise<AgentOptions> {
 		return this.guard(async () => {
 			await this.connection.initialize();
 			const models: AgentOptions["models"] = [];
@@ -227,6 +228,10 @@ export class CodexAgentClient implements ICodexAgentClient {
 								model: z.string().min(1).max(256),
 								displayName: z.string().max(256),
 								isDefault: z.boolean(),
+								supportedReasoningEfforts: z
+									.array(z.object({ reasoningEffort: z.string().min(1), description: z.string() }))
+									.optional(),
+								defaultReasoningEffort: z.string().min(1).optional(),
 							}),
 						),
 						nextCursor: z.string().nullable(),
@@ -237,6 +242,8 @@ export class CodexAgentClient implements ICodexAgentClient {
 						id: model.model,
 						name: model.displayName,
 						isDefault: model.isDefault,
+						supportedReasoningEfforts: model.supportedReasoningEfforts,
+						defaultReasoningEffort: model.defaultReasoningEffort,
 					})),
 				);
 				if (
@@ -247,7 +254,8 @@ export class CodexAgentClient implements ICodexAgentClient {
 					throw new Error("Invalid model pagination");
 				cursor = page.nextCursor ?? undefined;
 			} while (cursor);
-			const skills = await this.skills(path);
+			this.defaultModel = models.find((model) => model.isDefault)?.id;
+			const skills = path ? await this.skills(path) : [];
 			return { models, skills: skills.map(({ name, description }) => ({ name, description })) };
 		});
 	}
@@ -280,11 +288,10 @@ export class CodexAgentClient implements ICodexAgentClient {
 			const view = this.views.get(id);
 			if (!view || ["running", "waiting", "uncertain"].includes(view.status))
 				throw new AgentError("agent-conflict");
-			const selectedSkills =
-				!usage?.ticketId && /(?:^|\s)\$[\w-]+/.test(text)
-					? (await this.skills(path)).filter((skill) => text.split(/\s+/).includes(`$${skill.name}`))
-					: [];
-			const model = settings?.model ?? this.models.get(id);
+			const selectedSkills = /(?:^|\s)\$[\w-]+/.test(text)
+				? (await this.skills(path)).filter((skill) => text.split(/\s+/).includes(`$${skill.name}`))
+				: [];
+			const model = settings?.model ?? this.defaultModel ?? this.models.get(id);
 			if (usage?.phase === "planning" && !model) throw new AgentError("agent-unavailable");
 			view.status = "running";
 			this.settled.delete(id);
@@ -297,11 +304,21 @@ export class CodexAgentClient implements ICodexAgentClient {
 						threadId: id,
 						cwd: path,
 						...(usage?.phase === "planning"
-							? { collaborationMode: { mode: "plan", settings: { model, developer_instructions: null } } }
+							? {
+									collaborationMode: {
+										mode: "plan",
+										settings: {
+											model,
+											reasoning_effort: settings?.reasoningEffort ?? null,
+											developer_instructions: null,
+										},
+									},
+								}
 							: {}),
 						...(settings
 							? {
-									...(settings.model ? { model: settings.model } : {}),
+									...(model ? { model } : {}),
+									effort: settings.reasoningEffort ?? null,
 									approvalPolicy: settings.permissions === "full-access" ? "never" : "on-request",
 									approvalsReviewer:
 										settings.permissions === "approve-for-me" ? "auto_review" : "user",
@@ -325,16 +342,23 @@ export class CodexAgentClient implements ICodexAgentClient {
 			}
 		});
 	}
-	async steer(id: string, turnId: string, text: string): Promise<void> {
+	async steer(id: string, turnId: string, text: string, path?: string): Promise<void> {
 		await this.guard(async () => {
 			const view = this.views.get(id);
 			if (!view || view.status !== "running" || view.turnId !== turnId || view.requests.length)
 				throw new AgentError("agent-conflict");
+			const skills =
+				path && /(?:^|\s)\$[\w-]+/.test(text)
+					? (await this.skills(path)).filter((skill) => text.split(/\s+/).includes(`$${skill.name}`))
+					: [];
 			const result = z.object({ turnId: z.string() }).parse(
 				await this.connection.request("turn/steer", {
 					threadId: id,
 					expectedTurnId: turnId,
-					input: [{ type: "text", text, text_elements: [] }],
+					input: [
+						{ type: "text", text, text_elements: [] },
+						...skills.map(({ name, path }) => ({ type: "skill", name, path })),
+					],
 				}),
 			);
 			if (result.turnId !== turnId) throw new AgentError("agent-conflict");

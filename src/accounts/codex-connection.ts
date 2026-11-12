@@ -112,10 +112,15 @@ const methods = new Map<string, z.ZodType>([
 			threadId: z.string().min(1),
 			cwd: z.string().min(1),
 			model: z.string().min(1).max(256).optional(),
+			effort: z.string().min(1).max(256).nullable().optional(),
 			collaborationMode: z
 				.strictObject({
 					mode: z.literal("plan"),
-					settings: z.strictObject({ model: z.string().min(1).max(256), developer_instructions: z.null() }),
+					settings: z.strictObject({
+						model: z.string().min(1).max(256),
+						reasoning_effort: z.string().min(1).max(256).nullable().optional(),
+						developer_instructions: z.null(),
+					}),
 				})
 				.optional(),
 			approvalPolicy: z.enum(["on-request", "never"]).optional(),
@@ -143,13 +148,17 @@ const methods = new Map<string, z.ZodType>([
 			expectedTurnId: z.string().min(1).max(256),
 			input: z
 				.array(
-					z.strictObject({
-						type: z.literal("text"),
-						text: z.string().min(1).max(8000),
-						text_elements: z.array(z.never()),
-					}),
+					z.union([
+						z.strictObject({
+							type: z.literal("text"),
+							text: z.string().min(1).max(8000),
+							text_elements: z.array(z.never()),
+						}),
+						z.strictObject({ type: z.literal("skill"), name: z.string().min(1), path: z.string().min(1) }),
+					]),
 				)
-				.length(1),
+				.min(1)
+				.max(101),
 		}),
 	],
 ]);

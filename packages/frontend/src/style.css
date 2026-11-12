@@ -447,7 +447,7 @@
 	bottom: calc(100% + 8px);
 	left: 0;
 	right: 0;
-	max-height: min(300px, 35dvh);
+	max-height: min(300px, var(--completion-height, 35dvh));
 	overflow-y: auto;
 	border: 1px solid #41424a;
 	border-radius: 12px;
@@ -468,6 +468,8 @@
 	color: #858791;
 }
 .agent-completions [role="option"] {
+	min-height: 44px;
+	touch-action: manipulation;
 	display: grid;
 	gap: 2px;
 	padding: 8px 10px;
@@ -1012,6 +1014,47 @@
 		width: 100vw;
 		border: 0;
 		padding: 8px;
+		gap: 4px;
+	}
+	.ticket-details-heading {
+		position: relative;
+		align-items: flex-start;
+	}
+	.ticket-details-heading > div:first-child {
+		width: 100%;
+	}
+	.ticket-details-heading h2 {
+		font-size: 14px;
+		line-height: 28px;
+		padding-right: 80px;
+	}
+	.ticket-details-actions {
+		position: absolute;
+		right: 0;
+		top: 0;
+	}
+	.ticket-details-actions button {
+		padding: 4px 8px;
+		min-height: 28px;
+	}
+	.ticket-details-heading p {
+		font-size: 13px;
+		line-height: 20px;
+	}
+	.ticket-details-toolbar label {
+		gap: 4px;
+	}
+	.ticket-details-tabs button {
+		padding: 5px 10px;
+	}
+	.ticket-details .agent-composer-settings {
+		gap: 2px;
+		flex-wrap: wrap;
+	}
+	.ticket-details .agent-composer-settings select {
+		max-width: 120px;
+		font-size: 11px;
+		padding: 3px;
 	}
 	.ticket-details .agent-composer textarea {
 		height: 48px;
@@ -1023,15 +1066,18 @@
 .ticket-dialog-heading {
 	margin-bottom: 20px;
 }
-.ticket-dialog label {
+.ticket-dialog:not(.ticket-details) label,
+.ticket-fields label {
 	display: grid;
 	gap: 8px;
 	margin-bottom: 16px;
 	font-size: 13px;
 }
-.ticket-dialog input,
-.ticket-dialog textarea,
-.ticket-dialog select {
+.ticket-dialog:not(.ticket-details) input,
+.ticket-dialog:not(.ticket-details) textarea,
+.ticket-dialog:not(.ticket-details) select,
+.ticket-fields input,
+.ticket-fields textarea {
 	width: 100%;
 	padding: 10px;
 	border: 1px solid #30363d;
@@ -1040,7 +1086,7 @@
 	color: #e6edf3;
 	font: inherit;
 }
-.ticket-dialog textarea {
+.ticket-fields textarea {
 	resize: vertical;
 }
 .ticket-dialog .ticket-status-label {

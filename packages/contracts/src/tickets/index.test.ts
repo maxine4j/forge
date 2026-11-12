@@ -1,10 +1,23 @@
 import { expect, test } from "vitest";
 
-import { createTicketSchema, moveTicketSchema, ticketSchema, ticketStatuses } from "./index.ts";
+import { createTicketSchema, updateTicketSchema, moveTicketSchema, ticketSchema, ticketStatuses } from "./index.ts";
 
 test("board exposes exactly four workflow stages", () => {
 	expect(ticketStatuses).toEqual(["backlog", "todo", "in-progress", "done"]);
 	expect(moveTicketSchema.safeParse({ status: "planning" }).success).toBe(false);
+});
+
+test("ticket execution settings are optional on creation and independent of scope edits", () => {
+	const input = {
+		title: "Ticket",
+		executionSettings: { model: "runtime-id", reasoningEffort: "high", permissions: "full-access" },
+	};
+	expect(createTicketSchema.parse(input)).toEqual({ ...input, description: "" });
+	expect(updateTicketSchema.safeParse(input).success).toBe(false);
+	expect(createTicketSchema.safeParse({ title: "Ticket", executionSettings: { reasoningEffort: "" } }).success).toBe(
+		false,
+	);
+	expect(createTicketSchema.parse({ title: "Ticket", executionSettings: {} }).executionSettings).toEqual({});
 });
 
 test("tickets have bounded plain fields, immutable keys and explicit manual moves", () => {

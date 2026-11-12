@@ -72,7 +72,14 @@ const setup = () => {
 		}),
 		steer: vi.fn(async (_id: string, _turnId: string, _text: string) => {}),
 		options: vi.fn(async () => ({
-			models: [{ id: "test-model", name: "Test model", isDefault: true }],
+			models: [
+				{
+					id: "test-model",
+					name: "Test model",
+					isDefault: true,
+					supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }],
+				},
+			],
 			skills: [],
 		})),
 		files: vi.fn(async () => ["src/main.ts"]),
@@ -229,7 +236,12 @@ test("ticket steering checks authorization, ownership and active turn without cl
 	await expect(f.service.steer(owner, thread.id, "turn", "   ")).rejects.toThrow("invalid-request");
 	const before = f.records.get(thread.id);
 	await f.service.steer(owner, thread.id, "turn", "Focus on tests");
-	expect(f.client.steer).toHaveBeenCalledWith(before!.codexId, "turn", "Focus on tests");
+	expect(f.client.steer).toHaveBeenCalledWith(
+		before!.codexId,
+		"turn",
+		"Focus on tests",
+		`/data/worktrees/${before!.workspaceId}`,
+	);
 	expect(f.records.get(thread.id)).toEqual(before);
 	expect(f.client.send).toHaveBeenCalledTimes(1);
 	vi.mocked(f.workspaces.resolve).mockResolvedValueOnce({
@@ -332,6 +344,31 @@ test("threads have independent verified worktrees and may execute concurrently; 
 	expect(JSON.stringify(await service.list(owner, projectId))).not.toContain("codex-");
 	await service.shutdown();
 });
+test("thinking validates against the runtime catalog before dispatch and persists with the thread", async () => {
+	const { service, client, records, workspaces } = setup();
+	const { thread } = await service.create(owner, projectId, "Thinking");
+	await service.projectOptions(owner, projectId);
+	expect(workspaces.resolve).not.toHaveBeenCalled();
+	await expect(service.projectOptions({ username: "other" }, projectId)).rejects.toThrow();
+	await expect(service.send(owner, thread.id, "Draft", { model: "invented" })).rejects.toThrow(
+		"unsupported-settings",
+	);
+	await expect(service.send(owner, thread.id, "Draft", { reasoningEffort: "invented" })).rejects.toThrow(
+		"unsupported-settings",
+	);
+	expect(client.start).not.toHaveBeenCalled();
+	await service.send(owner, thread.id, "Draft", { reasoningEffort: "high" });
+	expect(records.get(thread.id)?.reasoningEffort).toBe("high");
+	expect(client.send).toHaveBeenLastCalledWith(
+		expect.any(String),
+		expect.any(String),
+		"Draft",
+		expect.objectContaining({ reasoningEffort: "high" }),
+		expect.anything(),
+	);
+	await service.shutdown();
+});
+
 test("empty chats survive restart without depending on an unpersisted Codex thread", async () => {
 	const { service, client, records } = setup();
 	const { thread } = await service.create(owner, projectId, "Empty");

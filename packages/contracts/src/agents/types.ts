@@ -17,10 +17,17 @@ export interface AgentItem {
 }
 export interface AgentSettings {
 	model?: string;
+	reasoningEffort?: string;
 	permissions?: "ask" | "approve-for-me" | "full-access";
 }
 export interface AgentOptions {
-	models: { id: string; name: string; isDefault: boolean }[];
+	models: {
+		id: string;
+		name: string;
+		isDefault: boolean;
+		supportedReasoningEfforts?: { reasoningEffort: string; description: string }[];
+		defaultReasoningEffort?: string;
+	}[];
 	skills: { name: string; description: string }[];
 }
 export interface AgentQuestion {

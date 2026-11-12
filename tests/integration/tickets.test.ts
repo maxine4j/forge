@@ -45,6 +45,7 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		workflowStore,
 		store,
 		{
+			projectOptions: vi.fn(async () => ({ models: [], skills: [] })),
 			createTicketThread: vi.fn(),
 			dispatch: vi.fn(),
 			steer,
@@ -99,6 +100,12 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	);
 	const moved = await request(`tickets/${ticket.id}/move`, "POST", { status: "todo" });
 	expect(await moved.json()).toMatchObject({ title: "Edited", status: "todo" });
+	expect((await request(`tickets/${ticket.id}/settings`, "PATCH", { permissions: "full-access" })).status).toBe(200);
+	expect((await (await request(`tickets/${ticket.id}`)).json()).executionSettings).toEqual({
+		permissions: "full-access",
+	});
+	expect((await request(`tickets/${ticket.id}/settings`, "PATCH", { model: "invented" })).status).toBe(400);
+	expect((await request(`tickets/${ticket.id}/settings`, "PATCH", { reasoningEffort: "invented" })).status).toBe(400);
 	expect(await (await request(`tickets/${ticket.id}/workflow`)).json()).toMatchObject({
 		state: "queued",
 		phase: "planning",

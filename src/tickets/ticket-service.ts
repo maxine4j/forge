@@ -57,6 +57,8 @@ export class TicketService implements ITicketService {
 		if (!parsed.success) throw new TicketError("invalid-request");
 		return this.serialize(async () => {
 			await this.requireProject(projectId);
+			if (parsed.data.executionSettings)
+				await this.workflow.validateSettings(actor, projectId, parsed.data.executionSettings);
 			return this.store.insert(projectId, parsed.data, this.now().toISOString());
 		});
 	}
@@ -71,7 +73,7 @@ export class TicketService implements ITicketService {
 	async update(actor: Actor, id: string, input: CreateTicket): Promise<Ticket> {
 		this.access.assertOwner(actor);
 		const parsed = createTicketSchema.safeParse(input);
-		if (!parsed.success) throw new TicketError("invalid-request");
+		if (!parsed.success || parsed.data.executionSettings !== undefined) throw new TicketError("invalid-request");
 		return this.serialize(async () => {
 			const ticket = await this.get(actor, id);
 			if (ticket.archivedAt || ticket.status !== "backlog") throw new TicketError("ticket-conflict");

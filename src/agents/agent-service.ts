@@ -30,6 +30,7 @@ export interface IAgentWorkspaces {
 	tree(actor: Actor, id: string, path: string): Promise<WorkspaceTree>;
 }
 export interface IAgentService {
+	projectOptions(actor: Actor, projectId: string): Promise<AgentOptions>;
 	/** Owner-only. Creates a dedicated workspace; Codex identifiers stay private. Throws AgentError. */
 	create(actor: Actor, projectId: string, title: string): Promise<AgentView>;
 	list(actor: Actor, projectId: string): Promise<AgentThread[]>;
@@ -44,6 +45,7 @@ export interface IAgentService {
 	shutdown(): Promise<void>;
 }
 export interface ITicketAgents {
+	projectOptions(actor: Actor, projectId: string): Promise<AgentOptions>;
 	steer(actor: Actor, id: string, turnId: string, text: string): Promise<AgentView>;
 	createTicketThread(
 		actor: Actor,
@@ -58,6 +60,7 @@ export interface ITicketAgents {
 		text: string,
 		ticket: TicketUsageScope,
 		allowed?: () => boolean,
+		settings?: AgentSettings,
 	): Promise<AgentView>;
 	plan(actor: Actor, id: string, turnId: string): Promise<string | undefined>;
 	get(actor: Actor, id: string): Promise<AgentView>;
@@ -124,6 +127,11 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		const location = await this.workspaces.resolve(actor, record.workspaceId);
 		return this.client.options(location.path);
 	}
+	async projectOptions(actor: Actor, projectId: string): Promise<AgentOptions> {
+		this.authorize(actor);
+		await this.projects.get(actor, projectId);
+		return this.client.options();
+	}
 	async files(actor: Actor, id: string, query: string): Promise<string[]> {
 		this.authorize(actor);
 		if (query.length > 500) throw new AgentError("invalid-request");
@@ -151,8 +159,9 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		text: string,
 		ticket?: TicketUsageScope,
 		allowed?: () => boolean,
+		settings?: AgentSettings,
 	): Promise<AgentView> {
-		return this.execute(actor, id, text, undefined, ticket, allowed);
+		return this.execute(actor, id, text, settings, ticket, allowed);
 	}
 	async steer(actor: Actor, id: string, turnId: string, text: string): Promise<AgentView> {
 		this.authorize(actor);
@@ -163,7 +172,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				throw new AgentError("agent-conflict");
 			const location = await this.workspaces.resolve(actor, record.workspaceId);
 			if (location.workspace.projectId !== record.projectId) throw new AgentError("agent-conflict");
-			await this.client.steer(record.codexId, turnId, text.trim());
+			await this.client.steer(record.codexId, turnId, text.trim(), location.path);
 			return this.sync(record);
 		});
 	}
@@ -200,7 +209,21 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			if (settings) {
 				const parsed = agentSettingsSchema.safeParse(settings);
 				if (!parsed.success) throw new AgentError("invalid-request");
-				Object.assign(record, parsed.data);
+				const options = await this.client.options();
+				const model = options.models.find((value) =>
+					parsed.data.model ? value.id === parsed.data.model : value.isDefault,
+				);
+				if (
+					(parsed.data.model && !model)
+					|| (parsed.data.reasoningEffort
+						&& !model?.supportedReasoningEfforts?.some(
+							(value) => value.reasoningEffort === parsed.data.reasoningEffort,
+						))
+				)
+					throw new AgentError("unsupported-settings");
+				record.model = parsed.data.model;
+				record.reasoningEffort = parsed.data.reasoningEffort;
+				record.permissions = parsed.data.permissions;
 			}
 			if (allowed && !allowed()) {
 				this.pool.observe(id, record.status);
@@ -235,7 +258,11 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 					record.codexId,
 					location.path,
 					input.data.text,
-					agentSettingsSchema.parse({ model: record.model, permissions: record.permissions }),
+					agentSettingsSchema.parse({
+						model: record.model,
+						reasoningEffort: record.reasoningEffort,
+						permissions: record.permissions,
+					}),
 					ticket
 						? { projectId: record.projectId, ...ticket }
 						: record.managed

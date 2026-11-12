@@ -1,4 +1,6 @@
 import type { AgentView } from "@forge/contracts/agents";
+import { agentOptionsSchema, type AgentOptions, type AgentSettings } from "@forge/contracts/agents";
+import { ticketSchema } from "@forge/contracts/tickets";
 import {
 	ticketWorkflowSchema,
 	type Ticket,
@@ -10,6 +12,7 @@ import {
 import { useEffect, useRef, useState, useId } from "react";
 
 import { Conversation } from "../agents/agent-chat.tsx";
+import { ExecutionSettings } from "../agents/execution-settings.tsx";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { TicketCost } from "./ticket-cost.tsx";
@@ -56,7 +59,47 @@ export const TicketDetails = ({
 	const [acting, setActing] = useState(false);
 	const [title, setTitle] = useState(ticket.title);
 	const [description, setDescription] = useState(ticket.description);
+	const settingsKey = JSON.stringify(ticket.executionSettings);
+	const [observedSettings, setObservedSettings] = useState(settingsKey);
+	const [savedSettings, setSavedSettings] = useState<AgentSettings>();
+	if (observedSettings !== settingsKey) {
+		setObservedSettings(settingsKey);
+		setSavedSettings(undefined);
+	}
+	const settings = savedSettings ?? ticket.executionSettings ?? {};
 	const [error, setError] = useState("");
+	const [options, setOptions] = useState<AgentOptions>();
+	const [savingSettings, setSavingSettings] = useState(false);
+	const [settingsError, setSettingsError] = useState("");
+	useEffect(() => {
+		let current = true;
+		void api
+			.read(`projects/${ticket.projectId}/model-options`, agentOptionsSchema)
+			.then((value) => {
+				if (current) setOptions(value);
+			})
+			.catch(() => {
+				if (current) setError("Models unavailable.");
+			});
+		return () => {
+			current = false;
+		};
+	}, [api, ticket.projectId]);
+	const changeSettings = (value: AgentSettings) => {
+		if (savingSettings) return;
+		setSettingsError("");
+		setSavingSettings(true);
+		void api
+			.read(`tickets/${ticket.id}/settings`, ticketSchema, "PATCH", value)
+			.then((updated) => {
+				setSavedSettings(updated.executionSettings ?? {});
+				refreshBoard();
+			})
+			.catch((err: unknown) =>
+				setSettingsError(err instanceof Error ? err.message : "Cannot save execution settings."),
+			)
+			.finally(() => setSavingSettings(false));
+	};
 	const [archiveError, setArchiveError] = useState("");
 	const [refresh] = useState(() => () => poller.current?.refresh());
 	useEffect(() => {
@@ -263,9 +306,9 @@ export const TicketDetails = ({
 					</button>
 				))}
 			</div>
-			{error && (
+			{(error || settingsError) && (
 				<p role='alert' className='error'>
-					{error}
+					{settingsError || error}
 				</p>
 			)}
 			{job?.state === "uncertain" && (
@@ -289,6 +332,12 @@ export const TicketDetails = ({
 				</button>
 			)}
 			<div className='ticket-fields' {...panel("details")}>
+				<ExecutionSettings
+					settings={settings}
+					options={options}
+					change={changeSettings}
+					disabled={savingSettings || ticket.status === "done"}
+				/>
 				<form
 					onSubmit={(event) => {
 						event.preventDefault();
@@ -326,6 +375,7 @@ export const TicketDetails = ({
 				</form>
 			</div>
 			<div className='ticket-chat' {...panel("chat")}>
+				{job?.state === "running" && <small role='status'>Applies to next turn</small>}
 				{currentId ? (
 					<Conversation
 						key={currentId}
@@ -336,7 +386,10 @@ export const TicketDetails = ({
 						changed={refresh}
 						selected={tab === "chat"}
 						messagePath={`tickets/${ticket.id}/messages`}
-						blocked={blocked}
+						executionSettings={settings}
+						settingsChanged={changeSettings}
+						settingsDisabled={savingSettings}
+						blocked={blocked || savingSettings}
 						steer={steering}
 						readOnly={ticket.status !== "in-progress" || (!job?.implementerId && job?.phase !== "planning")}
 						draftKey={`ticket:${ticket.id}`}

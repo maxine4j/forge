@@ -164,6 +164,25 @@ to idle/failed turns. Queued, dispatching and uncertain execution disable sendin
 with status text. Structured input and permission requests retain their dedicated
 reply controls. See the [agent protocol contract](agents.md#interactive-agents).
 
+### Ticket execution settings
+
+Tickets accept optional `executionSettings: {model?, reasoningEffort?, permissions?}`
+on creation and return the saved selection on reads. Owner-authorized
+`PATCH /api/tickets/:id/settings` replaces that selection independently of Backlog
+scope editing, with exact-origin checks. Settings are editable in Details before
+moving to Ready and in the shared chat composer. Changes save immediately and
+remain shared across polling, reopening and planner-to-implementer transitions.
+Done and archived tickets retain their settings but cannot change them.
+
+One selection applies across planning, implementation, feedback and rebase turns.
+The workflow snapshots it under dispatch coordination; changes during execution
+show “Applies to next turn” and cannot change active-turn steering or bypass stale
+turn checks. Default delegates to Codex; explicit settings are validated against
+the [runtime catalog](agents.md#interactive-agents). SQLite adds a nullable JSON
+settings column on upgrade; existing tickets keep their previous behavior until
+configured. Ticket chats use the shared composer and completion controls with a
+compact mobile header, a separately scrolling timeline and viewport-bounded popups.
+
 ### Ticket cost
 
 The account-wide [weekly budget capacity methodology](agents.md#weekly-budget-capacity)

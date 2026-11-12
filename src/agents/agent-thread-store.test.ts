@@ -39,6 +39,7 @@ test("persists thread identities and approvals; startup makes execution uncertai
 			title: "Chat",
 			status: "running" as const,
 			codexId: "codex-id",
+			reasoningEffort: "high",
 			turnId: "turn",
 			createdAt,
 			requests: [{ id: "request", kind: "file" as const, description: "Edit", questions: [] }],

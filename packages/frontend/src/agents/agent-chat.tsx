@@ -138,6 +138,9 @@ export const Conversation = ({
 	changed,
 	selected,
 	messagePath,
+	executionSettings,
+	settingsChanged,
+	settingsDisabled,
 	blocked = false,
 	readOnly = false,
 	drafts,
@@ -157,6 +160,9 @@ export const Conversation = ({
 	changed: () => void;
 	selected: boolean;
 	messagePath?: string;
+	executionSettings?: import("@forge/contracts/agents").AgentSettings;
+	settingsChanged?: (settings: import("@forge/contracts/agents").AgentSettings) => void;
+	settingsDisabled?: boolean;
 	blocked?: boolean;
 	readOnly?: boolean;
 	drafts?: Map<string, string>;
@@ -508,9 +514,12 @@ export const Conversation = ({
 					draft={draft}
 					disabled={busy || readOnly}
 					sendable={Boolean(sendable)}
-					settings={view.thread}
+					settings={executionSettings ?? view.thread}
+					settingsChanged={settingsChanged}
+					settingsDisabled={settingsDisabled}
+					completions={!readOnly}
 					contextWindow={messagePath ? view.contextWindow : undefined}
-					configurable={!messagePath && !readOnly}
+					configurable={!readOnly}
 					change={(value) => {
 						setDraft(value);
 						drafts?.set(draftKey, value);

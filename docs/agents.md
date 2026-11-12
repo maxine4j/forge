@@ -34,6 +34,22 @@ a reference, not the required transport lifecycle for Forge's continuous agent U
 
 ### Interactive agents
 
+Composers share the Codex theme and `$` skill / `@` file completion, including
+[ticket chats](tickets.md#agentic-ticket-board). Completion choices scroll within
+the space above the composer and support keyboard and touch selection. File and
+skill discovery uses the active agent's verified worktree; internal skill paths
+never enter browser responses. Explicit skills are resolved again at submission
+and sent as structured inputs, including ticket steering.
+
+Model options come from the installed runtime's catalog, including supported
+thinking levels and its default effort. Messages accept optional `reasoningEffort`,
+a nonempty catalog value; Default delegates to the runtime. Switching models clears
+an incompatible explicit effort. Standalone selections persist in existing SQLite
+thread JSON records; absent fields preserve existing behavior. Unsupported explicit
+model/effort combinations return `unsupported-settings` (400) and preserve drafts.
+`GET /api/projects/:projectId/model-options` reads the catalog without allocating a
+thread or worktree. Each endpoint rechecks owner access.
+
 The Agents tab and backend reuse the one private, pinned Codex `0.164.0` stdio
 process and existing persistent ChatGPT login.
 `AgentService` owns thread/workspace coordination, authorization and per-thread

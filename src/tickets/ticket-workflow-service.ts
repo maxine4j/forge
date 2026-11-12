@@ -1,4 +1,5 @@
 import { createLogger } from "@forge/backend-infrastructure/logger";
+import { agentSettingsSchema, type AgentSettings } from "@forge/contracts/agents";
 import type { BoardSettings, Ticket, MoveTicket, TicketWorkflow } from "@forge/contracts/tickets";
 
 import type { IAgentExecutionPool } from "../agents/agent-execution-pool.ts";
@@ -15,6 +16,8 @@ import type { ITicketWorkflowStore } from "./ticket-workflow-store.ts";
 import type { TicketWorkflowRecord } from "./types.ts";
 
 export interface ITicketWorkflowService {
+	validateSettings(actor: Actor, projectId: string, settings: AgentSettings): Promise<void>;
+	settings(actor: Actor, ticket: Ticket, settings: AgentSettings): Promise<void>;
 	/** Archives between scheduler operations. Active or unresolved execution and pending merges conflict. */
 	archive(actor: Actor, ticket: Ticket, archivedAt: string): Promise<void>;
 	move(actor: Actor, ticket: Ticket, input: MoveTicket): Promise<void>;
@@ -31,6 +34,34 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	private tail: Promise<unknown> = Promise.resolve();
 	private readonly settingUp = new Set<string>();
 	private readonly log = createLogger(TicketWorkflowService.name);
+	async validateSettings(actor: Actor, projectId: string, settings: AgentSettings): Promise<void> {
+		this.access.assertOwner(actor);
+		const parsed = agentSettingsSchema.safeParse(settings);
+		if (!parsed.success) throw new TicketError("invalid-request");
+		const options = await this.agents.projectOptions(actor, projectId);
+		const model = options.models.find((value) =>
+			parsed.data.model ? value.id === parsed.data.model : value.isDefault,
+		);
+		if (
+			(parsed.data.model && !model)
+			|| (parsed.data.reasoningEffort
+				&& !model?.supportedReasoningEfforts?.some(
+					(value) => value.reasoningEffort === parsed.data.reasoningEffort,
+				))
+		)
+			throw new TicketError("unsupported-settings");
+	}
+	async settings(actor: Actor, ticket: Ticket, settings: AgentSettings): Promise<void> {
+		this.access.assertOwner(actor);
+		const parsed = agentSettingsSchema.safeParse(settings);
+		if (!parsed.success) throw new TicketError("invalid-request");
+		await this.serialize(async () => {
+			const current = await this.tickets.get(ticket.id);
+			if (!current || current.archivedAt || current.status === "done") throw new TicketError("ticket-conflict");
+			await this.validateSettings(actor, ticket.projectId, parsed.data);
+			await this.tickets.updateSettings(ticket.id, parsed.data);
+		});
+	}
 	constructor(
 		private readonly store: ITicketWorkflowStore,
 		private readonly tickets: ITicketStore,
@@ -261,6 +292,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		return mode === "running" || (mode === "paused" && ticket.status === "in-progress");
 	}
 	private async dispatch(actor: Actor, ticket: Ticket, job: TicketWorkflowRecord): Promise<void> {
+		const settings = (await this.tickets.get(ticket.id))?.executionSettings;
 		const planning = job.phase === "planning";
 		let id = planning ? job.plannerId : job.implementerId;
 		let releaseReservation = false;
@@ -297,6 +329,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				this.prompts.build(ticket, job),
 				{ ticketId: ticket.id, phase: job.phase },
 				() => this.canDispatch(ticket),
+				settings,
 			);
 			job.state = "running";
 			job.turnId = view.thread.turnId;

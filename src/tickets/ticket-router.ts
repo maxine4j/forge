@@ -1,5 +1,7 @@
+import { agentSettingsSchema } from "@forge/contracts/agents";
 import {
 	createTicketSchema,
+	updateTicketSchema,
 	ticketMessageSchema,
 	approveTicketPlanSchema,
 	moveTicketSchema,
@@ -22,6 +24,13 @@ export class TicketRouter implements IHttpRouter {
 	) {}
 	create(): Router<{ actor: Actor }> {
 		const router = new Router<{ actor: Actor }>();
+		router.patch("/api/tickets/:id/settings", async (ctx) => {
+			const settings = agentSettingsSchema.safeParse(ctx.request.body);
+			if (!settings.success) throw new TicketError("invalid-request");
+			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);
+			await this.workflow.settings(ctx.state.actor, ticket, settings.data);
+			ctx.body = ticketSchema.parse(await this.service.get(ctx.state.actor, ticket.id));
+		});
 		router.get("/api/tickets/:id/workflow", async (ctx) => {
 			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);
 			ctx.body = ticketWorkflowSchema.parse(await this.workflow.get(ctx.state.actor, ticket.id));
@@ -66,7 +75,7 @@ export class TicketRouter implements IHttpRouter {
 			ctx.body = ticketSchema.parse(await this.service.get(ctx.state.actor, ctx.params["id"]!));
 		});
 		router.patch("/api/tickets/:id", async (ctx) => {
-			const input = createTicketSchema.safeParse(ctx.request.body);
+			const input = updateTicketSchema.safeParse(ctx.request.body);
 			if (!input.success) throw new TicketError("invalid-request");
 			ctx.body = ticketSchema.parse(await this.service.update(ctx.state.actor, ctx.params["id"]!, input.data));
 		});

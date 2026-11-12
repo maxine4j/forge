@@ -12,12 +12,28 @@ export const agentStatusSchema = z.enum([
 export const createAgentSchema = z.strictObject({ title: z.string().trim().min(1).max(120) });
 export const agentSettingsSchema = z.strictObject({
 	model: z.string().min(1).max(256).optional(),
+	reasoningEffort: z.string().min(1).max(256).optional(),
 	permissions: z.enum(["ask", "approve-for-me", "full-access"]).optional(),
 });
 export const agentMessageSchema = agentSettingsSchema.extend({ text: z.string().trim().min(1).max(8000) });
 export const agentOptionsSchema = z.strictObject({
 	models: z
-		.array(z.strictObject({ id: z.string().min(1).max(256), name: z.string().max(256), isDefault: z.boolean() }))
+		.array(
+			z.strictObject({
+				id: z.string().min(1).max(256),
+				name: z.string().max(256),
+				isDefault: z.boolean(),
+				supportedReasoningEfforts: z
+					.array(
+						z.strictObject({
+							reasoningEffort: z.string().min(1).max(256),
+							description: z.string().max(4000),
+						}),
+					)
+					.optional(),
+				defaultReasoningEffort: z.string().min(1).max(256).optional(),
+			}),
+		)
 		.max(500),
 	skills: z.array(z.strictObject({ name: z.string().min(1).max(256), description: z.string().max(4000) })).max(500),
 });

@@ -20,6 +20,8 @@ export class WorkspaceApi implements IWorkspaceApi {
 		if (!response.ok) {
 			const error = typeof value === "object" && value !== null && "error" in value ? value.error : undefined;
 			const messages: Record<string, string> = {
+				"unsupported-settings":
+					"The selected model or thinking level is unavailable. Choose a supported setting and retry. Your draft is preserved.",
 				"agent-capacity":
 					"All agent slots are occupied. Retry when an agent finishes. Your draft is preserved.",
 				"agent-not-found": "Chat no longer exists. Refresh the chat list.",

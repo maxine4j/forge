@@ -1,13 +1,16 @@
 import { z } from "zod";
 
+import { agentSettingsSchema } from "../agents/index.ts";
+
 export const ticketStatuses = ["backlog", "todo", "in-progress", "done"] as const;
 export const ticketStatusSchema = z.enum(ticketStatuses);
 export const ticketIdSchema = z.string().regex(/^FORGE-[1-9]\d{0,14}$/u);
 export const createTicketSchema = z.strictObject({
+	executionSettings: agentSettingsSchema.optional(),
 	title: z.string().trim().min(1).max(120),
 	description: z.string().max(4000).default(""),
 });
-export const updateTicketSchema = createTicketSchema;
+export const updateTicketSchema = createTicketSchema.omit({ executionSettings: true });
 export const moveTicketSchema = z.strictObject({ status: ticketStatusSchema, beforeId: ticketIdSchema.optional() });
 export const approveTicketPlanSchema = z.strictObject({ revision: z.number().int().positive() });
 export const ticketMessageSchema = z.strictObject({
@@ -15,6 +18,7 @@ export const ticketMessageSchema = z.strictObject({
 	expectedTurnId: z.string().min(1).max(256).optional(),
 });
 export const ticketSchema = z.strictObject({
+	executionSettings: agentSettingsSchema.optional(),
 	id: ticketIdSchema,
 	projectId: z.uuid(),
 	title: z.string().min(1).max(120),

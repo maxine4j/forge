@@ -18,6 +18,17 @@ const fixture = () => {
 	const plans = new Map<string, string>();
 	const pool = new AgentExecutionPool();
 	const agents = {
+		projectOptions: vi.fn(async () => ({
+			models: [
+				{
+					id: "test-model",
+					name: "Test",
+					isDefault: true,
+					supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }],
+				},
+			],
+			skills: [],
+		})),
 		steer: vi.fn<ITicketAgents["steer"]>(async (_actor, id) => structuredClone(views.get(id)!)),
 		createTicketThread: vi.fn<ITicketAgents["createTicketThread"]>(
 			async (_actor, projectId, title, workspaceId) => {
@@ -63,6 +74,9 @@ const fixture = () => {
 		}),
 	};
 	const ticketStore = {
+		updateSettings: vi.fn(async (id: string, settings: import("@forge/contracts/agents").AgentSettings) => {
+			tickets.get(id)!.executionSettings = structuredClone(settings);
+		}),
 		get: async (id: string) => structuredClone(tickets.get(id)),
 		list: vi.fn(),
 		insert: vi.fn(),
@@ -112,6 +126,33 @@ const fixture = () => {
 	};
 	return { service, jobs, tickets, views, pool, agents, merges, create, complete, wake, cleanup };
 };
+
+test("ticket settings validate before saving and each phase snapshots the current selection", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	const settings = { model: "test-model", reasoningEffort: "high", permissions: "full-access" } as const;
+	await expect(f.service.settings({ username: "other" }, ticket, settings)).rejects.toThrow();
+	await expect(f.service.settings(actor, ticket, { model: "invented" })).rejects.toThrow("unsupported-settings");
+	await expect(
+		f.service.settings(actor, ticket, { model: "test-model", reasoningEffort: "invented" }),
+	).rejects.toThrow("unsupported-settings");
+	await f.service.settings(actor, ticket, settings);
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	expect(f.agents.dispatch.mock.calls[0]?.[5]).toEqual(settings);
+	await f.service.settings(actor, ticket, {});
+	expect(f.agents.dispatch.mock.calls[0]?.[5]).toEqual(settings);
+	f.complete(f.jobs.get(ticket.id)!.plannerId!, "# Plan");
+	await f.service.tick(actor);
+	await f.service.approve(actor, f.tickets.get(ticket.id)!, 1);
+	await f.service.tick(actor);
+	expect(f.agents.dispatch.mock.calls[1]?.[5]).toEqual({});
+	await f.service.settings(actor, ticket, settings);
+	const job = f.jobs.get(ticket.id)!;
+	await f.service.message(actor, f.tickets.get(ticket.id)!, "Steer", job.turnId);
+	expect(f.agents.dispatch.mock.calls[1]?.[5]).toEqual({});
+	expect(f.agents.steer).toHaveBeenCalledWith(actor, job.implementerId, job.turnId, "Steer");
+});
 
 test("board summary maps execution and attention, checking only the current running agent", async () => {
 	const { service, jobs, create, agents } = fixture();
