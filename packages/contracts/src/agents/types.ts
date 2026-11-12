@@ -29,6 +29,8 @@ export interface AgentOptions {
 		defaultReasoningEffort?: string;
 	}[];
 	skills: { name: string; description: string }[];
+	defaultModel?: string;
+	defaultReasoningEffort?: string;
 }
 export interface AgentQuestion {
 	id: string;

@@ -5,6 +5,7 @@ import {
 	createAgentSchema,
 	agentMessageSchema,
 	agentSettingsSchema,
+	resolveAgentSettings,
 	type AgentSettings,
 	type AgentOptions,
 	type AgentThread,
@@ -21,7 +22,7 @@ import type { IProjectService } from "../projects/project-service.ts";
 import type { WorkspaceLocation } from "../workspaces/types.ts";
 import type { IAgentExecutionPool } from "./agent-execution-pool.ts";
 import type { IAgentThreadStore } from "./agent-thread-store.ts";
-import { AgentError } from "./errors.ts";
+import { AgentCatalogError, AgentError } from "./errors.ts";
 import type { AgentThreadRecord } from "./types.ts";
 export interface IAgentWorkspaces {
 	get(actor: Actor, id: string): Promise<Workspace>;
@@ -88,6 +89,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		private readonly generateId: () => string,
 		private readonly now: () => Date,
 		private readonly pool: IAgentExecutionPool,
+		private readonly defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = () => ({}),
 	) {
 		this.unsubscribe = client.subscribe((codexId) => {
 			const id = this.identities.get(codexId);
@@ -125,12 +127,12 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		this.authorize(actor);
 		const record = await this.require(id);
 		const location = await this.workspaces.resolve(actor, record.workspaceId);
-		return this.client.options(location.path);
+		return { ...(await this.client.options(location.path)), ...this.defaults() };
 	}
 	async projectOptions(actor: Actor, projectId: string): Promise<AgentOptions> {
 		this.authorize(actor);
 		await this.projects.get(actor, projectId);
-		return this.client.options();
+		return { ...(await this.client.options()), ...this.defaults() };
 	}
 	async files(actor: Actor, id: string, query: string): Promise<string[]> {
 		this.authorize(actor);
@@ -161,7 +163,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		allowed?: () => boolean,
 		settings?: AgentSettings,
 	): Promise<AgentView> {
-		return this.execute(actor, id, text, settings, ticket, allowed);
+		return this.execute(actor, id, text, settings ?? {}, ticket, allowed);
 	}
 	async steer(actor: Actor, id: string, turnId: string, text: string): Promise<AgentView> {
 		this.authorize(actor);
@@ -206,30 +208,31 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			const previousStatus = record.status;
 			if (["creating", "running", "waiting", "uncertain"].includes(record.status))
 				throw new AgentError("agent-conflict");
-			if (settings) {
-				const parsed = agentSettingsSchema.safeParse(settings);
-				if (!parsed.success) throw new AgentError("invalid-request");
-				const options = await this.client.options();
-				const model = options.models.find((value) =>
-					parsed.data.model ? value.id === parsed.data.model : value.isDefault,
-				);
-				if (
-					(parsed.data.model && !model)
-					|| (parsed.data.reasoningEffort
-						&& !model?.supportedReasoningEfforts?.some(
-							(value) => value.reasoningEffort === parsed.data.reasoningEffort,
-						))
-				)
-					throw new AgentError("unsupported-settings");
-				record.model = parsed.data.model;
-				record.reasoningEffort = parsed.data.reasoningEffort;
-				record.permissions = parsed.data.permissions;
+			const selection = agentSettingsSchema.safeParse(
+				settings ?? {
+					model: record.model,
+					reasoningEffort: record.reasoningEffort,
+					permissions: record.permissions,
+				},
+			);
+			if (!selection.success) throw new AgentError("invalid-request");
+			const catalog = await this.client.options().catch((cause: unknown) => {
+				this.pool.observe(id, previousStatus);
+				throw new AgentCatalogError(cause);
+			});
+			const resolved = resolveAgentSettings({ ...catalog, ...this.defaults() }, selection.data);
+			if (!resolved.supported) {
+				this.pool.observe(id, previousStatus);
+				throw new AgentError("unsupported-settings");
 			}
 			if (allowed && !allowed()) {
 				this.pool.observe(id, record.status);
 				throw new AgentError("agent-capacity");
 			}
 			this.pool.claim(id);
+			record.model = selection.data.model;
+			record.reasoningEffort = selection.data.reasoningEffort;
+			record.permissions = selection.data.permissions;
 			let contactedRuntime = false;
 			try {
 				const location = await this.workspaces.resolve(actor, record.workspaceId);
@@ -258,11 +261,11 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 					record.codexId,
 					location.path,
 					input.data.text,
-					agentSettingsSchema.parse({
-						model: record.model,
-						reasoningEffort: record.reasoningEffort,
-						permissions: record.permissions,
-					}),
+					{
+						model: resolved.model?.id,
+						reasoningEffort: resolved.reasoningEffort,
+						permissions: selection.data.permissions,
+					},
 					ticket
 						? { projectId: record.projectId, ...ticket }
 						: record.managed

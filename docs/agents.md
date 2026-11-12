@@ -43,9 +43,12 @@ and sent as structured inputs, including ticket steering.
 
 Model options come from the installed runtime's catalog, including supported
 thinking levels and its default effort. Messages accept optional `reasoningEffort`,
-a nonempty catalog value; Default delegates to the runtime. Switching models clears
-an incompatible explicit effort. Standalone selections persist in existing SQLite
-thread JSON records; absent fields preserve existing behavior. Unsupported explicit
+a nonempty catalog value. When a field is unset, each new turn inherits the
+[Forge Config](foundation.md#forge-settings) model and thinking defaults. An unavailable
+configured model falls back to Codex's default. Configured thinking applies to any
+selected model that supports it and falls back to Codex's thinking default otherwise.
+Switching models clears an incompatible explicit effort. Standalone selections
+persist in existing SQLite thread JSON records. Unsupported explicit
 model/effort combinations return `unsupported-settings` (400) and preserve drafts.
 `GET /api/projects/:projectId/model-options` reads the catalog without allocating a
 thread or worktree. Each endpoint rechecks owner access.

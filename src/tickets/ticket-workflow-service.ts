@@ -1,10 +1,10 @@
 import { createLogger } from "@forge/backend-infrastructure/logger";
-import { agentSettingsSchema, type AgentSettings } from "@forge/contracts/agents";
+import { agentSettingsSchema, resolveAgentSettings, type AgentSettings } from "@forge/contracts/agents";
 import type { BoardSettings, Ticket, MoveTicket, TicketWorkflow } from "@forge/contracts/tickets";
 
 import type { IAgentExecutionPool } from "../agents/agent-execution-pool.ts";
 import type { ITicketAgents } from "../agents/agent-service.ts";
-import { AgentError } from "../agents/errors.ts";
+import { AgentCatalogError, AgentError } from "../agents/errors.ts";
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
 import type { ITicketMergeClient } from "../workspaces/workspace-merge-client.ts";
@@ -39,17 +39,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		const parsed = agentSettingsSchema.safeParse(settings);
 		if (!parsed.success) throw new TicketError("invalid-request");
 		const options = await this.agents.projectOptions(actor, projectId);
-		const model = options.models.find((value) =>
-			parsed.data.model ? value.id === parsed.data.model : value.isDefault,
-		);
-		if (
-			(parsed.data.model && !model)
-			|| (parsed.data.reasoningEffort
-				&& !model?.supportedReasoningEfforts?.some(
-					(value) => value.reasoningEffort === parsed.data.reasoningEffort,
-				))
-		)
-			throw new TicketError("unsupported-settings");
+		if (!resolveAgentSettings(options, parsed.data).supported) throw new TicketError("unsupported-settings");
 	}
 	async settings(actor: Actor, ticket: Ticket, settings: AgentSettings): Promise<void> {
 		this.access.assertOwner(actor);
@@ -223,8 +213,11 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 						continue;
 					}
 					this.log.error({ err, ticketId: ticket.id }, "Ticket execution needs attention");
-					const state =
-						job.state === "queued" ? "setup-failed" : job.state === "dispatching" ? "uncertain" : "failed";
+					const setupFailed =
+						job.state === "queued"
+						|| err instanceof AgentCatalogError
+						|| (err instanceof AgentError && err.code === "unsupported-settings");
+					const state = setupFailed ? "setup-failed" : job.state === "dispatching" ? "uncertain" : "failed";
 					await this.store.save(
 						{ ...job, state },
 						ticket.status === "todo" ? { status: "in-progress" } : undefined,

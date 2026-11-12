@@ -50,6 +50,7 @@ export class WorkspaceApi implements IWorkspaceApi {
 					"This transition is not available. Wait for the current work or plan before retrying.",
 				"ticket-unavailable": "Tickets are unavailable. Retry or check the server logs.",
 				"invalid-request": "Check the supplied values.",
+				"settings-unavailable": "Forge settings are unavailable. Check the connection and retry.",
 				"workspace-not-found": "Project files no longer exist. Reopen the project.",
 				"workspace-conflict":
 					"The branch changed. Your drafts are preserved. Copy them before discarding drafts to reload the branch.",

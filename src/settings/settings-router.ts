@@ -1,3 +1,4 @@
+import { agentOptionsSchema } from "@forge/contracts/agents";
 import Router from "@koa/router";
 
 import type { Actor } from "../auth/types.ts";
@@ -11,6 +12,9 @@ export class SettingsRouter implements IHttpRouter {
 		const router = new Router<{ actor: Actor }>();
 		router.get("/api/settings", (ctx) => {
 			ctx.body = this.service.get(ctx.state.actor);
+		});
+		router.get("/api/settings/model-options", async (ctx) => {
+			ctx.body = agentOptionsSchema.parse(await this.service.modelOptions(ctx.state.actor));
 		});
 		router.put("/api/settings", async (ctx) => {
 			ctx.body = await this.service.save(ctx.state.actor, ctx.request.body);
