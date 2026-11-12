@@ -40,6 +40,8 @@ test("dark project tabs hide infrastructure and keep account setup in Config", a
 					},
 				});
 			if (path.endsWith("/branches")) return route.fulfill({ json: [{ name: "main", sha: head }] });
+			if (path.endsWith("/pipelines")) return route.fulfill({ json: { commit: head, workflows: [] } });
+			if (path.endsWith("/pipeline-runs")) return route.fulfill({ json: { runs: [], hasMore: false } });
 			if (path.endsWith("/workspaces")) {
 				if (route.request().method() === "POST") {
 					preparations++;
@@ -124,7 +126,7 @@ test("dark project tabs hide infrastructure and keep account setup in Config", a
 	for (const name of ["Pipelines"]) {
 		await page.getByRole("tab", { name, exact: true }).click();
 		await expect(page.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true");
-		await expect(page.getByRole("tabpanel", { name, exact: true })).toContainText("not available yet");
+		await expect(page.getByRole("tabpanel", { name, exact: true })).toContainText("No workflows found");
 	}
 	await page.getByRole("tab", { name: "Terminals", exact: true }).click();
 	await expect(page.getByRole("region", { name: "Terminal", exact: true })).toContainText("Connected");

@@ -24,9 +24,22 @@ FROM docker:28.5.2-dind AS docker-engine
 FROM docker/compose-bin:v2.39.4 AS docker-compose
 FROM docker/buildx-bin:0.28.0 AS docker-buildx
 
+FROM base AS act-installer
+ARG TARGETARCH
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl && rm -rf /var/lib/apt/lists/*
+RUN case "$TARGETARCH" in \
+      amd64) arch=x86_64; checksum=67b4976a56f33ea7870b798912e738ec44eef38e7578ae7b532f2def1c73a5ad ;; \
+      arm64) arch=arm64; checksum=44d48e3d4a6409053fdec6fc6518322467d79a2d5be8f72c021b0421e2ac113d ;; \
+      *) exit 1 ;; \
+    esac && \
+    curl -fsSL "https://github.com/nektos/act/releases/download/v0.2.97/act_Linux_${arch}.tar.gz" -o /tmp/act.tar.gz && \
+    printf '%s  /tmp/act.tar.gz\n' "$checksum" | sha256sum -c - && \
+    tar -xzf /tmp/act.tar.gz -C /usr/local/bin act
+
 FROM docker/sandbox-templates:codex@sha256:a68b972a59148c6359ade441387159033f6d196d48aef9dda06d2d4bb26eb41e AS runner
 USER root
 WORKDIR /app
+COPY --from=act-installer /usr/local/bin/act /usr/local/bin/act
 COPY --from=docker-engine /usr/local/bin/docker /usr/local/bin/dockerd /usr/local/bin/containerd /usr/local/bin/ctr /usr/local/bin/runc /usr/local/bin/docker-init /usr/local/bin/docker-proxy /usr/local/bin/containerd-shim-runc-v2 /usr/local/bin/
 COPY --from=docker-engine /usr/local/bin/dind /usr/local/bin/dind
 COPY --from=docker-compose /docker-compose /usr/local/lib/docker/cli-plugins/docker-compose

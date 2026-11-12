@@ -35,6 +35,11 @@ import { DockerService } from "./docker/docker-service.ts";
 import { HttpApplication } from "./http/http-application.ts";
 import type { ILifecycle } from "./http/lifecycle.ts";
 import { StaticAssets } from "./http/static-assets.ts";
+import { ActProcess } from "./pipelines/act-process.ts";
+import { GitSnapshotClient } from "./pipelines/git-snapshot-client.ts";
+import { PipelineRouter } from "./pipelines/pipeline-router.ts";
+import { PipelineService } from "./pipelines/pipeline-service.ts";
+import { PipelineStore } from "./pipelines/pipeline-store.ts";
 import { ProjectRouter } from "./projects/project-router.ts";
 import { ProjectService } from "./projects/project-service.ts";
 import { ProjectStore } from "./projects/project-store.ts";
@@ -120,6 +125,19 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const differences = new GitDiffClient(git);
 	const repositories = new RepositoryClient(config.dataDirectory, config.importHosts, files, git);
 	const projects = new ProjectService(store, repositories, access, randomUUID, () => new Date());
+	const pipelineStore = new PipelineStore(database);
+	await pipelineStore.initialize();
+	const pipelines = new PipelineService(
+		projects,
+		pipelineStore,
+		new GitSnapshotClient(config.dataDirectory, git, files, repositories),
+		new ActProcess(dockerCommand, files, sleep, process.env["PATH"] ?? ""),
+		randomUUID,
+		() => new Date(),
+		sleep,
+	);
+	lifecycle.register(() => pipelines.shutdown());
+	await pipelines.recover();
 	let recovery = Promise.resolve();
 	lifecycle.register(async () => {
 		await Promise.all([git.close(), githubGit.close()]);
@@ -290,6 +308,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			agentRouter,
 			new BoardSettingsRouter(boardSettings),
 			new DockerRouter(docker),
+			new PipelineRouter(pipelines),
 			new TicketRouter(tickets, workflow),
 			new CostRouter(cost),
 			new WorkspaceRouter(workspaces),

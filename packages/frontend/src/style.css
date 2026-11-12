@@ -2586,3 +2586,30 @@ summary {
 		padding: 12px;
 	}
 }
+.pipelines {
+	padding: 1rem;
+	overflow-wrap: anywhere;
+}
+.pipeline-controls {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: end;
+	gap: 1rem;
+}
+.pipeline-controls label {
+	display: grid;
+	gap: 0.4rem;
+}
+.pipeline-controls select {
+	max-width: min(30rem, 80vw);
+}
+.pipeline-state {
+	font-weight: 600;
+}
+.state-failed,
+.state-interrupted {
+	color: #ff7b72;
+}
+.state-succeeded {
+	color: #3fb950;
+}

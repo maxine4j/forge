@@ -24,7 +24,7 @@
 								"message": "Use the canonical @forge/backend-infrastructure/file filesystem boundary."
 							},
 							{
-								"group": ["yaml", "yaml/*"],
+								"group": ["yaml", "yaml/*", "!@forge/backend-infrastructure/yaml"],
 								"message": "Use parseYaml/stringifyYaml from @forge/backend-infrastructure/yaml."
 							},
 							{

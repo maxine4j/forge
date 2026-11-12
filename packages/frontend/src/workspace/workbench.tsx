@@ -6,6 +6,7 @@ import { AgentChat } from "../agents/agent-chat.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { CostDashboard } from "../cost/cost-dashboard.tsx";
 import { resolveRoute } from "../navigation/routes.ts";
+import { Pipelines } from "../pipelines/pipelines.tsx";
 import { TaskBoard } from "../tasks/task-board.tsx";
 import { RepositoryBrowser } from "./repository-browser.tsx";
 import { WorkspaceTerminal } from "./terminal.tsx";
@@ -151,15 +152,8 @@ export const Workbench = ({
 			<section id='panel-Agents' role='tabpanel' aria-labelledby='tab-Agents' hidden={tab !== "Agents"}>
 				{navigation.opened.includes("agents") && <AgentChat projectId={project.id} api={api} />}
 			</section>
-			<section
-				id='panel-Pipelines'
-				role='tabpanel'
-				aria-labelledby='tab-Pipelines'
-				hidden={tab !== "Pipelines"}
-				className='empty feature-empty'
-			>
-				<h2>Pipelines</h2>
-				<p>Pipelines are not available yet.</p>
+			<section id='panel-Pipelines' role='tabpanel' aria-labelledby='tab-Pipelines' hidden={tab !== "Pipelines"}>
+				{tab === "Pipelines" && <Pipelines key={project.id} projectId={project.id} api={api} />}
 			</section>
 			<section id='panel-Terminals' role='tabpanel' aria-labelledby='tab-Terminals' hidden={tab !== "Terminals"}>
 				{navigation.opened.includes("terminals") && <ProjectTerminal projectId={project.id} api={api} />}

@@ -67,7 +67,7 @@ HTTP / WebSocket / Git protocol adapters / background tasks
 - Git is authoritative for commits, trees, branches, and tags. Bare repositories
   are stored locally on the mounted volume.
 - SQLite holds projects, tickets, plan revisions, PRs, reviews, jobs, execution
-  state, Codex identifiers, CI mappings, and durable application events.
+  state, Codex identifiers, pipeline runs/jobs/steps, and durable application events.
 - Codex owns its conversation history and execution state in its persistent home;
   SQLite stores the identifiers and normalized state needed by Forge. Do not
   invent a second authoritative conversation store.
@@ -102,8 +102,8 @@ commands from mutating accessible storage. Use Codex's supported workspace sandb
 and approval controls where verified in the pinned runtime; do not automatically
 copy `codex-runner`'s full-access defaults. Privileged Docker-in-Docker expands the
 trust boundary to the host kernel even though Forge and its agents remain UID/GID 1000. Avoid passwordless sudo and additional privileges. Define
-resource/output/time limits for child processes. Remote CI does
-not remove local costs for dependency installation, agent commands, or terminals.
+resource/output/time limits for child processes. Local pipelines share CPU,
+memory and disk with dependency installation, agent commands and terminals.
 
 Deliver in slices:
 
@@ -111,7 +111,7 @@ Deliver in slices:
 2. Manual workspace editor/terminal/diff and PR review workflow.
 3. Ticket scheduling, Codex planning, and plan review.
 4. Agent implementation, live interaction, approvals, and recovery.
-5. GitHub Actions integration and exact-tested-commit merging.
+5. Manual local GitHub Actions pipelines through act; merge gating is a later slice.
 
 ## Expected source and package structure
 
@@ -176,8 +176,8 @@ forge/
 │   │   ├── codex-login-service.ts
 │   │   ├── codex-event-mapper.ts
 │   │   └── types.ts
-│   ├── github/                     # gh login, pushes, Actions API
-│   ├── ci/                         # Check policy, candidate tracking
+│   ├── github/                     # gh login and pushes
+│   ├── pipelines/                  # Manual act execution, snapshots, state and recovery
 │   ├── jobs/                       # Scheduling and restart recovery
 │   ├── events/                     # Durable events and live delivery
 │   ├── database/                   # SQLite and initial schema
@@ -205,7 +205,13 @@ create project -> ready ticket -> review plan -> agent implementation
 
 See the [ticket workflow](tickets.md#agentic-ticket-board) for the board and
 automatic merge queue. The [Git and CI contract](git-and-ci.md) describes the
-future CI-gated candidate workflow.
+manual local pipeline workflow.
+
+Local pipelines use a service, SQLite store, Git snapshot client and streaming
+act adapter under `src/pipelines`. Startup initializes storage, interrupts unfinished
+runs and reconciles disposable resources; shutdown stops owned process groups.
+Run metadata/jobs/steps live in `pipeline_runs`; disposable source and bounded
+diagnostics live under `artifacts/<runId>`. See [the pipeline contract](git-and-ci.md#manual-local-pipelines).
 
 Automated tests must not require live ChatGPT or GitHub credentials. Separately
 report manual verification of real login, Codex execution, remote CI, and credential

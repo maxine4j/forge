@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 import { mkdir, writeFile } from "@forge/backend-infrastructure/file";
 
+import { pipelineSmoke } from "./pipeline-image-smoke.mjs";
+
 // Tests only: inspect the real, built container through Docker, without publishing HTTP ports.
 const image = process.env.FORGE_IMAGE ?? "forge:dev";
 const name = `forge-smoke-${randomUUID()}`;
@@ -214,6 +216,8 @@ try {
 	assert.equal(created.status, 201);
 	const project = JSON.parse(created.body);
 	assert.equal(project.status, "ready");
+	await pipelineSmoke({ docker, name, request, execute, headers, nested });
+	await clean("/api/board/docker/cleanup");
 	const chatResponse = request(`/api/projects/${project.id}/agents`, {
 		method: "POST",
 		headers,

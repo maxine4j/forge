@@ -58,6 +58,17 @@ files return JSON 404 responses. Fixtures are not persisted. Normal Vite mode
 does not install the mock routes, and production builds exclude the mock API
 and banner, including builds invoked with `--mode mock`.
 
+## Local pipeline verification
+
+The image bundles checksum-verified act v0.2.97 for amd64/arm64 alongside the
+existing Docker supervisor and nonroot application. Pipelines use digest-pinned
+Ubuntu runner images on the internal daemon. Downloads require network access
+but no live account credentials. See [the runtime limitations and APIs](git-and-ci.md#manual-local-pipelines).
+Unit, real Git/SQLite integration and controlled browser tests cover discovery,
+pinning, lifecycle, persistence, authorization, status parsing and polling.
+The privileged image smoke also exercises real act workflows and runner Docker
+commands against the internal socket, failed execution and recovery.
+
 ## Cost settings
 
 The [Cost tab](agents.md#cost-and-usage) uses `FORGE_CODEX_MONTHLY_AUD` for the

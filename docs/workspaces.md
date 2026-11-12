@@ -389,6 +389,16 @@ policy violations, real syntax colors/output, and an intentional inline script
 that remains blocked. It uses controlled API/WebSocket data; native PTY/PR runtime
 behavior is verified separately in Linux integration and the real image smoke.
 
+## Pipelines
+
+The project Pipelines tab runs committed workflows from disposable clones, separate
+from editor and ticket worktrees. Branch/pipeline/event dropdowns and a Run button
+sit above recent run history. Selected runs show immutable commits and ordered
+steps grouped by matrix job, with text states. Active runs poll every two seconds;
+leaving the tab stops polling. No workflow editor, log viewer, graph or artifact
+browser is included. See [the manual pipeline contract](git-and-ci.md#manual-local-pipelines)
+and [verification](development.md#local-pipeline-verification).
+
 ## Integrated agent workspace
 
 One screen must combine:

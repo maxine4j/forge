@@ -33,6 +33,10 @@ export class WorkspaceApi implements IWorkspaceApi {
 		if (!response.ok) {
 			const error = typeof value === "object" && value !== null && "error" in value ? value.error : undefined;
 			const messages: Record<string, string> = {
+				"pipeline-invalid": "Branch, workflow or event is invalid. Refresh the pipeline selection.",
+				"pipeline-busy": "Another pipeline is running. Wait for it to finish before retrying.",
+				"pipeline-not-found": "Pipeline run no longer exists. Refresh recent runs.",
+				"pipeline-unavailable": "Pipelines are unavailable. Retry after Forge restarts.",
 				"docker-busy": "Docker cleanup is already running. Refresh to follow its progress.",
 				"docker-unavailable": "Docker is unavailable. Refresh and retry.",
 				"unsupported-settings":
@@ -78,6 +82,14 @@ export class WorkspaceApi implements IWorkspaceApi {
 				"terminal-conflict": "A live shell already exists. Refresh status and reconnect.",
 				"terminal-capacity": "Close unused shells and retry.",
 			};
+			if (
+				error === "pipeline-invalid"
+				&& typeof value === "object"
+				&& value !== null
+				&& "message" in value
+				&& typeof value.message === "string"
+			)
+				throw new Error(value.message);
 			throw new Error(
 				typeof error === "string" && Object.hasOwn(messages, error)
 					? messages[error]

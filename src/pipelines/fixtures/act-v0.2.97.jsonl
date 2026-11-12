@@ -1,0 +1,11 @@
+{"dryrun":false,"jobID":"test","level":"info","matrix":{},"msg":"  ✅  Success - Set up job","step":"Set up job","stepResult":"success","stepid":["--setup-job"]}
+{"dryrun":false,"jobID":"test","level":"info","matrix":{},"msg":"⭐ Run Main Source","stage":"Main","step":"Source","stepID":["0"]}
+{"dryrun":false,"jobID":"test","level":"info","matrix":{},"msg":"  ✅  Success - Main Source [165.289731ms]","stage":"Main","step":"Source","stepID":["0"],"stepResult":"success"}
+{"dryrun":false,"jobID":"test","level":"info","matrix":{},"msg":"⭐ Run Main Docker","stage":"Main","step":"Docker","stepID":["1"]}
+{"dryrun":false,"jobID":"test","level":"info","matrix":{},"msg":"  ✅  Success - Main Docker [8.105275633s]","stage":"Main","step":"Docker","stepID":["1"],"stepResult":"success"}
+{"dryrun":false,"jobID":"test","level":"info","matrix":{},"msg":"⭐ Run Main Continued failure","stage":"Main","step":"Continued failure","stepID":["2"]}
+{"dryrun":false,"jobID":"test","level":"info","matrix":{},"msg":"  ❌  Failure - Main Continued failure [187.784333ms]","stage":"Main","step":"Continued failure","stepID":["2"],"stepResult":"failure"}
+{"dryrun":false,"jobID":"test","level":"info","matrix":{},"msg":"⭐ Run Main Last","stage":"Main","step":"Last","stepID":["3"]}
+{"dryrun":false,"jobID":"test","level":"info","matrix":{},"msg":"  ✅  Success - Main Last [87.409559ms]","stage":"Main","step":"Last","stepID":["3"],"stepResult":"success"}
+{"dryrun":false,"jobID":"test","level":"info","matrix":{},"msg":"  ✅  Success - Complete job","step":"Complete job","stepResult":"success","stepid":["--complete-job"]}
+{"dryrun":false,"jobID":"test","jobResult":"success","level":"info","matrix":{},"msg":"🏁  Job succeeded"}
