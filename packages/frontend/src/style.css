@@ -590,12 +590,81 @@
 		font-size: 10px;
 	}
 }
+.tasks,
+.tasks-panel,
+.task-backlog,
 .task-board {
 	min-width: 0;
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
 	flex: 1;
+}
+.tasks-panel[hidden] {
+	display: none;
+}
+.tasks-tabs {
+	margin-top: 12px;
+}
+.backlog-scroll {
+	min-height: 0;
+	overflow: auto;
+	border: 1px solid #30363d;
+	border-radius: 6px;
+}
+.backlog-table {
+	width: 100%;
+	min-width: 600px;
+	border-collapse: separate;
+	border-spacing: 0;
+	font-size: 13px;
+}
+.backlog-table caption {
+	text-align: left;
+	padding: 8px 12px;
+}
+.backlog-table th {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+	background: #161b22;
+	text-align: left;
+}
+.backlog-table th,
+.backlog-table td {
+	padding: 8px 12px;
+	border-bottom: 1px solid #30363d;
+}
+.backlog-table th:first-child {
+	width: 120px;
+}
+.backlog-table th:last-child {
+	width: 190px;
+}
+.backlog-table tr:hover,
+.backlog-table tr:focus-within {
+	background: #21262d;
+}
+.backlog-table .needs-attention,
+.backlog-table .needs-attention:hover,
+.backlog-table .needs-attention:focus-within {
+	background: #402b16;
+}
+.backlog-title {
+	position: relative;
+	overflow-wrap: anywhere;
+	padding-right: 40px !important;
+}
+.backlog-open {
+	white-space: nowrap;
+	padding: 2px 4px;
+	border: 0;
+	background: transparent;
+	color: #58a6ff;
+}
+.backlog-open:focus-visible {
+	outline: 2px solid #58a6ff;
+	outline-offset: 2px;
 }
 .task-board > :not(.kanban-columns) {
 	flex-shrink: 0;
@@ -1137,7 +1206,7 @@
 	justify-content: flex-end;
 	margin-top: 20px;
 }
-.task-board .primary {
+.tasks .primary {
 	width: auto;
 	margin-top: 0;
 }

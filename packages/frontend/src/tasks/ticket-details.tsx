@@ -1,6 +1,6 @@
 import type { AgentView } from "@forge/contracts/agents";
 import { agentOptionsSchema, type AgentOptions, type AgentSettings } from "@forge/contracts/agents";
-import { ticketSchema } from "@forge/contracts/tickets";
+import { createTicketSchema, ticketSchema } from "@forge/contracts/tickets";
 import {
 	ticketWorkflowSchema,
 	type Ticket,
@@ -94,6 +94,7 @@ export const TicketDetails = ({
 	}
 	const settings = savedSettings ?? ticket.executionSettings ?? {};
 	const [error, setError] = useState("");
+	const [scopeError, setScopeError] = useState("");
 	const [options, setOptions] = useState<AgentOptions>();
 	const optionsRevision = useContext(AgentOptionsRevision);
 	const [savingSettings, setSavingSettings] = useState(false);
@@ -337,9 +338,9 @@ export const TicketDetails = ({
 					</button>
 				))}
 			</div>
-			{(error || settingsError) && (
+			{(scopeError || error || settingsError) && (
 				<p role='alert' className='error'>
-					{settingsError || error}
+					{scopeError || settingsError || error}
 				</p>
 			)}
 			{job?.state === "uncertain" && (
@@ -372,9 +373,17 @@ export const TicketDetails = ({
 				<form
 					onSubmit={(event) => {
 						event.preventDefault();
-						if (archived) return;
-						void save({ title, description, repositoryIds }).catch((err: unknown) =>
-							setError(err instanceof Error ? err.message : "Cannot save ticket."),
+						if (archived || ticket.status !== "backlog") return;
+						const input = createTicketSchema.safeParse({ title, description, repositoryIds });
+						if (!input.success) {
+							setScopeError(
+								"Enter a title up to 120 characters and a description up to 4000 characters.",
+							);
+							return;
+						}
+						setScopeError("");
+						void save(input.data).catch((err: unknown) =>
+							setScopeError(err instanceof Error ? err.message : "Cannot save ticket. Retry."),
 						);
 					}}
 				>

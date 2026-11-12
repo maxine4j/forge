@@ -1,223 +1,40 @@
-import {
-	createTicketSchema,
-	ticketSchema,
-	ticketsSchema,
-	ticketStatuses,
-	type CreateTicket,
-	type MoveTicket,
-	type Ticket,
-	type TicketStatus,
-} from "@forge/contracts/tickets";
-import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import type { FormEvent, PointerEvent } from "react";
-import { useLocation, useSearchParams } from "react-router";
+import { ticketStatuses, type Ticket, type TicketStatus, type MoveTicket } from "@forge/contracts/tickets";
+import { Fragment, useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 
-import { ResourcePoller } from "../api/resource-poller.ts";
-import type { IWorkspaceApi } from "../api/workspace-api.ts";
-import { BoardSettingsDialog } from "./board-settings-dialog.tsx";
-import { RepositorySelection } from "./repository-selection.tsx";
-import { TicketDetails, ticketLabels, type TicketReadingState } from "./ticket-details.tsx";
-
-const labels = ticketLabels;
+import { ticketLabels as labels } from "./ticket-details.tsx";
+import { TicketIndicator } from "./ticket-indicator.tsx";
 type Drop = { status: TicketStatus; beforeId?: string };
 type Drag = { ticket: Ticket; x: number; y: number; drop?: Drop };
-
-const TicketEditor = ({
-	api,
-	visible,
-	busy,
-	close,
-	save,
-}: {
-	api: IWorkspaceApi;
-	visible: boolean;
+export type TaskViewProps = {
+	tickets: Ticket[];
 	busy: boolean;
-	close: () => void;
-	save: (input: CreateTicket) => Promise<void>;
-}) => {
-	const dialog = useRef<HTMLDialogElement>(null);
-	const [title, setTitle] = useState("");
-	const [description, setDescription] = useState("");
-	const [repositoryIds, setRepositoryIds] = useState<string[]>([]);
-	const [error, setError] = useState("");
-	useEffect(() => {
-		if (visible) dialog.current?.showModal();
-		else dialog.current?.close();
-	}, [visible]);
-	const submit = async (event: FormEvent) => {
-		event.preventDefault();
-		const input = createTicketSchema.safeParse({ title, description, repositoryIds });
-		if (!input.success) {
-			setError("Enter a title up to 120 characters and a description up to 4000 characters.");
-			return;
-		}
-		setError("");
-		try {
-			await save(input.data);
-			close();
-		} catch (failure) {
-			setError(failure instanceof Error ? failure.message : "Cannot save ticket. Retry.");
-		}
-	};
-	return (
-		<dialog
-			ref={dialog}
-			className='ticket-dialog'
-			aria-labelledby='ticket-dialog-title'
-			onCancel={(event) => {
-				event.preventDefault();
-				if (!busy) close();
-			}}
-		>
-			<div className='ticket-dialog-heading'>
-				<h2 id='ticket-dialog-title'>Create ticket</h2>
-				<button type='button' aria-label='Close ticket' disabled={busy} onClick={close}>
-					✕
-				</button>
-			</div>
-			<form onSubmit={(event) => void submit(event)}>
-				<label>
-					Title
-					<input
-						autoFocus
-						required
-						maxLength={120}
-						value={title}
-						disabled={busy}
-						onChange={(event) => setTitle(event.target.value)}
-					/>
-				</label>
-				<label>
-					Description
-					<textarea
-						rows={7}
-						maxLength={4000}
-						value={description}
-						disabled={busy}
-						onChange={(event) => setDescription(event.target.value)}
-					/>
-				</label>
-				<RepositorySelection api={api} value={repositoryIds} change={setRepositoryIds} disabled={busy} />
-				{error && (
-					<p role='alert' className='error'>
-						{error}
-					</p>
-				)}
-				<div className='ticket-dialog-actions'>
-					<button type='button' disabled={busy} onClick={close}>
-						Cancel
-					</button>
-					<button className='primary' disabled={busy} type='submit'>
-						{busy ? "Saving…" : "Create"}
-					</button>
-				</div>
-			</form>
-		</dialog>
-	);
+	loading: boolean;
+	error: string;
+	notice: string;
+	open: (ticket: Ticket) => void;
+	create: () => void;
+	refresh: () => void;
 };
-
-export const TaskBoard = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }) => {
-	const location = useLocation();
-	const [search, setSearch] = useSearchParams();
-	const linkedId = location.pathname === "/tasks" ? search.get("ticket") : null;
-	const [linked, setLinked] = useState<{ id: string; ticket?: Ticket; error?: string }>();
-	const closeTicket = () => {
-		setCreating(false);
-		if (!search.has("ticket")) return;
-		const next = new URLSearchParams(search);
-		next.delete("ticket");
-		setSearch(next);
-	};
-	useEffect(() => {
-		if (!linkedId) return;
-		let current = true;
-		void api.read(`tickets/${encodeURIComponent(linkedId)}`, ticketSchema).then(
-			(ticket) => {
-				if (current) setLinked({ id: linkedId, ticket });
-			},
-			() => {
-				if (current) setLinked({ id: linkedId, error: "Ticket unavailable." });
-			},
-		);
-		return () => {
-			current = false;
-		};
-	}, [api, linkedId]);
-	const [tickets, setTickets] = useState<Ticket[]>([]);
-	const [loading, setLoading] = useState(true);
-	const [busy, setBusy] = useState(false);
-	const [error, setError] = useState("");
-	const [notice, setNotice] = useState("");
-	const [creating, setCreating] = useState(false);
-	const selectedTicket = linkedId && linked?.id === linkedId ? linked.ticket : undefined;
-	const [showSettings, setShowSettings] = useState(false);
+export const TaskBoard = ({
+	tickets,
+	busy,
+	loading,
+	error,
+	notice,
+	open,
+	create,
+	refresh,
+	settings,
+	move,
+	reportError,
+}: TaskViewProps & {
+	settings: () => void;
+	move: (id: string, input: MoveTicket) => Promise<void>;
+	reportError: (error: string) => void;
+}) => {
 	const [drag, setDrag] = useState<Drag>();
 	const dragging = useRef<Drag | undefined>(undefined);
 	const board = useRef<HTMLDivElement>(null);
-	const active = useRef(true);
-	const locked = useRef(false);
-	const [drafts] = useState(() => new Map<string, string>());
-	const [reading] = useState(() => new Map<string, TicketReadingState>());
-	const poller = useRef<ResourcePoller<Ticket[]> | undefined>(undefined);
-	const load = () => poller.current?.refresh();
-	useEffect(() => {
-		active.current = true;
-		const polling = new ResourcePoller(
-			() => api.read("tickets", ticketsSchema),
-			(values) => {
-				setTickets(values);
-				setError("");
-				setLoading(false);
-			},
-			(message) => {
-				setError(message);
-				setLoading(false);
-			},
-			1000,
-		);
-		poller.current = polling;
-		polling.refresh();
-		return () => {
-			polling.stop();
-			poller.current = undefined;
-			active.current = false;
-		};
-	}, [api]);
-	const mutate = async (operation: () => Promise<void>) => {
-		if (locked.current) throw new Error("A ticket change is still saving.");
-		locked.current = true;
-		setBusy(true);
-		setError("");
-		setNotice("");
-		try {
-			let failure: unknown;
-			await poller.current?.mutate(async () => {
-				try {
-					await operation();
-					return await api.read("tickets", ticketsSchema);
-				} catch (error) {
-					failure = error;
-					throw error;
-				}
-			});
-			if (failure) throw failure;
-		} finally {
-			locked.current = false;
-			if (active.current) setBusy(false);
-		}
-	};
-	const move = async (id: string, input: MoveTicket) =>
-		mutate(async () => {
-			const updated = await api.read(`tickets/${id}/move`, ticketSchema, "POST", input);
-			if (!active.current) return;
-			setTickets((current) => {
-				const values = current.filter((ticket) => ticket.id !== id);
-				const index = values.findIndex((ticket) => ticket.id === input.beforeId);
-				values.splice(index < 0 ? values.length : index, 0, updated);
-				return values;
-			});
-			setNotice(`${id} moved to ${labels[updated.status]}.`);
-		});
 	const locate = useCallback((x: number, y: number, id: string): Drop | undefined => {
 		const element = document.elementFromPoint(x, y);
 		const column = element?.closest<HTMLElement>("[data-drop-status]");
@@ -303,7 +120,7 @@ export const TaskBoard = ({ api, visible }: { api: IWorkspaceApi; visible: boole
 		cancelDrag();
 		if (current && drop)
 			void move(current.ticket.id, drop).catch((failure: unknown) => {
-				if (active.current) setError(failure instanceof Error ? failure.message : "Cannot move ticket. Retry.");
+				reportError(failure instanceof Error ? failure.message : "Cannot move ticket. Retry.");
 			});
 	};
 	return (
@@ -313,20 +130,13 @@ export const TaskBoard = ({ api, visible }: { api: IWorkspaceApi; visible: boole
 					<h2>Board</h2>
 				</div>
 				<div className='task-board-actions'>
-					<button type='button' disabled={!!drag} onClick={() => setShowSettings(true)}>
+					<button type='button' disabled={!!drag} onClick={settings}>
 						Board settings
 					</button>
-					<button
-						disabled={busy || loading || !!drag}
-						onClick={() => {
-							setLoading(true);
-							setError("");
-							void load();
-						}}
-					>
+					<button disabled={busy || loading || !!drag} onClick={refresh}>
 						Refresh board
 					</button>
-					<button className='primary' disabled={busy || loading || !!drag} onClick={() => setCreating(true)}>
+					<button className='primary' disabled={busy || loading || !!drag} onClick={create}>
 						Create ticket
 					</button>
 				</div>
@@ -369,11 +179,7 @@ export const TaskBoard = ({ api, visible }: { api: IWorkspaceApi; visible: boole
 												className='ticket-open'
 												aria-label={`${ticket.id} ${ticket.title}`}
 												disabled={busy || !!drag}
-												onClick={() => {
-													const next = new URLSearchParams(search);
-													next.set("ticket", ticket.id);
-													setSearch(next);
-												}}
+												onClick={() => open(ticket)}
 											>
 												<span className='ticket-title'>{ticket.title}</span>
 												<span className='ticket-key'>
@@ -385,42 +191,7 @@ export const TaskBoard = ({ api, visible }: { api: IWorkspaceApi; visible: boole
 													</span>
 													{ticket.id}
 												</span>
-												{ticket.needsAttention ? (
-													<span
-														className='ticket-agent-status ticket-attention'
-														role='img'
-														aria-label='Action required'
-														title='Action required'
-													/>
-												) : ticket.agentStatus ? (
-													<svg
-														className={`ticket-agent-status ${ticket.agentStatus === "working" ? "is-working" : ""}`}
-														role='img'
-														aria-label={
-															ticket.agentStatus === "queued"
-																? "Agent queued"
-																: "Agent working"
-														}
-														viewBox='0 0 16 16'
-														fill='none'
-														stroke='currentColor'
-														strokeWidth='1.5'
-													>
-														<title>
-															{ticket.agentStatus === "queued"
-																? "Agent queued"
-																: "Agent working"}
-														</title>
-														{ticket.agentStatus === "queued" ? (
-															<>
-																<circle cx='8' cy='8' r='6' />
-																<path d='M8 4v4l3 2' />
-															</>
-														) : (
-															<path d='M8 2a6 6 0 1 1-6 6' strokeLinecap='round' />
-														)}
-													</svg>
-												) : null}
+												<TicketIndicator ticket={ticket} />
 											</button>
 											<button
 												className='ticket-drag-handle'
@@ -457,72 +228,6 @@ export const TaskBoard = ({ api, visible }: { api: IWorkspaceApi; visible: boole
 						<span className='ticket-key'>{drag.ticket.id}</span>
 					</div>
 				</>
-			)}
-			{showSettings && <BoardSettingsDialog api={api} close={() => setShowSettings(false)} />}
-			{linkedId && linked?.id !== linkedId && <p role='status'>Loading ticket…</p>}
-			{linkedId && linked?.id === linkedId && linked.error && (
-				<p role='alert'>
-					{linked.error}
-					<button onClick={closeTicket}>Close ticket</button>
-				</p>
-			)}
-			{visible && selectedTicket && (
-				<TicketDetails
-					key={selectedTicket.id}
-					ticket={
-						selectedTicket.archivedAt
-							? selectedTicket
-							: (tickets.find((ticket) => ticket.id === selectedTicket.id) ?? selectedTicket)
-					}
-					api={api}
-					busy={busy}
-					drafts={drafts}
-					reading={reading}
-					close={closeTicket}
-					archive={() =>
-						mutate(async () => {
-							await api.read(`tickets/${selectedTicket.id}/archive`, ticketSchema, "POST");
-							if (!active.current) return;
-							setTickets((current) => current.filter((ticket) => ticket.id !== selectedTicket.id));
-							closeTicket();
-							setNotice(`${selectedTicket.id} archived.`);
-						})
-					}
-					move={move}
-					refreshBoard={() => poller.current?.refresh()}
-					save={(input) =>
-						mutate(async () => {
-							const updated = await api.read(
-								`tickets/${selectedTicket.id}`,
-								ticketSchema,
-								"PATCH",
-								input,
-							);
-							setTickets((current) =>
-								current.map((ticket) => (ticket.id === updated.id ? updated : ticket)),
-							);
-							closeTicket();
-						})
-					}
-				/>
-			)}
-			{creating && (
-				<TicketEditor
-					key='new'
-					api={api}
-					visible={visible}
-					busy={busy}
-					close={closeTicket}
-					save={(input) =>
-						mutate(async () => {
-							const updated = await api.read("tickets", ticketSchema, "POST", input);
-							if (active.current) {
-								setTickets((current) => [...current, updated]);
-								setNotice(`${updated.id} saved.`);
-							}
-						})
-					}
-				/>
 			)}
 		</div>
 	);

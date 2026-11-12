@@ -2,6 +2,24 @@
 
 ## Agentic ticket board
 
+Tasks has nested Board and Backlog tabs. `/tasks` opens Board by default;
+`/tasks?view=backlog` selects Backlog. Missing or unknown `view` values select
+Board. Both preserve `?ticket=:id` for details, reload and browser history,
+including existing archived-ticket links from [Costs](#ticket-cost).
+
+Backlog is a compact Key, Title and Status table of non-archived tickets in
+Backlog, Ready for development and In progress; Done is excluded. Its visible
+count and rows follow the existing API order and shared one-second polling.
+Both views use the same collection, create/details dialogs, status transitions,
+archive controls and attention/agent indicators. Polling removes completed or
+archived rows without closing an open ticket. The table scrolls with a sticky
+header and horizontal overflow on narrow screens. Arrow keys, Home and End
+select views; ticket-open buttons and dialog tabs support keyboard navigation.
+Creation starts in Backlog. Scope and repository selection remain editable only
+in Backlog status, regardless of selected view; Ready and In progress retain
+their chat workflow. Inline editing, search, sorting, table reordering, bulk
+actions, sprints, priorities and assignees are deferred.
+
 The board has four columns: Backlog, Ready for development, In progress and
 Done. The corresponding API statuses are `backlog`, `todo`, `in-progress` and
 `done`. Cards support pointer and touch reordering, edge scrolling and

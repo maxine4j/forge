@@ -11,7 +11,7 @@ import type { IWorkspaceApi } from "./api/workspace-api.ts";
 import { CostDashboard } from "./cost/cost-dashboard.tsx";
 import { resolveRoute } from "./navigation/routes.ts";
 import { ForgeSettingsForm } from "./settings/settings-form.tsx";
-import { TaskBoard } from "./tasks/task-board.tsx";
+import { Tasks } from "./tasks/tasks.tsx";
 import { Workbench } from "./workspace/workbench.tsx";
 
 const failureMessages = {
@@ -275,7 +275,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 			<main>
 				<div className='tasks-view' hidden={route.page !== "tasks"}>
 					<AgentOptionsRevision.Provider value={agentOptionsRevision}>
-						<TaskBoard api={workspaceApi} visible={route.page === "tasks"} />
+						<Tasks api={workspaceApi} visible={route.page === "tasks"} />
 					</AgentOptionsRevision.Provider>
 				</div>
 				{route.page === "costs" && <CostDashboard api={workspaceApi} />}

@@ -40,6 +40,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		description: string;
 		status: string;
 		createdAt: string;
+		archivedAt?: string;
 		executionSettings?: import("@forge/contracts/agents").AgentSettings;
 		needsAttention?: true;
 		agentStatus?: "queued" | "working";
@@ -56,6 +57,8 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	];
 	let failMove = false;
 	let failArchive = false;
+	let failSave = false;
+	let failList = false;
 	let hold: Promise<void> | undefined;
 	let release = () => {};
 	let held = 0;
@@ -206,6 +209,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 				});
 			if (path.endsWith("/tickets")) {
 				if (method === "POST") {
+					if (failSave) return route.fulfill({ status: 503, json: { error: "ticket-unavailable" } });
 					const ticket = {
 						repositoryIds: [],
 						...route.request().postDataJSON(),
@@ -221,6 +225,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 					await hold;
 					operations.push("read");
 				}
+				if (failList) return route.fulfill({ status: 503, json: { error: "ticket-unavailable" } });
 				return route.fulfill({ json: tickets });
 			}
 			if (path.startsWith("/api/tickets/")) {
@@ -239,7 +244,10 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 					tickets = tickets.filter((value) => value.id !== ticket.id);
 					const index = tickets.findIndex((value) => value.id === beforeId);
 					tickets.splice(index < 0 ? tickets.length : index, 0, ticket);
-				} else if (method === "PATCH") Object.assign(ticket, route.request().postDataJSON());
+				} else if (method === "PATCH") {
+					if (failSave) return route.fulfill({ status: 503, json: { error: "ticket-unavailable" } });
+					Object.assign(ticket, route.request().postDataJSON());
+				}
 				return route.fulfill({ json: ticket });
 			}
 			if (path.endsWith("/branches")) return route.fulfill({ json: [{ name: "main", sha: "a".repeat(40) }] });
@@ -252,6 +260,12 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	await expect(page).toHaveURL("/tasks");
 	return {
 		tickets: () => tickets,
+		failSaves: (value: boolean) => {
+			failSave = value;
+		},
+		failLists: (value: boolean) => {
+			failList = value;
+		},
 		setDocker: (value: Partial<DockerOverview>) => {
 			docker = { ...docker, ...value };
 		},
@@ -287,6 +301,169 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		},
 	};
 };
+
+test("task views persist URL selection, history and ticket deep links with keyboard tabs", async ({ page }) => {
+	await setup(page);
+	const board = page.getByRole("tab", { name: "Board", exact: true });
+	const backlog = page.getByRole("tab", { name: "Backlog", exact: true });
+	await expect(board).toHaveAttribute("aria-selected", "true");
+	await board.focus();
+	await board.press("ArrowRight");
+	await expect(backlog).toBeFocused();
+	await expect(page).toHaveURL("/tasks?view=backlog");
+	await expect(page.getByRole("tabpanel", { name: "Backlog", exact: true })).toBeVisible();
+	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	await expect(page).toHaveURL("/tasks?view=backlog&ticket=FORGE-1");
+	await page.reload();
+	const dialog = page.getByRole("dialog", { name: "FORGE-1", exact: true });
+	await expect(dialog).toBeVisible();
+	await dialog.getByRole("button", { name: "Close ticket" }).click();
+	await expect(page).toHaveURL("/tasks?view=backlog");
+	await expect(backlog).toBeFocused();
+	await page.goBack();
+	await expect(dialog).toBeVisible();
+	await page.goForward();
+	await expect(dialog).toHaveCount(0);
+	await backlog.focus();
+	await backlog.press("Home");
+	await expect(board).toBeFocused();
+	await expect(page).toHaveURL("/tasks");
+	await page.goBack();
+	await expect(backlog).toHaveAttribute("aria-selected", "true");
+	await page.goto("/tasks?view=unknown&ticket=FORGE-2");
+	await expect(board).toHaveAttribute("aria-selected", "true");
+	await expect(page.getByRole("dialog", { name: "FORGE-2", exact: true })).toBeVisible();
+});
+
+test("backlog filters unfinished tickets in API order and polling retains an open completed or archived ticket", async ({
+	page,
+}) => {
+	const f = await setup(page);
+	f.tickets()[0]!.status = "todo";
+	f.tickets()[0]!.agentStatus = "queued";
+	f.tickets().push({ ...f.tickets()[0]!, id: "FORGE-3", status: "done" });
+	f.tickets().push({ ...f.tickets()[0]!, id: "FORGE-4", status: "in-progress", needsAttention: true });
+	f.tickets().push({ ...f.tickets()[0]!, id: "FORGE-5", status: "backlog", archivedAt: createdAt });
+	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+	const table = page.getByRole("table");
+	await expect(page.getByRole("status").filter({ hasText: "3 unfinished tickets" })).toBeVisible();
+	await expect(table.locator("tbody tr td:first-child")).toHaveText(["FORGE-1", "FORGE-2", "FORGE-4"]);
+	await expect(table.getByRole("img", { name: "Agent queued" })).toHaveCount(1);
+	await expect(table.getByRole("img", { name: "Action required" })).toHaveCount(1);
+	await page.getByRole("button", { name: "FORGE-1 First task", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "FORGE-1", exact: true });
+	await expect(dialog.getByLabel("Title", { exact: true })).toBeDisabled();
+	f.tickets()[0]!.status = "done";
+	await expect(table.locator("tbody tr")).toHaveCount(2);
+	await expect(dialog).toBeVisible();
+	await expect(dialog.getByLabel("Status", { exact: true })).toHaveValue("done");
+	Object.assign(f.tickets()[0]!, { archivedAt: createdAt });
+	await expect(dialog).toContainText("Archived · Read only");
+	await dialog.getByRole("button", { name: "Close ticket" }).click();
+	await expect(page.getByRole("tab", { name: "Backlog", exact: true })).toBeFocused();
+});
+
+test("backlog creation and scope saves retain failed drafts and share changes with Board", async ({ page }) => {
+	const f = await setup(page);
+	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+	const create = page.getByRole("button", { name: "Create ticket", exact: true });
+	await create.click();
+	let dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
+	await dialog.getByLabel("Title", { exact: true }).fill("  New task  ");
+	await dialog.getByLabel("Description", { exact: true }).fill("Plain text <script>scope</script>");
+	f.failSaves(true);
+	await dialog.getByRole("button", { name: "Create", exact: true }).click();
+	await expect(dialog.getByRole("alert")).toBeVisible();
+	await expect(dialog.getByLabel("Title", { exact: true })).toHaveValue("  New task  ");
+	f.failSaves(false);
+	await dialog.getByRole("button", { name: "Create", exact: true }).click();
+	await expect(dialog).toHaveCount(0);
+	await expect(create).toBeFocused();
+	const open = page.getByRole("button", { name: "FORGE-3 New task", exact: true });
+	await open.focus();
+	await open.press("Enter");
+	dialog = page.getByRole("dialog", { name: "FORGE-3", exact: true });
+	await dialog.getByLabel("Title", { exact: true }).fill("   ");
+	await dialog.getByRole("button", { name: "Save", exact: true }).click();
+	await expect(dialog.getByRole("alert")).toContainText("Enter a title");
+	await dialog.getByLabel("Title", { exact: true }).fill("Updated task");
+	await dialog.getByLabel("Description", { exact: true }).fill("Updated scope");
+	f.failSaves(true);
+	await dialog.getByRole("button", { name: "Save", exact: true }).click();
+	await expect(dialog.getByRole("alert")).toBeVisible();
+	await page.waitForTimeout(1200);
+	await expect(dialog.getByRole("alert")).toBeVisible();
+	await expect(dialog.getByLabel("Description", { exact: true })).toHaveValue("Updated scope");
+	f.failSaves(false);
+	await dialog.getByRole("button", { name: "Save", exact: true }).click();
+	await expect(dialog).toHaveCount(0);
+	await expect(page.getByRole("button", { name: "FORGE-3 Updated task", exact: true })).toBeFocused();
+	await page.getByRole("tab", { name: "Board", exact: true }).click();
+	await expect(page.getByRole("button", { name: "FORGE-3 Updated task", exact: true })).toBeVisible();
+	await page.getByRole("button", { name: "FORGE-3 Updated task", exact: true }).click();
+	await dialog.getByLabel("Status", { exact: true }).selectOption("todo");
+	await expect(dialog.getByLabel("Title", { exact: true })).toBeDisabled();
+	await dialog.getByRole("button", { name: "Close ticket" }).click();
+	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+	await expect(page.getByRole("row").filter({ hasText: "Updated task" })).toContainText("Ready for development");
+});
+
+test("switching views shares tickets and the single pending list request", async ({ page }) => {
+	const f = await setup(page);
+	await expect(page.locator(".ticket-card")).toHaveCount(2);
+	f.blockReads();
+	await page.getByRole("button", { name: "Refresh board", exact: true }).click();
+	await expect.poll(f.held).toBe(1);
+	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+	await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(2);
+	await expect(page.getByRole("status")).toHaveText("Loading tickets…");
+	await page.getByRole("tab", { name: "Board", exact: true }).click();
+	await expect(page.locator(".ticket-card")).toHaveCount(2);
+	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+	expect(f.held()).toBe(1);
+	f.releaseReads();
+	await expect(page.getByRole("status")).toHaveText("2 unfinished tickets");
+});
+
+test("backlog has loading, empty and recoverable list errors", async ({ page }) => {
+	const f = await setup(page);
+	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+	await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(2);
+	f.blockReads();
+	await page.getByRole("button", { name: "Refresh", exact: true }).click();
+	await expect(page.getByRole("status")).toHaveText("Loading tickets…");
+	await expect(page.getByRole("region", { name: "Unfinished tickets" })).toHaveAttribute("aria-busy", "true");
+	f.failLists(true);
+	f.releaseReads();
+	await expect(page.getByRole("alert")).toContainText("Use Refresh to retry");
+	f.failLists(false);
+	f.tickets().splice(0);
+	await page.getByRole("button", { name: "Refresh", exact: true }).click();
+	await expect(page.getByRole("status")).toHaveText("0 unfinished tickets");
+	await expect(page.getByText("No unfinished tickets. Create a ticket to get started.")).toBeVisible();
+	await expect(page.getByRole("alert")).toHaveCount(0);
+});
+
+for (const width of [1280, 390]) {
+	test(`backlog scrolls with a sticky header and fits the page at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 844 });
+		const f = await setup(page, true);
+		f.tickets()[0]!.title = "Long ticket title ".repeat(6);
+		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+		await expect(page.getByRole("table").locator("tbody tr")).toHaveCount(60);
+		await expect(page.getByRole("alert")).toHaveCount(0);
+		const scroll = page.getByRole("region", { name: "Unfinished tickets" });
+		await expect.poll(() => scroll.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
+		await scroll.evaluate((element) => {
+			element.scrollTop = 400;
+		});
+		await expect(page.getByRole("columnheader", { name: "Key", exact: true })).toBeInViewport();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		if (width === 390)
+			expect(await scroll.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+		await page.screenshot({ path: `../../artifacts/forge-browser/tasks-backlog-${width}.png` });
+	});
+}
 
 test("global board creates unassigned tickets and saves ordered references", async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });
