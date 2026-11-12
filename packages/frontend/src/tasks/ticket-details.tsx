@@ -48,6 +48,7 @@ export const TicketDetails = ({
 	refreshBoard: () => void;
 	drafts: Map<string, string>;
 }) => {
+	const archived = !!ticket.archivedAt;
 	const dialog = useRef<HTMLDialogElement>(null);
 	const [snapshots] = useState(() => new Map<string, AgentView>());
 	const [scrollState] = useState(() => ({ top: 0, follow: true }));
@@ -87,7 +88,7 @@ export const TicketDetails = ({
 		};
 	}, [api, ticket.projectId, optionsRevision]);
 	const changeSettings = (value: AgentSettings) => {
-		if (savingSettings) return;
+		if (archived || savingSettings) return;
 		setSettingsError("");
 		setSavingSettings(true);
 		void api
@@ -156,7 +157,7 @@ export const TicketDetails = ({
 		&& job?.resultSha
 		&& ((job.phase === "review" && job.state === "idle") || job.state === "failed");
 	const act = (path: string, body: unknown, onSuccess?: () => void) => {
-		if (acting || !poller.current) return;
+		if (archived || acting || !poller.current) return;
 		setActing(true);
 		setError("");
 		void poller.current
@@ -181,14 +182,17 @@ export const TicketDetails = ({
 			<div className='ticket-details-heading'>
 				<div>
 					<h2 id='ticket-details-title'>{ticket.id}</h2>
-					<p>{ticket.title}</p>
+					<p>
+						{ticket.title}
+						{archived && <small> Archived · Read only</small>}
+					</p>
 				</div>
 				<div className='ticket-details-actions'>
 					<button
 						type='button'
 						aria-label='Archive ticket'
 						title='Archive ticket'
-						disabled={busy || acting}
+						disabled={archived || busy || acting}
 						onClick={() => {
 							setArchiveError("");
 							archiveDialog.current?.showModal();
@@ -259,7 +263,7 @@ export const TicketDetails = ({
 					<select
 						aria-label='Status'
 						value={ticket.status}
-						disabled={busy || !target}
+						disabled={archived || busy || !target}
 						onChange={(event) => {
 							setError("");
 							void move(ticket.id, { status: event.target.value as TicketStatus }).catch((err: unknown) =>
@@ -314,7 +318,7 @@ export const TicketDetails = ({
 			)}
 			{job?.state === "uncertain" && (
 				<div className='ticket-recovery'>
-					<button type='button' disabled={acting} onClick={() => act("reconcile", {})}>
+					<button type='button' disabled={archived || acting} onClick={() => act("reconcile", {})}>
 						Reconcile execution
 					</button>
 				</div>
@@ -322,13 +326,13 @@ export const TicketDetails = ({
 			{job?.state === "setup-failed" && (
 				<div className='ticket-recovery'>
 					<span>Agent setup failed.</span>
-					<button type='button' disabled={acting} onClick={() => act("reconcile", {})}>
+					<button type='button' disabled={archived || acting} onClick={() => act("reconcile", {})}>
 						Retry setup
 					</button>
 				</div>
 			)}
 			{canQueueMerge && (
-				<button type='button' disabled={acting} onClick={() => act("merge", {})}>
+				<button type='button' disabled={archived || acting} onClick={() => act("merge", {})}>
 					Queue merge
 				</button>
 			)}
@@ -337,11 +341,12 @@ export const TicketDetails = ({
 					settings={settings}
 					options={options}
 					change={changeSettings}
-					disabled={savingSettings || ticket.status === "done"}
+					disabled={archived || savingSettings || ticket.status === "done"}
 				/>
 				<form
 					onSubmit={(event) => {
 						event.preventDefault();
+						if (archived) return;
 						void save({ title, description }).catch((err: unknown) =>
 							setError(err instanceof Error ? err.message : "Cannot save ticket."),
 						);
@@ -353,7 +358,7 @@ export const TicketDetails = ({
 						required
 						maxLength={120}
 						value={title}
-						disabled={busy || ticket.status !== "backlog"}
+						disabled={archived || busy || ticket.status !== "backlog"}
 						onChange={(event) => setTitle(event.target.value)}
 					/>
 					<label htmlFor={`${fieldId}-description`}>Description</label>
@@ -362,10 +367,10 @@ export const TicketDetails = ({
 						id={`${fieldId}-description`}
 						maxLength={4000}
 						value={description}
-						disabled={busy || ticket.status !== "backlog"}
+						disabled={archived || busy || ticket.status !== "backlog"}
 						onChange={(event) => setDescription(event.target.value)}
 					/>
-					{ticket.status === "backlog" && (
+					{!archived && ticket.status === "backlog" && (
 						<button className='primary' disabled={busy}>
 							Save
 						</button>
@@ -389,19 +394,24 @@ export const TicketDetails = ({
 						messagePath={`tickets/${ticket.id}/messages`}
 						executionSettings={settings}
 						settingsChanged={changeSettings}
-						settingsDisabled={savingSettings}
+						settingsDisabled={archived || savingSettings}
 						blocked={blocked || savingSettings}
 						steer={steering}
-						readOnly={ticket.status !== "in-progress" || (!job?.implementerId && job?.phase !== "planning")}
+						readOnly={
+							archived
+							|| ticket.status !== "in-progress"
+							|| (!job?.implementerId && job?.phase !== "planning")
+						}
 						draftKey={`ticket:${ticket.id}`}
 						drafts={drafts}
 						planText={!job?.implementerId ? plan?.text : undefined}
 						planAction={
-							awaitingReview && (
+							!archived
+							&& awaitingReview && (
 								<button
 									type='button'
 									className='primary'
-									disabled={acting}
+									disabled={archived || acting}
 									onClick={() => act("approve", { revision: plan!.revision })}
 								>
 									Approve plan
@@ -442,7 +452,7 @@ export const TicketDetails = ({
 				)}
 			</div>
 			<div className='ticket-cost' {...panel("cost")}>
-				{tab === "cost" && <TicketCost api={api} projectId={ticket.projectId} ticketId={ticket.id} />}
+				{tab === "cost" && <TicketCost api={api} ticketId={ticket.id} />}
 			</div>
 		</dialog>
 	);

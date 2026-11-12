@@ -1,25 +1,27 @@
-import { costPhaseSchema, type ProjectCost } from "@forge/contracts";
+import { costPhaseSchema, type Costs, type TicketCost } from "@forge/contracts";
+import { ticketIdSchema } from "@forge/contracts/tickets";
 
+import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
 import type { ICodexLimits } from "../codex/codex-usage-client.ts";
+import { TicketError } from "../tickets/errors.ts";
 import { apiCostAud } from "./api-pricing.ts";
 import type { ICostHistory } from "./cost-store.ts";
 import type { IQuotaStore } from "./quota-store.ts";
 import type { CostSettings, TokenCounts, UsageTurn } from "./types.ts";
 import { weeklyBudget } from "./weekly-budget.ts";
 
-export interface ICostProjects {
-	/** Checks owner access and project existence. */
-	get(actor: Actor, projectId: string): Promise<unknown>;
-}
-
 export interface ICostTickets {
 	/** Includes archived tickets and tickets without recorded usage. */
-	listForCost(projectId: string): Promise<{ id: string; title: string; archivedAt?: string }[]>;
+	listForCost(): Promise<
+		{ id: string; title: string; projectId: string; projectName: string; archivedAt?: string }[]
+	>;
+	get(id: string): Promise<{ id: string; projectId: string } | undefined>;
 }
 
 export interface ICostService {
-	read(actor: Actor, projectId: string): Promise<ProjectCost>;
+	read(actor: Actor): Promise<Costs>;
+	readTicket(actor: Actor, ticketId: string): Promise<TicketCost>;
 }
 
 const empty = () => ({ input: 0, cached: 0, output: 0, turns: 0 });
@@ -27,7 +29,7 @@ const dayMs = 86_400_000;
 
 export class CostService implements ICostService {
 	constructor(
-		private readonly projects: ICostProjects,
+		private readonly access: Pick<IAccessService, "assertOwner">,
 		private readonly tickets: ICostTickets,
 		private readonly store: ICostHistory,
 		private readonly codex: ICodexLimits,
@@ -36,11 +38,11 @@ export class CostService implements ICostService {
 		private readonly quotas?: IQuotaStore,
 	) {}
 
-	async read(actor: Actor, projectId: string): Promise<ProjectCost> {
-		await this.projects.get(actor, projectId);
+	async read(actor: Actor): Promise<Costs> {
+		this.access.assertOwner(actor);
 		const [{ since, turns }, tickets, limits] = await Promise.all([
-			this.store.read(projectId),
-			this.tickets.listForCost(projectId),
+			this.store.read(),
+			this.tickets.listForCost(),
 			this.codex.limits(),
 		]);
 		const today = this.now();
@@ -54,7 +56,7 @@ export class CostService implements ICostService {
 		const byDay = new Map(days.map((day) => [day.date, day]));
 		const phases = new Map(costPhaseSchema.options.map((phase) => [phase, { phase, ...empty() }]));
 		const totals = empty();
-		const ticketRows: ProjectCost["tickets"] = tickets.map((ticket) => ({
+		const ticketRows: Costs["tickets"] = tickets.map((ticket) => ({
 			...ticket,
 			...empty(),
 			untimedTurns: 0,
@@ -69,16 +71,30 @@ export class CostService implements ICostService {
 			const day = byDay.get(turn.startedAt.slice(0, 10));
 			if (day) this.add(day, tokens);
 			const ticket = turn.ticketId ? byTicket.get(turn.ticketId) : undefined;
-			if (!ticket) continue;
+			if (!ticket || ticket.projectId !== turn.projectId) continue;
 			this.add(ticket, tokens);
-			const subscription = this.subscriptionCost(turn);
-			if (subscription === undefined) ticket.untimedTurns++;
-			else ticket.subscriptionAud = (ticket.subscriptionAud ?? 0) + subscription;
-			const api = turn.input === undefined ? undefined : apiCostAud(turn.model, tokens, this.settings.audPerUsd);
-			if (api === undefined) ticket.unpricedTurns++;
-			else ticket.apiAud = (ticket.apiAud ?? 0) + api;
+			this.estimate(ticket, turn);
+		}
+		const ticketEstimates = {
+			...empty(),
+			untimedTurns: 0,
+			unpricedTurns: 0,
+			subscriptionAud: 0,
+			apiAud: 0,
+		};
+		for (const ticket of ticketRows) {
+			ticketEstimates.input += ticket.input;
+			ticketEstimates.cached += ticket.cached;
+			ticketEstimates.output += ticket.output;
+			ticketEstimates.turns += ticket.turns;
+			ticketEstimates.untimedTurns += ticket.untimedTurns;
+			ticketEstimates.unpricedTurns += ticket.unpricedTurns;
+			if (ticket.subscriptionAud !== undefined)
+				ticketEstimates.subscriptionAud = (ticketEstimates.subscriptionAud ?? 0) + ticket.subscriptionAud;
+			if (ticket.apiAud !== undefined) ticketEstimates.apiAud = (ticketEstimates.apiAud ?? 0) + ticket.apiAud;
 		}
 		return {
+			ticketEstimates,
 			weeklyBudget: this.quotas ? await this.readWeeklyBudget() : undefined,
 			since,
 			totals,
@@ -88,6 +104,35 @@ export class CostService implements ICostService {
 			limits,
 			...this.settings,
 		};
+	}
+	async readTicket(actor: Actor, ticketId: string): Promise<TicketCost> {
+		this.access.assertOwner(actor);
+		if (!ticketIdSchema.safeParse(ticketId).success) throw new TicketError("invalid-request");
+		const metadata = await this.tickets.get(ticketId);
+		if (!metadata) throw new TicketError("ticket-not-found");
+		const { since, turns } = await this.store.read(ticketId);
+		const ticket = { ...empty(), untimedTurns: 0, unpricedTurns: 0 };
+		for (const turn of turns) {
+			if (turn.ticketId !== ticketId || turn.projectId !== metadata.projectId) continue;
+			this.add(ticket, { input: turn.input ?? 0, cached: turn.cached ?? 0, output: turn.output ?? 0 });
+			this.estimate(ticket, turn);
+		}
+		return { since, ...this.settings, ticket };
+	}
+	private estimate(ticket: TicketCost["ticket"], turn: UsageTurn) {
+		const subscription = this.subscriptionCost(turn);
+		if (subscription === undefined) ticket.untimedTurns++;
+		else ticket.subscriptionAud = (ticket.subscriptionAud ?? 0) + subscription;
+		const api =
+			turn.input === undefined
+				? undefined
+				: apiCostAud(
+						turn.model,
+						{ input: turn.input, cached: turn.cached ?? 0, output: turn.output ?? 0 },
+						this.settings.audPerUsd,
+					);
+		if (api === undefined) ticket.unpricedTurns++;
+		else ticket.apiAud = (ticket.apiAud ?? 0) + api;
 	}
 	private async readWeeklyBudget() {
 		const now = this.now();

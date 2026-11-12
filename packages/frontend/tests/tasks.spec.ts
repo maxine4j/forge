@@ -639,7 +639,7 @@ test("ticket chat shows the current context window", async ({ page }) => {
 test("ticket Cost shows this ticket's estimates and token counts", async ({ page }) => {
 	await setup(page, false, true);
 	const totals = { input: 1800, cached: 600, output: 200, turns: 2 };
-	await page.route(`**/api/projects/${projectId}/cost`, (route) =>
+	await page.route("**/api/tickets/FORGE-1/cost", (route) =>
 		route.fulfill({
 			json: {
 				since: createdAt,
@@ -649,18 +649,15 @@ test("ticket Cost shows this ticket's estimates and token counts", async ({ page
 				totals,
 				phases: [],
 				days: [],
-				tickets: [
-					{
-						...totals,
-						id: "FORGE-1",
-						title: "First task",
-						subscriptionAud: 0.015,
-						apiAud: 0.09,
-						untimedTurns: 0,
-						unpricedTurns: 1,
-					},
-					{ ...totals, id: "FORGE-2", title: "Second task", apiAud: 1.99, untimedTurns: 0, unpricedTurns: 0 },
-				],
+				ticket: {
+					...totals,
+					id: "FORGE-1",
+					title: "First task",
+					subscriptionAud: 0.015,
+					apiAud: 0.09,
+					untimedTurns: 0,
+					unpricedTurns: 1,
+				},
 			},
 		}),
 	);
@@ -1136,4 +1133,94 @@ test("a plan needs attention on the four-column board and approval submits the d
 	await expect(dot).toHaveCount(0);
 	await expect(card.getByRole("img", { name: "Agent queued" })).toBeVisible();
 	await expect(card).not.toHaveClass(/needs-attention/);
+});
+
+for (const archived of [false, true]) {
+	test(`ticket deep links support reload, closing and history (archived: ${archived})`, async ({ page }) => {
+		await setup(page);
+		const ticket = {
+			id: "FORGE-9",
+			projectId,
+			title: "Linked ticket",
+			description: "Linked scope",
+			status: "backlog",
+			createdAt,
+			...(archived ? { archivedAt: createdAt } : {}),
+		};
+		await page.route("**/api/tickets/FORGE-9", (route) => route.fulfill({ json: ticket }));
+		await page.route("**/api/tickets/FORGE-9/workflow", (route) =>
+			route.fulfill({ json: { ticketId: ticket.id, phase: "planning", state: "idle", mergeAttempts: 0 } }),
+		);
+		await page.goto(`/projects/${projectId}/tasks?ticket=FORGE-9`);
+		const modal = page.getByRole("dialog", { name: "FORGE-9" });
+		await expect(modal).toBeVisible();
+		await expect(modal.getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
+		if (archived) {
+			await expect(modal.getByText("Archived · Read only")).toBeVisible();
+			await expect(modal.getByLabel("Title", { exact: true })).toBeDisabled();
+			await expect(modal.getByLabel("Description", { exact: true })).toBeDisabled();
+			await expect(modal.getByLabel("Status", { exact: true })).toBeDisabled();
+			await expect(modal.getByRole("button", { name: "Archive ticket" })).toBeDisabled();
+			await expect(modal.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
+		}
+		await page.reload();
+		await expect(modal).toBeVisible();
+		await modal.getByRole("button", { name: "Close ticket" }).click();
+		await expect(page).toHaveURL(`/projects/${projectId}/tasks`);
+		await expect(modal).toHaveCount(0);
+		await page.goBack();
+		await expect(modal).toBeVisible();
+		await page.goForward();
+		await expect(modal).toHaveCount(0);
+		await page.goto(`/projects/${projectId}/tasks?ticket=FORGE-9`);
+		await expect(modal).toBeVisible();
+		await modal.getByRole("button", { name: "Close ticket" }).click();
+		await page.route("**/api/tickets/FORGE-9", (route) =>
+			route.fulfill({ json: { ...ticket, projectId: "123e4567-e89b-42d3-a456-426614174099" } }),
+		);
+		await page.goto(`/projects/${projectId}/tasks?ticket=FORGE-9`);
+		await expect(page.getByRole("alert")).toContainText("Ticket belongs to another project.");
+		await page.goto(`/projects/${projectId}/tasks?ticket=FORGE-999`);
+		await expect(page.getByRole("alert")).toContainText("Ticket unavailable.");
+	});
+}
+
+test("archived ticket chat retains history and disables input and execution", async ({ page }) => {
+	await setup(page, false, true);
+	await page.route("**/api/tickets/FORGE-9", (route) =>
+		route.fulfill({
+			json: {
+				id: "FORGE-9",
+				projectId,
+				title: "Archived history",
+				description: "Scope",
+				status: "in-progress",
+				createdAt,
+				archivedAt: createdAt,
+			},
+		}),
+	);
+	await page.route("**/api/tickets/FORGE-9/workflow", (route) =>
+		route.fulfill({
+			json: {
+				ticketId: "FORGE-9",
+				phase: "planning",
+				state: "idle",
+				mergeAttempts: 0,
+				plannerId: "123e4567-e89b-42d3-a456-426614174010",
+				plan: { revision: 1, text: "Plan history" },
+			},
+		}),
+	);
+	await page.goto(`/projects/${projectId}/tasks?ticket=FORGE-9`);
+	const modal = page.getByRole("dialog", { name: "FORGE-9" });
+	await expect(modal.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
+	await expect(modal.getByText("Planning message 0: implement search with tests.", { exact: true })).toBeAttached();
+	await expect(modal.getByLabel("Message", { exact: true })).toBeDisabled();
+	await expect(modal.getByRole("button", { name: "Interrupt", exact: true })).toHaveCount(0);
+	await expect(modal.getByRole("button", { name: "Approve plan", exact: true })).toHaveCount(0);
+	await modal.getByRole("tab", { name: "Details" }).click();
+	for (const select of await modal.getByRole("combobox").all()) await expect(select).toBeDisabled();
+	await modal.getByRole("tab", { name: "Cost" }).click();
+	await expect(modal.getByRole("tabpanel", { name: "Cost" })).toBeVisible();
 });

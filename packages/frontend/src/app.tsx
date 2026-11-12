@@ -8,6 +8,7 @@ import { AgentOptionsRevision } from "./agents/execution-settings.tsx";
 import type { IApiClient } from "./api/api-client.ts";
 import { ResourcePoller } from "./api/resource-poller.ts";
 import type { IWorkspaceApi } from "./api/workspace-api.ts";
+import { CostDashboard } from "./cost/cost-dashboard.tsx";
 import { resolveRoute } from "./navigation/routes.ts";
 import { ForgeSettingsForm } from "./settings/settings-form.tsx";
 import { Workbench } from "./workspace/workbench.tsx";
@@ -125,21 +126,25 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 		};
 	}, [constrained]);
 	const config = route.page === "config";
+	const global = config || route.page === "costs";
 	const [retained, setRetained] = useState<Project>();
 	const [projects, setProjects] = useState<Project[]>();
-	const selected = config
+	const selected = global
 		? retained
 		: route.page === "project"
 			? projects?.find((project) => project.id === route.projectId && project.status === "ready")
 			: undefined;
-	if (!config && retained !== selected) setRetained(selected);
+	if (!global && retained !== selected) setRetained(selected);
 	const [dirty, setDirty] = useState(false);
 	const dirtyChange = useCallback((value: boolean) => setDirty(value), []);
 	const [navigationError, setNavigationError] = useState("");
 	const blocker = useBlocker(({ nextLocation }) => {
 		const next = resolveRoute(nextLocation.pathname);
 		const blocked =
-			dirty && next.page !== "config" && !(next.page === "project" && next.projectId === selected?.id);
+			dirty
+			&& next.page !== "config"
+			&& next.page !== "costs"
+			&& !(next.page === "project" && next.projectId === selected?.id);
 		if (blocked) setNavigationError("Uncommitted drafts remain. Commit or discard them before leaving.");
 		return blocked;
 	});
@@ -236,7 +241,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 					<Link className='brand' to='/projects' aria-label='Forge home'>
 						<span aria-hidden='true'>F</span>forge
 					</Link>
-					{selected && !config && (
+					{selected && !global && (
 						<>
 							<span className='header-separator' aria-hidden='true'>
 								/
@@ -248,8 +253,14 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 					)}
 				</div>
 				<nav className='global-nav' aria-label='Forge'>
-					<Link to='/projects' aria-current={!config ? "page" : undefined}>
+					<Link
+						to='/projects'
+						aria-current={route.page === "projects" || route.page === "project" ? "page" : undefined}
+					>
 						Projects
+					</Link>
+					<Link to='/costs' aria-current={route.page === "costs" ? "page" : undefined}>
+						Costs
 					</Link>
 					<Link to='/config' aria-current={config ? "page" : undefined}>
 						Config
@@ -257,6 +268,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 				</nav>
 			</header>
 			<main>
+				{route.page === "costs" && <CostDashboard api={workspaceApi} />}
 				{navigationError && dirty && (
 					<p role='alert' className='error'>
 						{navigationError}
@@ -282,7 +294,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 					</div>
 				</div>
 				{selected && (
-					<div className='project-view' hidden={config}>
+					<div className='project-view' hidden={global}>
 						<AgentOptionsRevision.Provider value={agentOptionsRevision}>
 							<Workbench
 								key={selected.id}

@@ -71,7 +71,7 @@ commands against the internal socket, failed execution and recovery.
 
 ## Cost settings
 
-The [Cost tab](agents.md#cost-and-usage) uses `FORGE_CODEX_MONTHLY_AUD` for the
+The [Costs page](agents.md#cost-and-usage) uses `FORGE_CODEX_MONTHLY_AUD` for the
 monthly subscription amount (default A$30). Update it when the plan price changes.
 Forge retains the configured amount with each recorded turn.
 

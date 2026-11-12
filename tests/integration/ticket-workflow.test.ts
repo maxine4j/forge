@@ -110,7 +110,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		const ticketStore = new TicketStore(db);
 		await ticketStore.initialize();
 		const cost = new CostService(
-			projects,
+			access,
 			ticketStore,
 			costStore,
 			usage,
@@ -326,12 +326,13 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect(history.contextWindow).toEqual({ used: 1100, max: 128000 });
 		expect(await agents!.list(owner, project.id)).toEqual([]);
 		const archived = await tickets.archive(owner, ticket.id);
-		await expect.poll(async () => (await cost.read(owner, project.id)).totals.input).toBe(4000);
-		const recorded = await cost.read(owner, project.id);
+		await expect.poll(async () => (await cost.read(owner)).totals.input).toBe(7000);
+		const recorded = await cost.read(owner);
 		expect(recorded.phases.map(({ phase, turns }) => [phase, turns])).toEqual([
 			["planning", 2],
 			["implementation", 1],
 			["rebase", 1],
+			["chat", 3],
 		]);
 		expect(recorded.tickets.at(0)).toMatchObject({
 			id: ticket.id,
@@ -342,7 +343,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		});
 		expect(recorded.tickets.at(0)?.apiAud).toBeCloseTo(0.01656);
 		expect(recorded.limits?.windows.at(0)).toMatchObject({ minutes: 300, usedPercent: 40 });
-		expect((await cost.read(owner, other.id)).phases.map(({ phase }) => phase)).toEqual(["chat"]);
+		expect((await cost.read(owner)).phases.map(({ phase }) => phase)).toContain("chat");
 	} finally {
 		await agents?.shutdown();
 		await usage?.close();

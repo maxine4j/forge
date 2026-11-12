@@ -21,7 +21,9 @@ const ticketRowSchema = ticketSchema.extend({
 	executionSettings: settingsColumn,
 	archivedAt: ticketSchema.shape.archivedAt.nullable(),
 });
-const costTicketRowSchema = ticketRowSchema.pick({ id: true, title: true, archivedAt: true });
+const costTicketRowSchema = ticketRowSchema
+	.pick({ id: true, title: true, projectId: true, archivedAt: true })
+	.extend({ projectName: z.string() });
 export interface ITicketStore {
 	updateSettings(id: string, settings: AgentSettings): Promise<void>;
 	/** Allocates an immutable globally increasing key; at most 1000 active tickets per project. */
@@ -90,17 +92,25 @@ export class TicketStore implements ITicketStore {
 			).map((row) => readTicketSchema.parse(row)),
 		);
 	}
-	async listForCost(projectId: string): Promise<{ id: string; title: string; archivedAt?: string }[]> {
+	async listForCost(): Promise<
+		{ id: string; title: string; projectId: string; projectName: string; archivedAt?: string }[]
+	> {
 		return this.guard(async () => {
-			const tickets: { id: string; title: string; archivedAt?: string }[] = [];
+			const tickets: {
+				id: string;
+				title: string;
+				projectId: string;
+				projectName: string;
+				archivedAt?: string;
+			}[] = [];
 			for (let offset = 0; ; offset += 500) {
 				const rows = await this.database.all(
-					"SELECT id, title, archivedAt FROM tickets WHERE projectId=? ORDER BY number LIMIT 500 OFFSET ?",
-					[projectId, offset],
+					"SELECT tickets.id, tickets.title, tickets.projectId, projects.name AS projectName, tickets.archivedAt FROM tickets JOIN projects ON projects.id=tickets.projectId ORDER BY tickets.number LIMIT 500 OFFSET ?",
+					[offset],
 				);
 				for (const row of rows) {
-					const { id, title, archivedAt } = costTicketRowSchema.parse(row);
-					tickets.push(archivedAt ? { id, title, archivedAt } : { id, title });
+					const { archivedAt, ...ticket } = costTicketRowSchema.parse(row);
+					tickets.push(archivedAt ? { ...ticket, archivedAt } : ticket);
 				}
 				if (rows.length < 500) return tickets;
 			}

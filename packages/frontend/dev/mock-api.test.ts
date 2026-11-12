@@ -2,7 +2,7 @@ import {
 	accountsStatusSchema,
 	githubSyncStatusSchema,
 	projectsSchema,
-	projectCostSchema,
+	costsSchema,
 	workspacesSchema,
 	workspaceTreeSchema,
 	workspaceFileSchema,
@@ -70,11 +70,11 @@ test("mock cost data uses ticket keys from its project", async () => {
 	const projects = projectsSchema.parse(await read("/api/projects"));
 	for (const project of projects) {
 		const tickets = ticketsSchema.parse(await read(`/api/projects/${project.id}/tickets`));
-		const cost = projectCostSchema.parse(await read(`/api/projects/${project.id}/cost`));
-		expect(cost.tickets.filter((ticket) => !ticket.archivedAt).map(({ id }) => id)).toEqual(
-			tickets.map(({ id }) => id),
-		);
-		const archived = cost.tickets.find((ticket) => ticket.archivedAt)!;
+		const cost = costsSchema.parse(await read("/api/costs"));
+		expect(
+			cost.tickets.filter((ticket) => !ticket.archivedAt && ticket.projectId === project.id).map(({ id }) => id),
+		).toEqual(tickets.map(({ id }) => id));
+		const archived = cost.tickets.find((ticket) => ticket.archivedAt && ticket.projectId === project.id)!;
 		expect(await read(`/api/tickets/${archived.id}`)).toMatchObject({
 			projectId: project.id,
 			archivedAt: archived.archivedAt,

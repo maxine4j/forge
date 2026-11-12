@@ -31,15 +31,46 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 			cached: 0,
 			output: 10,
 		},
-		{ ...planning, ticketId: undefined, phase: "chat", turnId: "three", input: 20, cached: 0, output: 10 },
-	];
-	const projects = { get: vi.fn(async () => ({})) };
-	const service = new CostService(
-		projects,
 		{
+			...planning,
+			projectId: "b",
+			ticketId: undefined,
+			phase: "chat",
+			turnId: "three",
+			input: 20,
+			cached: 0,
+			output: 10,
+		},
+		{
+			...planning,
+			projectId: "b",
+			ticketId: "FORGE-3",
+			durationMs: undefined,
+			model: "unknown",
+			input: 10,
+			cached: 0,
+			output: 0,
+		},
+	];
+	turns.push({
+		...planning,
+		projectId: "b",
+		ticketId: "FORGE-3",
+		turnId: "four",
+		durationMs: 1000,
+		input: 100,
+		cached: 0,
+		output: 10,
+	});
+	const access = { assertOwner: vi.fn() };
+	const service = new CostService(
+		access,
+		{
+			get: async () => ({ id: "FORGE-1", projectId: "a" }),
 			listForCost: async () => [
-				{ id: "FORGE-1", title: "Search", archivedAt: startedAt },
-				{ id: "FORGE-2", title: "Waiting" },
+				{ projectId: "a", projectName: "One", id: "FORGE-1", title: "Search", archivedAt: startedAt },
+				{ projectId: "b", projectName: "Two", id: "FORGE-2", title: "Waiting" },
+				{ projectId: "b", projectName: "Two", id: "FORGE-3", title: "Other" },
 			],
 		},
 		{ read: async () => ({ since: startedAt, turns }) },
@@ -48,12 +79,12 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 		() => new Date("2026-11-01T00:00:00Z"),
 		{ save: async () => {}, read: async () => ({ observations: [], completions: [] }) },
 	);
-	const result = await service.read({ username: "owner" }, "a");
-	expect(projects.get).toHaveBeenCalledWith({ username: "owner" }, "a");
-	expect(result.totals).toMatchObject({ input: 1000120, cached: 500000, output: 100020, turns: 3 });
+	const result = await service.read({ username: "owner" });
+	expect(access.assertOwner).toHaveBeenCalledWith({ username: "owner" });
+	expect(result.totals).toMatchObject({ input: 1000230, cached: 500000, output: 100030, turns: 5 });
 	expect(result.phases.map(({ phase }) => phase)).toEqual(["planning", "review", "chat"]);
 	expect(result.days).toHaveLength(30);
-	expect(result.days.at(-2)).toMatchObject({ date: "2026-10-31", input: 1000120 });
+	expect(result.days.at(-2)).toMatchObject({ date: "2026-10-31", input: 1000230 });
 	expect(result.days.at(-1)).toMatchObject({ date: "2026-11-01", input: 0 });
 	expect(result.tickets.at(0)?.subscriptionAud).toBeCloseTo(30 / (31 * 24) + 30 / (30 * 24));
 	expect(result.tickets.at(0)).toMatchObject({
@@ -66,5 +97,14 @@ test("aggregates phase and daily usage, splits time across months, and flags unp
 	expect(result.tickets.at(1)).toMatchObject({ id: "FORGE-2", turns: 0 });
 	expect(result.tickets.at(1)?.apiAud).toBeUndefined();
 	expect(result.limits).toBeUndefined();
+	expect(result.ticketEstimates).toMatchObject({ unpricedTurns: 2, untimedTurns: 1, turns: 4 });
+	expect(result.ticketEstimates.apiAud).toBeCloseTo(4.3131, 8);
+	expect(result.ticketEstimates.subscriptionAud).toBeCloseTo(
+		30 / (31 * 24) + 30 / (30 * 24) + (30 * 1000) / (31 * 86400000),
+		8,
+	);
+	const scoped = await service.readTicket({ username: "owner" }, "FORGE-1");
+	expect(scoped.ticket).toEqual(expect.objectContaining({ turns: 2, apiAud: 4.3125 }));
+	await expect(service.readTicket({ username: "owner" }, "invalid")).rejects.toThrow();
 	expect(result.weeklyBudget).toEqual({ buckets: [], defaultBucketId: undefined });
 });

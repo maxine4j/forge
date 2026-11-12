@@ -149,9 +149,9 @@ the workspace store and completes recovery before listening.
 ## Slice 2 integrated manual workspace and PR review
 
 Forge uses a dark GitHub-style layout throughout, including the editor, forms,
-diffs and account setup. Global navigation separates Projects at `/projects` from Config at
-`/config`; ChatGPT/GitHub status, device-code login, cancellation and retry live
-only on Config. Account errors never clutter project views. Switching to Config
+diffs and account setup. Global navigation contains Projects at `/projects`, [Costs](agents.md#cost-and-usage)
+at `/costs`, and Config at `/config`; ChatGPT/GitHub status, device-code login, cancellation and retry live
+only on Config. Account errors never clutter project views. Switching to Config or Costs
 preserves the open project and its unsaved drafts.
 
 Projects retains creation/import/retry. The entire ready project card opens the
@@ -208,7 +208,7 @@ select the first chat from the base URL. Resizing an open chat preserves it;
 widening the list selects the first chat. Visited conversations remain mounted
 and running through list and section navigation, retaining drafts and reading
 position. Only the visible pane participates in keyboard navigation.
-URL navigation within a project and to Config retains local editor/chat drafts and
+URL navigation within a project and to Config or Costs retains local editor/chat drafts and
 visited terminals. Project exit, including browser history and global navigation,
 blocks while code drafts remain uncommitted; commit or discard them first.
 Reload/unload retains the native unsaved-code warning. Draft contents are not

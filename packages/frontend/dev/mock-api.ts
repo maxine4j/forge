@@ -1,3 +1,4 @@
+import type { Costs } from "@forge/contracts";
 import { defaultForgeSettings } from "@forge/contracts/settings";
 import { defaultBoardSettings } from "@forge/contracts/tickets";
 import type { Plugin } from "vite";
@@ -47,6 +48,38 @@ export class MockApi implements IMockApi {
 			codex: { connection: "available", account: { name: "owner@example.test" }, login: { state: "completed" } },
 			github: { connection: "available", login: { state: "idle" } },
 		}));
+		const costData: Costs[] = [];
+		this.routes.set("/api/costs", () => {
+			const first = costData[0]!;
+			return {
+				...first,
+				tickets: costData.flatMap((cost) => cost.tickets),
+				totals: { input: 328000, cached: 192000, output: 42000, turns: 16 },
+				ticketEstimates: {
+					input: 328000,
+					cached: 192000,
+					output: 42000,
+					turns: 16,
+					subscriptionAud: 0.08,
+					apiAud: 1.46,
+					untimedTurns: 0,
+					unpricedTurns: 0,
+				},
+				days: first.days.map((day) => ({
+					...day,
+					input: day.input * 2,
+					cached: day.cached * 2,
+					output: day.output * 2,
+				})),
+				phases: first.phases.map((phase) => ({
+					...phase,
+					input: phase.input * 2,
+					cached: phase.cached * 2,
+					output: phase.output * 2,
+					turns: phase.turns * 2,
+				})),
+			};
+		});
 		for (const project of projects) {
 			const id = project.id.replace(/0$/, "1");
 			const prId = project.id.replace(/0$/, "2");
@@ -190,7 +223,8 @@ export class MockApi implements IMockApi {
 				cached: index >= 22 ? 12000 : 0,
 				output: index >= 22 ? 2625 : 0,
 			}));
-			this.routes.set(`${projectRoot}/cost`, () => ({
+			const cost: Costs = {
+				ticketEstimates: { ...usage, subscriptionAud: 0.04, apiAud: 0.73, untimedTurns: 0, unpricedTurns: 0 },
 				weeklyBudget: {
 					defaultBucketId: "codex",
 					buckets: [
@@ -230,6 +264,8 @@ export class MockApi implements IMockApi {
 					{ phase: "review", input: 24000, cached: 14000, output: 4000, turns: 1 },
 				],
 				tickets: tickets.map(({ id, title, archivedAt }, index) => ({
+					projectId: project.id,
+					projectName: project.name,
 					id,
 					title,
 					archivedAt,
@@ -246,7 +282,16 @@ export class MockApi implements IMockApi {
 						{ bucket: "Codex", minutes: 10080, usedPercent: 64 },
 					],
 				},
-			}));
+			};
+			costData.push(cost);
+			for (const row of cost.tickets)
+				this.routes.set(`/api/tickets/${row.id}/cost`, () => ({
+					since: cost.since,
+					monthlyAud: cost.monthlyAud,
+					audPerUsd: cost.audPerUsd,
+					exchangeDate: cost.exchangeDate,
+					ticket: row,
+				}));
 			for (const ticket of tickets) {
 				this.routes.set(`/api/tickets/${ticket.id}`, () => ticket);
 				this.routes.set(`/api/tickets/${ticket.id}/workflow`, () => ({

@@ -1,9 +1,8 @@
-import { projectCostSchema, projectIdSchema } from "@forge/contracts";
+import { costsSchema, ticketCostSchema } from "@forge/contracts";
 import Router from "@koa/router";
 
 import type { Actor } from "../auth/types.ts";
 import type { IHttpRouter } from "../http/http-application.ts";
-import { InvalidProjectError } from "../projects/errors.ts";
 import type { ICostService } from "./cost-service.ts";
 
 export class CostRouter implements IHttpRouter {
@@ -11,10 +10,11 @@ export class CostRouter implements IHttpRouter {
 
 	create(): Router<{ actor: Actor }> {
 		const router = new Router<{ actor: Actor }>();
-		router.get("/api/projects/:id/cost", async (ctx) => {
-			const id = projectIdSchema.safeParse(ctx.params["id"]);
-			if (!id.success) throw new InvalidProjectError();
-			ctx.body = projectCostSchema.parse(await this.cost.read(ctx.state.actor, id.data));
+		router.get("/api/costs", async (ctx) => {
+			ctx.body = costsSchema.parse(await this.cost.read(ctx.state.actor));
+		});
+		router.get("/api/tickets/:id/cost", async (ctx) => {
+			ctx.body = ticketCostSchema.parse(await this.cost.readTicket(ctx.state.actor, ctx.params["id"]!));
 		});
 		return router;
 	}

@@ -67,6 +67,12 @@ test("existing file edits remain local, navigation guards drafts, and typing dur
 	expect(mutations).toEqual([]);
 	await page.getByRole("link", { name: "Forge home", exact: true }).click();
 	await expect(page.getByRole("alert")).toContainText("Uncommitted drafts remain");
+	await page.getByRole("link", { name: "Costs", exact: true }).click();
+	await expect(page).toHaveURL("/costs");
+	await expect(page.getByRole("link", { name: "Costs", exact: true })).toHaveAttribute("aria-current", "page");
+	await expect(page.getByRole("link", { name: "Projects", exact: true })).not.toHaveAttribute("aria-current");
+	await page.goBack();
+	await expect(editor).toContainText("first snapshot");
 	await page.getByRole("link", { name: "Config", exact: true }).click();
 	await page.getByRole("link", { name: "Projects", exact: true }).click();
 	await expect(page).toHaveURL("/config");

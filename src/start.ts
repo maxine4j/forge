@@ -224,7 +224,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		(err) => log.warn({ err }, "Weekly quota collection failed"),
 	);
 	lifecycle.register(() => collector.close());
-	const cost = new CostService(projects, ticketStore, costStore, usage, config.cost, () => new Date(), quotas);
+	const cost = new CostService(access, ticketStore, costStore, usage, config.cost, () => new Date(), quotas);
 	const codex = new CodexAccountClient(connection, attempts);
 	const github = new GithubAccountClient(processes, sleep, attempts);
 	lifecycle.register(() => github.close());

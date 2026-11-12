@@ -24,7 +24,7 @@ const recordSchema = z
 	);
 
 export interface ICostHistory {
-	read(projectId: string): Promise<{ since: string; turns: UsageTurn[] }>;
+	read(ticketId?: string): Promise<{ since: string; turns: UsageTurn[] }>;
 }
 
 export interface ICostStore extends ICostHistory {
@@ -47,14 +47,16 @@ export class CostStore implements ICostStore {
 		]);
 	}
 
-	async read(projectId: string): Promise<{ since: string; turns: UsageTurn[] }> {
+	async read(ticketId?: string): Promise<{ since: string; turns: UsageTurn[] }> {
 		const metadata = await this.database.all("SELECT since FROM cost_tracking WHERE id=1");
 		const { since } = z.object({ since: z.iso.datetime() }).parse(metadata.at(0));
 		const turns: UsageTurn[] = [];
 		for (let offset = 0; ; offset += 500) {
 			const rows = await this.database.all(
-				"SELECT record FROM codex_usage WHERE projectId=? ORDER BY rowid LIMIT 500 OFFSET ?",
-				[projectId, offset],
+				ticketId
+					? "SELECT record FROM codex_usage WHERE json_extract(record, '$.ticketId')=? ORDER BY rowid LIMIT 500 OFFSET ?"
+					: "SELECT record FROM codex_usage ORDER BY rowid LIMIT 500 OFFSET ?",
+				ticketId ? [ticketId, offset] : [offset],
 			);
 			for (const row of rows)
 				turns.push(recordSchema.parse(JSON.parse(z.object({ record: z.string() }).parse(row).record)));

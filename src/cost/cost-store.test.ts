@@ -7,7 +7,7 @@ import { expect, test } from "vitest";
 import { SqliteDatabase } from "../database/sqlite-database.ts";
 import { CostStore } from "./cost-store.ts";
 
-test("persists one usage snapshot per turn across restarts and scopes reads by project", async () => {
+test("persists one usage snapshot per turn across restarts and reads all projects and isolates tickets", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "forge-cost-"));
 	const path = join(directory, "forge.sqlite");
 	const date = "2026-11-11T00:00:00.000Z";
@@ -36,16 +36,22 @@ test("persists one usage snapshot per turn across restarts and scopes reads by p
 		await db.initialize();
 		const reopened = new CostStore(db);
 		await reopened.initialize("2026-11-12T00:00:00.000Z");
-		expect(await reopened.read("a")).toEqual({ since: date, turns: [{ ...record, output: 10, durationMs: 1000 }] });
-		expect((await reopened.read("b")).turns).toHaveLength(1);
+		expect(await reopened.read("FORGE-1")).toEqual({
+			since: date,
+			turns: [
+				{ ...record, output: 10, durationMs: 1000 },
+				{ ...record, projectId: "b", threadId: "other" },
+			],
+		});
+		expect((await reopened.read("FORGE-2")).turns).toHaveLength(0);
 		await db.run(
 			`WITH RECURSIVE turns(n) AS (VALUES(1) UNION ALL SELECT n+1 FROM turns WHERE n<1000)
 			 INSERT INTO codex_usage(projectId,threadId,turnId,record)
 			 SELECT 'a','thread','turn-'||n,json_set(?,'$.turnId','turn-'||n) FROM turns`,
 			[JSON.stringify(record)],
 		);
-		const history = await reopened.read("a");
-		expect(history.turns).toHaveLength(1001);
+		const history = await reopened.read();
+		expect(history.turns).toHaveLength(1002);
 		expect(history.turns.at(-1)?.turnId).toBe("turn-1000");
 	} finally {
 		await db.close();

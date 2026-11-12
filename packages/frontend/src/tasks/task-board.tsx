@@ -10,6 +10,7 @@ import {
 } from "@forge/contracts/tickets";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent, PointerEvent } from "react";
+import { useLocation, useSearchParams } from "react-router";
 
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
@@ -108,12 +109,44 @@ const TicketEditor = ({
 };
 
 export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspaceApi }) => {
+	const location = useLocation();
+	const [search, setSearch] = useSearchParams();
+	const linkedId = location.pathname === `/projects/${projectId}/tasks` ? search.get("ticket") : null;
+	const [linked, setLinked] = useState<{ id: string; ticket?: Ticket; error?: string }>();
+	const closeTicket = () => {
+		setCreating(false);
+		if (!search.has("ticket")) return;
+		const next = new URLSearchParams(search);
+		next.delete("ticket");
+		setSearch(next);
+	};
+	useEffect(() => {
+		if (!linkedId) return;
+		let current = true;
+		void api.read(`tickets/${encodeURIComponent(linkedId)}`, ticketSchema).then(
+			(ticket) => {
+				if (current)
+					setLinked(
+						ticket.projectId === projectId
+							? { id: linkedId, ticket }
+							: { id: linkedId, error: "Ticket belongs to another project." },
+					);
+			},
+			() => {
+				if (current) setLinked({ id: linkedId, error: "Ticket unavailable." });
+			},
+		);
+		return () => {
+			current = false;
+		};
+	}, [api, projectId, linkedId]);
 	const [tickets, setTickets] = useState<Ticket[]>([]);
 	const [loading, setLoading] = useState(true);
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 	const [notice, setNotice] = useState("");
-	const [editing, setEditing] = useState<Ticket | "new">();
+	const [creating, setCreating] = useState(false);
+	const selectedTicket = linkedId && linked?.id === linkedId ? linked.ticket : undefined;
 	const [showSettings, setShowSettings] = useState(false);
 	const [drag, setDrag] = useState<Drag>();
 	const dragging = useRef<Drag | undefined>(undefined);
@@ -289,7 +322,7 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 					>
 						Refresh board
 					</button>
-					<button className='primary' disabled={busy || loading || !!drag} onClick={() => setEditing("new")}>
+					<button className='primary' disabled={busy || loading || !!drag} onClick={() => setCreating(true)}>
 						Create ticket
 					</button>
 				</div>
@@ -332,7 +365,11 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 												className='ticket-open'
 												aria-label={`${ticket.id} ${ticket.title}`}
 												disabled={busy || !!drag}
-												onClick={() => setEditing(ticket)}
+												onClick={() => {
+													const next = new URLSearchParams(search);
+													next.set("ticket", ticket.id);
+													setSearch(next);
+												}}
 											>
 												<span className='ticket-title'>{ticket.title}</span>
 												<span className='ticket-key'>
@@ -418,40 +455,57 @@ export const TaskBoard = ({ projectId, api }: { projectId: string; api: IWorkspa
 				</>
 			)}
 			{showSettings && <BoardSettingsDialog api={api} close={() => setShowSettings(false)} />}
-			{editing && editing !== "new" && (
+			{linkedId && linked?.id !== linkedId && <p role='status'>Loading ticket…</p>}
+			{linkedId && linked?.id === linkedId && linked.error && (
+				<p role='alert'>
+					{linked.error}
+					<button onClick={closeTicket}>Close ticket</button>
+				</p>
+			)}
+			{selectedTicket && (
 				<TicketDetails
-					ticket={tickets.find((ticket) => ticket.id === editing.id) ?? editing}
+					key={selectedTicket.id}
+					ticket={
+						selectedTicket.archivedAt
+							? selectedTicket
+							: (tickets.find((ticket) => ticket.id === selectedTicket.id) ?? selectedTicket)
+					}
 					api={api}
 					busy={busy}
 					drafts={drafts}
-					close={() => setEditing(undefined)}
+					close={closeTicket}
 					archive={() =>
 						mutate(async () => {
-							await api.read(`tickets/${editing.id}/archive`, ticketSchema, "POST");
+							await api.read(`tickets/${selectedTicket.id}/archive`, ticketSchema, "POST");
 							if (!active.current) return;
-							setTickets((current) => current.filter((ticket) => ticket.id !== editing.id));
-							setEditing(undefined);
-							setNotice(`${editing.id} archived.`);
+							setTickets((current) => current.filter((ticket) => ticket.id !== selectedTicket.id));
+							closeTicket();
+							setNotice(`${selectedTicket.id} archived.`);
 						})
 					}
 					move={move}
 					refreshBoard={() => poller.current?.refresh()}
 					save={(input) =>
 						mutate(async () => {
-							const updated = await api.read(`tickets/${editing.id}`, ticketSchema, "PATCH", input);
+							const updated = await api.read(
+								`tickets/${selectedTicket.id}`,
+								ticketSchema,
+								"PATCH",
+								input,
+							);
 							setTickets((current) =>
 								current.map((ticket) => (ticket.id === updated.id ? updated : ticket)),
 							);
-							setEditing(undefined);
+							closeTicket();
 						})
 					}
 				/>
 			)}
-			{editing === "new" && (
+			{creating && (
 				<TicketEditor
 					key='new'
 					busy={busy}
-					close={() => setEditing(undefined)}
+					close={closeTicket}
 					save={(input) =>
 						mutate(async () => {
 							const updated = await api.read(

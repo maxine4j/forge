@@ -277,17 +277,22 @@ live ChatGPT inference remains a separate manual check.
 
 ### Cost and usage
 
-The project Cost tab reads `GET /api/projects/:id/cost` through the owner-only
+The global Costs page at `/costs` reads `GET /api/costs` through the owner-only
 API. It shows cumulative recorded usage, 7- and 30-day UTC charts by turn start
 date, a breakdown by phase, and [per-ticket estimates](tickets.md#ticket-cost)
-for every project ticket, including archived tickets and tickets without usage.
-Standalone chats contribute to project usage in their own category. Cached
+across all projects, for every ticket, including archived tickets and tickets without usage.
+Ticket rows include project names and links. Summary cards sum known ticket
+subscription allocations and API equivalents before formatting, flagging missing
+duration or pricing. Monetary totals are ticket estimates; tokens include chats.
+The page retains manual refresh, retry, and five-minute refresh. Legacy project
+Cost URLs and API routes are unknown routes with no redirects.
+Standalone chats contribute to global usage in their own category. Cached
 input is included in input totals, and reasoning is included in output.
 
 Forge records `thread/tokenUsage/updated` counters and reported turn duration in
 SQLite. Usage updates replace the previous snapshot for the same turn, with the
 first update establishing the baseline from the runtime's last and total counts.
-The tab shows the date tracking began. Older turns lack reliable per-turn token
+The page shows the date tracking began. Older turns lack reliable per-turn token
 and phase data for backfill. Disconnects can leave partial usage and missing
 duration. The endpoint returns normalized counts without conversation content,
 Codex identifiers, or account credentials.
@@ -302,7 +307,7 @@ is read-only. A quota timeout leaves the shared execution connection open.
 
 #### Weekly budget capacity
 
-The owner-only Cost response additionally returns `weeklyBudget`: account-wide
+The owner-only Costs response additionally returns `weeklyBudget`: account-wide
 weekly bucket series, a default bucket ID, remaining percentage, reset and last
 observation timestamps, freshness, and an additional-ticket estimate or an
 unavailable reason (`learning`, `stale`, `reset-passed`). Existing cost fields remain.

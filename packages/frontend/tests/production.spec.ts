@@ -200,6 +200,8 @@ test("integrated production bundle styles editor/terminal on desktop/mobile and 
 			"script-src-elem",
 		]);
 		await page.getByRole("tab", { name: "Code", exact: true }).click();
+		await page.getByRole("tab", { name: "file.ts", exact: true }).click();
+		await expect(page.getByRole("textbox", { name: "File editor" })).toBeVisible();
 		expect(await page.evaluate(() => getComputedStyle(document.documentElement).colorScheme)).toBe("dark");
 		const colors = await page
 			.locator(".cm-content span")

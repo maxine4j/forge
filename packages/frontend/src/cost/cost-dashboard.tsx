@@ -1,5 +1,6 @@
-import { projectCostSchema, type ProjectCost } from "@forge/contracts";
+import { costsSchema, type Costs } from "@forge/contracts";
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { WeeklyBudgetChart } from "./weekly-budget.tsx";
@@ -20,7 +21,7 @@ const phaseLabels = {
 	chat: "Standalone chats",
 };
 
-const TokenStack = ({ counts, scale }: { counts: ProjectCost["days"][number]; scale: number }) => (
+const TokenStack = ({ counts, scale }: { counts: Costs["days"][number]; scale: number }) => (
 	<span className='cost-day-stack'>
 		<span className='cost-uncached' style={{ height: `${(100 * (counts.input - counts.cached)) / scale}%` }} />
 		<span className='cost-cached' style={{ height: `${(100 * counts.cached) / scale}%` }} />
@@ -28,7 +29,7 @@ const TokenStack = ({ counts, scale }: { counts: ProjectCost["days"][number]; sc
 	</span>
 );
 
-const UsageCharts = ({ cost }: { cost: ProjectCost }) => {
+const UsageCharts = ({ cost }: { cost: Costs }) => {
 	const [range, setRange] = useState(30);
 	const days = cost.days.slice(-range);
 	const scale = Math.max(1, ...days.map(tokens));
@@ -132,7 +133,7 @@ const UsageCharts = ({ cost }: { cost: ProjectCost }) => {
 	);
 };
 
-const Quotas = ({ limits }: { limits: ProjectCost["limits"] }) => (
+const Quotas = ({ limits }: { limits: Costs["limits"] }) => (
 	<section className='cost-card cost-quotas'>
 		<header className='cost-heading'>
 			<h3>Codex account limits</h3>
@@ -175,7 +176,7 @@ const Quotas = ({ limits }: { limits: ProjectCost["limits"] }) => (
 
 const columns = { ticket: "Ticket", tokens: "Tokens", subscription: "Subscription allocation", api: "API equivalent" };
 type Sort = keyof typeof columns;
-type TicketRow = ProjectCost["tickets"][number];
+type TicketRow = Costs["tickets"][number];
 const sortValue = (ticket: TicketRow, column: Sort) => {
 	switch (column) {
 		case "ticket":
@@ -189,7 +190,7 @@ const sortValue = (ticket: TicketRow, column: Sort) => {
 	}
 };
 
-const TicketCosts = ({ cost }: { cost: ProjectCost }) => {
+const TicketCosts = ({ cost }: { cost: Costs }) => {
 	const [sort, setSort] = useState<{ column: Sort; ascending: boolean }>({ column: "tokens", ascending: false });
 	const tickets = [...cost.tickets].sort((a, b) => {
 		const left = sortValue(a, sort.column);
@@ -206,7 +207,7 @@ const TicketCosts = ({ cost }: { cost: ProjectCost }) => {
 		<section className='cost-card'>
 			<h3>Usage and cost by ticket</h3>
 			{!tickets.length ? (
-				<p className='cost-muted'>This project has no tickets yet.</p>
+				<p className='cost-muted'>No tickets yet.</p>
 			) : (
 				<div className='cost-table-scroll' role='region' aria-label='Ticket costs' tabIndex={0}>
 					<table className='cost-table'>
@@ -246,7 +247,12 @@ const TicketCosts = ({ cost }: { cost: ProjectCost }) => {
 							{tickets.map((ticket) => (
 								<tr key={ticket.id}>
 									<th scope='row'>
-										<span className='cost-muted'>{ticket.id}</span> {ticket.title}
+										<Link
+											to={`/projects/${ticket.projectId}/tasks?ticket=${encodeURIComponent(ticket.id)}`}
+										>
+											<span className='cost-muted'>{ticket.id}</span> {ticket.title}
+										</Link>
+										<small>{ticket.projectName}</small>
 										{ticket.archivedAt && <small>Archived</small>}
 									</th>
 									<td>
@@ -294,16 +300,16 @@ const TicketCosts = ({ cost }: { cost: ProjectCost }) => {
 	);
 };
 
-export const CostDashboard = ({ projectId, api }: { projectId: string; api: IWorkspaceApi }) => {
+export const CostDashboard = ({ api }: { api: IWorkspaceApi }) => {
 	const [attempt, setAttempt] = useState(0);
 	useEffect(() => {
 		const timer = window.setInterval(() => setAttempt((value) => value + 1), 300_000);
 		return () => window.clearInterval(timer);
 	}, []);
-	const [result, setResult] = useState<{ attempt: number; value?: ProjectCost }>();
+	const [result, setResult] = useState<{ attempt: number; value?: Costs }>();
 	useEffect(() => {
 		let current = true;
-		void api.read(`projects/${projectId}/cost`, projectCostSchema).then(
+		void api.read("costs", costsSchema).then(
 			(value) => {
 				if (current) setResult({ attempt, value });
 			},
@@ -314,14 +320,14 @@ export const CostDashboard = ({ projectId, api }: { projectId: string; api: IWor
 		return () => {
 			current = false;
 		};
-	}, [api, projectId, attempt]);
+	}, [api, attempt]);
 	const cost = result?.value;
 	const pending = result?.attempt !== attempt;
 	return (
 		<div className='cost-dashboard' aria-busy={pending}>
 			<header className='cost-heading cost-title'>
 				<div>
-					<h2>Cost</h2>
+					<h2>Costs</h2>
 					{cost && <p className='cost-muted'>Recorded since {cost.since.slice(0, 10)} (UTC)</p>}
 				</div>
 				{cost && (
@@ -340,6 +346,20 @@ export const CostDashboard = ({ projectId, api }: { projectId: string; api: IWor
 			{cost && (
 				<>
 					<dl className='cost-metrics'>
+						<div className='cost-card'>
+							<dt>Ticket subscription allocation estimate</dt>
+							<dd>{formatAud(cost.ticketEstimates.subscriptionAud)}</dd>
+							{cost.ticketEstimates.untimedTurns > 0 && (
+								<small>Incomplete: {cost.ticketEstimates.untimedTurns} turns missing duration</small>
+							)}
+						</div>
+						<div className='cost-card'>
+							<dt>Ticket API equivalent estimate</dt>
+							<dd>{formatAud(cost.ticketEstimates.apiAud)}</dd>
+							{cost.ticketEstimates.unpricedTurns > 0 && (
+								<small>Incomplete: {cost.ticketEstimates.unpricedTurns} turns missing pricing</small>
+							)}
+						</div>
 						<div className='cost-card'>
 							<dt>Total tokens</dt>
 							<dd>{number.format(tokens(cost.totals))}</dd>

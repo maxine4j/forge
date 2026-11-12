@@ -15,7 +15,7 @@ description (0–4000 characters, default empty) while in Backlog. Each project
 can have at most 1000 active tickets.
 
 The owner can archive a ticket from its details panel after confirming. Archived
-tickets leave the board and remain in [project Cost](agents.md#cost-and-usage).
+tickets leave the board and remain in [Costs](agents.md#cost-and-usage).
 Forge retains the key, scope, status, workflow history and related data. The
 ticket and workflow remain readable by ID.
 Queued work can be archived before it starts. A running turn, unresolved dispatch
@@ -241,13 +241,20 @@ compact mobile header, a separately scrolling timeline and viewport-bounded popu
 The account-wide [weekly budget capacity methodology](agents.md#weekly-budget-capacity)
 uses first-time Done timestamps recorded atomically with workflow updates. Archived
 completions count; legacy completion timestamps are left unknown. Capacity appears
-in project Cost and does not constrain scheduling or add a board indicator.
+in Costs and does not constrain scheduling or add a board indicator.
 
-The [project Cost tab](agents.md#cost-and-usage) attributes each turn to the
+The [Costs page](agents.md#cost-and-usage) attributes each turn to the
 ticket and phase at dispatch, including rebase turns on an implementation thread
 and historical review turns. The ticket's Cost tab shows its recorded input,
 cached input and output tokens, turn count and two AUD estimates using the same
-data as the project dashboard.
+data as the global dashboard. Owner-only `GET /api/tickets/:id/cost` returns only
+that ticket’s usage, estimates, pricing metadata and tracking start date.
+
+Costs links to `/projects/:projectId/tasks?ticket=:ticketId`. The panel loads the
+ticket by ID independently of the active board, including archived tickets.
+Closing clears the query parameter; reload and Back/Forward restore selection.
+Missing tickets and project mismatches show errors. Archived panels retain
+Details, Chat history and Cost, with editing and execution controls read-only.
 
 - **Subscription allocation** prorates the monthly plan amount at dispatch over
   elapsed Codex turn time, splitting turns at UTC calendar month boundaries.

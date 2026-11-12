@@ -36,24 +36,33 @@ export const weeklyBudgetSchema = z.object({
 });
 export type WeeklyObservation = z.infer<typeof weeklyObservationSchema>;
 export type WeeklyBudget = z.infer<typeof weeklyBudgetSchema>;
-export const projectCostSchema = z.object({
-	weeklyBudget: weeklyBudgetSchema.optional(),
+export const ticketEstimateSchema = summary.extend({
+	subscriptionAud: amount.optional(),
+	apiAud: amount.optional(),
+	untimedTurns: count,
+	unpricedTurns: count,
+});
+const pricingSchema = z.object({
 	since: z.iso.datetime(),
 	monthlyAud: amount,
 	audPerUsd: amount.positive(),
 	exchangeDate: z.iso.date(),
+});
+export const ticketCostSchema = pricingSchema.extend({ ticket: ticketEstimateSchema });
+export type TicketCost = z.infer<typeof ticketCostSchema>;
+export const costsSchema = pricingSchema.extend({
+	weeklyBudget: weeklyBudgetSchema.optional(),
 	totals: summary,
+	ticketEstimates: ticketEstimateSchema,
 	phases: z.array(summary.extend({ phase: costPhaseSchema })),
 	days: z.array(tokens.extend({ date: z.iso.date() })).max(30),
 	tickets: z.array(
-		summary.extend({
+		ticketEstimateSchema.extend({
 			id: z.string(),
 			title: z.string(),
+			projectId: z.string(),
+			projectName: z.string(),
 			archivedAt: z.iso.datetime().optional(),
-			subscriptionAud: amount.optional(),
-			apiAud: amount.optional(),
-			untimedTurns: count,
-			unpricedTurns: count,
 		}),
 	),
 	limits: z
@@ -71,4 +80,4 @@ export const projectCostSchema = z.object({
 		})
 		.optional(),
 });
-export type ProjectCost = z.infer<typeof projectCostSchema>;
+export type Costs = z.infer<typeof costsSchema>;
