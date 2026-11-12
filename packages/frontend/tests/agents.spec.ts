@@ -48,6 +48,7 @@ const setup = async (page: Page, initialItems: AgentView["items"] = []) => {
 				});
 			if (path.endsWith("/agents")) {
 				if (method === "POST") {
+					if (fail) return route.fulfill({ status: 503, json: { error: "agent-unavailable" } });
 					const id = `123e4567-e89b-42d3-a456-${String(426614174001 + views.length)}`;
 					const view: AgentView = {
 						thread: {
@@ -127,12 +128,13 @@ const setup = async (page: Page, initialItems: AgentView["items"] = []) => {
 	await page.getByRole("link", { name: "Open Forge", exact: true }).click();
 	await page.getByRole("tab", { name: "Agents", exact: true }).click();
 	const create = async () => {
-		const title = `Chat ${views.length + 1}`;
+		const count = views.length;
+		const back = page.getByRole("button", { name: "Back to chats", exact: true });
+		if (await back.isVisible()) await back.click();
 		await page.getByRole("button", { name: "Create chat", exact: true }).click();
-		await expect(page.getByRole("button", { name: `Open chat ${title}`, exact: true })).toHaveAttribute(
-			"aria-current",
-			"true",
-		);
+		await expect.poll(() => views.length).toBe(count + 1);
+		await expect(page).toHaveURL(new RegExp(`/agents/${views.at(-1)!.thread.id}$`));
+		await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeVisible();
 	};
 	const event = async (type = "changed") =>
 		page.evaluate((detail) => window.dispatchEvent(new CustomEvent("agent-event", { detail })), type);
@@ -537,7 +539,7 @@ for (const size of [
 				thread: {
 					...first.thread,
 					id: `123e4567-e89b-42d3-a456-${String(426614174001 + i)}`,
-					title: `Chat ${i}`,
+					title: `Chat ${i + 1}`,
 				},
 			});
 		first.items = Array.from({ length: 50 }, (_, i) => ({
@@ -548,7 +550,7 @@ for (const size of [
 		await page.getByRole("tab", { name: "Code", exact: true }).click();
 		await page.getByRole("tab", { name: "Agents", exact: true }).click();
 		await fixture.event();
-		await expect(page.getByRole("button", { name: "Open chat Chat 39", exact: true })).toHaveCount(1);
+		await expect(page.locator('.agent-sidebar button[aria-label="Open chat Chat 40"]')).toHaveCount(1);
 		const check = async (height: number) => {
 			await expect
 				.poll(() => page.locator(".agent-panel").evaluate((el) => el.getBoundingClientRect().bottom))
@@ -559,10 +561,13 @@ for (const size of [
 			const send = (await page.getByRole("button", { name: "Send message", exact: true }).boundingBox())!;
 			expect(send.y + send.height).toBeLessThanOrEqual(height);
 			for (const selector of [".agent-sidebar nav", ".agent-messages"]) {
+				if (size.width <= 700 && selector.includes("nav"))
+					await page.getByRole("button", { name: "Back to chats", exact: true }).click();
 				const region = page.locator(selector);
-				expect(await region.evaluate((el) => el.scrollHeight > el.clientHeight && el.clientHeight > 0)).toBe(
-					true,
-				);
+				await expect(region).toBeVisible();
+				await expect
+					.poll(() => region.evaluate((el) => el.scrollHeight > el.clientHeight && el.clientHeight > 0))
+					.toBe(true);
 				await region.evaluate((el) => {
 					el.scrollTop = el.scrollHeight;
 				});
@@ -570,6 +575,8 @@ for (const size of [
 				const rect = (await region.boundingBox())!;
 				expect(rect.height).toBeGreaterThanOrEqual(40);
 				expect(rect.y + rect.height).toBeLessThanOrEqual(height);
+				if (size.width <= 700 && selector.includes("nav"))
+					await page.getByRole("button", { name: "Open chat Chat 1", exact: true }).click();
 			}
 			expect(
 				await page.evaluate(() => document.documentElement.scrollHeight <= innerHeight && scrollY === 0),
@@ -592,6 +599,156 @@ for (const size of [
 		}
 	});
 }
+
+test("mobile URLs select one pane, restore focus and support history, reload and resizing", async ({ page }) => {
+	await page.setViewportSize({ width: 700, height: 844 });
+	const fixture = await setup(page);
+	await fixture.create();
+	const url = page.url();
+	const back = page.getByRole("button", { name: "Back to chats", exact: true });
+	const chat = page.getByRole("button", { name: "Open chat Chat 1", exact: true });
+	const main = page.locator(".agent-main");
+	const sidebar = page.getByLabel("Chats", { exact: true });
+	await expect(main).toBeFocused();
+	await expect(sidebar).toBeHidden();
+	await page.locator(".agent-sidebar > button").evaluate((el: HTMLButtonElement) => el.focus());
+	await expect(main).toBeFocused();
+	await back.click();
+	await expect(chat).toBeFocused();
+	await expect(main).toBeHidden();
+	await page.locator(".agent-main textarea").evaluate((el: HTMLTextAreaElement) => el.focus());
+	await expect(chat).toBeFocused();
+	await page.screenshot({ path: "../../artifacts/forge-browser/agents-mobile-list.png" });
+	await page.getByRole("tab", { name: "Code", exact: true }).click();
+	await page.getByRole("tab", { name: "Agents", exact: true }).click();
+	await expect(main).toBeHidden();
+	await page.reload();
+	await expect(chat).toBeVisible();
+	await expect(main).toBeHidden();
+	await chat.click();
+	await expect(main).toBeFocused();
+	await expect(sidebar).toBeHidden();
+	await page.goBack();
+	await expect(chat).toBeFocused();
+	await page.goForward();
+	await expect(main).toBeFocused();
+	await page.reload();
+	await expect(page).toHaveURL(url);
+	await expect(back).toBeVisible();
+	await expect(sidebar).toBeHidden();
+	await page.setViewportSize({ width: 701, height: 844 });
+	await expect(sidebar).toBeVisible();
+	await expect(main).toBeVisible();
+	await expect(back).toBeHidden();
+	await expect(page).toHaveURL(url);
+	await page.setViewportSize({ width: 700, height: 844 });
+	await expect(sidebar).toBeHidden();
+	await expect(page).toHaveURL(url);
+	await back.click();
+	await page.setViewportSize({ width: 701, height: 844 });
+	await expect(page).toHaveURL(url);
+	await expect(sidebar).toBeVisible();
+	await page.setViewportSize({ width: 390, height: 844 });
+	await back.click();
+	fixture.fail(true);
+	await page.getByRole("button", { name: "Create chat", exact: true }).click();
+	await expect(page.getByRole("alert")).toBeVisible();
+	await expect(main).toBeHidden();
+	fixture.fail(false);
+	await fixture.create();
+	await expect(sidebar).toBeHidden();
+	await page.goto(`/projects/${projectId}/agents/123e4567-e89b-42d3-a456-426614174099`);
+	await expect(page.getByRole("heading", { name: "Chat unavailable", exact: true })).toBeVisible();
+	await expect(sidebar).toBeHidden();
+	await back.click();
+	await expect(page.getByRole("button", { name: "Create chat", exact: true })).toBeFocused();
+	await expect(main).toBeHidden();
+});
+
+test("mobile list and section navigation retain drafts, answers, paused history and running activity", async ({
+	page,
+}) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	const fixture = await setup(
+		page,
+		Array.from({ length: 40 }, (_, i) => ({
+			id: `message-${i}`,
+			role: "assistant",
+			text: `Message ${i}\n${"Output ".repeat(40)}`,
+		})),
+	);
+	await fixture.create();
+	const view = fixture.views[0]!;
+	view.thread.status = "waiting";
+	view.thread.turnId = "turn-1";
+	view.requests = [
+		{
+			id: "question",
+			kind: "input",
+			description: "Choose an approach",
+			questions: [{ id: "approach", question: "Which approach?", options: [], secret: false }],
+		},
+	];
+	await fixture.event();
+	await page.getByLabel("Which approach?", { exact: true }).fill("Keep my answer");
+	await page.getByLabel("Message", { exact: true }).fill("Keep my draft");
+	const history = page.getByLabel("Conversation history", { exact: true });
+	await history.evaluate((el) => {
+		el.scrollTop = 100;
+	});
+	await expect(page.getByRole("button", { name: "Scroll to latest", exact: true })).toBeVisible();
+	await page.getByRole("button", { name: "Back to chats", exact: true }).click();
+	const reads = fixture.reads();
+	view.items.push({ id: "background", role: "assistant", text: "Activity while reading the list" });
+	await fixture.event();
+	await expect.poll(fixture.reads).toBeGreaterThan(reads);
+	await page.getByRole("tab", { name: "Code", exact: true }).click();
+	await page.getByRole("tab", { name: "Agents", exact: true }).click();
+	await expect(page.locator(".agent-main")).toBeHidden();
+	await page.getByRole("button", { name: "Open chat Chat 1", exact: true }).click();
+	await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Keep my draft");
+	await expect(page.getByLabel("Which approach?", { exact: true })).toHaveValue("Keep my answer");
+	await expect.poll(() => history.evaluate((el) => el.scrollTop)).toBe(100);
+	await expect(page.getByRole("button", { name: "Scroll to latest", exact: true })).toHaveClass(
+		/agent-scroll-unseen/,
+	);
+	await expect(history).toContainText("Activity while reading the list");
+	await page.getByRole("tab", { name: "Code", exact: true }).click();
+	await page.getByRole("tab", { name: "Agents", exact: true }).click();
+	await expect(page.locator(".agent-main")).toBeFocused();
+	await expect.poll(() => history.evaluate((el) => el.scrollTop)).toBe(100);
+	view.requests = [];
+	view.thread.status = "running";
+	await fixture.event();
+	await expect(page.getByRole("button", { name: "Interrupt", exact: true })).toBeEnabled();
+	await page.getByRole("button", { name: "Back to chats", exact: true }).click();
+	view.items.push({ id: "running", role: "assistant", text: "Still working" });
+	await fixture.event();
+	await page.getByRole("button", { name: "Open chat Chat 1", exact: true }).click();
+	await expect(history).toContainText("Still working");
+	expect(fixture.writes).toHaveLength(1);
+});
+
+test("mobile loading chat offers explicit list navigation", async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await setup(page);
+	let release!: () => void;
+	const pending = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	await page.route(`**/api/projects/${projectId}/agents`, async (route) => {
+		await pending;
+		await route.fulfill({ json: [] });
+	});
+	await page.goto(`/projects/${projectId}/agents/123e4567-e89b-42d3-a456-426614174099`, {
+		waitUntil: "domcontentloaded",
+	});
+	await expect(page.getByRole("heading", { name: "Loading chat…", exact: true })).toBeVisible();
+	await page.getByRole("button", { name: "Back to chats", exact: true }).click();
+	await expect(page.locator(".agent-main")).toBeHidden();
+	release();
+	await expect(page.getByRole("button", { name: "Create chat", exact: true })).toBeFocused();
+});
 
 test("mobile chat keeps composer and long tool output within the viewport", async ({ page }) => {
 	await page.setViewportSize({ width: 390, height: 844 });

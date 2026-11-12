@@ -154,6 +154,7 @@ export const Conversation = ({
 	planAction,
 	snapshots,
 	scrollState,
+	navigation,
 }: {
 	id: string;
 	api: IWorkspaceApi;
@@ -176,6 +177,7 @@ export const Conversation = ({
 	planAction?: ReactNode;
 	snapshots?: Map<string, AgentView>;
 	scrollState?: ConversationScroll;
+	navigation?: ReactNode;
 }) => {
 	const [view, setView] = useState<AgentView | undefined>(() => snapshots?.get(id));
 	const [draft, setDraft] = useState(() => drafts?.get(draftKey) ?? "");
@@ -372,6 +374,7 @@ export const Conversation = ({
 	return (
 		<section className='agent-conversation' aria-label='Chat conversation'>
 			<div className='agent-chat-heading'>
+				{navigation}
 				<div>
 					<span className={`agent-status agent-status-${displayStatus}`}>{displayStatus ?? "loading"}</span>
 				</div>
@@ -545,12 +548,31 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 	const location = useLocation();
 	const navigate = useNavigate();
 	const route = resolveRoute(location.pathname);
+	const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 700px)").matches);
+	useEffect(() => {
+		const query = window.matchMedia("(max-width: 700px)");
+		const update = () => setMobile(query.matches);
+		query.addEventListener("change", update);
+		update();
+		return () => query.removeEventListener("change", update);
+	}, []);
 	const selectFirst = route.page === "project" && route.section === "agents" && !route.threadId;
 	const [threads, setThreads] = useState<AgentThread[]>([]);
 	const [loaded, setLoaded] = useState(false);
 	const [opened, setOpened] = useState<string[]>([]);
 	const [retained, setRetained] = useState("");
 	const selected = route.page === "project" && route.section === "agents" ? (route.threadId ?? "") : retained;
+	const main = useRef<HTMLDivElement>(null);
+	const createButton = useRef<HTMLButtonElement>(null);
+	const chatButtons = useRef(new Map<string, HTMLButtonElement>());
+	const lastSelected = useRef("");
+	const visible = route.page === "project" && route.section === "agents";
+	useLayoutEffect(() => {
+		if (selected) lastSelected.current = selected;
+		if (!mobile || !visible) return;
+		if (selected) main.current?.focus({ preventScroll: true });
+		else (chatButtons.current.get(lastSelected.current) ?? createButton.current)?.focus({ preventScroll: true });
+	}, [selected, mobile, visible]);
 	if (retained !== selected) setRetained(selected);
 	if (selected && !opened.includes(selected)) setOpened([...opened, selected]);
 	const [error, setError] = useState("");
@@ -577,17 +599,23 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 	}, [api, projectId]);
 	const firstId = threads.at(0)?.id;
 	useEffect(() => {
-		if (selectFirst && firstId) {
+		if (!mobile && selectFirst && firstId) {
 			void navigate(`/projects/${projectId}/agents/${firstId}`, { replace: true });
 		}
-	}, [selectFirst, firstId, projectId, navigate]);
+	}, [mobile, selectFirst, firstId, projectId, navigate]);
 	const open = (id: string) => {
 		void navigate(`/projects/${projectId}/agents/${id}`);
 	};
+	const back = (
+		<button className='agent-back' type='button' onClick={() => void navigate(`/projects/${projectId}/agents`)}>
+			Back to chats
+		</button>
+	);
 	return (
 		<div className='agent-panel'>
-			<aside className='agent-sidebar' aria-label='Chats'>
+			<aside className='agent-sidebar' aria-label='Chats' hidden={mobile && Boolean(selected)}>
 				<button
+					ref={createButton}
 					disabled={creating}
 					onClick={() => {
 						if (acting.current) return;
@@ -623,6 +651,10 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 					{threads.map((thread) => (
 						<button
 							key={thread.id}
+							ref={(element) => {
+								if (element) chatButtons.current.set(thread.id, element);
+								else chatButtons.current.delete(thread.id);
+							}}
 							aria-label={`Open chat ${thread.title}`}
 							aria-current={selected === thread.id ? "true" : undefined}
 							onClick={() => open(thread.id)}
@@ -636,9 +668,16 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 				</nav>
 				{!threads.length && <p className='agent-notice'>No chats yet.</p>}
 			</aside>
-			<div className='agent-main'>
+			<div
+				ref={main}
+				className='agent-main'
+				tabIndex={-1}
+				aria-label='Open conversation'
+				hidden={mobile && !selected}
+			>
 				{selected && !threads.some((thread) => thread.id === selected) && (
 					<div className='agent-welcome'>
+						{back}
 						<h3>{loaded || error ? "Chat unavailable" : "Loading chat…"}</h3>
 						<p>Select another chat or create a new one.</p>
 					</div>
@@ -656,6 +695,7 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 						<div key={id} hidden={selected !== id}>
 							<Conversation
 								id={id}
+								navigation={back}
 								api={api}
 								changed={refresh}
 								selected={selected === id && route.page === "project" && route.section === "agents"}

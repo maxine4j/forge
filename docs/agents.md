@@ -168,7 +168,21 @@ clarification replies. Open chats retain their message and answer drafts across
 thread and project-section selection. Failed writes preserve drafts. Drafts are
 browser memory only and are lost when leaving the project or reloading the page.
 Execution continues independently of the selected chat or browser connection.
-Entering Agents without a chat URL selects the first listed chat. Opening a chat
+At widths up to 700 CSS pixels, the base Agents URL shows only the full-height
+chat list; a chat URL shows only its conversation. Creating a chat opens it after
+success; failures leave the list and error visible. **Back to chats** navigates
+explicitly to the base URL, including during loading and for unavailable chats.
+It shares the status/action row without repeating the title. Wider screens show
+the sidebar and conversation together and select the first listed chat when
+entering without a chat URL. Resizing keeps an open chat selected; widening from
+the list restores first-chat selection. Visited conversations stay mounted while
+hidden, preserving drafts, clarification answers, activity and reading position;
+returning to the list never interrupts execution. Hidden panes cannot receive
+keyboard focus. Opening a conversation focuses its container without opening the
+software keyboard; returning focuses its chat button, or Create chat if unavailable.
+The list and history scroll independently within the visible viewport, including
+when the software keyboard reduces it. See the [navigation contract](workspaces.md#slice-2-integrated-manual-workspace-and-pr-review).
+Opening a chat
 automatically loads persisted history and reconciles recoverable execution state;
 running/waiting chats retain their live activity and untouched empty chats need no
 resume. Sidebar chats hide the internal `uncertain` status and recover only when

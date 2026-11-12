@@ -197,8 +197,17 @@ approvals. Opening Agents may resume the selected chat to load history; opening
 Terminals uses the documented automatic terminal inspection/create flow. Reload
 reattaches its retained live shell without creating a duplicate.
 
-Returning to a visited project section restores its last code/chat URL. URL
-navigation within a project and to Config retains local editor/chat drafts and
+Returning to a visited project section restores its last code/chat URL. The URL
+also determines the [mobile Agents screen](agents.md#interactive-agents):
+at widths up to 700 CSS pixels, `/agents` shows the chat list and
+`/agents/:threadId` shows the conversation with **Back to chats**. Direct links,
+reloads and browser Back/Forward honor that screen. Returning from Code restores
+the last Agents screen, including the list. Wider screens show both panes and
+select the first chat from the base URL. Resizing an open chat preserves it;
+widening the list selects the first chat. Visited conversations remain mounted
+and running through list and section navigation, retaining drafts and reading
+position. Only the visible pane participates in keyboard navigation.
+URL navigation within a project and to Config retains local editor/chat drafts and
 visited terminals. Project exit, including browser history and global navigation,
 blocks while code drafts remain uncommitted; commit or discard them first.
 Reload/unload retains the native unsaved-code warning. Draft contents are not

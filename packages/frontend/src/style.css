@@ -16,6 +16,9 @@
 	flex: 1;
 	overflow: clip;
 }
+.agent-back {
+	display: none;
+}
 .agent-sidebar {
 	display: flex;
 	flex-direction: column;
@@ -519,11 +522,13 @@
 @media (max-width: 700px) {
 	.agent-panel {
 		grid-template-columns: minmax(0, 1fr);
-		grid-template-rows: minmax(104px, 1fr) minmax(0, 3fr);
+		grid-template-rows: minmax(0, 1fr);
+	}
+	.agent-back {
+		display: inline-block;
 	}
 	.agent-sidebar {
 		border-right: 0;
-		border-bottom: 1px solid #30363d;
 		padding: 8px;
 	}
 	.agent-sidebar nav {
