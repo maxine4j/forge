@@ -63,8 +63,9 @@ and banner, including builds invoked with `--mode mock`.
 
 ## Development databases
 
-FORGE-6 requires a fresh development database for epics, nullable ticket membership
-and the independent `TASK-n` and `EPIC-n` sequences. There is no automatic reset,
+FORGE-3, FORGE-4 and FORGE-6 require a fresh development database for cost
+snapshots, epics, nullable ticket membership and the independent `TASK-n` and
+`EPIC-n` sequences. There is no automatic reset,
 legacy schema migration, data conversion or fallback query. Stop Forge and
 explicitly move the old `forge.sqlite`, `forge.sqlite-wal` and `forge.sqlite-shm`
 files together to a backup outside the active data directory before restarting
@@ -88,16 +89,27 @@ commands against the internal socket, failed execution and recovery.
 
 ## Cost settings
 
-The [Costs page](agents.md#cost-and-usage) uses `FORGE_CODEX_MONTHLY_AUD` for the
-monthly subscription amount (default A$30). Update it when the plan price changes.
-Forge retains the configured amount with each recorded turn.
+Owner-only Config and `GET/PUT /api/settings` persist `localCurrency` and
+`monthlyPlanLocal`, defaulting to AUD and A$30. The currency must be one of the
+supported billing currencies and price must be finite and nonnegative. Changes
+apply to future turns. AUD-specific billing environment settings are removed.
 
-API equivalents use the same dated FX rate throughout the dashboard. Set
-`FORGE_COST_AUD_PER_USD` and `FORGE_COST_EXCHANGE_DATE` (YYYY-MM-DD) together to
-override the default of 1 AUD / 0.6924 USD from the
-[RBA's 10 November 2026 release](https://www.rba.gov.au/statistics/frequency/exchange-rates.html).
-The [model rate table](../src/cost/api-pricing.ts) records the pricing snapshot.
-The read-only frontend preview includes sample usage and quota data.
+The injected exchange-rate client uses Frankfurter's documented
+[`/v2/rate/USD/{currency}` API](https://frankfurter.dev/llms.txt).
+An injected SQLite cache retains publication date separately from fetch time,
+expires after four hours and coalesces concurrent refreshes. USD uses rate 1.
+Expired rates are never used on failures: usage and API USD costs remain available,
+while conversion and effective costs are explicitly unavailable. Each dispatch
+persists its billing/FX/model-rate snapshot. The
+[model table](../src/cost/api-pricing.ts) supplies USD rates per million tokens.
+
+Controlled HTTP, SQLite, unit, integration and browser tests require no live
+credentials or FX service. They cover cache hits/expiry/persistence, provider
+outages, concurrent refresh, immutable dispatch snapshots, repeated notifications,
+phase isolation, weighted quota conservation, unavailable inputs and mixed
+historical currencies. Preview fixtures show all three metrics and phase costs.
+See [agent usage](agents.md#cost-and-usage), [ticket costs](tickets.md#ticket-cost)
+and [settings access](foundation.md#navigation).
 
 ## Image and deployment
 

@@ -7,19 +7,19 @@ import { HttpApplication } from "../http/http-application.ts";
 import { ProjectRouter } from "../projects/project-router.ts";
 import { CostRouter } from "./cost-router.ts";
 import { CostService } from "./cost-service.ts";
+import { summarizeCosts } from "./cost-summary.ts";
 
 test("cost route uses owner access, removes project routes and returns browser-safe stats", async () => {
 	const id = "123e4567-e89b-42d3-a456-426614174000";
 	const response = {
 		since: "2026-11-11T00:00:00.000Z",
-		ticketEstimates: { input: 0, cached: 0, output: 0, turns: 0, untimedTurns: 0, unpricedTurns: 0 },
-		totals: { input: 0, cached: 0, output: 0, turns: 0 },
+		ticketEstimates: summarizeCosts([], []),
+		chats: summarizeCosts([], []),
+		quotaAttribution: [],
+		totals: summarizeCosts([], []),
 		phases: [],
 		tickets: [],
 		days: [],
-		monthlyAud: 30,
-		audPerUsd: 1.5,
-		exchangeDate: "2026-11-10",
 	};
 	const read = vi.fn(async () => response);
 	const projects = { get: vi.fn(), list: vi.fn(), create: vi.fn(), retry: vi.fn(), recover: vi.fn() };
@@ -27,11 +27,6 @@ test("cost route uses owner access, removes project routes and returns browser-s
 		new ProjectRouter(projects),
 		new AccessService({ owner: "owner", origin: "https://forge.test" }),
 	);
-	const settings = {
-		monthlyAud: response.monthlyAud,
-		audPerUsd: response.audPerUsd,
-		exchangeDate: response.exchangeDate,
-	};
 	const history = vi.fn(async () => ({ since: response.since, turns: [] }));
 	const service = new CostService(
 		new AccessService({ owner: "owner", origin: "https://forge.test" }),
@@ -41,7 +36,6 @@ test("cost route uses owner access, removes project routes and returns browser-s
 		},
 		{ read: history },
 		{ limits: async () => undefined },
-		settings,
 		() => new Date(),
 	);
 	const server = app
@@ -63,7 +57,10 @@ test("cost route uses owner access, removes project routes and returns browser-s
 		expect((await get("/api/tickets/invalid/cost", "owner")).status).toBe(400);
 		expect((await get("/api/tickets/TASK-2/cost", "owner")).status).toBe(404);
 		expect(await (await get("/api/tickets/TASK-1/cost", "owner")).json()).toEqual({
-			...settings,
+			phases: ["planning", "implementation", "review", "rebase"].map((phase) => ({
+				phase,
+				...summarizeCosts([], []),
+			})),
 			since: response.since,
 			ticket: response.ticketEstimates,
 		});

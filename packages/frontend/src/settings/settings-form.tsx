@@ -1,5 +1,5 @@
 import { agentOptionsSchema, type AgentOptions } from "@forge/contracts/agents";
-import { forgeSettingsSchema, type ForgeSettings } from "@forge/contracts/settings";
+import { billingCurrencies, forgeSettingsSchema, type ForgeSettings } from "@forge/contracts/settings";
 import { useEffect, useState, type FormEvent } from "react";
 
 import { ExecutionSettings } from "../agents/execution-settings.tsx";
@@ -45,7 +45,7 @@ export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; 
 		};
 	}, [api, optionsAttempt]);
 
-	const change = (field: keyof ForgeSettings, value: string) => {
+	const change = (field: keyof ForgeSettings, value: string | number) => {
 		setDraft((current) => current && { ...current, [field]: value });
 		setError("");
 		setSaved(false);
@@ -59,7 +59,7 @@ export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; 
 		if (!parsed.success) {
 			setError(
 				Boolean(draft?.gitName.trim()) === Boolean(draft?.gitEmail.trim())
-					? "Check the Git name, email and instruction lengths."
+					? "Check billing values, Git identity and instruction lengths."
 					: "Provide both a Git name and email, or leave both blank.",
 			);
 			return;
@@ -82,6 +82,32 @@ export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; 
 			<h2 id='forge-settings-heading'>Forge settings</h2>
 			{draft ? (
 				<form onSubmit={(event) => void save(event)}>
+					<fieldset disabled={saving}>
+						<legend>Billing</legend>
+						<label>
+							Local currency
+							<select
+								value={draft.localCurrency}
+								onChange={(event) => change("localCurrency", event.target.value)}
+							>
+								{billingCurrencies.map((currency) => (
+									<option key={currency}>{currency}</option>
+								))}
+							</select>
+						</label>
+						<label>
+							Monthly plan price
+							<input
+								type='number'
+								min='0'
+								step='any'
+								required
+								value={draft.monthlyPlanLocal}
+								onChange={(event) => change("monthlyPlanLocal", event.target.valueAsNumber)}
+							/>
+						</label>
+						<p>Applies to future turns. Historical costs keep their saved prices and exchange rates.</p>
+					</fieldset>
 					<fieldset disabled={saving}>
 						<legend>Agent defaults</legend>
 						<p>Apply to tickets and chats that use Default on their next turn.</p>

@@ -5,7 +5,9 @@ import { AccessService } from "../auth/access-service.ts";
 import { SettingsService } from "./settings-service.ts";
 
 const owner = { username: "owner" };
-const saved = {
+const saved: ForgeSettings = {
+	localCurrency: "AUD",
+	monthlyPlanLocal: 30,
 	planningInstructions: "Check migrations.",
 	implementationInstructions: "Run focused tests.",
 	gitName: "Forge Developer",
@@ -34,7 +36,12 @@ test("loads settings and publishes saved identity at startup, then updates and c
 	await service.initialize();
 	expect(service.get(owner)).toEqual(saved);
 	expect(git.publish).toHaveBeenLastCalledWith({ name: saved.gitName, email: saved.gitEmail });
-	const edited = { ...saved, planningInstructions: "Read the requirements." };
+	const edited = {
+		...saved,
+		localCurrency: "AUD",
+		monthlyPlanLocal: 30,
+		planningInstructions: "Read the requirements.",
+	};
 	await expect(service.save(owner, edited)).resolves.toEqual(edited);
 	expect(service.current()).toEqual(edited);
 	expect(git.publish).toHaveBeenCalledTimes(1);

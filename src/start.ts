@@ -25,6 +25,7 @@ import { Configuration } from "./config/configuration.ts";
 import { CostRouter } from "./cost/cost-router.ts";
 import { CostService } from "./cost/cost-service.ts";
 import { CostStore } from "./cost/cost-store.ts";
+import { ExchangeRateCacheStore, ExchangeRates, FrankfurterClient } from "./cost/exchange-rate.ts";
 import { QuotaCollector } from "./cost/quota-collector.ts";
 import { QuotaStore } from "./cost/quota-store.ts";
 import { SqliteDatabase } from "./database/sqlite-database.ts";
@@ -119,11 +120,25 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	);
 	const connection = new CodexConnection(processes, sleep);
 	lifecycle.register(() => connection.close());
+	const exchangeStore = new ExchangeRateCacheStore(database);
+	await exchangeStore.initialize();
+	const exchange = new ExchangeRates(new FrankfurterClient(fetch, sleep), exchangeStore, () => new Date());
 	const usage = new CodexUsageClient(
 		connection,
 		(turn) => costStore.save(turn),
 		() => new Date(),
-		config.cost.monthlyAud,
+		async () => {
+			const { localCurrency, monthlyPlanLocal } = settings.current();
+			const rate = await exchange.get(localCurrency);
+			return {
+				localCurrency,
+				monthlyPlanLocal,
+				usdToLocal: rate?.rate,
+				rateDate: rate?.date,
+				fetchedAt: rate?.fetchedAt,
+			};
+		},
+		() => collector.sample(),
 	);
 	lifecycle.register(() => usage.close());
 	const agentClient = new CodexAgentClient(connection, files.realpath, randomUUID, usage);
@@ -219,7 +234,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		log.warn({ err }, "Account credential homes unavailable");
 	}
 	if (!lifecycle.isOpen()) return;
-	const quotas = new QuotaStore(database);
+	const quotas = new QuotaStore(database, costStore);
 	await quotas.initialize();
 	const collector = new QuotaCollector(
 		usage,
@@ -229,7 +244,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		(err) => log.warn({ err }, "Weekly quota collection failed"),
 	);
 	lifecycle.register(() => collector.close());
-	const cost = new CostService(access, ticketStore, costStore, usage, config.cost, () => new Date(), quotas);
+	const cost = new CostService(access, ticketStore, costStore, usage, () => new Date(), quotas);
 	const codex = new CodexAccountClient(connection, attempts);
 	const github = new GithubAccountClient(processes, sleep, attempts);
 	lifecycle.register(() => github.close());

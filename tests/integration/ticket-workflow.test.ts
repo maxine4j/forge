@@ -91,7 +91,8 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			connection,
 			(turn) => costStore.save(turn),
 			() => new Date(),
-			30,
+			async () => ({ localCurrency: "AUD", monthlyPlanLocal: 30, usdToLocal: 1.44 }),
+			async () => {},
 		);
 		const client = new CodexAgentClient(connection, files.realpath, randomUUID, usage);
 		const rpc = vi.spyOn(connection, "request");
@@ -110,14 +111,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		);
 		const ticketStore = new TicketStore(db);
 		await ticketStore.initialize();
-		const cost = new CostService(
-			access,
-			ticketStore,
-			costStore,
-			usage,
-			{ monthlyAud: 30, audPerUsd: 1.44, exchangeDate: "2026-11-10" },
-			() => new Date(),
-		);
+		const cost = new CostService(access, ticketStore, costStore, usage, () => new Date());
 		const jobs = new TicketWorkflowStore(db);
 		await jobs.initialize();
 		const merges = new WorkspaceMergeClient(workspaces, git);
@@ -348,7 +342,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		const archived = await tickets.archive(owner, ticket.id);
 		await expect.poll(async () => (await cost.read(owner)).totals.input).toBe(7000);
 		const recorded = await cost.read(owner);
-		expect(recorded.phases.map(({ phase, turns }) => [phase, turns])).toEqual([
+		expect(recorded.phases.filter(({ turns }) => turns).map(({ phase, turns }) => [phase, turns])).toEqual([
 			["planning", 2],
 			["implementation", 1],
 			["rebase", 1],
@@ -358,10 +352,9 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			id: ticket.id,
 			archivedAt: archived.archivedAt,
 			cached: 2000,
-			untimedTurns: 0,
-			unpricedTurns: 0,
+			incomplete: { api: 0 },
 		});
-		expect(recorded.tickets.at(0)?.apiAud).toBeCloseTo(0.01656);
+		expect(recorded.tickets.at(0)?.apiUsd).toBeCloseTo(0.0115);
 		expect(recorded.limits?.windows.at(0)).toMatchObject({ minutes: 300, usedPercent: 40 });
 		expect((await cost.read(owner)).phases.map(({ phase }) => phase)).toContain("chat");
 	} finally {

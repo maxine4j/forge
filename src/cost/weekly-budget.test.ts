@@ -50,13 +50,13 @@ test("suppresses stale and expired estimates, but exhausted fresh allowance is z
 		0,
 	);
 });
-test("selects lowest remaining bucket, keeps reset cycles and drops history outside 28 days", () => {
+test("prefers stable codex bucket, keeps reset cycles and drops history outside 28 days", () => {
 	const samples = series();
 	const result = weeklyBudget(
 		[...samples, { ...samples.at(-1)!, bucketId: "other", bucket: "Other", usedPercent: 80 }],
 		completions,
 		new Date(iso(86_400_000)),
 	);
-	expect(result.defaultBucketId).toBe("other");
+	expect(result.defaultBucketId).toBe("codex");
 	expect(weeklyBudget(samples, [], new Date(iso(30 * 86_400_000))).buckets).toEqual([]);
 });

@@ -285,9 +285,12 @@ for every board ticket, including archived tickets, tickets with no repository
 references and tickets without usage. Ticket rows link directly to
 `/tasks?ticket=:id` and show no single-repository label. Ticket usage is aggregated
 by ticket ID, independently of a turn's execution repository. See
-[board ownership and execution context](tickets.md#agentic-ticket-board). Summary cards sum known ticket
-subscription allocations and API equivalents before formatting, flagging missing
-duration or pricing. Monetary totals are ticket estimates; tokens include chats.
+[board ownership and execution context](tickets.md#agentic-ticket-board). Summary cards sum known ticket API USD costs, attributed weekly percentage and
+effective USD costs before formatting, with per-metric incomplete-turn counts.
+Account totals and standalone chats are separately identifiable. Historical local
+currency equivalents convert each record using its dispatch snapshot before
+summing, grouping currencies separately. Weekly percentages use three significant
+figures only in presentation; incompatible bucket identities are never added.
 The page retains manual refresh, retry, and five-minute refresh. Legacy project
 Cost URLs and API routes are unknown routes with no redirects.
 Standalone chats contribute to global usage in their own category. Cached
@@ -296,6 +299,10 @@ input is included in input totals, and reasoning is included in output.
 Forge records `thread/tokenUsage/updated` counters and reported turn duration in
 SQLite. Usage updates replace the previous snapshot for the same turn, with the
 first update establishing the baseline from the runtime's last and total counts.
+An indexed ticket ID supports direct queries without repository joins. Dispatch
+saves local currency, monthly plan price, FX publication date and fetch time, and
+USD model rates. Later settings or pricing changes never reprice saved turns.
+API cost prices uncached input, cached input and output separately in USD.
 The page shows the date tracking began. Older turns lack reliable per-turn token
 and phase data for backfill. Disconnects can leave partial usage and missing
 duration. The endpoint returns normalized counts without conversation content,
@@ -309,14 +316,36 @@ Account-wide quota windows come from `account/rateLimits/read` when available.
 Forge shows the reported window length, percent used, and reset time. The request
 is read-only. A quota timeout leaves the shared execution connection open.
 
+#### Quota cost attribution
+
+Weekly windows are identified by `minutes === 10080`: use the sole weekly bucket,
+or the stable `codex` bucket when multiple exist. Missing or ambiguous selection
+makes attribution unavailable. Consecutive observations in the same bucket and
+reset cycle allocate the nonnegative increase in proportion to each turn's saved
+API-cost increment, including standalone chats in the denominator. SQLite saves
+samples and interval allocations atomically and idempotently; repeated notifications,
+restarts and dashboard reads cannot add duplicate turns or allocations.
+
+Missing pricing, absent activity, counter decreases, reset boundaries, unavailable
+selection and gaps over fifteen minutes leave observed consumption unallocated.
+Per-bucket observed consumption equals ticket allocations plus chat allocations
+plus unallocated consumption. Unobserved consumption is unknown. Raw observations
+remain available independently of the dashboard and attribution selection.
+Effective USD cost is `percentage / 100 × monthlyPlanLocal / usdToLocal / 4.33`,
+using each turn's saved values. Both quota attribution and effective cost are
+estimates: account-wide counters include external activity and delayed updates.
+See [billing and exchange rates](development.md#cost-settings) and
+[ticket summaries](tickets.md#ticket-cost).
+
 #### Weekly budget capacity
 
 The owner-only Costs response additionally returns `weeklyBudget`: account-wide
 weekly bucket series, a default bucket ID, remaining percentage, reset and last
 observation timestamps, freshness, and an additional-ticket estimate or an
-unavailable reason (`learning`, `stale`, `reset-passed`). Existing cost fields remain.
+unavailable reason (`learning`, `stale`, `reset-passed`).
 Bucket identities are stored separately from display names. SQLite retains samples
-across restarts; the collector samples at startup and every five minutes without
+across restarts; the collector coalesces and serializes requests at startup, turn
+dispatch, completion and every five minutes without
 requiring an open dashboard. Missing quota data leaves token and cost views usable.
 The open dashboard also refreshes every five minutes and supports manual Refresh.
 

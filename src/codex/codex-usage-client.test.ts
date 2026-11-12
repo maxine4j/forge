@@ -6,6 +6,8 @@ import { CodexUsageClient } from "./codex-usage-client.ts";
 test("records cumulative changes once per turn and preserves the dispatch phase", async () => {
 	let notify: AccountNotification = () => undefined;
 	const save = vi.fn(async () => {});
+	const sampleQuota = vi.fn(async () => {});
+	let monthlyPlanLocal = 30;
 	const client = new CodexUsageClient(
 		{
 			initialize: async () => {},
@@ -17,10 +19,11 @@ test("records cumulative changes once per turn and preserves the dispatch phase"
 		},
 		save,
 		() => new Date("2026-11-11T00:00:00Z"),
-		30,
+		async () => ({ localCurrency: "AUD", monthlyPlanLocal }),
+		sampleQuota,
 	);
 	const scope = { projectId: "project", ticketId: "TASK-1", phase: "review" } as const;
-	client.track("thread", scope, "gpt-5.4");
+	await client.track("thread", scope, "gpt-5.4");
 	const breakdown = (inputTokens: number, outputTokens: number) => ({
 		inputTokens,
 		outputTokens,
@@ -34,7 +37,8 @@ test("records cumulative changes once per turn and preserves the dispatch phase"
 	sample("turn", breakdown(130, 28), breakdown(10, 3));
 	sample("turn", breakdown(130, 28), breakdown(10, 3));
 	notify("turn/completed", { threadId: "thread", turn: { id: "turn", startedAt: 1794355200, durationMs: 5000 } });
-	client.track("thread", { ...scope, phase: "rebase" }, "gpt-5.4");
+	monthlyPlanLocal = 60;
+	await client.track("thread", { ...scope, phase: "rebase" }, "gpt-5.4");
 	sample("turn", breakdown(130, 28), breakdown(10, 3));
 	sample("next", breakdown(140, 30), breakdown(10, 2));
 	await client.close();
@@ -48,7 +52,7 @@ test("records cumulative changes once per turn and preserves the dispatch phase"
 			cached: 15,
 			output: 8,
 			durationMs: 5000,
-			monthlyAud: 30,
+			billing: expect.objectContaining({ localCurrency: "AUD", monthlyPlanLocal: 30 }),
 		}),
 	);
 	expect(save).toHaveBeenLastCalledWith(
@@ -58,8 +62,10 @@ test("records cumulative changes once per turn and preserves the dispatch phase"
 			input: 10,
 			cached: 5,
 			output: 2,
+			billing: expect.objectContaining({ monthlyPlanLocal: 60 }),
 		}),
 	);
+	expect(sampleQuota).toHaveBeenCalledTimes(3);
 });
 
 test("returns reported quota windows and omits private account data", async () => {
@@ -71,7 +77,7 @@ test("returns reported quota windows and omits private account data", async () =
 				limitName: "Display name",
 				planType: "plus",
 				primary: { usedPercent: 25, windowDurationMins: 300, resetsAt: 1794355200 },
-				secondary: { usedPercent: 75, windowDurationMins: 10080 },
+				secondary: { usedPercent: 75.125, windowDurationMins: 10080 },
 			},
 		},
 	}));
@@ -79,9 +85,12 @@ test("returns reported quota windows and omits private account data", async () =
 		{ initialize: async () => {}, request, subscribe: () => () => {} },
 		async () => {},
 		() => new Date(0),
-		30,
+		async () => ({ localCurrency: "AUD", monthlyPlanLocal: 30 }),
+		async () => {},
 	);
-	expect(await client.limits()).toEqual({
+	const readings = await Promise.all([client.limits(), client.limits(), client.limits()]);
+	expect(request).toHaveBeenCalledTimes(1);
+	expect(readings[0]).toEqual({
 		plan: "plus",
 		windows: [
 			{
@@ -91,7 +100,7 @@ test("returns reported quota windows and omits private account data", async () =
 				usedPercent: 25,
 				resetsAt: "2026-11-11T00:00:00.000Z",
 			},
-			{ bucketId: "codex", bucket: "Display name", minutes: 10080, usedPercent: 75 },
+			{ bucketId: "codex", bucket: "Display name", minutes: 10080, usedPercent: 75.125 },
 		],
 	});
 	expect(request).toHaveBeenCalledWith("account/rateLimits/read", null);

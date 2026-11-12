@@ -1,9 +1,15 @@
 import type { TicketWorkflow } from "@forge/contracts/tickets";
 
 export interface CostSettings {
-	monthlyAud: number;
-	audPerUsd: number;
-	exchangeDate: string;
+	localCurrency: string;
+	monthlyPlanLocal: number;
+}
+
+export interface BillingSnapshot extends CostSettings {
+	usdToLocal?: number;
+	rateDate?: string;
+	fetchedAt?: string;
+	rates?: TokenCounts;
 }
 
 export interface TicketUsageScope {
@@ -23,7 +29,9 @@ export type UsageSnapshot = UsageScope & {
 	threadId: string;
 	startedAt: string;
 	durationMs?: number;
-	monthlyAud: number;
+	billing: BillingSnapshot;
+	apiUsd?: number;
+	pricingUnavailable?: boolean;
 	model?: string;
 	input?: number;
 	cached?: number;

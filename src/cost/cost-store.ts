@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
+import { apiCostUsd } from "./api-pricing.ts";
 import type { UsageTurn } from "./types.ts";
 
 const recordSchema = z
@@ -9,12 +10,47 @@ const recordSchema = z
 		threadId: z.string(),
 		turnId: z.string(),
 		startedAt: z.iso.datetime(),
-		durationMs: z.int().nonnegative().optional(),
-		monthlyAud: z.number().nonnegative(),
+		durationMs: z
+			.int()
+			.nonnegative()
+			.nullish()
+			.transform((value) => value ?? undefined),
+		billing: z.object({
+			localCurrency: z.string(),
+			monthlyPlanLocal: z.number().nonnegative(),
+			usdToLocal: z.number().positive().optional(),
+			rateDate: z.iso.date().optional(),
+			fetchedAt: z.iso.datetime().optional(),
+			rates: z
+				.object({
+					input: z.number().nonnegative(),
+					cached: z.number().nonnegative(),
+					output: z.number().nonnegative(),
+				})
+				.optional(),
+		}),
+		pricingUnavailable: z.boolean().optional(),
+		apiUsd: z
+			.number()
+			.nonnegative()
+			.nullish()
+			.transform((value) => value ?? undefined),
 		model: z.string().optional(),
-		input: z.int().nonnegative().optional(),
-		cached: z.int().nonnegative().optional(),
-		output: z.int().nonnegative().optional(),
+		input: z
+			.int()
+			.nonnegative()
+			.nullish()
+			.transform((value) => value ?? undefined),
+		cached: z
+			.int()
+			.nonnegative()
+			.nullish()
+			.transform((value) => value ?? undefined),
+		output: z
+			.int()
+			.nonnegative()
+			.nullish()
+			.transform((value) => value ?? undefined),
 	})
 	.and(
 		z.discriminatedUnion("phase", [
@@ -41,9 +77,9 @@ export class CostStore implements ICostStore {
 			},
 			{ sql: "INSERT OR IGNORE INTO cost_tracking(id, since) VALUES (1, ?)", parameters: [since] },
 			{
-				sql: "CREATE TABLE IF NOT EXISTS codex_usage (projectId TEXT NOT NULL, threadId TEXT NOT NULL, turnId TEXT NOT NULL, record TEXT NOT NULL, PRIMARY KEY(threadId, turnId))",
+				sql: "CREATE TABLE IF NOT EXISTS codex_usage (projectId TEXT NOT NULL, threadId TEXT NOT NULL, turnId TEXT NOT NULL, ticketId TEXT, record TEXT NOT NULL, PRIMARY KEY(threadId, turnId))",
 			},
-			{ sql: "CREATE INDEX IF NOT EXISTS codex_usage_project ON codex_usage(projectId)" },
+			{ sql: "CREATE INDEX IF NOT EXISTS codex_usage_ticket ON codex_usage(ticketId)" },
 		]);
 	}
 
@@ -54,7 +90,7 @@ export class CostStore implements ICostStore {
 		for (let offset = 0; ; offset += 500) {
 			const rows = await this.database.all(
 				ticketId
-					? "SELECT record FROM codex_usage WHERE json_extract(record, '$.ticketId')=? ORDER BY rowid LIMIT 500 OFFSET ?"
+					? "SELECT record FROM codex_usage WHERE ticketId=? ORDER BY rowid LIMIT 500 OFFSET ?"
 					: "SELECT record FROM codex_usage ORDER BY rowid LIMIT 500 OFFSET ?",
 				ticketId ? [ticketId, offset] : [offset],
 			);
@@ -66,9 +102,40 @@ export class CostStore implements ICostStore {
 
 	async save(turn: UsageTurn): Promise<void> {
 		const record = recordSchema.parse(turn);
+		record.apiUsd =
+			record.pricingUnavailable
+			|| record.input === undefined
+			|| record.cached === undefined
+			|| record.output === undefined
+				? undefined
+				: apiCostUsd(record.billing.rates, {
+						input: record.input,
+						cached: record.cached ?? 0,
+						output: record.output ?? 0,
+					});
 		await this.database.run(
-			"INSERT INTO codex_usage(projectId, threadId, turnId, record) VALUES(?, ?, ?, ?) ON CONFLICT(threadId, turnId) DO UPDATE SET record=excluded.record WHERE projectId=excluded.projectId",
-			[record.projectId, record.threadId, record.turnId, JSON.stringify(record)],
+			// Keep dispatch metadata immutable even when writers overlap or settings change.
+			`INSERT INTO codex_usage(projectId, threadId, turnId, ticketId, record) VALUES(?, ?, ?, ?, ?)
+    ON CONFLICT(threadId, turnId) DO UPDATE SET record=json_set(codex_usage.record,
+     '$.input', json_extract(excluded.record, '$.input'),
+     '$.cached', json_extract(excluded.record, '$.cached'),
+     '$.output', json_extract(excluded.record, '$.output'),
+     '$.durationMs', COALESCE(json_extract(excluded.record, '$.durationMs'), json_extract(codex_usage.record, '$.durationMs')),
+     '$.pricingUnavailable', json(CASE WHEN json_extract(excluded.record, '$.pricingUnavailable') OR json_extract(codex_usage.record, '$.pricingUnavailable') THEN 'true' ELSE 'false' END),
+     '$.apiUsd', CASE WHEN json_extract(codex_usage.record, '$.billing.rates') IS NULL
+       OR json_extract(excluded.record, '$.input') IS NULL
+       OR json_extract(excluded.record, '$.cached') IS NULL
+       OR json_extract(excluded.record, '$.output') IS NULL
+       OR json_extract(excluded.record, '$.pricingUnavailable')
+       OR json_extract(codex_usage.record, '$.pricingUnavailable') THEN NULL
+      ELSE ((json_extract(excluded.record, '$.input') - json_extract(excluded.record, '$.cached')) * json_extract(codex_usage.record, '$.billing.rates.input')
+       + json_extract(excluded.record, '$.cached') * json_extract(codex_usage.record, '$.billing.rates.cached')
+       + json_extract(excluded.record, '$.output') * json_extract(codex_usage.record, '$.billing.rates.output')) / 1000000.0 END)
+    WHERE projectId=excluded.projectId
+     AND COALESCE(json_extract(excluded.record, '$.input'),0) >= COALESCE(json_extract(codex_usage.record, '$.input'),0)
+     AND COALESCE(json_extract(excluded.record, '$.cached'),0) >= COALESCE(json_extract(codex_usage.record, '$.cached'),0)
+     AND COALESCE(json_extract(excluded.record, '$.output'),0) >= COALESCE(json_extract(codex_usage.record, '$.output'),0)`,
+			[record.projectId, record.threadId, record.turnId, record.ticketId ?? null, JSON.stringify(record)],
 		);
 	}
 }

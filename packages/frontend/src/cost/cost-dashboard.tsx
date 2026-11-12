@@ -3,15 +3,13 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { CostMetrics, Money, PhaseCosts, WeeklyUsage, formatPercent } from "./cost-metrics.tsx";
 import { WeeklyBudgetChart } from "./weekly-budget.tsx";
 
 const number = new Intl.NumberFormat("en-AU");
 const shortNumber = new Intl.NumberFormat("en-AU", { notation: "compact" });
-const amount = new Intl.NumberFormat("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 4 });
 const day = new Intl.DateTimeFormat("en-AU", { month: "short", day: "numeric", timeZone: "UTC" });
 const resetTime = new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeStyle: "short" });
-export const formatAud = (value?: number) =>
-	value === undefined ? "—" : value > 0 && value < 0.0001 ? "< A$0.0001" : `A$${amount.format(value)}`;
 const tokens = (value: { input: number; output: number }) => value.input + value.output;
 const phaseLabels = {
 	planning: "Planning",
@@ -158,7 +156,7 @@ const Quotas = ({ limits }: { limits: Costs["limits"] }) => (
 								<span>
 									{label} <small>{window.bucket}</small>
 								</span>
-								<strong>{window.usedPercent}% used</strong>
+								<strong>{formatPercent(window.usedPercent)} used</strong>
 							</div>
 							<progress
 								max={100}
@@ -174,113 +172,75 @@ const Quotas = ({ limits }: { limits: Costs["limits"] }) => (
 	</section>
 );
 
-const columns = { ticket: "Ticket", tokens: "Tokens", subscription: "Subscription allocation", api: "API equivalent" };
-type Sort = keyof typeof columns;
-type TicketRow = Costs["tickets"][number];
-const sortValue = (ticket: TicketRow, column: Sort) => {
-	switch (column) {
-		case "ticket":
-			return ticket.id;
-		case "tokens":
-			return ticket.turns ? tokens(ticket) : undefined;
-		case "subscription":
-			return ticket.subscriptionAud;
-		case "api":
-			return ticket.apiAud;
-	}
-};
-
 const TicketCosts = ({ cost }: { cost: Costs }) => {
-	const [sort, setSort] = useState<{ column: Sort; ascending: boolean }>({ column: "tokens", ascending: false });
-	const tickets = [...cost.tickets].sort((a, b) => {
-		const left = sortValue(a, sort.column);
-		const right = sortValue(b, sort.column);
-		if (left === undefined || right === undefined) return Number(left === undefined) - Number(right === undefined);
-		const order =
-			typeof left === "string"
-				? left.localeCompare(String(right), "en-AU", { numeric: true })
-				: left - Number(right);
-		return sort.ascending ? order : -order;
-	});
-	const scale = tickets.reduce((max, ticket) => Math.max(max, tokens(ticket)), 1);
+	const [sort, setSort] = useState("tokens");
+	const tickets = [...cost.tickets].sort((a, b) =>
+		sort === "ticket"
+			? a.id.localeCompare(b.id, undefined, { numeric: true })
+			: (sort === "api"
+					? (b.apiUsd ?? -1)
+					: sort === "weekly"
+						? (b.weeklyUsagePercent ?? -1)
+						: sort === "effective"
+							? (b.effectiveUsd ?? -1)
+							: tokens(b))
+				- (sort === "api"
+					? (a.apiUsd ?? -1)
+					: sort === "weekly"
+						? (a.weeklyUsagePercent ?? -1)
+						: sort === "effective"
+							? (a.effectiveUsd ?? -1)
+							: tokens(a)),
+	);
 	return (
 		<section className='cost-card'>
 			<h3>Usage and cost by ticket</h3>
+			<label>
+				Sort tickets
+				<select value={sort} onChange={(event) => setSort(event.target.value)}>
+					<option value='ticket'>Ticket</option>
+					<option value='tokens'>Tokens</option>
+					<option value='api'>Estimated API cost</option>
+					<option value='weekly'>Weekly limit spent</option>
+					<option value='effective'>Effective cost</option>
+				</select>
+			</label>
 			{!tickets.length ? (
-				<p className='cost-muted'>No tickets yet.</p>
+				<p>No tickets yet.</p>
 			) : (
 				<div className='cost-table-scroll' role='region' aria-label='Ticket costs' tabIndex={0}>
 					<table className='cost-table'>
 						<thead>
 							<tr>
-								{(Object.keys(columns) as Sort[]).map((column) => (
-									<th
-										key={column}
-										scope='col'
-										aria-sort={
-											sort.column === column
-												? sort.ascending
-													? "ascending"
-													: "descending"
-												: undefined
-										}
-									>
-										<button
-											onClick={() =>
-												setSort({
-													column,
-													ascending:
-														sort.column === column ? !sort.ascending : column === "ticket",
-												})
-											}
-										>
-											{columns[column]}
-											{sort.column === column && (
-												<span aria-hidden='true'>{sort.ascending ? " ↑" : " ↓"}</span>
-											)}
-										</button>
-									</th>
-								))}
+								<th>Ticket</th>
+								<th>Tokens</th>
+								<th>Estimated API cost</th>
+								<th>Weekly limit spent (estimate)</th>
+								<th>Effective cost (estimate)</th>
 							</tr>
 						</thead>
 						<tbody>
 							{tickets.map((ticket) => (
 								<tr key={ticket.id}>
-									<th scope='row'>
+									<th>
 										<Link to={`/tasks?ticket=${encodeURIComponent(ticket.id)}`}>
-											<span className='cost-muted'>{ticket.id}</span> {ticket.title}
+											{ticket.id} {ticket.title}
 										</Link>
 										{ticket.archivedAt && <small>Archived</small>}
+										<details>
+											<summary>Phase breakdown</summary>
+											<PhaseCosts phases={ticket.phases} />
+										</details>
 									</th>
+									<td>{number.format(tokens(ticket))}</td>
 									<td>
-										{ticket.turns ? (
-											<>
-												<span>{number.format(tokens(ticket))}</span>
-												<span className='cost-bar' aria-hidden='true'>
-													<span style={{ width: `${(100 * tokens(ticket)) / scale}%` }} />
-												</span>
-											</>
-										) : (
-											"—"
-										)}
+										<Money summary={ticket} metric='api' />
 									</td>
 									<td>
-										{formatAud(ticket.subscriptionAud)}
-										{ticket.untimedTurns > 0 && (
-											<small>
-												{ticket.untimedTurns} {ticket.untimedTurns === 1 ? "turn" : "turns"}{" "}
-												missing duration
-											</small>
-										)}
+										<WeeklyUsage summary={ticket} />
 									</td>
 									<td>
-										{formatAud(ticket.apiAud)}
-										{ticket.unpricedTurns > 0 && (
-											<small>
-												{ticket.unpricedTurns} {ticket.unpricedTurns === 1 ? "turn" : "turns"}{" "}
-												missing pricing
-											</small>
-										)}
+										<Money summary={ticket} metric='effective' />
 									</td>
 								</tr>
 							))}
@@ -288,11 +248,6 @@ const TicketCosts = ({ cost }: { cost: Costs }) => {
 					</table>
 				</div>
 			)}
-			<p className='cost-muted cost-method'>
-				Subscription allocation uses recorded turn duration and the monthly rate at dispatch. The current
-				setting is {formatAud(cost.monthlyAud)}/month. API estimates use standard text token prices and{" "}
-				{formatAud(cost.audPerUsd)} per US$1 as of {cost.exchangeDate}.
-			</p>
 		</section>
 	);
 };
@@ -342,38 +297,28 @@ export const CostDashboard = ({ api }: { api: IWorkspaceApi }) => {
 			)}
 			{cost && (
 				<>
-					<dl className='cost-metrics'>
-						<div className='cost-card'>
-							<dt>Ticket subscription allocation estimate</dt>
-							<dd>{formatAud(cost.ticketEstimates.subscriptionAud)}</dd>
-							{cost.ticketEstimates.untimedTurns > 0 && (
-								<small>Incomplete: {cost.ticketEstimates.untimedTurns} turns missing duration</small>
-							)}
-						</div>
-						<div className='cost-card'>
-							<dt>Ticket API equivalent estimate</dt>
-							<dd>{formatAud(cost.ticketEstimates.apiAud)}</dd>
-							{cost.ticketEstimates.unpricedTurns > 0 && (
-								<small>Incomplete: {cost.ticketEstimates.unpricedTurns} turns missing pricing</small>
-							)}
-						</div>
-						<div className='cost-card'>
-							<dt>Total tokens</dt>
-							<dd>{number.format(tokens(cost.totals))}</dd>
-						</div>
-						<div className='cost-card'>
-							<dt>Input tokens</dt>
-							<dd>{number.format(cost.totals.input)}</dd>
-						</div>
-						<div className='cost-card'>
-							<dt>Cached input</dt>
-							<dd>{number.format(cost.totals.cached)}</dd>
-						</div>
-						<div className='cost-card'>
-							<dt>Output tokens</dt>
-							<dd>{number.format(cost.totals.output)}</dd>
-						</div>
-					</dl>
+					<h3>Ticket totals</h3>
+					<CostMetrics summary={cost.ticketEstimates} />
+					<details>
+						<summary>Account usage including standalone chats</summary>
+						<CostMetrics summary={cost.totals} />
+						<PhaseCosts phases={cost.phases} />
+						<p>
+							Total tokens: {number.format(tokens(cost.totals))}; input:{" "}
+							{number.format(cost.totals.input)}; cached: {number.format(cost.totals.cached)}; output:{" "}
+							{number.format(cost.totals.output)}; turns: {cost.totals.turns}
+						</p>
+					</details>
+					<details>
+						<summary>Standalone chats</summary>
+						<CostMetrics summary={cost.chats} />
+					</details>
+					{cost.quotaAttribution.map((bucket) => (
+						<p key={bucket.bucketId}>
+							{bucket.bucketId}: observed {formatPercent(bucket.consumption)}, allocated{" "}
+							{formatPercent(bucket.allocated)}, unallocated {formatPercent(bucket.unallocated)}
+						</p>
+					))}
 					<WeeklyBudgetChart budget={cost.weeklyBudget} />
 					<UsageCharts cost={cost} />
 					<Quotas limits={cost.limits} />

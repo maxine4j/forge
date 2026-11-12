@@ -4,6 +4,8 @@ test("Config persists agent defaults, instructions and Git identity and can clea
 	page,
 }) => {
 	let settings = {
+		localCurrency: "AUD",
+		monthlyPlanLocal: 30,
 		planningInstructions: "",
 		implementationInstructions: "",
 		gitName: "",
@@ -55,12 +57,16 @@ test("Config persists agent defaults, instructions and Git identity and can clea
 	await expect(page.getByRole("alert")).toHaveText("Provide both a Git name and email, or leave both blank.");
 	expect(updates).toEqual([]);
 	await page.getByLabel("Git email").fill("forge@example.com");
+	await page.getByLabel("Local currency").selectOption("EUR");
+	await page.getByLabel("Monthly plan price").fill("45.5");
 	await page.getByLabel("Default model").selectOption("model-a");
 	await page.getByLabel("Default thinking").selectOption("high");
 	await page.getByRole("button", { name: "Save settings" }).click();
 	await expect(page.getByRole("status")).toHaveText("Settings saved.");
 	expect(updates).toEqual([
 		{
+			localCurrency: "EUR",
+			monthlyPlanLocal: 45.5,
 			planningInstructions: "Check migrations.\nInclude rollback steps.",
 			implementationInstructions: "Run focused tests.",
 			gitName: "Forge Developer",
@@ -73,6 +79,8 @@ test("Config persists agent defaults, instructions and Git identity and can clea
 	await expect(page.getByLabel("Planning instructions")).toHaveValue(settings.planningInstructions);
 	await expect(page.getByLabel("Implementation instructions")).toHaveValue(settings.implementationInstructions);
 	await expect(page.getByLabel("Git name")).toHaveValue(settings.gitName);
+	await expect(page.getByLabel("Local currency")).toHaveValue("EUR");
+	await expect(page.getByLabel("Monthly plan price")).toHaveValue("45.5");
 	await expect(page.getByLabel("Git email")).toHaveValue(settings.gitEmail);
 	await expect(page.getByLabel("Default model")).toHaveValue("model-a");
 	await expect(page.getByLabel("Default thinking")).toHaveValue("high");

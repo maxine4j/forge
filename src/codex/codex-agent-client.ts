@@ -296,7 +296,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			delete view.turnId;
 			delete view.plan;
 			try {
-				if (usage) this.usageTracker?.track(id, usage, model);
+				if (usage) await this.usageTracker?.track(id, usage, model);
 				const result = z.object({ turn: turnSchema }).parse(
 					await this.connection.request("turn/start", {
 						threadId: id,

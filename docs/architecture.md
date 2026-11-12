@@ -76,6 +76,15 @@ HTTP / WebSocket / Git protocol adapters / background tasks
 - Codex owns its conversation history and execution state in its persistent home;
   SQLite stores the identifiers and normalized state needed by Forge. Do not
   invent a second authoritative conversation store.
+- Cost records have an indexed ticket ID and unique `(threadId, turnId)` identity;
+  repository ID is execution metadata. Immutable dispatch snapshots retain billing,
+  model token pricing and historical FX context; USD costs persist with usage.
+  SQLite also owns the four-hour exchange-rate cache, raw quota observations and
+  idempotent interval allocations. Inject exchange client/cache interfaces and
+  serialize quota collection independently of dashboard reads. No migration or
+  compatibility path is provided; use a fresh database. See
+  [cost attribution](agents.md#quota-cost-attribution),
+  [ticket costs](tickets.md#ticket-cost) and [billing](development.md#cost-settings).
 - Store larger attachments and execution artifacts outside SQLite.
 - Epics have an independent SQLite key sequence (`EPIC-n`); tickets use `TASK-n`
   and an indexed nullable foreign key to an epic. Epic completion is derived from

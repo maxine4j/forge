@@ -58,6 +58,8 @@ test("Forge settings are owner-only, origin-protected and persist across startup
 				...(body === undefined ? {} : { body: JSON.stringify(body) }),
 			});
 		const settings = {
+			localCurrency: "AUD",
+			monthlyPlanLocal: 30,
 			planningInstructions: "Review the design.\nInclude rollout steps.",
 			implementationInstructions: "Run tests.",
 			gitName: "Forge Developer",
@@ -73,10 +75,14 @@ test("Forge settings are owner-only, origin-protected and persist across startup
 		expect(initial.status).toBe(200);
 		expect(await initial.json()).toEqual(defaultForgeSettings);
 		expect((await request("PUT", { ...settings, gitEmail: "" })).status).toBe(400);
+		for (const change of [{ localCurrency: "XYZ" }, { monthlyPlanLocal: -1 }, { monthlyPlanLocal: null }])
+			expect((await request("PUT", { ...settings, ...change })).status).toBe(400);
 		expect(
 			(
 				await request("PUT", {
 					...settings,
+					localCurrency: "AUD",
+					monthlyPlanLocal: 30,
 					planningInstructions: "\u0001".repeat(4000),
 					implementationInstructions: "\u0001".repeat(4000),
 				})
@@ -97,7 +103,12 @@ test("Forge settings are owner-only, origin-protected and persist across startup
 		catalog.mockResolvedValue(options);
 		expect((await request("PUT", configured)).status).toBe(200);
 		catalog.mockRejectedValue(new Error("Codex offline"));
-		const updated = { ...configured, planningInstructions: "Updated during outage." };
+		const updated = {
+			...configured,
+			localCurrency: "EUR",
+			monthlyPlanLocal: 45.5,
+			planningInstructions: "Updated during outage.",
+		};
 		expect((await request("PUT", updated)).status).toBe(200);
 		await db.close();
 		await reopened.initialize();

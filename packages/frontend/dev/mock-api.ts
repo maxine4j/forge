@@ -3,6 +3,8 @@ import { defaultForgeSettings } from "@forge/contracts/settings";
 import { defaultBoardSettings } from "@forge/contracts/tickets";
 import type { Plugin } from "vite";
 
+import { costFixture, phaseFixtures } from "./cost-fixture.ts";
+
 const date = "2026-11-02T00:00:00.000Z";
 const head = "a".repeat(40);
 const baseSha = "b".repeat(40);
@@ -57,17 +59,13 @@ export class MockApi implements IMockApi {
 			return {
 				...first,
 				tickets: costData.flatMap((cost) => cost.tickets),
-				totals: { input: 328000, cached: 192000, output: 42000, turns: 16 },
-				ticketEstimates: {
-					input: 328000,
-					cached: 192000,
-					output: 42000,
-					turns: 16,
-					subscriptionAud: 0.08,
-					apiAud: 1.46,
-					untimedTurns: 0,
-					unpricedTurns: 0,
-				},
+				totals: costFixture({ input: 328000, cached: 192000, output: 42000, turns: 16 }, 1.46, 2.34, 0.15),
+				ticketEstimates: costFixture(
+					{ input: 328000, cached: 192000, output: 42000, turns: 16 },
+					1.46,
+					2.34,
+					0.15,
+				),
 				days: first.days.map((day) => ({
 					...day,
 					input: day.input * 2,
@@ -219,7 +217,7 @@ export class MockApi implements IMockApi {
 				},
 			];
 			boardTickets.push(...tickets.filter((ticket) => !ticket.archivedAt));
-			const usage = { input: 164000, cached: 96000, output: 21000, turns: 8 };
+			const usage = costFixture({ input: 164000, cached: 96000, output: 21000, turns: 8 }, 0.73, 1.17, 0.075);
 			const daily = Array.from({ length: 30 }, (_, index) => ({
 				date: new Date(Date.parse(date) - (29 - index) * 86_400_000).toISOString().slice(0, 10),
 				input: index >= 22 ? 20500 : 0,
@@ -227,7 +225,9 @@ export class MockApi implements IMockApi {
 				output: index >= 22 ? 2625 : 0,
 			}));
 			const cost: Costs = {
-				ticketEstimates: { ...usage, subscriptionAud: 0.04, apiAud: 0.73, untimedTurns: 0, unpricedTurns: 0 },
+				ticketEstimates: usage,
+				chats: costFixture({ input: 0, cached: 0, output: 0, turns: 0 }),
+				quotaAttribution: [{ bucketId: "codex", consumption: 2, allocated: 1.17, unallocated: 0.83 }],
 				weeklyBudget: {
 					defaultBucketId: "codex",
 					buckets: [
@@ -256,26 +256,13 @@ export class MockApi implements IMockApi {
 					],
 				},
 				since: `${daily.at(0)!.date}T00:00:00.000Z`,
-				monthlyAud: 30,
-				audPerUsd: 1.44,
-				exchangeDate: date.slice(0, 10),
 				totals: usage,
 				days: daily,
-				phases: [
-					{ phase: "planning", input: 40000, cached: 22000, output: 4000, turns: 3 },
-					{ phase: "implementation", input: 100000, cached: 60000, output: 13000, turns: 4 },
-					{ phase: "review", input: 24000, cached: 14000, output: 4000, turns: 1 },
-				],
-				tickets: tickets.map(({ id, title, archivedAt }, index) => ({
-					id,
-					title,
-					archivedAt,
-					untimedTurns: 0,
-					unpricedTurns: 0,
-					...(index === 1
-						? { ...usage, subscriptionAud: 0.04, apiAud: 0.73 }
-						: { input: 0, cached: 0, output: 0, turns: 0 }),
-				})),
+				phases: phaseFixtures(usage),
+				tickets: tickets.map(({ id, title, archivedAt }, index) => {
+					const summary = index === 1 ? usage : costFixture({ input: 0, cached: 0, output: 0, turns: 0 });
+					return { id, title, archivedAt, ...summary, phases: phaseFixtures(summary) };
+				}),
 				limits: {
 					plan: "plus",
 					windows: [
@@ -288,9 +275,7 @@ export class MockApi implements IMockApi {
 			for (const row of cost.tickets)
 				this.routes.set(`/api/tickets/${row.id}/cost`, () => ({
 					since: cost.since,
-					monthlyAud: cost.monthlyAud,
-					audPerUsd: cost.audPerUsd,
-					exchangeDate: cost.exchangeDate,
+					phases: row.phases,
 					ticket: row,
 				}));
 			for (const ticket of tickets) {

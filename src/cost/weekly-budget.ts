@@ -73,5 +73,11 @@ export function weeklyBudget(observations: WeeklyObservation[], completions: str
 		});
 	}
 	buckets.sort((a, b) => a.remainingPercent - b.remainingPercent || a.bucketId.localeCompare(b.bucketId));
-	return { defaultBucketId: buckets[0]?.bucketId, buckets };
+	return {
+		defaultBucketId:
+			buckets.length === 1
+				? buckets[0]?.bucketId
+				: buckets.find((bucket) => bucket.bucketId === "codex")?.bucketId,
+		buckets,
+	};
 }

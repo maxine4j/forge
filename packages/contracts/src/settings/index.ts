@@ -5,8 +5,44 @@ const instructions = z
 	.max(4000)
 	.refine((value) => !value.includes("\0"));
 
+// Frankfurter fiat currencies supported by Forge's billing selector.
+export const billingCurrencies = [
+	"AUD",
+	"USD",
+	"EUR",
+	"GBP",
+	"CAD",
+	"NZD",
+	"JPY",
+	"CHF",
+	"CNY",
+	"HKD",
+	"SGD",
+	"INR",
+	"BRL",
+	"MXN",
+	"ZAR",
+	"KRW",
+	"SEK",
+	"NOK",
+	"DKK",
+	"PLN",
+	"CZK",
+	"HUF",
+	"RON",
+	"TRY",
+	"IDR",
+	"ILS",
+	"MYR",
+	"PHP",
+	"THB",
+	"ISK",
+] as const;
+
 export const forgeSettingsSchema = z
 	.strictObject({
+		localCurrency: z.enum(billingCurrencies),
+		monthlyPlanLocal: z.number().nonnegative(),
 		planningInstructions: instructions,
 		implementationInstructions: instructions,
 		defaultAgentModel: z.string().min(1).max(256).optional(),
@@ -34,6 +70,8 @@ export interface GitIdentity {
 }
 
 export const defaultForgeSettings: Readonly<ForgeSettings> = {
+	localCurrency: "AUD",
+	monthlyPlanLocal: 30,
 	planningInstructions: "",
 	implementationInstructions: "",
 	gitName: "",

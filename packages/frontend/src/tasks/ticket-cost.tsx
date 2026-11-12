@@ -2,27 +2,21 @@ import { ticketCostSchema, type TicketCost as TicketCostData } from "@forge/cont
 import { useEffect, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
-import { formatAud } from "../cost/cost-dashboard.tsx";
+import { CostMetrics, PhaseCosts } from "../cost/cost-metrics.tsx";
 
 const number = new Intl.NumberFormat("en-AU");
-const missingTurns = (count: number, field: string) =>
-	count > 0 && (
-		<small className='cost-muted'>
-			{count} {count === 1 ? "turn" : "turns"} missing {field}
-		</small>
-	);
-
 export const TicketCost = ({ api, ticketId }: { api: IWorkspaceApi; ticketId: string }) => {
 	const [attempt, setAttempt] = useState(0);
-	const [cost, setCost] = useState<TicketCostData | "unavailable">();
+	const [result, setResult] = useState<{ ticketId: string; value: TicketCostData | "unavailable" }>();
+	const cost = result?.ticketId === ticketId ? result.value : undefined;
 	useEffect(() => {
 		let current = true;
 		void api.read(`tickets/${ticketId}/cost`, ticketCostSchema).then(
 			(value) => {
-				if (current) setCost(value);
+				if (current) setResult({ ticketId, value });
 			},
 			() => {
-				if (current) setCost("unavailable");
+				if (current) setResult({ ticketId, value: "unavailable" });
 			},
 		);
 		return () => {
@@ -37,7 +31,7 @@ export const TicketCost = ({ api, ticketId }: { api: IWorkspaceApi; ticketId: st
 				<button
 					type='button'
 					onClick={() => {
-						setCost(undefined);
+						setResult(undefined);
 						setAttempt((value) => value + 1);
 					}}
 				>
@@ -46,25 +40,16 @@ export const TicketCost = ({ api, ticketId }: { api: IWorkspaceApi; ticketId: st
 			</div>
 		);
 	const ticket = cost.ticket;
-	if (!ticket?.turns) return <p>No usage recorded for this ticket.</p>;
+
 	return (
 		<div className='cost-dashboard'>
-			<dl className='cost-metrics'>
-				<div className='cost-card'>
-					<dt>Subscription allocation</dt>
-					<dd>
-						<span>{formatAud(ticket.subscriptionAud)}</span>
-						{missingTurns(ticket.untimedTurns, "duration")}
-					</dd>
-				</div>
-				<div className='cost-card'>
-					<dt>API equivalent</dt>
-					<dd>
-						<span>{formatAud(ticket.apiAud)}</span>
-						{missingTurns(ticket.unpricedTurns, "pricing")}
-					</dd>
-				</div>
-			</dl>
+			{!ticket.turns && <p>No usage recorded for this ticket.</p>}
+			<button onClick={() => setAttempt((value) => value + 1)}>Refresh</button>
+			<CostMetrics summary={ticket} />
+			<PhaseCosts phases={cost.phases} />
+			{ticket.incomplete.tokens > 0 && (
+				<p>Partial token counts: {ticket.incomplete.tokens} turns missing usage.</p>
+			)}
 			<dl className='cost-metrics'>
 				{Object.entries({
 					"Total tokens": ticket.input + ticket.output,

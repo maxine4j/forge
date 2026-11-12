@@ -16,12 +16,13 @@ const rates = new Map([
 	["gpt-5.3-codex", { input: 1.75, cached: 0.175, output: 14 }],
 ]);
 
-export const apiCostAud = (model: string | undefined, tokens: TokenCounts, audPerUsd: number): number | undefined => {
-	const rate = model ? rates.get(model === "gpt-5.6" ? "gpt-5.6-sol" : model) : undefined;
+export const modelRates = (model?: string): TokenCounts | undefined =>
+	model ? rates.get(model === "gpt-5.6" ? "gpt-5.6-sol" : model) : undefined;
+
+export const apiCostUsd = (rate: TokenCounts | undefined, tokens: TokenCounts): number | undefined => {
 	if (!rate) return undefined;
 	return (
-		(((tokens.input - tokens.cached) * rate.input + tokens.cached * rate.cached + tokens.output * rate.output)
-			* audPerUsd)
+		((tokens.input - tokens.cached) * rate.input + tokens.cached * rate.cached + tokens.output * rate.output)
 		/ 1_000_000
 	);
 };

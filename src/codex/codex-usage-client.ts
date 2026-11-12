@@ -2,6 +2,8 @@ import { createLogger } from "@forge/backend-infrastructure/logger";
 import { z } from "zod";
 
 import type { AccountNotification } from "../accounts/types.ts";
+import { modelRates } from "../cost/api-pricing.ts";
+import type { BillingSnapshot } from "../cost/types.ts";
 import type { AccountLimits, TokenCounts, UsageScope, UsageSnapshot, UsageTurn } from "../cost/types.ts";
 
 export interface ICodexUsageConnection {
@@ -11,7 +13,7 @@ export interface ICodexUsageConnection {
 }
 
 export interface ICodexUsageTracker {
-	track(threadId: string, scope: UsageScope, model?: string): void;
+	track(threadId: string, scope: UsageScope, model?: string): Promise<void>;
 }
 
 export interface ICodexLimits {
@@ -38,7 +40,11 @@ const turnEvent = z.object({
 	}),
 });
 const windowSchema = z
-	.object({ usedPercent: count, windowDurationMins: count.positive().nullish(), resetsAt: timestamp.nullish() })
+	.object({
+		usedPercent: z.number().nonnegative(),
+		windowDurationMins: count.positive().nullish(),
+		resetsAt: timestamp.nullish(),
+	})
 	.nullish();
 const bucketSchema = z.object({
 	limitId: z.string().nullish(),
@@ -64,24 +70,35 @@ export class CodexUsageClient implements ICodexUsageTracker, ICodexLimits {
 	private readonly turns = new Map<string, TrackedTurn>();
 	private readonly unsubscribe: () => void;
 	private writes = Promise.resolve();
+	private limitRequest?: Promise<AccountLimits | undefined>;
 
 	constructor(
 		private readonly connection: ICodexUsageConnection,
 		private readonly save: (turn: UsageTurn) => Promise<void>,
 		private readonly now: () => Date,
-		private readonly monthlyAud: number,
+		private readonly billing: () => Promise<BillingSnapshot>,
+		private readonly sample: () => Promise<void>,
 	) {
 		this.unsubscribe = connection.subscribe((method, params) => this.notification(method, params));
 	}
-	track(threadId: string, scope: UsageScope, model?: string): void {
+	async track(threadId: string, scope: UsageScope, model?: string): Promise<void> {
+		await this.writes;
+		const billing = { ...(await this.billing()), rates: modelRates(model) };
+		await this.sample();
 		const previousId = this.turns.get(threadId)?.id;
 		this.turns.set(threadId, {
 			previousId,
-			data: { ...scope, threadId, startedAt: this.now().toISOString(), monthlyAud: this.monthlyAud, model },
+			data: { ...scope, threadId, startedAt: this.now().toISOString(), billing, model },
 		});
 	}
 
-	async limits(): Promise<AccountLimits | undefined> {
+	limits(): Promise<AccountLimits | undefined> {
+		return (this.limitRequest ??= this.readLimits().finally(() => {
+			this.limitRequest = undefined;
+		}));
+	}
+
+	private async readLimits(): Promise<AccountLimits | undefined> {
 		try {
 			await this.connection.initialize();
 			const result = limitsSchema.parse(await this.connection.request("account/rateLimits/read", null));
@@ -140,7 +157,8 @@ export class CodexUsageClient implements ICodexUsageTracker, ICodexLimits {
 							? Math.max(0, turn.completedAt - turn.startedAt) * 1000
 							: undefined);
 					this.persist(tracked.data, turn.id);
-				}
+					this.writes = this.writes.then(() => this.sample());
+				} else this.persist(tracked.data, turn.id);
 				break;
 			}
 			case "model/rerouted": {
@@ -149,6 +167,7 @@ export class CodexUsageClient implements ICodexUsageTracker, ICodexLimits {
 				const tracked = this.match(event.data.threadId, event.data.turnId);
 				if (tracked?.data.model) {
 					delete tracked.data.model;
+					tracked.data.pricingUnavailable = true;
 					if (tracked.baseline) this.persist(tracked.data, event.data.turnId);
 				}
 				break;
@@ -193,7 +212,7 @@ export class CodexUsageClient implements ICodexUsageTracker, ICodexLimits {
 	}
 
 	private persist(data: UsageSnapshot, turnId: string): void {
-		const snapshot = { ...data, turnId };
+		const snapshot = structuredClone({ ...data, turnId });
 		this.writes = this.writes
 			.then(() => this.save(snapshot))
 			.catch((err: unknown) => {

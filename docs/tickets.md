@@ -320,9 +320,14 @@ in Costs and does not constrain scheduling or add a board indicator.
 The [Costs page](agents.md#cost-and-usage) attributes each turn to the
 ticket and phase at dispatch, including rebase turns on an implementation thread
 and historical review turns. The ticket's Cost tab shows its recorded input,
-cached input and output tokens, turn count and two AUD estimates using the same
-data as the global dashboard. Owner-only `GET /api/tickets/:id/cost` returns only
-that ticket’s usage, estimates, pricing metadata and tracking start date.
+cached input and output tokens, turn count and three metrics: estimated API cost
+in USD, estimated weekly limit spent, and estimated effective USD cost. Planning,
+implementation, review and rebase have separate summaries using the same contract
+as ticket and board totals. Standalone chats remain outside ticket totals.
+Owner-only, project-independent `GET /api/tickets/:id/cost` returns only that
+ticket’s summary, phase summaries and tracking start date. Archived tickets, tickets
+without repositories, and zero-usage tickets remain queryable. Invalid IDs return
+400 and missing tickets return 404.
 
 Costs links to `/tasks?ticket=:ticketId`. The panel loads the
 ticket by ID independently of the active board, including archived tickets.
@@ -330,14 +335,19 @@ Closing clears the query parameter; reload and Back/Forward restore selection.
 Missing tickets show errors. Archived panels retain
 Details, Chat history and Cost, with editing and execution controls read-only.
 
-- **Subscription allocation** prorates the monthly plan amount at dispatch over
-  elapsed Codex turn time, splitting turns at UTC calendar month boundaries.
-  Queue time and gaps between turns are excluded. Concurrent turns are priced
-  independently. The allocation estimates a portion of the fixed subscription fee.
-- **API equivalent** applies the published standard text rates for uncached input,
-  cached input, and output to each known model and converts USD to AUD. It uses a
-  dated exchange-rate snapshot. Long-context, service-tier, cache-write and tool
-  fees are outside this base token estimate. Turns with missing duration, token
-  counts or model pricing are flagged in the table.
+- **Estimated API cost** prices uncached input, cached input and output using the
+  dispatch snapshot's USD model rates. Unknown pricing or usage stays unavailable.
+- **Weekly limit spent** attributes account-wide quota increases using API-cost
+  increments as weights, including chats. Values retain full precision; display
+  uses three significant figures. Bucket identity accompanies the summary.
+- **Effective cost** multiplies weekly percentage / 100 by the saved monthly plan
+  price converted to USD, divided by 4.33. This is a quota attribution estimate.
 
-See [cost settings](development.md#cost-settings) for the monthly amount and FX defaults.
+Known values sum before formatting; completeness indicators identify partial
+amounts. Local equivalents use each turn's historical exchange rate and group
+mixed currencies separately, with USD detail. Long-context, service-tier,
+cache-write and tool fees remain outside the base API token estimate.
+
+See [quota attribution](agents.md#quota-cost-attribution),
+[billing settings and FX caching](development.md#cost-settings), and
+[persistence boundaries](architecture.md#persistence-and-recovery).

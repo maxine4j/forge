@@ -3,109 +3,66 @@ import { expect, test, vi } from "vitest";
 import { CostService } from "./cost-service.ts";
 import type { UsageTurn } from "./types.ts";
 
-test("aggregates phase and daily usage, splits time across months, and flags unpriced turns", async () => {
+test("aggregates all phases, chats, archived and repository-free tickets without repository joins", async () => {
 	const startedAt = "2026-10-31T23:00:00.000Z";
-	const planning: UsageTurn = {
+	const planning = {
 		projectId: "a",
 		ticketId: "TASK-1",
 		threadId: "one",
 		turnId: "one",
-		phase: "planning",
+		phase: "planning" as const,
 		startedAt,
-		durationMs: 7200000,
-		monthlyAud: 30,
-		model: "gpt-5.4",
+		billing: { localCurrency: "AUD", monthlyPlanLocal: 30, usdToLocal: 1.5 },
+		apiUsd: 2.875,
 		input: 1000000,
 		cached: 500000,
 		output: 100000,
 	};
 	const turns: UsageTurn[] = [
 		planning,
-		{
-			...planning,
-			turnId: "two",
-			projectId: "another-execution-repository",
-			phase: "review",
-			durationMs: 0,
-			model: "unknown",
-			input: 100,
-			cached: 0,
-			output: 10,
-		},
-		{
-			...planning,
-			projectId: "b",
-			ticketId: undefined,
-			phase: "chat",
-			turnId: "three",
-			input: 20,
-			cached: 0,
-			output: 10,
-		},
-		{
-			...planning,
-			projectId: "b",
-			ticketId: "TASK-3",
-			durationMs: undefined,
-			model: "unknown",
-			input: 10,
-			cached: 0,
-			output: 0,
-		},
+		{ ...planning, phase: "implementation", turnId: "two", projectId: "another-repository" },
+		{ ...planning, phase: "review", turnId: "three", apiUsd: undefined },
+		{ ...planning, phase: "rebase", turnId: "four", ticketId: "TASK-3" },
+		{ ...planning, phase: "chat", turnId: "five", ticketId: undefined },
 	];
-	turns.push({
-		...planning,
-		projectId: "b",
-		ticketId: "TASK-3",
-		turnId: "four",
-		durationMs: 1000,
-		input: 100,
-		cached: 0,
-		output: 10,
-	});
 	const access = { assertOwner: vi.fn() };
 	const service = new CostService(
 		access,
 		{
-			get: async () => ({ id: "TASK-1" }),
+			get: async (id) => ({ id }),
 			listForCost: async () => [
 				{ id: "TASK-1", title: "Search", archivedAt: startedAt },
-				{ id: "TASK-2", title: "Waiting" },
+				{ id: "TASK-2", title: "No repository or usage" },
 				{ id: "TASK-3", title: "Other" },
 			],
 		},
 		{ read: async () => ({ since: startedAt, turns }) },
 		{ limits: async () => undefined },
-		{ monthlyAud: 30, audPerUsd: 1.5, exchangeDate: "2026-11-10" },
 		() => new Date("2026-11-01T00:00:00Z"),
-		{ save: async () => {}, read: async () => ({ observations: [], completions: [] }) },
 	);
 	const result = await service.read({ username: "owner" });
 	expect(access.assertOwner).toHaveBeenCalledWith({ username: "owner" });
-	expect(result.totals).toMatchObject({ input: 1000230, cached: 500000, output: 100030, turns: 5 });
-	expect(result.phases.map(({ phase }) => phase)).toEqual(["planning", "review", "chat"]);
+	expect(result.totals).toMatchObject({ input: 5000000, cached: 2500000, output: 500000, turns: 5, apiUsd: 11.5 });
+	expect(result.ticketEstimates).toMatchObject({
+		turns: 4,
+		apiUsd: 8.625,
+		incomplete: { api: 1, weekly: 4, effective: 4 },
+	});
+	expect(result.chats).toMatchObject({ turns: 1, apiUsd: 2.875 });
+	expect(result.phases.map(({ phase }) => phase)).toEqual(["planning", "implementation", "review", "rebase", "chat"]);
 	expect(result.days).toHaveLength(30);
-	expect(result.days.at(-2)).toMatchObject({ date: "2026-10-31", input: 1000230 });
-	expect(result.days.at(-1)).toMatchObject({ date: "2026-11-01", input: 0 });
-	expect(result.tickets.at(0)?.subscriptionAud).toBeCloseTo(30 / (31 * 24) + 30 / (30 * 24));
-	expect(result.tickets.at(0)).toMatchObject({
+	expect(result.days.at(-2)).toMatchObject({ date: "2026-10-31", input: 5000000 });
+	expect(result.tickets[0]).toMatchObject({
 		id: "TASK-1",
 		archivedAt: startedAt,
-		apiAud: 4.3125,
-		unpricedTurns: 1,
-		turns: 2,
+		turns: 3,
+		apiUsd: 5.75,
+		localCurrencies: [{ currency: "AUD", api: 8.625 }],
 	});
-	expect(result.tickets.at(1)).toMatchObject({ id: "TASK-2", turns: 0 });
-	expect(result.tickets.at(1)?.apiAud).toBeUndefined();
-	expect(result.limits).toBeUndefined();
-	expect(result.ticketEstimates).toMatchObject({ unpricedTurns: 2, untimedTurns: 1, turns: 4 });
-	expect(result.ticketEstimates.apiAud).toBeCloseTo(4.3131, 8);
-	expect(result.ticketEstimates.subscriptionAud).toBeCloseTo(
-		30 / (31 * 24) + 30 / (30 * 24) + (30 * 1000) / (31 * 86400000),
-		8,
-	);
+	expect(result.tickets[0]?.phases.map((phase) => phase.turns)).toEqual([1, 1, 1, 0]);
+	expect(result.tickets[1]).toMatchObject({ turns: 0, apiUsd: 0, weeklyUsagePercent: 0, effectiveUsd: 0 });
 	const scoped = await service.readTicket({ username: "owner" }, "TASK-1");
-	expect(scoped.ticket).toEqual(expect.objectContaining({ turns: 2, apiAud: 4.3125 }));
+	expect(scoped.ticket).toEqual(expect.objectContaining({ turns: 3, apiUsd: 5.75 }));
+	expect(scoped.phases.map((phase) => phase.turns)).toEqual([1, 1, 1, 0]);
 	await expect(service.readTicket({ username: "owner" }, "invalid")).rejects.toThrow();
-	expect(result.weeklyBudget).toEqual({ buckets: [], defaultBucketId: undefined });
 });

@@ -3,7 +3,7 @@ import { z } from "zod";
 const count = z.int().nonnegative();
 const amount = z.number().nonnegative();
 const tokens = z.object({ input: count, cached: count, output: count });
-const summary = tokens.extend({ turns: count });
+
 export const costPhaseSchema = z.enum(["planning", "implementation", "review", "rebase", "chat"]);
 export const weeklyObservationSchema = z.object({
 	bucketId: z.string(),
@@ -36,31 +36,42 @@ export const weeklyBudgetSchema = z.object({
 });
 export type WeeklyObservation = z.infer<typeof weeklyObservationSchema>;
 export type WeeklyBudget = z.infer<typeof weeklyBudgetSchema>;
-export const ticketEstimateSchema = summary.extend({
-	subscriptionAud: amount.optional(),
-	apiAud: amount.optional(),
-	untimedTurns: count,
-	unpricedTurns: count,
+export const ticketEstimateSchema = tokens.extend({
+	turns: count,
+	apiUsd: amount.optional(),
+	weeklyUsagePercent: amount.optional(),
+	effectiveUsd: amount.optional(),
+	incomplete: z.object({ api: count, weekly: count, effective: count, conversion: count, tokens: count }),
+	weeklyBuckets: z.array(z.object({ bucketId: z.string(), percent: amount })),
+	localCurrencies: z.array(
+		z.object({ currency: z.string(), api: amount.optional(), effective: amount.optional(), incomplete: count }),
+	),
 });
-const pricingSchema = z.object({
+export type CostSummary = z.infer<typeof ticketEstimateSchema>;
+const phaseSummary = ticketEstimateSchema.extend({ phase: costPhaseSchema });
+export const ticketCostSchema = z.object({
 	since: z.iso.datetime(),
-	monthlyAud: amount,
-	audPerUsd: amount.positive(),
-	exchangeDate: z.iso.date(),
+	ticket: ticketEstimateSchema,
+	phases: z.array(phaseSummary),
 });
-export const ticketCostSchema = pricingSchema.extend({ ticket: ticketEstimateSchema });
 export type TicketCost = z.infer<typeof ticketCostSchema>;
-export const costsSchema = pricingSchema.extend({
+export const costsSchema = z.object({
+	since: z.iso.datetime(),
 	weeklyBudget: weeklyBudgetSchema.optional(),
-	totals: summary,
+	quotaAttribution: z.array(
+		z.object({ bucketId: z.string(), consumption: amount, allocated: amount, unallocated: amount }),
+	),
+	totals: ticketEstimateSchema,
+	chats: ticketEstimateSchema,
 	ticketEstimates: ticketEstimateSchema,
-	phases: z.array(summary.extend({ phase: costPhaseSchema })),
+	phases: z.array(phaseSummary),
 	days: z.array(tokens.extend({ date: z.iso.date() })).max(30),
 	tickets: z.array(
 		ticketEstimateSchema.extend({
 			id: z.string(),
 			title: z.string(),
 			archivedAt: z.iso.datetime().optional(),
+			phases: z.array(phaseSummary),
 		}),
 	),
 	limits: z
@@ -71,7 +82,7 @@ export const costsSchema = pricingSchema.extend({
 					bucketId: z.string().optional(),
 					bucket: z.string(),
 					minutes: count.optional(),
-					usedPercent: count,
+					usedPercent: amount,
 					resetsAt: z.iso.datetime().optional(),
 				}),
 			),

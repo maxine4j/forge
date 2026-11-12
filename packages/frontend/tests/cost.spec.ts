@@ -1,8 +1,11 @@
 import { expect, test } from "@playwright/test";
 
+import { costFixture, phaseFixtures } from "../dev/cost-fixture.ts";
+
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const since = "2026-11-03T00:00:00.000Z";
-const tokens = { input: 1800, cached: 600, output: 200, turns: 2 };
+const tokens = costFixture({ input: 1800, cached: 600, output: 200, turns: 2 }, 0.0625, 0.123456, 0.015 / 1.44);
+tokens.incomplete.api = 1;
 const cost = {
 	weeklyBudget: {
 		defaultBucketId: "codex",
@@ -30,11 +33,10 @@ const cost = {
 		})),
 	},
 	since,
-	monthlyAud: 30,
-	audPerUsd: 1.44,
-	exchangeDate: "2026-11-10",
+	chats: costFixture({ input: 0, cached: 0, output: 0, turns: 0 }),
+	quotaAttribution: [],
 	totals: tokens,
-	ticketEstimates: { ...tokens, subscriptionAud: 0.015, apiAud: 0.09, untimedTurns: 0, unpricedTurns: 1 },
+	ticketEstimates: tokens,
 	phases: [{ phase: "review", ...tokens }],
 	days: [{ date: "2026-11-10", input: 1800, cached: 600, output: 200 }],
 	tickets: [
@@ -42,21 +44,14 @@ const cost = {
 			id: "TASK-2",
 			title: "Search",
 			...tokens,
-			subscriptionAud: 0.015,
-			apiAud: 0.09,
-			untimedTurns: 0,
-			unpricedTurns: 1,
+			phases: phaseFixtures(tokens),
 		},
 		{
 			id: "TASK-1",
 			title: "Cleanup",
 			archivedAt: since,
-			input: 0,
-			cached: 0,
-			output: 0,
-			turns: 0,
-			untimedTurns: 0,
-			unpricedTurns: 0,
+			...costFixture({ input: 0, cached: 0, output: 0, turns: 0 }),
+			phases: [],
 		},
 	],
 	limits: {
@@ -116,11 +111,12 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	await expect(page.getByText("5-hour window")).toBeVisible();
 	await expect(page.getByText("Weekly window")).toBeVisible();
 	const ticket = page.getByRole("row", { name: /TASK-2 Search/ });
-	await expect(ticket).toContainText("A$0.015");
-	await expect(ticket).toContainText("A$0.09");
-	await expect(ticket).toContainText("1 turn missing pricing");
+	await expect(ticket).toContainText("$0.015");
+	await expect(ticket).toContainText("$0.09");
+	await expect(ticket).toContainText("1 turn missing pricing or usage");
 	await expect(page.getByRole("row", { name: /TASK-1 Cleanup/ })).toContainText("Archived");
-	await page.getByRole("button", { name: "Ticket", exact: true }).click();
+	await expect(ticket).toContainText("0.123%");
+	await page.getByLabel("Sort tickets").selectOption("ticket");
 	await expect(page.getByRole("row").nth(1)).toContainText("TASK-1");
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 	await expect(ticket.getByRole("link")).toHaveAttribute("href", `/tasks?ticket=TASK-2`);

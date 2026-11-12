@@ -15,6 +15,9 @@ test("shutdown drains an in-flight request without saving or scheduling another 
 	const collector = new QuotaCollector({ limits }, { save, read: vi.fn() }, () => new Date(), sleep, vi.fn());
 	collector.start();
 	collector.start();
+	const dispatch = collector.sample();
+	const completion = collector.sample();
+	expect(dispatch).toBe(completion);
 	expect(limits).toHaveBeenCalledTimes(1);
 	const closing = collector.close();
 	resolve(undefined);

@@ -3,6 +3,8 @@ import type { Epic } from "@forge/contracts/tickets";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
+import { costFixture, phaseFixtures } from "../dev/cost-fixture.ts";
+
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const createdAt = "2026-11-03T00:00:00.000Z";
 const setup = async (page: Page, crowded = false, agentic = false, review = false) => {
@@ -1082,25 +1084,18 @@ test("ticket chat shows the current context window", async ({ page }) => {
 
 test("ticket Cost shows this ticket's estimates and token counts", async ({ page }) => {
 	await setup(page, false, true);
-	const totals = { input: 1800, cached: 600, output: 200, turns: 2 };
+	const totals = costFixture({ input: 1800, cached: 600, output: 200, turns: 2 }, 0.0625, 0.123456, 0.015 / 1.44);
+	totals.incomplete.api = 1;
 	await page.route("**/api/tickets/TASK-1/cost", (route) =>
 		route.fulfill({
 			json: {
 				since: createdAt,
-				monthlyAud: 30,
-				audPerUsd: 1.44,
-				exchangeDate: "2026-11-10",
 				totals,
-				phases: [],
-				days: [],
+				phases: phaseFixtures(totals),
 				ticket: {
 					...totals,
 					id: "TASK-1",
 					title: "First task",
-					subscriptionAud: 0.015,
-					apiAud: 0.09,
-					untimedTurns: 0,
-					unpricedTurns: 1,
 				},
 			},
 		}),
@@ -1110,7 +1105,15 @@ test("ticket Cost shows this ticket's estimates and token counts", async ({ page
 	await expect(modal.getByRole("tab", { name: "Cost" })).toBeVisible();
 	await modal.getByRole("tab", { name: "Cost" }).click();
 	const cost = modal.getByRole("tabpanel", { name: "Cost" });
-	for (const value of ["1,800", "600", "200", "A$0.015", "A$0.09", "1 turn missing pricing"])
+	for (const value of [
+		"1,800",
+		"600",
+		"200",
+		"AUD $0.015",
+		"AUD $0.09",
+		"Partial / unavailable: 1 turn missing pricing or usage",
+		"0.123%",
+	])
 		await expect(cost.getByText(value, { exact: true })).toBeVisible();
 	await expect(cost.getByText("A$1.99")).toHaveCount(0);
 });
