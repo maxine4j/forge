@@ -103,19 +103,39 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const dockerCommand = new DockerCommand(sleep);
 	lifecycle.register(() => dockerCommand.close());
 	const docker = new DockerService(new DockerClient(dockerCommand), access, randomUUID, () => new Date());
+	const costStore = new CostStore(database);
+	await costStore.initialize(new Date().toISOString());
+	const processes = new AccountProcess(
+		{
+			dataDirectory: config.dataDirectory,
+			path: process.env["PATH"] ?? "",
+			codexExecutable: fileURLToPath(new URL("../node_modules/.bin/codex", import.meta.url)),
+			githubExecutable: "gh",
+		},
+		sleep,
+	);
+	const connection = new CodexConnection(processes, sleep);
+	lifecycle.register(() => connection.close());
+	const usage = new CodexUsageClient(
+		connection,
+		(turn) => costStore.save(turn),
+		() => new Date(),
+		config.cost.monthlyAud,
+	);
+	lifecycle.register(() => usage.close());
+	const agentClient = new CodexAgentClient(connection, files.realpath, randomUUID, usage);
 	const settingsStore = new SettingsStore(database);
 	await settingsStore.initialize();
 	const settings = new SettingsService(
 		settingsStore,
 		options.containerGitConfig ? new GitSystemConfig(options.containerGitConfig, files) : undefined,
 		access,
+		() => agentClient.options(),
 	);
 	await settings.initialize();
 	if (!lifecycle.isOpen()) return;
 	const ticketStore = new TicketStore(database);
 	await ticketStore.initialize();
-	const costStore = new CostStore(database);
-	await costStore.initialize(new Date().toISOString());
 	const identity = () => settings.gitIdentity();
 	const git = options.git ?? new GitTransport(sleep, { identity });
 	const githubGit = new GitTransport(sleep, {
@@ -187,15 +207,6 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const attempts = new AccountAttemptStore(database);
 	await attempts.initialize();
 	if (!lifecycle.isOpen()) return;
-	const processes = new AccountProcess(
-		{
-			dataDirectory: config.dataDirectory,
-			path: process.env["PATH"] ?? "",
-			codexExecutable: fileURLToPath(new URL("../node_modules/.bin/codex", import.meta.url)),
-			githubExecutable: "gh",
-		},
-		sleep,
-	);
 	// Credential-home failure is reported by account APIs, without withholding project HTTP or health.
 	try {
 		await processes.initialize();
@@ -203,15 +214,6 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		log.warn({ err }, "Account credential homes unavailable");
 	}
 	if (!lifecycle.isOpen()) return;
-	const connection = new CodexConnection(processes, sleep);
-	lifecycle.register(() => connection.close());
-	const usage = new CodexUsageClient(
-		connection,
-		(turn) => costStore.save(turn),
-		() => new Date(),
-		config.cost.monthlyAud,
-	);
-	lifecycle.register(() => usage.close());
 	const quotas = new QuotaStore(database);
 	await quotas.initialize();
 	const collector = new QuotaCollector(
@@ -239,13 +241,17 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const pool = new AgentExecutionPool(wakeScheduler);
 	const agents = new AgentService(
 		agentStore,
-		new CodexAgentClient(connection, files.realpath, randomUUID, usage),
+		agentClient,
 		workspaces,
 		projects,
 		access,
 		randomUUID,
 		() => new Date(),
 		pool,
+		() => {
+			const { defaultAgentModel, defaultAgentReasoningEffort } = settings.current();
+			return { defaultModel: defaultAgentModel, defaultReasoningEffort: defaultAgentReasoningEffort };
+		},
 	);
 	lifecycle.register(() => agents.shutdown());
 	const boardStore = new BoardSettingsStore(database);

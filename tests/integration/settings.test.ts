@@ -24,8 +24,20 @@ test("Forge settings are owner-only, origin-protected and persist across startup
 	const db = new SqliteDatabase(path);
 	const reopened = new SqliteDatabase(path);
 	const publish = vi.fn(async () => {});
+	const options = {
+		models: [
+			{
+				id: "model-a",
+				name: "Model A",
+				isDefault: true,
+				supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }],
+			},
+		],
+		skills: [],
+	};
+	const catalog = vi.fn(async () => options);
 	const store = new SettingsStore(db);
-	const service = new SettingsService(store, { publish }, access);
+	const service = new SettingsService(store, { publish }, access, catalog);
 	const server = createServer(
 		new HttpApplication({ create: () => new Router<{ actor: Actor }>() }, access)
 			.create([new SettingsRouter(service)])
@@ -39,8 +51,8 @@ test("Forge settings are owner-only, origin-protected and persist across startup
 		await once(server, "listening");
 		const address = server.address();
 		if (!address || typeof address === "string") throw new Error("No listener");
-		const request = (method = "GET", body?: unknown, username = "owner", requestOrigin = origin) =>
-			fetch(`http://127.0.0.1:${address.port}/api/settings`, {
+		const request = (method = "GET", body?: unknown, username = "owner", requestOrigin = origin, suffix = "") =>
+			fetch(`http://127.0.0.1:${address.port}/api/settings${suffix}`, {
 				method,
 				headers: { "x-webauth-user": username, origin: requestOrigin, "content-type": "application/json" },
 				...(body === undefined ? {} : { body: JSON.stringify(body) }),
@@ -52,6 +64,10 @@ test("Forge settings are owner-only, origin-protected and persist across startup
 			gitEmail: "forge@example.com",
 		};
 		expect((await request("GET", undefined, "other")).status).toBe(403);
+		expect((await request("GET", undefined, "other", origin, "/model-options")).status).toBe(403);
+		const models = await request("GET", undefined, "owner", origin, "/model-options");
+		expect(models.status).toBe(200);
+		expect(await models.json()).toEqual(options);
 		expect((await request("PUT", settings, "owner", "https://other.test")).status).toBe(403);
 		const initial = await request();
 		expect(initial.status).toBe(200);
@@ -66,15 +82,28 @@ test("Forge settings are owner-only, origin-protected and persist across startup
 				})
 			).status,
 		).toBe(200);
-		const saved = await request("PUT", settings);
+		expect((await request("PUT", { ...settings, defaultAgentModel: "missing" })).status).toBe(400);
+		expect((await request("PUT", { ...settings, defaultAgentReasoningEffort: "low" })).status).toBe(400);
+		const configured = { ...settings, defaultAgentModel: "model-a", defaultAgentReasoningEffort: "high" };
+		const saved = await request("PUT", configured);
 		expect(saved.status).toBe(200);
-		expect(await saved.json()).toEqual(settings);
-		expect(await (await request()).json()).toEqual(settings);
+		expect(await saved.json()).toEqual(configured);
+		expect(await (await request()).json()).toEqual(configured);
+		catalog.mockRejectedValue(new Error("Codex offline"));
+		expect((await request("GET", undefined, "owner", origin, "/model-options")).status).toBe(503);
+		expect((await request("PUT", { ...configured, defaultAgentModel: undefined })).status).toBe(503);
+		expect((await request("PUT", settings)).status).toBe(200);
+		expect((await request("PUT", configured)).status).toBe(503);
+		catalog.mockResolvedValue(options);
+		expect((await request("PUT", configured)).status).toBe(200);
+		catalog.mockRejectedValue(new Error("Codex offline"));
+		const updated = { ...configured, planningInstructions: "Updated during outage." };
+		expect((await request("PUT", updated)).status).toBe(200);
 		await db.close();
 		await reopened.initialize();
 		const recovered = new SettingsService(new SettingsStore(reopened), { publish }, access);
 		await recovered.initialize();
-		expect(recovered.get({ username: "owner" })).toEqual(settings);
+		expect(recovered.get({ username: "owner" })).toEqual(updated);
 		expect(publish).toHaveBeenLastCalledWith({ name: settings.gitName, email: settings.gitEmail });
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));

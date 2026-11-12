@@ -1,4 +1,5 @@
 import type { AgentView } from "@forge/contracts/agents";
+import { defaultForgeSettings, type ForgeSettings } from "@forge/contracts/settings";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -210,6 +211,52 @@ test("standalone thinking uses catalog levels and resets on incompatible model c
 	await page.getByRole("button", { name: "Send message", exact: true }).click();
 	expect((await request).postDataJSON()).toMatchObject({ reasoningEffort: "high" });
 	expect((await request).postDataJSON()).not.toHaveProperty("model");
+});
+
+test("Config changes refresh the default labels in an open chat and preserve its draft", async ({ page }) => {
+	const fixture = await setup(page);
+	let settings: ForgeSettings = { ...defaultForgeSettings };
+	const options = {
+		models: [
+			{ id: "test-model", name: "Test model", isDefault: true },
+			{
+				id: "other-model",
+				name: "Other model",
+				isDefault: false,
+				supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }],
+			},
+		],
+		skills: [],
+	};
+	await page.route("**/api/settings", (route) => {
+		if (route.request().method() === "PUT") settings = route.request().postDataJSON();
+		return route.fulfill({ json: settings });
+	});
+	await page.route("**/api/settings/model-options", (route) => route.fulfill({ json: options }));
+	await page.route("**/api/agents/*/options", (route) =>
+		route.fulfill({
+			json: {
+				...options,
+				defaultModel: settings.defaultAgentModel,
+				defaultReasoningEffort: settings.defaultAgentReasoningEffort,
+			},
+		}),
+	);
+	await fixture.create();
+	const model = page.getByRole("combobox", { name: "Model", exact: true });
+	const thinking = page.getByRole("combobox", { name: "Thinking level", exact: true });
+	const message = page.getByRole("textbox", { name: "Message", exact: true });
+	await expect(model.locator("option:checked")).toHaveText("Default model (Test model)");
+	await message.fill("Keep this draft");
+	await page.getByRole("link", { name: "Config", exact: true }).click();
+	await page.getByLabel("Default model", { exact: true }).selectOption("other-model");
+	await page.getByLabel("Default thinking", { exact: true }).selectOption("high");
+	await page.getByRole("button", { name: "Save settings" }).click();
+	await expect(page.getByRole("status")).toHaveText("Settings saved.");
+	await page.goBack();
+	await expect(model.locator("option:checked")).toHaveText("Default model (Other model)");
+	await expect(thinking.locator("option:checked")).toHaveText("Default thinking (high)");
+	await expect(message).toHaveValue("Keep this draft");
 });
 
 test("consecutive tools share a collapsed group with statuses and agent messages have no bubbles", async ({ page }) => {

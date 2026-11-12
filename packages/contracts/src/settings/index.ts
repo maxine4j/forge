@@ -9,6 +9,8 @@ export const forgeSettingsSchema = z
 	.strictObject({
 		planningInstructions: instructions,
 		implementationInstructions: instructions,
+		defaultAgentModel: z.string().min(1).max(256).optional(),
+		defaultAgentReasoningEffort: z.string().min(1).max(256).optional(),
 		gitName: z
 			.string()
 			.trim()

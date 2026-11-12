@@ -5,10 +5,10 @@ import {
 	type AgentOptions,
 	type AgentSettings,
 } from "@forge/contracts/agents";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
-import { ExecutionSettings } from "./execution-settings.tsx";
+import { AgentOptionsRevision, ExecutionSettings } from "./execution-settings.tsx";
 
 const number = new Intl.NumberFormat("en-AU");
 
@@ -85,6 +85,7 @@ export const AgentComposer = ({
 		pendingCaret.current = undefined;
 	}, [draft]);
 	const [options, setOptions] = useState<AgentOptions>();
+	const optionsRevision = useContext(AgentOptionsRevision);
 	const [error, setError] = useState("");
 	const [attempt, setAttempt] = useState(0);
 	const settingsKey = JSON.stringify([settings.model, settings.reasoningEffort, settings.permissions]);
@@ -118,7 +119,7 @@ export const AgentComposer = ({
 		return () => {
 			current = false;
 		};
-	}, [api, id, attempt, configurable, completions]);
+	}, [api, id, attempt, configurable, completions, optionsRevision]);
 	const match = /(?:^|\s)([$@])([^\s$@]*)$/.exec(draft.slice(0, cursor));
 	const trigger = !dismissed && completions ? match?.[1] : undefined;
 	const query = match?.[2] ?? "";

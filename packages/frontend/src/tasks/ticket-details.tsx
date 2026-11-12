@@ -9,10 +9,10 @@ import {
 	type MoveTicket,
 	type TicketWorkflow,
 } from "@forge/contracts/tickets";
-import { useEffect, useRef, useState, useId } from "react";
+import { useContext, useEffect, useRef, useState, useId } from "react";
 
 import { Conversation } from "../agents/agent-chat.tsx";
-import { ExecutionSettings } from "../agents/execution-settings.tsx";
+import { AgentOptionsRevision, ExecutionSettings } from "../agents/execution-settings.tsx";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { TicketCost } from "./ticket-cost.tsx";
@@ -69,6 +69,7 @@ export const TicketDetails = ({
 	const settings = savedSettings ?? ticket.executionSettings ?? {};
 	const [error, setError] = useState("");
 	const [options, setOptions] = useState<AgentOptions>();
+	const optionsRevision = useContext(AgentOptionsRevision);
 	const [savingSettings, setSavingSettings] = useState(false);
 	const [settingsError, setSettingsError] = useState("");
 	useEffect(() => {
@@ -84,7 +85,7 @@ export const TicketDetails = ({
 		return () => {
 			current = false;
 		};
-	}, [api, ticket.projectId]);
+	}, [api, ticket.projectId, optionsRevision]);
 	const changeSettings = (value: AgentSettings) => {
 		if (savingSettings) return;
 		setSettingsError("");

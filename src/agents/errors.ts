@@ -13,3 +13,10 @@ export class AgentError extends Error {
 		this.name = "AgentError";
 	}
 }
+
+/** Model catalog lookup failed before an execution was attempted. */
+export class AgentCatalogError extends AgentError {
+	constructor(cause: unknown) {
+		super("agent-unavailable", { cause });
+	}
+}

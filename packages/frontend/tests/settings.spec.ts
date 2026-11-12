@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-test("Config saves and reloads Forge-wide agent instructions and Git identity", async ({ page }) => {
+test("Config persists agent defaults, instructions and Git identity and can clear defaults offline", async ({
+	page,
+}) => {
 	let settings = {
 		planningInstructions: "",
 		implementationInstructions: "",
@@ -8,6 +10,7 @@ test("Config saves and reloads Forge-wide agent instructions and Git identity", 
 		gitEmail: "",
 	};
 	const updates: unknown[] = [];
+	let catalogAvailable = true;
 	await page.route("**/api/projects", (route) => route.fulfill({ json: [] }));
 	await page.route("**/api/accounts", (route) =>
 		route.fulfill({
@@ -24,6 +27,23 @@ test("Config saves and reloads Forge-wide agent instructions and Git identity", 
 		}
 		return route.fulfill({ json: settings });
 	});
+	await page.route("**/api/settings/model-options", (route) =>
+		catalogAvailable
+			? route.fulfill({
+					json: {
+						models: [
+							{
+								id: "model-a",
+								name: "Model A",
+								isDefault: true,
+								supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }],
+							},
+						],
+						skills: [],
+					},
+				})
+			: route.fulfill({ status: 503, json: { error: "settings-unavailable" } }),
+	);
 	await page.goto("/projects");
 	await page.getByRole("link", { name: "Config", exact: true }).click();
 	await expect(page).toHaveURL(/\/config$/u);
@@ -35,6 +55,8 @@ test("Config saves and reloads Forge-wide agent instructions and Git identity", 
 	await expect(page.getByRole("alert")).toHaveText("Provide both a Git name and email, or leave both blank.");
 	expect(updates).toEqual([]);
 	await page.getByLabel("Git email").fill("forge@example.com");
+	await page.getByLabel("Default model").selectOption("model-a");
+	await page.getByLabel("Default thinking").selectOption("high");
 	await page.getByRole("button", { name: "Save settings" }).click();
 	await expect(page.getByRole("status")).toHaveText("Settings saved.");
 	expect(updates).toEqual([
@@ -43,6 +65,8 @@ test("Config saves and reloads Forge-wide agent instructions and Git identity", 
 			implementationInstructions: "Run focused tests.",
 			gitName: "Forge Developer",
 			gitEmail: "forge@example.com",
+			defaultAgentModel: "model-a",
+			defaultAgentReasoningEffort: "high",
 		},
 	]);
 	await page.reload();
@@ -50,4 +74,15 @@ test("Config saves and reloads Forge-wide agent instructions and Git identity", 
 	await expect(page.getByLabel("Implementation instructions")).toHaveValue(settings.implementationInstructions);
 	await expect(page.getByLabel("Git name")).toHaveValue(settings.gitName);
 	await expect(page.getByLabel("Git email")).toHaveValue(settings.gitEmail);
+	await expect(page.getByLabel("Default model")).toHaveValue("model-a");
+	await expect(page.getByLabel("Default thinking")).toHaveValue("high");
+	catalogAvailable = false;
+	await page.reload();
+	await expect(page.getByRole("button", { name: "Retry loading models" })).toBeVisible();
+	await page.getByLabel("Default thinking").selectOption("");
+	await page.getByLabel("Default model").selectOption("");
+	await page.getByRole("button", { name: "Save settings" }).click();
+	await expect(page.getByRole("status")).toHaveText("Settings saved.");
+	expect(updates.at(-1)).not.toHaveProperty("defaultAgentModel");
+	expect(updates.at(-1)).not.toHaveProperty("defaultAgentReasoningEffort");
 });

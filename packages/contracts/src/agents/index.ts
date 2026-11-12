@@ -1,4 +1,6 @@
 import { z } from "zod";
+
+import type { AgentOptions, AgentSettings } from "./types.ts";
 export const agentStatusSchema = z.enum([
 	"creating",
 	"idle",
@@ -36,7 +38,27 @@ export const agentOptionsSchema = z.strictObject({
 		)
 		.max(500),
 	skills: z.array(z.strictObject({ name: z.string().min(1).max(256), description: z.string().max(4000) })).max(500),
+	defaultModel: agentSettingsSchema.shape.model,
+	defaultReasoningEffort: agentSettingsSchema.shape.reasoningEffort,
 });
+
+export const resolveAgentSettings = (options: AgentOptions, settings: AgentSettings) => {
+	const model = settings.model
+		? options.models.find((entry) => entry.id === settings.model)
+		: (options.models.find((entry) => entry.id === options.defaultModel)
+			?? options.models.find((entry) => entry.isDefault));
+	const supportsEffort = (effort: string) =>
+		model?.supportedReasoningEfforts?.some((entry) => entry.reasoningEffort === effort) ?? false;
+	const inherited = options.defaultReasoningEffort;
+	return {
+		model,
+		reasoningEffort:
+			settings.reasoningEffort
+			?? (inherited && supportsEffort(inherited) ? inherited : model?.defaultReasoningEffort),
+		supported:
+			(!settings.model || !!model) && (!settings.reasoningEffort || supportsEffort(settings.reasoningEffort)),
+	};
+};
 export const agentFilesSchema = z.array(z.string().min(1).max(4096)).max(100);
 export const agentReplySchema = z.strictObject({
 	requestId: z.string().min(1).max(256),

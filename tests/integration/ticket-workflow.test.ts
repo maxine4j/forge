@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import * as files from "@forge/backend-infrastructure/file";
 import { sleep } from "@forge/backend-infrastructure/sleep";
+import type { AgentOptions } from "@forge/contracts/agents";
 import { expect, test, vi } from "vitest";
 
 import { AccountProcess } from "../../src/accounts/account-process.ts";
@@ -92,7 +93,20 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			30,
 		);
 		const client = new CodexAgentClient(connection, files.realpath, randomUUID, usage);
-		agents = new AgentService(agentStore, client, workspaces, projects, access, randomUUID, () => new Date(), pool);
+		const rpc = vi.spyOn(connection, "request");
+		let defaults: Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = {};
+		const readDefaults = () => defaults;
+		agents = new AgentService(
+			agentStore,
+			client,
+			workspaces,
+			projects,
+			access,
+			randomUUID,
+			() => new Date(),
+			pool,
+			readDefaults,
+		);
 		const ticketStore = new TicketStore(db);
 		await ticketStore.initialize();
 		const cost = new CostService(
@@ -136,6 +150,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				randomUUID,
 				() => new Date(),
 				pool,
+				readDefaults,
 			);
 			await agents.seed(owner);
 			await agents.recover(owner);
@@ -174,6 +189,14 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect((await ticketStore.get(ticket.id))?.status).toBe("todo");
 		expect((await jobs.get(ticket.id))?.state).toBe("queued");
 		dispatch = "running";
+		await workflow.settings(owner, (await ticketStore.get(ticket.id))!, { reasoningEffort: "medium" });
+		defaults = { defaultModel: "gpt-5.4-mini", defaultReasoningEffort: "low" };
+		await workflow.tick(owner);
+		expect((await jobs.get(ticket.id))?.state).toBe("setup-failed");
+		expect(pool.activeIds()).not.toContain(preparedPlanner);
+		await workflow.settings(owner, (await ticketStore.get(ticket.id))!, {});
+		defaults = { defaultModel: "gpt-5.4", defaultReasoningEffort: "high" };
+		await workflow.recover(owner, ticket.id);
 		await workflow.tick(owner);
 		const planning = (await jobs.get(ticket.id))!;
 		expect(planning.plannerId).toBe(preparedPlanner);
@@ -184,6 +207,18 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		};
 		await expect.poll(idle).toBe("idle");
 		expect((await jobs.get(ticket.id))?.plan?.revision).toBe(1);
+		expect(rpc).toHaveBeenCalledWith(
+			"turn/start",
+			expect.objectContaining({
+				model: "gpt-5.4",
+				effort: "high",
+				collaborationMode: {
+					mode: "plan",
+					settings: { model: "gpt-5.4", reasoning_effort: "high", developer_instructions: null },
+				},
+			}),
+		);
+		defaults = { defaultModel: "gpt-5.4", defaultReasoningEffort: "medium" };
 		await workflow.message(owner, (await ticketStore.get(ticket.id))!, "Include filtering");
 		dispatch = "stopped";
 		await workflow.tick(owner);
@@ -192,6 +227,11 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await workflow.tick(owner);
 		await expect.poll(idle).toBe("idle");
 		expect((await jobs.get(ticket.id))?.plan?.revision).toBe(2);
+		expect(rpc.mock.calls.filter(([method]) => method === "turn/start").at(-1)?.[1]).toMatchObject({
+			model: "gpt-5.4",
+			effort: "medium",
+			collaborationMode: { settings: { model: "gpt-5.4", reasoning_effort: "medium" } },
+		});
 		dispatch = "running";
 		expect((await tickets.list(owner, project.id)).at(0)).toMatchObject({
 			status: "in-progress",

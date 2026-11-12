@@ -25,11 +25,6 @@ export class AgentRouter {
 	) {}
 	create(): Router<{ actor: Actor }> {
 		const router = new Router<{ actor: Actor }>();
-		router.get("/api/projects/:projectId/model-options", async (ctx) => {
-			ctx.body = agentOptionsSchema.parse(
-				await this.service.projectOptions(ctx.state.actor, ctx.params["projectId"]!),
-			);
-		});
 		router.use(async (ctx, next) => {
 			try {
 				await next();
@@ -45,6 +40,11 @@ export class AgentRouter {
 								: 503;
 				ctx.body = { error: error.code };
 			}
+		});
+		router.get("/api/projects/:projectId/model-options", async (ctx) => {
+			ctx.body = agentOptionsSchema.parse(
+				await this.service.projectOptions(ctx.state.actor, ctx.params["projectId"]!),
+			);
 		});
 		router.get("/api/projects/:projectId/agents", async (ctx) => {
 			ctx.body = agentThreadsSchema.parse(await this.service.list(ctx.state.actor, ctx.params["projectId"]!));

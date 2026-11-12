@@ -1,3 +1,4 @@
+import { resolveAgentSettings, type AgentOptions } from "@forge/contracts/agents";
 import {
 	defaultForgeSettings,
 	forgeSettingsSchema,
@@ -12,7 +13,7 @@ import type { ISettingsStore } from "./settings-store.ts";
 
 export class SettingsError extends Error {
 	constructor(
-		readonly code: "invalid-request" | "settings-unavailable",
+		readonly code: "invalid-request" | "unsupported-settings" | "settings-unavailable",
 		options?: ErrorOptions,
 	) {
 		super(code, options);
@@ -22,6 +23,7 @@ export class SettingsError extends Error {
 
 export interface ISettingsService {
 	get(actor: Actor): ForgeSettings;
+	modelOptions(actor: Actor): Promise<AgentOptions>;
 	/** Throws SettingsError for invalid input or failed persistence/publication. */
 	save(actor: Actor, input: unknown): Promise<ForgeSettings>;
 }
@@ -34,6 +36,7 @@ export class SettingsService implements ISettingsService {
 		private readonly store: ISettingsStore,
 		private readonly git: IGitSystemConfig | undefined,
 		private readonly access: IAccessService,
+		private readonly catalog?: () => Promise<AgentOptions>,
 	) {}
 
 	async initialize(): Promise<void> {
@@ -55,11 +58,33 @@ export class SettingsService implements ISettingsService {
 		return this.current();
 	}
 
+	async modelOptions(actor: Actor): Promise<AgentOptions> {
+		this.access.assertOwner(actor);
+		try {
+			if (this.catalog) return await this.catalog();
+		} catch (cause) {
+			throw new SettingsError("settings-unavailable", { cause });
+		}
+		throw new SettingsError("settings-unavailable");
+	}
+
 	async save(actor: Actor, input: unknown): Promise<ForgeSettings> {
 		this.access.assertOwner(actor);
 		const parsed = forgeSettingsSchema.safeParse(input);
 		if (!parsed.success) throw new SettingsError("invalid-request");
-		const saved = this.pending.then(() => this.apply(parsed.data));
+		const saved = this.pending.then(async () => {
+			const { defaultAgentModel: model, defaultAgentReasoningEffort: reasoningEffort } = parsed.data;
+			if (
+				(model || reasoningEffort)
+				&& (model !== this.settings.defaultAgentModel
+					|| reasoningEffort !== this.settings.defaultAgentReasoningEffort)
+			) {
+				const options = await this.modelOptions(actor);
+				if (!resolveAgentSettings(options, { model, reasoningEffort }).supported)
+					throw new SettingsError("unsupported-settings");
+			}
+			return this.apply(parsed.data);
+		});
 		this.pending = saved.catch(() => {});
 		return saved;
 	}

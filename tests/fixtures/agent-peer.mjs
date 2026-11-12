@@ -11,6 +11,29 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 	const { id, method, params } = message;
 	if (method === "initialized") return;
 	let result = {};
+	if (method === "model/list")
+		result = {
+			data: [
+				{
+					model: "gpt-5.4",
+					displayName: "GPT-5.4",
+					isDefault: true,
+					supportedReasoningEfforts: [
+						{ reasoningEffort: "medium", description: "Medium thinking" },
+						{ reasoningEffort: "high", description: "High thinking" },
+					],
+					defaultReasoningEffort: "medium",
+				},
+				{
+					model: "gpt-5.4-mini",
+					displayName: "GPT-5.4 Mini",
+					isDefault: false,
+					supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Low thinking" }],
+					defaultReasoningEffort: "low",
+				},
+			],
+			nextCursor: null,
+		};
 	if (method === "initialize")
 		result = {
 			userAgent: "controlled-peer",

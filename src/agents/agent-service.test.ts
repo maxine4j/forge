@@ -1,3 +1,4 @@
+import type { AgentOptions } from "@forge/contracts/agents";
 import { expect, test, vi } from "vitest";
 
 import { AccessService } from "../auth/access-service.ts";
@@ -10,7 +11,7 @@ import type { AgentThreadRecord } from "./types.ts";
 
 const owner = { username: "owner" };
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
-const setup = () => {
+const setup = (defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = () => ({})) => {
 	let sequence = 0;
 	const records = new Map<string, AgentThreadRecord>();
 	const views = new Map<string, AgentRuntimeView>();
@@ -77,7 +78,17 @@ const setup = () => {
 					id: "test-model",
 					name: "Test model",
 					isDefault: true,
-					supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }],
+					supportedReasoningEfforts: [
+						{ reasoningEffort: "high", description: "High" },
+						{ reasoningEffort: "medium", description: "Medium" },
+					],
+					defaultReasoningEffort: "medium",
+				},
+				{
+					id: "alternate",
+					name: "Alternate",
+					isDefault: false,
+					supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Low" }],
 				},
 			],
 			skills: [],
@@ -128,6 +139,7 @@ const setup = () => {
 		list: async () => [...records.values()],
 		recover: async () => {},
 	};
+	const pool = new AgentExecutionPool();
 	const service = new AgentService(
 		store,
 		client,
@@ -136,9 +148,10 @@ const setup = () => {
 		new AccessService({ owner: "owner", origin: "https://forge.example" }),
 		id,
 		() => new Date(createdAt),
-		new AgentExecutionPool(),
+		pool,
+		defaults,
 	);
-	return { service, client, store, workspaces, records, views, changed: (key: string) => changed(key) };
+	return { service, client, store, workspaces, records, views, pool, changed: (key: string) => changed(key) };
 };
 
 test("repeated stop reconciles uncertain slots and reports acknowledgments as unresolved", async () => {
@@ -259,7 +272,9 @@ test("ticket steering checks authorization, ownership and active turn without cl
 test("settings persist per chat and discovery always resolves the owned worktree", async () => {
 	const { service, client, workspaces, records } = setup();
 	const { thread } = await service.create(owner, projectId, "Configured");
-	expect(await service.options(owner, thread.id)).toMatchObject({ models: [{ id: "test-model" }] });
+	expect(await service.options(owner, thread.id)).toMatchObject({
+		models: [{ id: "test-model" }, { id: "alternate" }],
+	});
 	expect(await service.files(owner, thread.id, "main")).toEqual(["src/main.ts"]);
 	expect(await service.files(owner, thread.id, "")).toEqual(["README.md"]);
 	expect(client.files).toHaveBeenCalledWith(`/data/worktrees/${thread.workspaceId}`, "main");
@@ -271,6 +286,7 @@ test("settings persist per chat and discovery always resolves the owned worktree
 		"Work",
 		{
 			model: "test-model",
+			reasoningEffort: "medium",
 			permissions: "approve-for-me",
 		},
 		{ projectId, phase: "chat" },
@@ -366,6 +382,64 @@ test("thinking validates against the runtime catalog before dispatch and persist
 		expect.objectContaining({ reasoningEffort: "high" }),
 		expect.anything(),
 	);
+	await service.shutdown();
+});
+
+test("existing chats and tickets inherit updated defaults without saving them as overrides", async () => {
+	const defaults = { defaultModel: "test-model", defaultReasoningEffort: "high" };
+	const { service, client, records } = setup(() => defaults);
+	const { thread: chat } = await service.create(owner, projectId, "Chat");
+	const { thread: planner } = await service.createTicketThread(owner, projectId, "Ticket");
+	const ticket = { ticketId: "FORGE-1", phase: "planning" } as const;
+	const expectTurn = (text: string, model: string, reasoningEffort?: string) => {
+		expect(client.send).toHaveBeenLastCalledWith(
+			expect.any(String),
+			expect.any(String),
+			text,
+			{ model, reasoningEffort, permissions: undefined },
+			expect.anything(),
+		);
+	};
+	await service.send(owner, chat.id, "First message", {});
+	expectTurn("First message", "test-model", "high");
+	await service.dispatch(owner, planner.id, "First plan", ticket);
+	expectTurn("First plan", "test-model", "high");
+	defaults.defaultModel = "alternate";
+	defaults.defaultReasoningEffort = "low";
+	await service.resume(owner, chat.id);
+	await service.resume(owner, planner.id);
+	await service.send(owner, chat.id, "Next message", {});
+	expectTurn("Next message", "alternate", "low");
+	await service.dispatch(owner, planner.id, "Next plan", ticket);
+	expectTurn("Next plan", "alternate", "low");
+	for (const id of [chat.id, planner.id]) {
+		expect(records.get(id)?.model).toBeUndefined();
+		expect(records.get(id)?.reasoningEffort).toBeUndefined();
+	}
+	await service.resume(owner, chat.id);
+	await service.send(owner, chat.id, "Different model", { model: "test-model" });
+	expectTurn("Different model", "test-model", "medium");
+	await service.resume(owner, chat.id);
+	await service.send(owner, chat.id, "Explicit settings", { model: "test-model", reasoningEffort: "high" });
+	expectTurn("Explicit settings", "test-model", "high");
+	await service.resume(owner, chat.id);
+	defaults.defaultModel = "retired-model";
+	await service.send(owner, chat.id, "Fallback model", {});
+	expectTurn("Fallback model", "test-model", "medium");
+	await service.shutdown();
+});
+
+test("unsupported ticket overrides release the reservation before starting a turn", async () => {
+	const { service, client, pool } = setup(() => ({ defaultModel: "alternate" }));
+	const { thread } = await service.createTicketThread(owner, projectId, "Ticket", undefined, true);
+	expect(pool.activeIds()).toEqual([thread.id]);
+	await expect(
+		service.dispatch(owner, thread.id, "Plan", { ticketId: "FORGE-1", phase: "planning" }, undefined, {
+			reasoningEffort: "high",
+		}),
+	).rejects.toThrow("unsupported-settings");
+	expect(pool.activeIds()).toEqual([]);
+	expect(client.start).not.toHaveBeenCalled();
 	await service.shutdown();
 });
 

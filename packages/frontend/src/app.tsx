@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useBlocker, useLocation } from "react-router";
 
+import { AgentOptionsRevision } from "./agents/execution-settings.tsx";
 import type { IApiClient } from "./api/api-client.ts";
 import { ResourcePoller } from "./api/resource-poller.ts";
 import type { IWorkspaceApi } from "./api/workspace-api.ts";
@@ -154,6 +155,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 	const [source, setSource] = useState("");
 	const [projectBusy, setProjectBusy] = useState(false);
 	const [accountBusy, setAccountBusy] = useState(false);
+	const [agentOptionsRevision, setAgentOptionsRevision] = useState(0);
 	const projectPoller = useRef<ResourcePoller<Project[]> | undefined>(undefined);
 	const accountPoller = useRef<ResourcePoller<AccountsStatus> | undefined>(undefined);
 	useEffect(() => {
@@ -281,7 +283,14 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 				</div>
 				{selected && (
 					<div className='project-view' hidden={config}>
-						<Workbench key={selected.id} project={selected} api={workspaceApi} dirtyChange={dirtyChange} />
+						<AgentOptionsRevision.Provider value={agentOptionsRevision}>
+							<Workbench
+								key={selected.id}
+								project={selected}
+								api={workspaceApi}
+								dirtyChange={dirtyChange}
+							/>
+						</AgentOptionsRevision.Provider>
 					</div>
 				)}
 				<div className='workspace-grid' hidden={route.page !== "projects"}>
@@ -438,7 +447,12 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 						))}
 					</div>
 				</section>
-				{config && <ForgeSettingsForm api={workspaceApi} />}
+				{config && (
+					<ForgeSettingsForm
+						api={workspaceApi}
+						defaultsSaved={() => setAgentOptionsRevision((revision) => revision + 1)}
+					/>
+				)}
 			</main>
 		</div>
 	);

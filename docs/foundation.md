@@ -51,15 +51,20 @@ Backend foundation configuration:
 
 ### Forge settings
 
-The top-level **Config** tab lets the owner edit multiline instructions for
+The top-level **Config** tab lets the owner set
+[default model and thinking for tickets and chats](agents.md#interactive-agents), edit multiline instructions for
 [ticket planners and implementers](tickets.md#agentic-ticket-board) and the
 [container-wide Git identity](development.md#image-and-deployment). Forge stores
-these settings in SQLite. The defaults are empty. Each instruction field accepts
+these settings in SQLite. Unset agent defaults delegate to Codex. Each instruction field accepts
 up to 4,000 characters. Set both Git identity fields or clear both together.
 
 The owner-only `GET /api/settings` and `PUT /api/settings` routes use
-`@forge/contracts/settings`. PUT replaces all four fields and requires the
-configured HTTPS origin. Validation failures return 400 and failed saves return 503.
+`@forge/contracts/settings`. PUT replaces the settings and requires the
+configured HTTPS origin. `GET /api/settings/model-options` provides the owner with
+the Codex catalog used to validate changes to `defaultAgentModel` and
+`defaultAgentReasoningEffort`. Unsupported selections return 400 and unavailable
+settings or catalog lookups return 503. The owner can clear both defaults or save
+unrelated settings during a catalog outage.
 
 ### Projects and repository imports
 

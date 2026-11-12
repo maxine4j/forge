@@ -39,7 +39,6 @@ export class CodexAgentClient implements ICodexAgentClient {
 	private readonly revisions = new Map<string, number>();
 	private readonly resuming = new Set<string>();
 	private readonly models = new Map<string, string>();
-	private defaultModel: string | undefined;
 	private readonly creations = new Map<object, number>();
 	private readonly settled = new Set<string>();
 	private readonly initialEpoch: number;
@@ -254,7 +253,6 @@ export class CodexAgentClient implements ICodexAgentClient {
 					throw new Error("Invalid model pagination");
 				cursor = page.nextCursor ?? undefined;
 			} while (cursor);
-			this.defaultModel = models.find((model) => model.isDefault)?.id;
 			const skills = path ? await this.skills(path) : [];
 			return { models, skills: skills.map(({ name, description }) => ({ name, description })) };
 		});
@@ -291,7 +289,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			const selectedSkills = /(?:^|\s)\$[\w-]+/.test(text)
 				? (await this.skills(path)).filter((skill) => text.split(/\s+/).includes(`$${skill.name}`))
 				: [];
-			const model = settings?.model ?? this.defaultModel ?? this.models.get(id);
+			const model = settings?.model ?? this.models.get(id);
 			if (usage?.phase === "planning" && !model) throw new AgentError("agent-unavailable");
 			view.status = "running";
 			this.settled.delete(id);

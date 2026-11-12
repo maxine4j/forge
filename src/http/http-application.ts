@@ -48,7 +48,7 @@ export class HttpApplication implements IHttpApplication {
 									: 503;
 					ctx.body = { error: err.code };
 				} else if (err instanceof SettingsError) {
-					ctx.status = err.code === "invalid-request" ? 400 : 503;
+					ctx.status = err.code === "invalid-request" || err.code === "unsupported-settings" ? 400 : 503;
 					ctx.body = { error: err.code };
 				} else if (err instanceof TicketError) {
 					ctx.status =

@@ -1,10 +1,15 @@
+import { agentOptionsSchema, type AgentOptions } from "@forge/contracts/agents";
 import { forgeSettingsSchema, type ForgeSettings } from "@forge/contracts/settings";
 import { useEffect, useState, type FormEvent } from "react";
 
+import { ExecutionSettings } from "../agents/execution-settings.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 
-export const ForgeSettingsForm = ({ api }: { api: IWorkspaceApi }) => {
+export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; defaultsSaved: () => void }) => {
 	const [draft, setDraft] = useState<ForgeSettings>();
+	const [options, setOptions] = useState<AgentOptions>();
+	const [optionsError, setOptionsError] = useState(false);
+	const [optionsAttempt, setOptionsAttempt] = useState(0);
 	const [loadAttempt, setLoadAttempt] = useState(0);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState("");
@@ -24,6 +29,21 @@ export const ForgeSettingsForm = ({ api }: { api: IWorkspaceApi }) => {
 			active = false;
 		};
 	}, [api, loadAttempt]);
+
+	useEffect(() => {
+		let active = true;
+		void api.read("settings/model-options", agentOptionsSchema).then(
+			(value) => {
+				if (active) setOptions(value);
+			},
+			() => {
+				if (active) setOptionsError(true);
+			},
+		);
+		return () => {
+			active = false;
+		};
+	}, [api, optionsAttempt]);
 
 	const change = (field: keyof ForgeSettings, value: string) => {
 		setDraft((current) => current && { ...current, [field]: value });
@@ -48,6 +68,7 @@ export const ForgeSettingsForm = ({ api }: { api: IWorkspaceApi }) => {
 		setSaving(true);
 		try {
 			setDraft(await api.read("settings", forgeSettingsSchema, "PUT", parsed.data));
+			defaultsSaved();
 			setSaved(true);
 		} catch (failure) {
 			setError(failure instanceof Error ? failure.message : "Could not save Forge settings.");
@@ -61,6 +82,38 @@ export const ForgeSettingsForm = ({ api }: { api: IWorkspaceApi }) => {
 			<h2 id='forge-settings-heading'>Forge settings</h2>
 			{draft ? (
 				<form onSubmit={(event) => void save(event)}>
+					<fieldset disabled={saving}>
+						<legend>Agent defaults</legend>
+						<p>Apply to tickets and chats that use Default on their next turn.</p>
+						<ExecutionSettings
+							configureDefaults
+							options={options}
+							settings={{
+								model: draft.defaultAgentModel,
+								reasoningEffort: draft.defaultAgentReasoningEffort,
+							}}
+							change={({ model, reasoningEffort }) => {
+								setDraft({
+									...draft,
+									defaultAgentModel: model,
+									defaultAgentReasoningEffort: reasoningEffort,
+								});
+								setError("");
+								setSaved(false);
+							}}
+						/>
+						{optionsError && (
+							<button
+								type='button'
+								onClick={() => {
+									setOptionsError(false);
+									setOptionsAttempt((value) => value + 1);
+								}}
+							>
+								Retry loading models
+							</button>
+						)}
+					</fieldset>
 					<fieldset disabled={saving}>
 						<legend>Ticket agents</legend>
 						<p>Instructions apply when a planning or implementation conversation starts.</p>
