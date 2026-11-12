@@ -92,6 +92,14 @@ export const Workbench = ({
 		});
 	}
 	const tab = section.charAt(0).toUpperCase() + section.slice(1);
+	const codePath = `/projects/${project.id}/code`;
+	const codeSearch = new URLSearchParams(navigation.locations["code"]?.split("?").at(1));
+	const filesSearch = new URLSearchParams();
+	for (const key of ["branch", "path"]) {
+		const value = codeSearch.get(key);
+		if (value) filesSearch.set(key, value);
+	}
+	const codeFiles = filesSearch.size ? `${codePath}?${filesSearch}` : codePath;
 	const [dirtyBranches, setDirtyBranches] = useState<Record<string, boolean>>({});
 	const dirty = Object.values(dirtyBranches).some(Boolean);
 	useEffect(() => {
@@ -117,7 +125,12 @@ export const Workbench = ({
 						role='tab'
 						aria-selected={tab === name}
 						aria-controls={`panel-${name}`}
-						to={navigation.locations[name.toLowerCase()] ?? `/projects/${project.id}/${name.toLowerCase()}`}
+						to={
+							name === "Code"
+								? codeFiles
+								: (navigation.locations[name.toLowerCase()]
+									?? `/projects/${project.id}/${name.toLowerCase()}`)
+						}
 					>
 						{name}
 					</Link>
@@ -127,6 +140,7 @@ export const Workbench = ({
 				<RepositoryBrowser
 					projectId={project.id}
 					repositoryName={project.name}
+					githubSyncAvailable={project.githubSyncAvailable === true}
 					api={api}
 					dirtyChange={dirtyChange}
 				/>

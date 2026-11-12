@@ -21,7 +21,13 @@ const files: Record<string, string> = {
 	"src/style.css": "body {\n  margin: 0;\n  font-family: system-ui, sans-serif;\n}\n",
 };
 const projects = [
-	{ id: "123e4567-e89b-42d3-a456-426614174000", name: "Forge", status: "ready", createdAt: date },
+	{
+		id: "123e4567-e89b-42d3-a456-426614174000",
+		name: "Forge",
+		status: "ready",
+		createdAt: date,
+		githubSyncAvailable: true,
+	},
 	{ id: "123e4567-e89b-42d3-a456-426614174010", name: "Homelab dashboard", status: "ready", createdAt: date },
 ];
 
@@ -338,7 +344,7 @@ export class MockApi implements IMockApi {
 				});
 			}
 			this.routes.set(`${repositoryRoot}/github-sync`, () =>
-				project === projects.at(0) ? { state: "ready", ahead: 2, behind: 1 } : { state: "unconfigured" },
+				project.githubSyncAvailable ? { state: "ready", ahead: 2, behind: 1 } : { state: "unconfigured" },
 			);
 			this.routes.set(projectRoot, () => project);
 			this.routes.set(`${projectRoot}/workspaces`, () => [workspace]);

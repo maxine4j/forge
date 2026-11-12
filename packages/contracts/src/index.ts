@@ -52,6 +52,7 @@ export const projectSchema = z.strictObject({
 	name: z.string().min(1).max(120),
 	status: z.enum(["creating", "ready", "failed"]),
 	createdAt: z.iso.datetime(),
+	githubSyncAvailable: z.literal(true).optional(),
 });
 export const projectsSchema = z.array(projectSchema).max(1000);
 export const apiErrorSchema = z.strictObject({

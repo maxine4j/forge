@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { ChangedFilesTree } from "./changed-files-tree.tsx";
 
 type Line = CommitPatch["hunks"][number]["lines"][number];
 export function splitLines(lines: Line[]): [Line | undefined, Line | undefined][] {
@@ -316,27 +317,12 @@ export const CommitView = ({ root, api }: { root: string; api: IWorkspaceApi }) 
 									value={filter}
 									onChange={(e) => setFilter(e.target.value)}
 								/>
-								<nav aria-label='Changed files'>
-									{detail.files
-										.filter((file) => file.path.toLowerCase().includes(filter.toLowerCase()))
-										.map((file) => (
-											<a
-												key={file.path}
-												href={`#commit-file-${detail.files.indexOf(file)}`}
-												onClick={() => {
-													const panel = document.getElementById(
-														`commit-file-${detail.files.indexOf(file)}`,
-													) as HTMLDetailsElement | null;
-													if (panel) panel.open = true;
-												}}
-											>
-												<span>
-													{file.status} {file.path}
-												</span>
-												<small>{displayedStats(file)}</small>
-											</a>
-										))}
-								</nav>
+								<ChangedFilesTree
+									key={sha}
+									files={detail.files}
+									filter={filter}
+									displayedStats={displayedStats}
+								/>
 							</details>
 						</aside>
 						<div className='commit-panels'>

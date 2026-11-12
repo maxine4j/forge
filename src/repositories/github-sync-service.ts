@@ -5,6 +5,7 @@ import type { Actor } from "../auth/types.ts";
 import { InvalidProjectError, ProjectNotFoundError, ProjectUnavailableError } from "../projects/errors.ts";
 import type { ProjectRecord } from "../projects/types.ts";
 import type { IGithubSyncClient } from "./github-sync-client.ts";
+import { isForgeGithubSource } from "./github-sync-eligibility.ts";
 import type { GithubSyncResult } from "./types.ts";
 
 interface ISyncProjects {
@@ -55,6 +56,6 @@ export class GithubSyncService implements IGithubSyncService {
 		const project = await this.projects.get(id);
 		if (!project) throw new ProjectNotFoundError();
 		if (project.status !== "ready") throw new ProjectUnavailableError();
-		return /^https:\/\/github\.com(?::443)?\/maxine4j\/forge(?:\.git)?\/?$/iu.test(project.source ?? "");
+		return isForgeGithubSource(project.source);
 	}
 }

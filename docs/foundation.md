@@ -65,8 +65,10 @@ configured HTTPS origin. Validation failures return 400 and failed saves return 
 
 The initial project API exposes `GET/POST /api/projects`,
 `GET /api/projects/:id`, and `POST /api/projects/:id/retry`. Inputs and responses
-use `@forge/contracts`; public project values contain only ID, name,
-creation timestamp, and `creating/ready/failed` status. Repository IDs initially
+use `@forge/contracts`. Public project values contain ID, name, creation
+timestamp, and `creating/ready/failed` status. Ready projects eligible for
+[GitHub sync](git-and-ci.md#sync-forge-main-with-github) also include `githubSyncAvailable: true`.
+Repository IDs initially
 equal project UUIDs. Inputs are limited to a 120-character name and optional
 2048-character HTTPS source; JSON bodies are limited to 16 KiB. The initial store
 supports at most 1000 projects. Errors expose fixed codes, never credentials,

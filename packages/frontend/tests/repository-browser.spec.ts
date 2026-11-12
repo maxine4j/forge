@@ -30,7 +30,9 @@ test.beforeEach(async ({ page }) => {
 			const path = url.pathname;
 			const json = (value: unknown) => route.fulfill({ json: value });
 			if (path === "/api/projects")
-				return json([{ id: projectId, name: "Forge", status: "ready", createdAt: date }]);
+				return json([
+					{ id: projectId, name: "Forge", status: "ready", createdAt: date, githubSyncAvailable: true },
+				]);
 			if (path.endsWith("/workspaces"))
 				return json([
 					{
@@ -56,6 +58,7 @@ test.beforeEach(async ({ page }) => {
 					commits: [{ ...commit, subject: `${url.searchParams.get("branch")} commit` }],
 					hasMore: false,
 				});
+			if (path.endsWith("/github-sync")) return json({ state: "ready", ahead: 0, behind: 0 });
 			if (path.endsWith("/tree")) {
 				const dir = url.searchParams.get("path") ?? "";
 				const values = dir
@@ -154,7 +157,7 @@ test("Code shows main drift, refreshes after sync, and reports merge conflicts",
 	await page.getByRole("button", { name: "file-0.ts", exact: true }).click();
 	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("original file");
 	await sync.click();
-	await expect(sync).toContainText("↑0 ↓0");
+	await expect(sync).toHaveText("Sync with GitHub");
 	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("updated by GitHub");
 	expect(posts).toBe(1);
 
@@ -187,17 +190,99 @@ test("main drafts stay in the editor and block sync until committed or discarded
 
 test("visible main refreshes the drift counts without a click", async ({ page }) => {
 	await page.clock.install();
-	let behind = 0;
+	let behind = 1;
 	await page.route("**/repository/github-sync", (route) => {
 		expect(route.request().method()).toBe("GET");
 		return route.fulfill({ json: { state: "ready", ahead: 0, behind } });
 	});
 	await page.reload();
 	const sync = page.getByRole("button", { name: /Sync with GitHub/ });
-	await expect(sync).toContainText("↑0 ↓0");
+	await expect(sync).toHaveText("Sync with GitHub ↓1");
 	behind = 3;
 	await page.clock.fastForward(31_000);
-	await expect(sync).toContainText("↑0 ↓3");
+	await expect(sync).toHaveText("Sync with GitHub ↓3");
+});
+
+test("sync renders while drift is pending and shows only positive counts", async ({ page }) => {
+	let release!: () => void;
+	const pending = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	await page.route("**/repository/github-sync", async (route) => {
+		await pending;
+		await route.fulfill({ json: { state: "ready", ahead: 2, behind: 0 } });
+	});
+	await page.reload();
+	const sync = page.getByRole("button", { name: /Sync with GitHub/ });
+	let initialBounds;
+	try {
+		await expect(sync).toHaveText("Sync with GitHub");
+		initialBounds = await sync.boundingBox();
+	} finally {
+		release();
+	}
+	await expect(sync).toHaveText("Sync with GitHub ↑2");
+	expect(await sync.boundingBox()).toEqual(initialBounds);
+});
+
+test("sync feedback floats at bottom left and can expire or be dismissed", async ({ page }) => {
+	await page.clock.install();
+	let conflict = false;
+	await page.route("**/repository/github-sync", (route) => {
+		if (route.request().method() === "GET") return route.fulfill({ json: { state: "ready", ahead: 1, behind: 0 } });
+		return conflict
+			? route.fulfill({ status: 409, json: { error: "github-sync-conflict" } })
+			: route.fulfill({ json: { head } });
+	});
+	await page.reload();
+	const sync = page.getByRole("button", { name: /Sync with GitHub/ });
+	const list = page.getByRole("table", { name: "Repository files" });
+	await expect(list).toBeVisible();
+	const before = await list.boundingBox();
+	await sync.click();
+	const toast = page.getByRole("status").filter({ hasText: "Main synced with GitHub." });
+	await expect(toast).toBeVisible();
+	await expect(toast).toHaveCSS("position", "fixed");
+	const box = (await toast.boundingBox())!;
+	expect(box.x).toBeLessThan(32);
+	expect(page.viewportSize()!.height - box.y - box.height).toBeLessThan(32);
+	expect((await list.boundingBox())?.y).toBe(before?.y);
+	await page.clock.fastForward(5_000);
+	await expect(toast).toBeHidden();
+	conflict = true;
+	await sync.click();
+	await expect(page.getByRole("alert")).toContainText("cannot be merged automatically");
+	await page.getByRole("button", { name: "Dismiss notification" }).click();
+	await expect(page.getByRole("alert")).toBeHidden();
+});
+
+test("history stays to the right of the date and Code always returns to files", async ({ page }) => {
+	const history = page.getByRole("button", { name: "Commit history", exact: true });
+	const tab = page.getByRole("tab", { name: "Code", exact: true });
+	const list = page.getByRole("table", { name: "Repository files" });
+	await expect(list).toBeVisible();
+	const checkPosition = async () => {
+		const dateBox = (await page.getByText("Last commit date", { exact: true }).boundingBox())!;
+		const buttonBox = (await history.boundingBox())!;
+		expect(buttonBox.x).toBeGreaterThanOrEqual(dateBox.x + dateBox.width);
+		expect(Math.abs(buttonBox.y + buttonBox.height / 2 - dateBox.y - dateBox.height / 2)).toBeLessThan(3);
+		return buttonBox;
+	};
+	for (const width of [1280, 390]) {
+		await page.setViewportSize({ width, height: 900 });
+		const filesPosition = await checkPosition();
+		await history.click();
+		await expect(page.getByRole("region", { name: "Commit history" })).toContainText("main commit");
+		const historyPosition = await checkPosition();
+		expect(historyPosition.x).toBe(filesPosition.x);
+		expect(Math.abs(historyPosition.y - filesPosition.y)).toBeLessThan(2);
+		await tab.click();
+		await expect(list).toBeVisible();
+	}
+	await history.click();
+	await page.getByRole("tab", { name: "Pipelines", exact: true }).click();
+	await tab.click();
+	await expect(list).toBeVisible();
 });
 
 test("code URLs restore branches, directories, files and history through reload and Back/Forward", async ({ page }) => {

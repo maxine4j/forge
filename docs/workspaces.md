@@ -197,8 +197,9 @@ approvals. Opening Agents may resume the selected chat to load history; opening
 Terminals uses the documented automatic terminal inspection/create flow. Reload
 reattaches its retained live shell without creating a duplicate.
 
-Returning to a visited project section restores its last code/chat URL. The URL
-also determines the [mobile Agents screen](agents.md#interactive-agents):
+Clicking Code opens the directory listing for the last selected branch and
+directory. The Code tab does this even when already selected. Returning to Agents
+restores its last chat URL, which also determines the [mobile Agents screen](agents.md#interactive-agents):
 at widths up to 700 CSS pixels, `/agents` shows the chat list and
 `/agents/:threadId` shows the conversation with **Back to chats**. Direct links,
 reloads and browser Back/Forward honor that screen. Returning from Code restores
@@ -236,17 +237,21 @@ branch when `main` is absent. Every branch supports owner editing. There is no
 Working changes option. Listings read committed files and show each entry's latest
 commit subject and date. Browsing and committing never switch or reset a checkout.
 On `main` of the project imported from GitHub's Forge repository, **Sync with
-GitHub** shows commits ahead (↑) and behind (↓). Code checks the counts when
+GitHub** appears before the counts load and shows each nonzero count for commits
+ahead (↑) or behind (↓). Code checks the counts when
 opened, every 30 seconds while visible, and after committing or syncing.
 Commit or discard main drafts before syncing. Code reloads the current view
-after an attempt and shows any [sync failure](git-and-ci.md#sync-forge-main-with-github).
+after an attempt. Sync results and repository operation errors appear in a
+bottom-left toast for five seconds or until dismissed with its close button.
+See [GitHub sync](git-and-ci.md#sync-forge-main-with-github) for failure outcomes.
 Directory tables, including the root, use Name, Last commit message and Last commit
 date headers. Nested directories start with a `..` folder entry for navigating up.
 Breadcrumbs start with the repository's project name followed by directory segments.
 File tabs appear above and encapsulate the active
 file heading, Back to files, history action and editor. Tabs have a distinct active
 surface and accent border, rather than standalone button styling.
-A history icon loads the selected branch's commits, thirty at a time.
+The history icon sits to the right of **Last commit date** in the directory and
+history views. It opens the selected branch's commits, thirty at a time.
 Pagination rejects a changed branch head rather than mixing histories.
 
 Repository read APIs are under `/api/projects/:id/repository`: `branches`,
@@ -262,8 +267,10 @@ History subjects and short SHAs link to `/projects/:id/code?branch=…&view=comm
 retaining `path` and `file` for return navigation. Commit pages preserve mounted
 editor drafts. `diff=unified|split` (default unified) and
 `ignoreWhitespace=true|false` (default false) retain rendering preferences in the
-URL. Desktop has a sticky, filterable changed-file list; mobile has a collapsible
-list and horizontally scrollable patches. File panels collapse independently.
+URL. The filterable changed-file tree groups files into collapsible folders and
+shows GitHub status icons and colored pills. The tree is sticky on desktop and
+can be collapsed on mobile, where patches scroll horizontally. File panels
+collapse independently.
 
 Owner-authorized `GET /api/projects/:id/repository/commits/:sha` returns validated
 commit metadata, parents, comparison base, original changed-file membership and

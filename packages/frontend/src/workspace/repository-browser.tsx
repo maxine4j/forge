@@ -104,10 +104,23 @@ const BranchBrowser = ({
 	const [error, setError] = useState("");
 	const [message, setMessage] = useState("");
 	const [revision, setRevision] = useState(0);
-	const [notice, setNotice] = useState("");
+	const [toast, setToast] = useState<{ message: string; error?: boolean }>();
 	const [syncStatus, setSyncStatus] = useState<GithubSyncStatus>();
 	const [syncing, setSyncing] = useState(false);
-	const [syncError, setSyncError] = useState("");
+	const driftUnavailable = useRef(false);
+	const reportError = useCallback(
+		(message: string) => {
+			setError(message);
+			setToast({ message, error: true });
+		},
+		[setError, setToast],
+	);
+	useEffect(() => {
+		if (!toast) return;
+		const timer = setTimeout(() => setToast(undefined), 5_000);
+		return () => clearTimeout(timer);
+	}, [toast]);
+	const readyDrift = syncStatus?.state === "ready" ? syncStatus : undefined;
 	const changed = Object.entries(drafts).filter(([, draft]) => draft.original !== draft.content);
 	const dirty = changed.length > 0;
 	const disabled = busy || loading || syncing;
@@ -139,17 +152,24 @@ const BranchBrowser = ({
 		let checking = false;
 		let unconfigured = false;
 		let timer: ReturnType<typeof setTimeout> | undefined;
+		const updateStatus = (status: GithubSyncStatus) => {
+			if (cancelled) return;
+			setSyncStatus(status);
+			if (status.state === "unavailable" && !driftUnavailable.current) {
+				setToast((current) => current ?? { message: "GitHub drift unavailable.", error: true });
+			}
+			driftUnavailable.current = status.state === "unavailable";
+		};
 		const check = async () => {
 			if (cancelled || checking || unconfigured || document.hidden) return;
 			clearTimeout(timer);
 			checking = true;
 			try {
 				const status = await api.read(`${root}/github-sync`, githubSyncStatusSchema);
-				if (!cancelled) setSyncStatus(status);
+				updateStatus(status);
 				unconfigured = status.state === "unconfigured";
 			} catch {
-				if (!cancelled)
-					setSyncStatus((current) => (current?.state === "ready" ? { state: "unavailable" } : current));
+				updateStatus({ state: "unavailable" });
 			} finally {
 				checking = false;
 				if (!cancelled && !unconfigured) timer = setTimeout(() => void check(), 30_000);
@@ -173,7 +193,7 @@ const BranchBrowser = ({
 				setBaseHead((current) => current || value.head);
 			})
 			.catch(() => {
-				if (!cancelled) setError("Files unavailable. Retry loading files.");
+				if (!cancelled) reportError("Files unavailable. Retry loading files.");
 			})
 			.finally(() => {
 				if (!cancelled) setLoading(false);
@@ -181,7 +201,7 @@ const BranchBrowser = ({
 		return () => {
 			cancelled = true;
 		};
-	}, [loadTree, path, revision]);
+	}, [loadTree, path, revision, reportError]);
 	useEffect(() => {
 		let cancelled = false;
 		if (readmePath)
@@ -207,11 +227,11 @@ const BranchBrowser = ({
 	const run = async (action: () => Promise<void>) => {
 		setBusy(true);
 		setError("");
-		setNotice("");
+		setToast(undefined);
 		try {
 			await action();
 		} catch (failure) {
-			setError(failure instanceof Error ? failure.message : "Operation failed");
+			reportError(failure instanceof Error ? failure.message : "Operation failed");
 		} finally {
 			setBusy(false);
 		}
@@ -234,12 +254,12 @@ const BranchBrowser = ({
 				}
 			})
 			.catch(() => {
-				if (!cancelled) setError("File unavailable. Select another file or return to files.");
+				if (!cancelled) reportError("File unavailable. Select another file or return to files.");
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, [api, root, branch, active, drafts, showingHistory, revision]);
+	}, [api, root, branch, active, drafts, showingHistory, revision, reportError]);
 	useEffect(() => {
 		if (!showingHistory) return;
 		let cancelled = false;
@@ -252,12 +272,12 @@ const BranchBrowser = ({
 				}
 			})
 			.catch(() => {
-				if (!cancelled) setError("Commit history unavailable. Reopen history to retry.");
+				if (!cancelled) reportError("Commit history unavailable. Reopen history to retry.");
 			});
 		return () => {
 			cancelled = true;
 		};
-	}, [api, root, branch, showingHistory, revision]);
+	}, [api, root, branch, showingHistory, revision, reportError]);
 	const open = async (file: string) => {
 		navigateCode(file.split("/").slice(0, -1).join("/"), file);
 	};
@@ -279,13 +299,15 @@ const BranchBrowser = ({
 	};
 	const syncGithub = async () => {
 		setSyncing(true);
-		setSyncError("");
-		setNotice("");
+		setToast(undefined);
 		try {
 			await api.read(`${root}/github-sync`, githubSyncResultSchema, "POST");
-			setNotice("Main synced with GitHub.");
+			setToast({ message: "Main synced with GitHub." });
 		} catch (failure) {
-			setSyncError(failure instanceof Error ? failure.message : "Could not sync with GitHub.");
+			setToast({
+				message: failure instanceof Error ? failure.message : "Could not sync with GitHub.",
+				error: true,
+			});
 		} finally {
 			setDrafts({});
 			setBaseHead("");
@@ -294,36 +316,29 @@ const BranchBrowser = ({
 			setSyncing(false);
 		}
 	};
-	const fileControls = (
-		<div className='file-controls'>
-			{(active || showingHistory) && (
-				<button disabled={disabled} onClick={() => navigateCode(path)}>
-					Back to files
-				</button>
-			)}
-			<button
-				className='history-button'
-				aria-label='Commit history'
-				title='Commit history'
-				disabled={disabled}
-				onClick={() => navigateCode(path, active, true)}
-			>
-				<svg width='18' height='18' viewBox='0 0 20 20' aria-hidden='true'>
-					<path
-						d='M3 8a7 7 0 1 1 0 5M3 3v5h5m2-3v5l3 2'
-						fill='none'
-						stroke='currentColor'
-						strokeWidth='1.6'
-					/>
-				</svg>
-			</button>
-		</div>
+	const historyButton = (
+		<button
+			className='history-button'
+			aria-label='Commit history'
+			title='Commit history'
+			disabled={disabled}
+			onClick={() => navigateCode(path, active, true)}
+		>
+			<svg width='18' height='18' viewBox='0 0 20 20' aria-hidden='true'>
+				<path d='M3 8a7 7 0 1 1 0 5M3 3v5h5m2-3v5l3 2' fill='none' stroke='currentColor' strokeWidth='1.6' />
+			</svg>
+		</button>
 	);
-	const header = (
-		<div className='file-list-header'>
-			<span>{showingHistory ? "Commits" : active}</span>
-			{fileControls}
-		</div>
+	const backToFiles = (
+		<button disabled={disabled} onClick={() => navigateCode(path)}>
+			Back to files
+		</button>
+	);
+	const dateHeading = (
+		<span className='repository-date-heading'>
+			<span>Last commit date</span>
+			{historyButton}
+		</span>
 	);
 	return (
 		<div className='branch-browser' aria-busy={disabled}>
@@ -346,39 +361,42 @@ const BranchBrowser = ({
 						))}
 					{active && <span> / {active.split("/").at(-1)}</span>}
 				</nav>
-				{!active && !showingHistory && fileControls}
-				{syncVisible && syncStatus && syncStatus.state !== "unconfigured" && (
+				{syncVisible && syncStatus?.state !== "unconfigured" && (
 					<button
+						className='repository-sync-button'
 						type='button'
 						disabled={disabled || dirty}
 						title={dirty ? "Commit or discard main drafts before syncing." : undefined}
 						onClick={() => void syncGithub()}
 					>
 						{syncing ? "Syncing with GitHub…" : "Sync with GitHub"}
-						{syncStatus.state === "ready" && (
+						{!!readyDrift?.ahead && (
 							<>
 								{" "}
-								<span aria-label={`${syncStatus.ahead} ahead, ${syncStatus.behind} behind`}>
-									↑{syncStatus.ahead} ↓{syncStatus.behind}
-								</span>
+								<span aria-label={`${readyDrift.ahead} ahead`}>↑{readyDrift.ahead}</span>
+							</>
+						)}
+						{!!readyDrift?.behind && (
+							<>
+								{" "}
+								<span aria-label={`${readyDrift.behind} behind`}>↓{readyDrift.behind}</span>
 							</>
 						)}
 					</button>
 				)}
 			</div>
-			{syncVisible && syncStatus?.state === "unavailable" && <p role='status'>GitHub drift unavailable.</p>}
-			{syncError && (
-				<p className='error' role='alert'>
-					{syncError}
-				</p>
+			{toast && (
+				<div
+					className={`repository-toast${toast.error ? " error" : ""}`}
+					role={toast.error ? "alert" : "status"}
+				>
+					<span>{toast.message}</span>
+					<button type='button' aria-label='Dismiss notification' onClick={() => setToast(undefined)}>
+						×
+					</button>
+				</div>
 			)}
-			{error && (
-				<p className='error' role='alert'>
-					{error}
-				</p>
-			)}
-			{notice && <p role='status'>{notice}</p>}
-			{loading && <p role='status'>Loading files…</p>}
+			{loading && !tree && <p role='status'>Loading files…</p>}
 			{!tree && !loading && (
 				<button
 					onClick={() => {
@@ -433,7 +451,13 @@ const BranchBrowser = ({
 								role='tabpanel'
 								aria-labelledby={`${editorId}-tab-${Object.keys(drafts).indexOf(active)}`}
 							>
-								{header}
+								<div className='file-list-header'>
+									<span>{active}</span>
+									<div className='file-controls'>
+										{backToFiles}
+										{historyButton}
+									</div>
+								</div>
 								{!draft && !error && <p role='status'>Loading file…</p>}
 								{draft && (
 									<div className='repository-code'>
@@ -455,7 +479,12 @@ const BranchBrowser = ({
 						</div>
 					) : (
 						<>
-							{showingHistory && header}
+							{showingHistory && (
+								<div className='file-list-header history-list-header'>
+									{backToFiles}
+									{dateHeading}
+								</div>
+							)}
 							{showingHistory ? (
 								<section className='commit-history' aria-label='Commit history'>
 									<h2>{branch}</h2>
@@ -489,7 +518,7 @@ const BranchBrowser = ({
 												<th scope='col' className='file-commit'>
 													Last commit message
 												</th>
-												<th scope='col'>Last commit date</th>
+												<th scope='col'>{dateHeading}</th>
 											</tr>
 										</thead>
 										<tbody>
@@ -587,9 +616,9 @@ const BranchBrowser = ({
 								),
 							);
 							setMessage("");
-							setNotice(
-								`Committed ${files.length} ${files.length === 1 ? "file" : "files"} to ${branch}.`,
-							);
+							setToast({
+								message: `Committed ${files.length} ${files.length === 1 ? "file" : "files"} to ${branch}.`,
+							});
 							setLoading(true);
 							setRevision((value) => value + 1);
 						});
@@ -639,11 +668,13 @@ const BranchBrowser = ({
 export const RepositoryBrowser = ({
 	projectId,
 	repositoryName,
+	githubSyncAvailable,
 	api,
 	dirtyChange,
 }: {
 	projectId: string;
 	repositoryName: string;
+	githubSyncAvailable: boolean;
 	api: IWorkspaceApi;
 	dirtyChange: (branch: string, dirty: boolean) => void;
 }) => {
@@ -708,7 +739,9 @@ export const RepositoryBrowser = ({
 						repositoryName={repositoryName}
 						branch={value}
 						search={inCode && branch === value && !showingCommit ? location.search : undefined}
-						syncVisible={inCode && branch === "main" && value === "main"}
+						syncVisible={
+							githubSyncAvailable && inCode && branch === "main" && value === "main" && !showingCommit
+						}
 						api={api}
 						dirtyChange={dirtyChange}
 						branchControl={

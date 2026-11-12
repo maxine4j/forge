@@ -55,6 +55,19 @@ test("authorization and domain validation run before effects even for non-HTTP c
 	expect(store.insert).not.toHaveBeenCalled();
 });
 
+test("ready Forge imports advertise GitHub sync without returning their source", async () => {
+	const { service } = fixture();
+	const actor = { username: "owner" };
+	const project = await service.create(actor, {
+		name: "Renamed",
+		source: "https://github.com:443/MAXINE4J/forge.git/",
+	});
+	for (const value of [project, await service.get(actor, id), ...(await service.list(actor))]) {
+		expect(value).toHaveProperty("githubSyncAvailable", true);
+		expect(value).not.toHaveProperty("source");
+	}
+});
+
 test("Git failure retains failed intent and sanitizes failure; explicit retry can finish it", async () => {
 	const { service, records, repositories } = fixture();
 	repositories.prepare.mockRejectedValueOnce(new Error("SECRET"));

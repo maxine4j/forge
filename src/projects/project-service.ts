@@ -9,6 +9,7 @@ import {
 
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
+import { isForgeGithubSource } from "../repositories/github-sync-eligibility.ts";
 import type { IRepositoryClient } from "../repositories/repository-client.ts";
 import { InvalidProjectError, ProjectNotFoundError, ProjectUnavailableError } from "./errors.ts";
 import type { IProjectStore } from "./project-store.ts";
@@ -109,8 +110,14 @@ export class ProjectService implements IProjectService {
 		if (!record) throw new ProjectNotFoundError();
 		return record;
 	}
-	private publicProject({ id, name, status, createdAt }: ProjectRecord): Project {
-		return projectSchema.parse({ id, name, status, createdAt });
+	private publicProject({ id, name, status, createdAt, source }: ProjectRecord): Project {
+		return projectSchema.parse({
+			id,
+			name,
+			status,
+			createdAt,
+			...(status === "ready" && isForgeGithubSource(source) ? { githubSyncAvailable: true } : {}),
+		});
 	}
 	private serialize<T>(operation: () => Promise<T>): Promise<T> {
 		const next = this.tail.then(operation);

@@ -2065,6 +2065,36 @@ summary {
 	color: #58a6ff;
 	padding: 2px;
 }
+.repository-sync-button {
+	min-inline-size: 13.5rem;
+	text-align: start;
+	white-space: nowrap;
+	font-variant-numeric: tabular-nums;
+}
+.repository-toast {
+	position: fixed;
+	inset-inline-start: max(16px, env(safe-area-inset-left));
+	inset-block-end: max(16px, env(safe-area-inset-bottom));
+	z-index: 1000;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	max-inline-size: min(420px, calc(100vw - 32px));
+	padding: 8px 8px 8px 14px;
+	border: 1px solid #484f58;
+	border-radius: 8px;
+	background: #21262d;
+	box-shadow: 0 6px 24px #0008;
+}
+.repository-toast.error {
+	border-color: #f85149;
+}
+.repository-toast button {
+	flex-shrink: 0;
+	padding: 4px 10px;
+	background: transparent;
+	border-color: transparent;
+}
 .repository-layout {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr);
@@ -2128,6 +2158,21 @@ summary {
 	background: transparent;
 	border-color: transparent;
 }
+.repository-date-heading {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
+	gap: 8px;
+	color: #8b949e;
+	font-size: 12px;
+	font-weight: 600;
+	white-space: nowrap;
+}
+.repository-files th:has(.repository-date-heading),
+.history-list-header {
+	padding-block: 5px;
+	height: 48px;
+}
 .repository-files {
 	width: 100%;
 	border-collapse: collapse;
@@ -2162,11 +2207,11 @@ summary {
 }
 .repository-files td:last-child,
 .repository-files th:last-child {
-	width: 160px;
+	width: 176px;
 	text-align: right;
 	font-size: 12px;
 }
-.repository-files button {
+.repository-files td button {
 	display: flex;
 	align-items: center;
 	gap: 10px;
@@ -2177,11 +2222,11 @@ summary {
 	width: 100%;
 	text-align: left;
 }
-.repository-files button:hover {
+.repository-files td button:hover {
 	color: #58a6ff;
 	text-decoration: underline;
 }
-.repository-files button span {
+.repository-files td button span {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -2289,7 +2334,7 @@ summary {
 	}
 	.repository-files td:last-child,
 	.repository-files th:last-child {
-		width: 132px;
+		width: 162px;
 	}
 	.repository-files td,
 	.repository-files th {
@@ -2300,6 +2345,9 @@ summary {
 	}
 	.repository-toolbar {
 		gap: 10px;
+	}
+	.history-list-header {
+		padding-inline: 10px;
 	}
 	.repository-code {
 		padding: 0 6px 6px;
@@ -2377,14 +2425,68 @@ summary {
 	width: 100%;
 	margin: 12px 0;
 }
-.commit-sidebar nav a {
+.changed-files-list .changed-file,
+.changed-files-list .changed-files-folder {
 	display: flex;
+	align-items: center;
 	gap: 8px;
-	justify-content: space-between;
-	padding: 8px 4px;
-	overflow-wrap: anywhere;
+	padding: 5px 4px;
+	font-size: 13px;
+}
+.changed-files-folder {
+	width: 100%;
+	border: 0;
+	background: transparent;
+	text-align: start;
+}
+.changed-files-folder:disabled {
+	opacity: 1;
+}
+.changed-files-folder span:last-child,
+.changed-file-name {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.changed-file {
+	--status-color: #8b949e;
+	--status-background: #30363d;
+	border-radius: 4px;
+	text-decoration: none;
+}
+.changed-file:hover {
+	background: #161b22;
+}
+.changed-file.status-A {
+	--status-color: #7ee787;
+	--status-background: #153322;
+}
+.changed-file.status-D {
+	--status-color: #ff7b72;
+	--status-background: #421e22;
+}
+.changed-file.status-R {
+	--status-color: #e3b341;
+	--status-background: #3d2e15;
+}
+.changed-file svg {
+	flex-shrink: 0;
+	color: var(--status-color);
+}
+.changed-file-status {
+	flex-shrink: 0;
+	min-inline-size: 1.5em;
+	margin-inline-start: auto;
+	border-radius: 999px;
+	background: var(--status-background);
+	color: var(--status-color);
+	font-size: 11px;
+	font-weight: 600;
+	text-align: center;
 }
 .commit-sidebar small {
+	color: #8b949e;
 	white-space: nowrap;
 }
 .commit-panels {

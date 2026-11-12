@@ -91,6 +91,45 @@ test("history links retain context and drafts across parent and browser navigati
 	await expect(editor).toHaveText("const retainedDraft = true;");
 });
 
+test("changed files group into collapsible folders with GitHub status icons and pills", async ({ page }) => {
+	const api = new MockApi();
+	await page.route(`**/commits/${sha}`, (route) => {
+		const detail = api.read(new URL(route.request().url())) as { files: unknown[] };
+		return route.fulfill({
+			json: {
+				...detail,
+				files: [
+					...detail.files,
+					{ path: "src/legacy/old.ts", status: "D", additions: 0, deletions: 1, binary: false },
+				],
+			},
+		});
+	});
+	await page.goto(commitUrl);
+	const tree = page.getByRole("navigation", { name: "Changed files" });
+	const src = tree.getByRole("button", { name: "src", exact: true });
+	const modified = tree.getByRole("link", { name: /index\.ts/ });
+	const removed = tree.getByRole("link", { name: /old\.ts/ });
+	await expect(src).toHaveAttribute("aria-expanded", "true");
+	await expect(tree.getByRole("button", { name: "legacy", exact: true })).toBeVisible();
+	for (const [file, letter, label, icon] of [
+		[modified, "M", "Modified", "file-diff"],
+		[tree.getByRole("link", { name: /logo\.bin/ }), "A", "Added", "file-added"],
+		[removed, "D", "Deleted", "file-removed"],
+		[tree.getByRole("link", { name: /theme\.css/ }), "R", "Renamed", "file-moved"],
+	] as const) {
+		await expect(file.getByTitle(label)).toHaveText(letter);
+		await expect(file).toHaveAccessibleName(new RegExp(label));
+		await expect(file.locator(`svg.octicon-${icon}`)).toBeVisible();
+	}
+	await src.click();
+	await expect(modified).toBeHidden();
+	await expect(removed).toBeHidden();
+	await page.getByRole("textbox", { name: "Filter changed files" }).fill("old.ts");
+	await expect(removed).toBeVisible();
+	await expect(tree.getByRole("link")).toHaveCount(1);
+});
+
 test("metadata and patch loading failures have working retries", async ({ page }) => {
 	let fail = true;
 	await page.route(`**/commits/${sha}`, async (route) =>
