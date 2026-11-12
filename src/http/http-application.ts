@@ -5,6 +5,7 @@ import Koa from "koa";
 
 import { AccessDeniedError, type IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
+import { DockerError } from "../docker/docker-command.ts";
 import { InvalidProjectError, ProjectNotFoundError, ProjectUnavailableError } from "../projects/errors.ts";
 import type { IProjectRouter } from "../projects/project-router.ts";
 import { SettingsError } from "../settings/settings-service.ts";
@@ -36,7 +37,17 @@ export class HttpApplication implements IHttpApplication {
 				failure = err;
 				const badBody = err instanceof Error && "status" in err && err.status === 400;
 				const tooLarge = err instanceof Error && "status" in err && err.status === 413;
-				if (err instanceof SettingsError) {
+				if (err instanceof DockerError) {
+					ctx.status =
+						err.code === "docker-busy"
+							? 409
+							: err.code === "invalid-request"
+								? 400
+								: err.code === "docker-operation-not-found"
+									? 404
+									: 503;
+					ctx.body = { error: err.code };
+				} else if (err instanceof SettingsError) {
 					ctx.status = err.code === "invalid-request" ? 400 : 503;
 					ctx.body = { error: err.code };
 				} else if (err instanceof TicketError) {

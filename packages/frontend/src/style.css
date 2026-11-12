@@ -6,6 +6,26 @@
 	font-synthesis: none;
 	line-height: 1.5;
 }
+.docker-settings {
+	border-top: 1px solid #30363d;
+	margin-top: 24px;
+	padding-top: 16px;
+	overflow-wrap: anywhere;
+}
+.docker-container {
+	border: 1px solid #30363d;
+	border-radius: 8px;
+	padding: 12px;
+	margin: 12px 0;
+}
+.docker-container dl {
+	display: grid;
+	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+	gap: 4px 12px;
+}
+.docker-container dd {
+	margin: 0;
+}
 .agent-panel {
 	display: grid;
 	grid-template-columns: 250px minmax(0, 1fr);

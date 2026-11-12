@@ -1,13 +1,26 @@
 export interface IWorkspaceApi {
-	read<T>(path: string, schema: { parse(value: unknown): T }, method?: string, body?: unknown): Promise<T>;
+	read<T>(
+		path: string,
+		schema: { parse(value: unknown): T },
+		method?: string,
+		body?: unknown,
+		signal?: AbortSignal,
+	): Promise<T>;
 }
 
 export class WorkspaceApi implements IWorkspaceApi {
 	constructor(private readonly request: typeof fetch) {}
-	async read<T>(path: string, schema: { parse(value: unknown): T }, method = "GET", body?: unknown): Promise<T> {
+	async read<T>(
+		path: string,
+		schema: { parse(value: unknown): T },
+		method = "GET",
+		body?: unknown,
+		signal?: AbortSignal,
+	): Promise<T> {
 		const response = await this.request(`/api/${path}`, {
 			method,
 			credentials: "same-origin",
+			signal,
 			headers: {
 				accept: "application/json",
 				...(body === undefined ? {} : { "content-type": "application/json" }),
@@ -20,6 +33,8 @@ export class WorkspaceApi implements IWorkspaceApi {
 		if (!response.ok) {
 			const error = typeof value === "object" && value !== null && "error" in value ? value.error : undefined;
 			const messages: Record<string, string> = {
+				"docker-busy": "Docker cleanup is already running. Refresh to follow its progress.",
+				"docker-unavailable": "Docker is unavailable. Refresh and retry.",
 				"unsupported-settings":
 					"The selected model or thinking level is unavailable. Choose a supported setting and retry. Your draft is preserved.",
 				"agent-capacity":

@@ -12,7 +12,15 @@ const image = process.env.FORGE_IMAGE ?? "forge:dev";
 const name = `forge-smoke-${randomUUID()}`;
 const volume = `${name}-data`;
 const docker = (...args) =>
-	execFileSync("docker", args, { encoding: "utf8", timeout: 120_000, stdio: ["ignore", "pipe", "pipe"] }).trim();
+	execFileSync(
+		"docker",
+		args[0] === "exec"
+			? ["exec", "--user", "agent", ...args.slice(1)]
+			: args[0] === "run"
+				? ["run", "--privileged", ...args.slice(1)]
+				: args,
+		{ encoding: "utf8", timeout: 180_000, stdio: ["ignore", "pipe", "pipe"] },
+	).trim();
 const execute = (code) => docker("exec", name, "node", "--input-type=module", "-e", code);
 const request = (path, options = {}) =>
 	JSON.parse(
@@ -41,12 +49,78 @@ try {
 	docker("run", "-d", "--name", name, "--mount", `type=volume,source=${volume},target=/data`, ...env, image);
 	await waitFor(() => assert.equal(request("/health").status, 200));
 	const inspect = JSON.parse(docker("inspect", name))[0];
-	assert.equal(inspect.Config.User, "agent");
+	assert.equal(inspect.Config.User, "root");
+	assert.match(
+		docker("exec", name, "ps", "-eo", "uid,args"),
+		/1000\s+.*node (?:\/app\/)?dist\/main\.js --container-git-config\s*$/m,
+	);
+	assert.equal(inspect.HostConfig.Privileged, true);
+	assert.ok(!inspect.Config.Volumes || Object.keys(inspect.Config.Volumes).length === 0);
 	assert.equal(docker("exec", name, "id", "-un"), "agent");
 	for (const command of ["git", "gh", "python3", "go", "uv", "tini", "bash"])
 		assert.ok(docker("exec", name, "/bin/bash", "-c", `command -v ${command}`));
 	assert.match(docker("exec", name, "codex", "--version"), /0\.164\.0/);
 	assert.equal(Object.keys(inspect.HostConfig.PortBindings ?? {}).length, 0);
+	const nested = (...args) => docker("exec", name, "docker", "--host", "unix:///run/forge/docker.sock", ...args);
+	await waitFor(() => assert.equal(nested("info", "--format", "{{.Driver}}"), "vfs"));
+	assert.equal(nested("info", "--format", "{{.DockerRootDir}}"), "/var/lib/forge-docker");
+	assert.match(nested("compose", "version", "--short"), /2\.39\.4/);
+	assert.match(nested("buildx", "version"), /v0\.28\.0/);
+	assert.ok(!inspect.Mounts.some((mount) => mount.Destination.includes("docker.sock")));
+	assert.equal(docker("exec", name, "stat", "-c", "%G %a", "/run/forge/docker.sock"), "agent 660");
+	assert.doesNotMatch(docker("exec", name, "ps", "-eo", "args"), /--host[= ]tcp:/);
+	const clean = async (path) => {
+		const response = request(path, { method: "POST", headers });
+		assert.equal(response.status, 202);
+		const id = JSON.parse(response.body).id;
+		await waitFor(() => {
+			const operation = JSON.parse(request(`/api/board/docker/operations/${id}`, { headers }).body);
+			assert.notEqual(operation.status, "running");
+			assert.equal(operation.status, "completed", JSON.stringify(operation));
+			return operation;
+		});
+	};
+	// A real BuildKit build, Compose networking, and an actual worktree-shaped bind mount.
+	execute(
+		"import {mkdir,writeFile} from '@forge/backend-infrastructure/file'; await mkdir('/data/worktrees/docker-smoke',{recursive:true}); await writeFile('/data/worktrees/docker-smoke/Dockerfile','FROM busybox:1.37.0\\nRUN echo built > /built\\nCMD [\"sleep\",\"300\"]\\n'); await writeFile('/data/worktrees/docker-smoke/compose.yaml','services:\\n  first:\\n    image: forge-smoke:latest\\n    volumes:\\n      - shared:/shared\\n      - /data/worktrees/docker-smoke:/source\\n  second:\\n    image: forge-smoke:latest\\n    volumes:\\n      - shared:/shared\\nvolumes:\\n  shared: {}\\n');",
+	);
+	nested("build", "-t", "forge-smoke:latest", "/data/worktrees/docker-smoke");
+	nested("tag", "forge-smoke:latest", "forge-smoke:second");
+	const compose = (...args) =>
+		nested("compose", "-p", "forge-smoke", "-f", "/data/worktrees/docker-smoke/compose.yaml", ...args);
+	compose("up", "-d");
+	const first = compose("ps", "-q", "first");
+	const second = compose("ps", "-q", "second");
+	assert.equal(nested("exec", first, "cat", "/built"), "built");
+	assert.match(nested("exec", first, "cat", "/source/Dockerfile"), /FROM busybox/);
+	assert.match(nested("exec", first, "ping", "-c", "1", "second"), /1 packets received/);
+	await waitFor(() => {
+		const state = JSON.parse(request("/api/board/docker", { headers }).body);
+		assert.equal(state.available, true);
+		assert.equal(state.containers.length, 2);
+		assert.ok(state.containers.every((container) => container.stats && container.stats.processes !== "0"));
+	});
+	await clean(`/api/board/docker/containers/${first}/cleanup`);
+	assert.equal(nested("inspect", "--format", "{{.State.Running}}", second), "true");
+	assert.ok(nested("volume", "ls", "-q").includes("forge-smoke_shared"));
+	assert.ok(nested("image", "ls", "--format", "{{.Repository}}:{{.Tag}}").includes("forge-smoke:second"));
+	await clean(`/api/board/docker/containers/${second}/cleanup`);
+	assert.ok(!nested("image", "ls", "--format", "{{.Repository}}").includes("forge-smoke"));
+	nested("volume", "create", "unused-named");
+	nested("create", "--name", "stopped-smoke", "busybox:1.37.0");
+	await clean("/api/board/docker/cleanup");
+	assert.equal(nested("ps", "-aq"), "");
+	assert.equal(nested("volume", "ls", "-q"), "");
+	assert.equal(nested("image", "ls", "-aq"), "");
+	assert.match(
+		execute(
+			"import {readFile} from '@forge/backend-infrastructure/file'; console.log(await readFile('/data/worktrees/docker-smoke/Dockerfile'));",
+		),
+		/FROM busybox/,
+	);
+	// Leave state to verify startup removes it on restart, including named volumes.
+	nested("volume", "create", "restart-disposable");
+	nested("run", "-d", "--name", "restart-workload", "busybox:1.37.0", "sleep", "300");
 	const settings = {
 		planningInstructions: "Include rollout steps.",
 		implementationInstructions: "Run focused tests.",
@@ -311,6 +385,9 @@ try {
 	assert.doesNotMatch(docker("logs", name), /exited unsuccessfully|Forge shutting down|Codex disconnected/);
 	docker("start", name);
 	await waitFor(() => assert.equal(request("/health").status, 200));
+	await waitFor(() => assert.equal(nested("volume", "ls", "-q"), ""));
+	assert.equal(nested("ps", "-aq"), "");
+	assert.equal(nested("image", "ls", "-aq"), "");
 	assert.equal(JSON.parse(request(`/api/terminals/${terminal.id}`, { headers }).body).status, "closed");
 	assert.equal(JSON.parse(request("/api/projects", { headers }).body)[0].id, project.id);
 	assert.equal(JSON.parse(request(`/api/agents/${chat.thread.id}`, { headers }).body).thread.status, "idle");
@@ -330,6 +407,8 @@ try {
 	docker(
 		"run",
 		"--rm",
+		"--user",
+		"agent",
 		"--mount",
 		`type=volume,source=${volume},target=/data`,
 		image,
@@ -343,6 +422,18 @@ try {
 	docker("run", "-d", "--name", name, "--mount", `type=volume,source=${volume},target=/data`, ...env, image);
 	await waitFor(() => assert.equal(request("/health").status, 200));
 	assert.deepEqual(JSON.parse(request("/api/settings", { headers }).body), settings);
+	assert.equal(
+		execute(
+			"import {readFile} from '@forge/backend-infrastructure/file'; console.log(await readFile('/data/codex/persistence-probe'));",
+		),
+		"test-only",
+	);
+	await waitFor(() => assert.equal(nested("ps", "-aq"), ""));
+	assert.equal(nested("image", "ls", "-aq"), "");
+	docker("exec", "-u", "root", name, "pkill", "-TERM", "-x", "dockerd");
+	await waitFor(() => assert.equal(JSON.parse(request("/api/board/docker", { headers }).body).available, false));
+	assert.equal(request("/api/board/settings", { headers }).status, 200);
+	assert.equal(request("/health").status, 200);
 	assertGitIdentity();
 	assert.equal(JSON.parse(request("/api/projects", { headers }).body)[0].id, project.id);
 	assert.equal(JSON.parse(request("/api/accounts", { headers }).body).github.connection, "unavailable");
@@ -357,6 +448,8 @@ try {
 	docker(
 		"run",
 		"-d",
+		"--user",
+		"agent",
 		"--name",
 		name,
 		"--mount",
@@ -404,6 +497,8 @@ try {
 	docker(
 		"run",
 		"--rm",
+		"--user",
+		"agent",
 		...env,
 		image,
 		"node",
@@ -422,6 +517,8 @@ try {
 			docker(
 				"run",
 				"--rm",
+				"--user",
+				"agent",
 				...env,
 				image,
 				"node",

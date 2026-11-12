@@ -25,7 +25,10 @@ describe("AccountProcess", () => {
 			let stderr = "";
 			const child = processes.spawn({
 				program: "github",
-				arguments: ["-e", "process.stdout.write('structured');process.stderr.write('diagnostic')"],
+				arguments: [
+					"-e",
+					"process.stdout.write('structured:'+process.env.DOCKER_HOST);process.stderr.write('diagnostic')",
+				],
 				onOutput: (chunk) => {
 					stdout += chunk;
 				},
@@ -34,7 +37,7 @@ describe("AccountProcess", () => {
 				},
 			});
 			await child.done;
-			expect(stdout).toBe("structured");
+			expect(stdout).toBe("structured:unix:///run/forge/docker.sock");
 			expect(stderr).toBe("diagnostic");
 		} finally {
 			await rm(directory, { recursive: true, force: true });

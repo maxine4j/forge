@@ -20,9 +20,19 @@ RUN pnpm build
 FROM manifests AS installer
 RUN --mount=type=cache,id=forge-pnpm,target=/pnpm/store pnpm install --prod --frozen-lockfile --filter @forge/app... --store-dir /pnpm/store
 
+FROM docker:28.5.2-dind AS docker-engine
+FROM docker/compose-bin:v2.39.4 AS docker-compose
+FROM docker/buildx-bin:0.28.0 AS docker-buildx
+
 FROM docker/sandbox-templates:codex@sha256:a68b972a59148c6359ade441387159033f6d196d48aef9dda06d2d4bb26eb41e AS runner
 USER root
 WORKDIR /app
+COPY --from=docker-engine /usr/local/bin/docker /usr/local/bin/dockerd /usr/local/bin/containerd /usr/local/bin/ctr /usr/local/bin/runc /usr/local/bin/docker-init /usr/local/bin/docker-proxy /usr/local/bin/containerd-shim-runc-v2 /usr/local/bin/
+COPY --from=docker-engine /usr/local/bin/dind /usr/local/bin/dind
+COPY --from=docker-compose /docker-compose /usr/local/lib/docker/cli-plugins/docker-compose
+COPY --from=docker-buildx /buildx /usr/local/lib/docker/cli-plugins/docker-buildx
+RUN apt-get update && apt-get install -y --no-install-recommends iptables kmod && rm -rf /var/lib/apt/lists/* && \
+    printf '%s\n' '{"features":{"containerd-snapshotter":false}}' > /etc/forge-docker.json
 ARG BUILD_SHA=unknown
 LABEL org.opencontainers.image.revision=$BUILD_SHA
 # Preserve the template's development tools while using Forge's tested Node runtime.
@@ -57,7 +67,7 @@ RUN mkdir -p /data && chown agent:agent /data && chmod 0700 /data && \
     install -d -m 0755 -o agent -g agent /run/forge && \
     git config --system --add include.path /run/forge/gitconfig
 ENV PATH="/app/node_modules/.bin:/usr/local/bin:${PATH}"
-USER agent
+ENV DOCKER_HOST=unix:///run/forge/docker.sock
 EXPOSE 8080
 ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "dist/main.js", "--container-git-config"]
+CMD ["node", "dist/main.js", "--container-git-config", "--supervise-docker"]
