@@ -152,9 +152,7 @@ export const TaskBoard = ({
 				</p>
 			)}
 			<p className='board-feedback' role='status'>
-				{loading
-					? "Loading tickets…"
-					: notice || "Drag by the grip to move tickets, or open a ticket to change its status."}
+				{loading ? "Loading tickets…" : notice}
 			</p>
 			<div ref={board} className='kanban-columns' aria-label='Ticket board' aria-busy={busy || loading}>
 				{ticketStatuses.map((status) => {

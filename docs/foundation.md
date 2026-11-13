@@ -10,10 +10,11 @@ repository management APIs keep their `/api/projects` namespace; tickets use
 owner-authorized `GET/POST /api/tickets` and ticket-ID routes instead. See the
 [workspace navigation contract](workspaces.md#slice-2-integrated-manual-workspace-and-pr-review).
 
-Config's owner-only settings API also persists billing currency and monthly plan
-price (AUD and A$30 by default). Validate a supported currency and finite,
-nonnegative amount; changes affect future turns. Cost APIs are owner-only and
-project-independent. See [billing settings](development.md#cost-settings) and
+The global header and browser favicon share the Forge anvil mark.
+Config's Cost tracking section uses the owner-only settings API to persist local
+currency and monthly plan price (AUD and A$30 by default). Validate a supported
+currency and a finite, nonnegative amount. Changes affect future turns. Cost APIs are owner-only and
+project-independent. See [cost settings](development.md#cost-settings) and
 [ticket cost contracts](tickets.md#ticket-cost).
 
 ## Account login and application access

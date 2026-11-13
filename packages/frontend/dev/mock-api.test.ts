@@ -15,6 +15,7 @@ import {
 	commitPatchSchema,
 } from "@forge/contracts";
 import { agentThreadsSchema, agentViewSchema, agentOptionsSchema, agentFilesSchema } from "@forge/contracts/agents";
+import { dockerOverviewSchema } from "@forge/contracts/docker";
 import {
 	pullRequestsSchema,
 	pullRequestSchema,
@@ -128,6 +129,19 @@ test("mock board exposes global tickets across the workflow", async () => {
 	}
 });
 
+test("mock board serves container statistics and rejects Docker cleanup", async () => {
+	const path = "/api/board/docker";
+	const overview = dockerOverviewSchema.parse(await read(path));
+	expect(overview.available).toBe(true);
+	expect(overview.statisticsStale).toBe(false);
+	expect(overview.containers).toHaveLength(2);
+	expect(overview.containers.every((container) => container.stats)).toBe(true);
+	for (const cleanup of [`${path}/cleanup`, `${path}/containers/${overview.containers.at(0)!.id}/cleanup`]) {
+		expect((await fetch(new URL(cleanup, origin), { method: "POST" })).status).toBe(405);
+	}
+	expect(await read(path)).toEqual(overview);
+});
+
 test("mock projects open populated workspaces and schema-valid repository views", async () => {
 	const projects = projectsSchema.parse(await read("/api/projects"));
 	expect(projects.length).toBeGreaterThan(1);
@@ -194,6 +208,12 @@ test("mock API is opt-in and excluded from every build mode", async () => {
 		const config = await resolveConfig({ mode, logLevel: "silent" }, command);
 		expect(config.plugins.some((plugin) => plugin.name === "forge-mock-api")).toBe(false);
 	}
-	const html = await fetch(new URL("/", origin)).then((response) => response.text());
-	expect(html).toContain("Forge mock preview");
+});
+
+test("mock preview serves the app HTML without a preview banner", async () => {
+	const response = await fetch(new URL("/repos", origin));
+	expect(response.status).toBe(200);
+	const html = await response.text();
+	expect(html).toContain('<div id="root"></div>');
+	expect(html).not.toContain("Forge mock preview");
 });

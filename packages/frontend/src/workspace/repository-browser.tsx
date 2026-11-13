@@ -391,20 +391,18 @@ const BranchBrowser = ({
 						title={dirty || syncBlocked ? "Commit or discard drafts before syncing." : undefined}
 						onClick={() => void syncUpstream()}
 					>
-						{syncing ? "Syncing with upstream…" : "Sync with upstream"}
-						{readyDrift && <span aria-label='Target branch'> {readyDrift.branch}</span>}
 						{!!readyDrift?.ahead && (
 							<>
-								{" "}
-								<span aria-label={`${readyDrift.ahead} ahead`}>↑{readyDrift.ahead}</span>
+								<span aria-label={`${readyDrift.ahead} ahead`}>↑{readyDrift.ahead}</span>{" "}
 							</>
 						)}
 						{!!readyDrift?.behind && (
 							<>
-								{" "}
-								<span aria-label={`${readyDrift.behind} behind`}>↓{readyDrift.behind}</span>
+								<span aria-label={`${readyDrift.behind} behind`}>↓{readyDrift.behind}</span>{" "}
 							</>
 						)}
+						{syncing ? "Syncing with upstream…" : "Sync with upstream"}
+						{readyDrift && <span aria-label='Target branch'> {readyDrift.branch}</span>}
 					</button>
 				)}
 			</div>

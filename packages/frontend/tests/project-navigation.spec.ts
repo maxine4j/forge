@@ -99,7 +99,9 @@ test("dark project tabs hide infrastructure and keep account setup in Config", a
 		{ width: 820, height: 820 },
 	]) {
 		await page.setViewportSize(size);
-		await expect(page.getByRole("banner").getByRole("heading", { name: "Forge", exact: true })).toBeVisible();
+		const header = page.getByRole("banner");
+		await expect(header.getByRole("link", { name: "Forge home" })).toBeVisible();
+		await expect(header.getByRole("heading")).toHaveCount(0);
 		await expect(
 			page
 				.getByRole("region", { name: "Repository", exact: true })

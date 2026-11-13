@@ -46,10 +46,11 @@ not inject a trusted application identity or provide an alternative login.
 For isolated frontend iteration, run `pnpm dev:mock` from the repository
 root and open `http://127.0.0.1:5174`. This builds only Forge's browser contracts
 and starts Vite in explicit `mock` mode; no backend, database, credentials, or
-container is required. A visible banner identifies the read-only preview.
+container is required.
 Vite serves deterministic HTTP fixtures for projects, accounts, repository
 branches/files/history, project workspaces, changes, pull-request reviews and
-project chat history with clarification requests.
+project chat history with clarification requests. Board settings includes two
+sample running containers with resource statistics.
 Commit history opens shareable commit pages with parent navigation, structured
 replacement hunks, renamed files, mode changes and binary placeholders. Preview
 fixtures support unified/split rendering and whitespace filtering. Commit browser
@@ -59,7 +60,7 @@ work; all API mutations return 405 and no terminal session or
 WebSocket execution is provided. Unknown API paths, identities, branches and
 files return JSON 404 responses. Fixtures are not persisted. Normal Vite mode
 does not install the mock routes, and production builds exclude the mock API
-and banner, including builds invoked with `--mode mock`.
+even when invoked with `--mode mock`.
 
 ## Development databases
 

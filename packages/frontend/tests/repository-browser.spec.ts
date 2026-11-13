@@ -162,7 +162,7 @@ test("Code shows main drift, refreshes after sync, and reports merge conflicts",
 	});
 	await page.reload();
 	const sync = page.getByRole("button", { name: /Sync with upstream/ });
-	await expect(sync).toContainText("↑2 ↓1");
+	await expect(sync).toHaveText("↑2 ↓1 Sync with upstream main");
 	expect(posts).toBe(0);
 	await page.getByRole("button", { name: "file-0.ts", exact: true }).click();
 	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("original file");
@@ -273,10 +273,10 @@ test("visible main refreshes the drift counts without a click", async ({ page })
 	});
 	await page.reload();
 	const sync = page.getByRole("button", { name: /Sync with upstream/ });
-	await expect(sync).toHaveText("Sync with upstream main ↓1");
+	await expect(sync).toHaveText("↓1 Sync with upstream main");
 	behind = 3;
 	await page.clock.fastForward(31_000);
-	await expect(sync).toHaveText("Sync with upstream main ↓3");
+	await expect(sync).toHaveText("↓3 Sync with upstream main");
 });
 
 test("sync renders while drift is pending and shows only positive counts", async ({ page }) => {
@@ -297,7 +297,7 @@ test("sync renders while drift is pending and shows only positive counts", async
 	} finally {
 		release();
 	}
-	await expect(sync).toHaveText("Sync with upstream main ↑2");
+	await expect(sync).toHaveText("↑2 Sync with upstream main");
 	expect((await sync.boundingBox())?.height).toEqual(initialBounds?.height);
 });
 

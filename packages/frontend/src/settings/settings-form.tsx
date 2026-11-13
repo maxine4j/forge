@@ -5,6 +5,39 @@ import { useEffect, useState, type FormEvent } from "react";
 import { ExecutionSettings } from "../agents/execution-settings.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 
+const currencyFlags: Partial<Record<ForgeSettings["localCurrency"], string>> = {
+	AUD: "🇦🇺",
+	USD: "🇺🇸",
+	EUR: "🇪🇺",
+	GBP: "🇬🇧",
+	CAD: "🇨🇦",
+	NZD: "🇳🇿",
+	JPY: "🇯🇵",
+	CHF: "🇨🇭",
+	CNY: "🇨🇳",
+	HKD: "🇭🇰",
+	SGD: "🇸🇬",
+	INR: "🇮🇳",
+	BRL: "🇧🇷",
+	MXN: "🇲🇽",
+	ZAR: "🇿🇦",
+	KRW: "🇰🇷",
+	SEK: "🇸🇪",
+	NOK: "🇳🇴",
+	DKK: "🇩🇰",
+	PLN: "🇵🇱",
+	CZK: "🇨🇿",
+	HUF: "🇭🇺",
+	RON: "🇷🇴",
+	TRY: "🇹🇷",
+	IDR: "🇮🇩",
+	ILS: "🇮🇱",
+	MYR: "🇲🇾",
+	PHP: "🇵🇭",
+	THB: "🇹🇭",
+	ISK: "🇮🇸",
+};
+
 export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; defaultsSaved: () => void }) => {
 	const [draft, setDraft] = useState<ForgeSettings>();
 	const [options, setOptions] = useState<AgentOptions>();
@@ -59,7 +92,7 @@ export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; 
 		if (!parsed.success) {
 			setError(
 				Boolean(draft?.gitName.trim()) === Boolean(draft?.gitEmail.trim())
-					? "Check billing values, Git identity and instruction lengths."
+					? "Check cost tracking values, Git identity and instruction lengths."
 					: "Provide both a Git name and email, or leave both blank.",
 			);
 			return;
@@ -83,29 +116,36 @@ export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; 
 			{draft ? (
 				<form onSubmit={(event) => void save(event)}>
 					<fieldset disabled={saving}>
-						<legend>Billing</legend>
-						<label>
-							Local currency
-							<select
-								value={draft.localCurrency}
-								onChange={(event) => change("localCurrency", event.target.value)}
-							>
-								{billingCurrencies.map((currency) => (
-									<option key={currency}>{currency}</option>
-								))}
-							</select>
-						</label>
-						<label>
-							Monthly plan price
-							<input
-								type='number'
-								min='0'
-								step='any'
-								required
-								value={draft.monthlyPlanLocal}
-								onChange={(event) => change("monthlyPlanLocal", event.target.valueAsNumber)}
-							/>
-						</label>
+						<legend>Cost tracking</legend>
+						<div className='forge-settings-fields'>
+							<label>
+								Local currency
+								<select
+									className='forge-currency-select'
+									value={draft.localCurrency}
+									onChange={(event) => change("localCurrency", event.target.value)}
+								>
+									{billingCurrencies.map((currency) => (
+										<option key={currency} value={currency}>
+											{currencyFlags[currency]
+												? `${currencyFlags[currency]} ${currency}`
+												: currency}
+										</option>
+									))}
+								</select>
+							</label>
+							<label>
+								Monthly plan price
+								<input
+									type='number'
+									min='0'
+									step='any'
+									required
+									value={draft.monthlyPlanLocal}
+									onChange={(event) => change("monthlyPlanLocal", event.target.valueAsNumber)}
+								/>
+							</label>
+						</div>
 						<p>Applies to future turns. Historical costs keep their saved prices and exchange rates.</p>
 					</fieldset>
 					<fieldset disabled={saving}>
@@ -163,7 +203,7 @@ export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; 
 					<fieldset disabled={saving}>
 						<legend>Git identity</legend>
 						<p>Applies to commits across the Forge container. Leave both fields blank to clear it.</p>
-						<div className='forge-git-fields'>
+						<div className='forge-settings-fields'>
 							<label>
 								Git name
 								<input

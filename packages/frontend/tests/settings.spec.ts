@@ -57,7 +57,9 @@ test("Config persists agent defaults, instructions and Git identity and can clea
 	await expect(page.getByRole("alert")).toHaveText("Provide both a Git name and email, or leave both blank.");
 	expect(updates).toEqual([]);
 	await page.getByLabel("Git email").fill("forge@example.com");
-	await page.getByLabel("Local currency").selectOption("EUR");
+	const currency = page.getByRole("group", { name: "Cost tracking" }).getByLabel("Local currency");
+	await expect(currency.locator('option[value="EUR"]')).toHaveText("🇪🇺 EUR");
+	await currency.selectOption("EUR");
 	await page.getByLabel("Monthly plan price").fill("45.5");
 	await page.getByLabel("Default model").selectOption("model-a");
 	await page.getByLabel("Default thinking").selectOption("high");

@@ -157,9 +157,9 @@ discard uncommitted code is guarded.
 
 Repos provides listing, creation, import and retry. Ready repository cards link to
 `/repos/:repositoryId/code`. Repository sections are Code, Agents, Pipelines and
-Terminals. The header shows `forge / repositoryName` inside a repository. The home
-link opens Tasks, and `/` replaces its history entry with `/tasks`. The
-[global ticket board](tickets.md#agentic-ticket-board) is independent of the
+Terminals. The global header's home link opens Tasks, and `/` replaces its
+history entry with `/tasks`. The [global ticket board](tickets.md#agentic-ticket-board)
+is independent of the
 repository workbench. Code is the default repository section; Agents provides
 [interactive chats](agents.md#interactive-agents), and Pipelines provides
 [local workflows](git-and-ci.md#manual-local-pipelines).
@@ -241,7 +241,7 @@ commit subject and date. Browsing and committing never switch or reset a checkou
 For any ready repository with an upstream remote, **Sync with upstream** appears
 on every branch before counts load, identifies the resolved target branch when
 available, and shows each nonzero count for commits
-ahead (↑) or behind (↓). Code checks the counts when
+ahead (↑) or behind (↓) to the left of the button label. Code checks the counts when
 opened, every 30 seconds while visible, and after committing or syncing.
 Commit or discard editor drafts before syncing; drafts on any branch disable the
 action with branch-neutral guidance. Code refreshes the affected branch's content

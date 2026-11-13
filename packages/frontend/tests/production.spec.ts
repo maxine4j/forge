@@ -139,6 +139,13 @@ test("integrated production bundle styles editor/terminal on desktop/mobile and 
 		);
 		expect(response?.headers()["cache-control"]).toBe("no-store");
 		expect(response?.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+		const icon = await page.locator('link[rel="icon"]').getAttribute("href");
+		const favicon = await page.request.get(new URL(icon!, page.url()).href, {
+			headers: { "x-webauth-user": "owner" },
+		});
+		expect(favicon.status()).toBe(200);
+		expect(favicon.headers()["content-type"]).toContain("image/svg+xml");
+		await expect(page.getByRole("link", { name: "Forge home" }).locator("img")).toHaveAttribute("src", icon!);
 		await expect(page.getByRole("textbox", { name: "File editor" })).toBeVisible();
 		await page.reload();
 		await expect(page.getByRole("textbox", { name: "File editor" })).toContainText(

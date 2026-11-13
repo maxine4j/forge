@@ -1,4 +1,5 @@
 import type { Costs } from "@forge/contracts";
+import type { DockerOverview } from "@forge/contracts/docker";
 import { defaultForgeSettings } from "@forge/contracts/settings";
 import { defaultBoardSettings } from "@forge/contracts/tickets";
 import type { Plugin } from "vite";
@@ -33,6 +34,42 @@ const projects = [
 	},
 	{ id: "123e4567-e89b-42d3-a456-426614174010", name: "Homelab dashboard", status: "ready", createdAt: date },
 ];
+const dockerOverview: DockerOverview = {
+	available: true,
+	statisticsAt: date,
+	statisticsStale: false,
+	operation: null,
+	containers: [
+		{
+			id: "d1".repeat(32),
+			name: "forge-preview-web",
+			image: "node:24-alpine",
+			status: "Up 8 minutes",
+			ports: "5173/tcp",
+			stats: {
+				cpu: "1.24%",
+				memory: "128 MiB / 2 GiB",
+				network: "840 kB / 1.2 MB",
+				block: "16 MB / 4 MB",
+				processes: "12",
+			},
+		},
+		{
+			id: "d2".repeat(32),
+			name: "forge-preview-db",
+			image: "postgres:17-alpine",
+			status: "Up 8 minutes",
+			ports: "5432/tcp",
+			stats: {
+				cpu: "0.08%",
+				memory: "64 MiB / 2 GiB",
+				network: "210 kB / 96 kB",
+				block: "8 MB / 2 MB",
+				processes: "7",
+			},
+		},
+	],
+};
 
 export interface IMockApi {
 	/** Returns a deterministic fixture, or undefined for an unknown route or query. */
@@ -46,6 +83,7 @@ export class MockApi implements IMockApi {
 		this.routes.set("/api/projects", () => projects);
 		this.routes.set("/api/settings", () => defaultForgeSettings);
 		this.routes.set("/api/board/settings", () => defaultBoardSettings);
+		this.routes.set("/api/board/docker", () => dockerOverview);
 		this.routes.set("/api/accounts", () => ({
 			codex: { connection: "available", account: { name: "owner@example.test" }, login: { state: "completed" } },
 			github: { connection: "available", login: { state: "idle" } },
@@ -487,17 +525,6 @@ export class MockApi implements IMockApi {
 export const mockApi = (): Plugin => ({
 	name: "forge-mock-api",
 	apply: "serve",
-	transformIndexHtml: () => [
-		{
-			tag: "div",
-			attrs: {
-				role: "status",
-				style: "padding:8px;text-align:center;background:#243344;color:#fff;font:14px system-ui",
-			},
-			children: "Forge mock preview · Read-only fixtures · No backend or shell execution",
-			injectTo: "body-prepend",
-		},
-	],
 	configureServer(server) {
 		const api = new MockApi();
 		server.middlewares.use((request, response, next) => {

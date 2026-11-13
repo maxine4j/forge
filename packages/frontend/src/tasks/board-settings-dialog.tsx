@@ -14,6 +14,7 @@ import { DockerSettings } from "./docker-settings.tsx";
 export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close: () => void }) => {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const titleId = useId();
+	const limitId = useId();
 	const [settings, setSettings] = useState<BoardSettings>();
 	const [limit, setLimit] = useState<number>();
 	const [busy, setBusy] = useState(false);
@@ -99,17 +100,16 @@ export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close:
 							void update({ maxAgents: limit }, "Agent limit saved.");
 						}}
 					>
-						<label>
-							<span>Max concurrent agents</span>
-							<input
-								type='range'
-								min={minConcurrentAgents}
-								max={maxConcurrentAgents}
-								value={limit}
-								disabled={busy}
-								onChange={(event) => setLimit(event.currentTarget.valueAsNumber)}
-							/>
-						</label>
+						<label htmlFor={limitId}>Max concurrent agents</label>
+						<input
+							id={limitId}
+							type='range'
+							min={minConcurrentAgents}
+							max={maxConcurrentAgents}
+							value={limit}
+							disabled={busy}
+							onChange={(event) => setLimit(event.currentTarget.valueAsNumber)}
+						/>
 						<span aria-hidden='true'>{limit}</span>
 						<button type='submit' disabled={busy || limit === settings.maxAgents}>
 							Save limit

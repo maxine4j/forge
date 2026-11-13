@@ -239,21 +239,10 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 			)}
 			{location.pathname === "/" && <Navigate to='/tasks' replace />}
 			<header>
-				<div className='header-identity'>
-					<Link className='brand' to='/tasks' aria-label='Forge home'>
-						<span aria-hidden='true'>F</span>forge
-					</Link>
-					{selected && !global && (
-						<>
-							<span className='header-separator' aria-hidden='true'>
-								/
-							</span>
-							<h1 className='header-project' title={selected.name}>
-								{selected.name}
-							</h1>
-						</>
-					)}
-				</div>
+				<Link className='brand' to='/tasks' aria-label='Forge home'>
+					<img src='/assets/anvil.svg' alt='' width={32} height={32} />
+					forge
+				</Link>
 				<nav className='global-nav' aria-label='Forge'>
 					<Link to='/tasks' aria-current={route.page === "tasks" ? "page" : undefined}>
 						Tasks
