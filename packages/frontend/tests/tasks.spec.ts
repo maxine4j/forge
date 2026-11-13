@@ -220,7 +220,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 									},
 								]
 							: [],
-						truncated: false,
+						truncated: review,
 						contextWindow: { used: 32000, max: 128000 },
 					},
 				});
@@ -1329,7 +1329,13 @@ for (const size of [
 		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 		const panel = page.getByRole("dialog");
 		await panel.getByRole("tab", { name: "Chat", exact: true }).click();
-		await expect(panel.getByLabel("Message", { exact: true })).toBeVisible();
+		const message = panel.getByLabel("Message", { exact: true });
+		await expect(message).toBeVisible();
+		const visibleLines = await message.evaluate((element) => {
+			const { height, lineHeight } = getComputedStyle(element);
+			return Number.parseFloat(height) / Number.parseFloat(lineHeight);
+		});
+		expect(visibleLines).toBeCloseTo(1.5);
 		if (size.width === 390) {
 			const timeline = await panel.locator(".agent-messages").boundingBox();
 			const composerTop = (await panel.locator(".agent-composer").boundingBox())!.y;
@@ -1378,11 +1384,21 @@ test("ticket message drafts survive closing and reopening", async ({ page }) => 
 test("combined chat has one set of live execution controls", async ({ page }) => {
 	await setup(page, false, true, true);
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
-	await expect(page.getByText("Applies to next turn", { exact: true })).toBeVisible();
-	await expect(page.getByRole("button", { name: "Interrupt", exact: true })).toHaveCount(1);
+	const chat = page.getByRole("tabpanel", { name: "Chat", exact: true });
+	const interrupt = chat.getByRole("button", { name: "Interrupt", exact: true });
+	await expect(interrupt).toBeEnabled();
+	await expect(chat.locator(".agent-composer").getByRole("button", { name: "Interrupt", exact: true })).toBeVisible();
+	for (const text of ["Applies to next turn", "waiting", "Some history or output was omitted."])
+		await expect(chat.getByText(text, { exact: true })).toHaveCount(0);
 	await expect(page.getByRole("tab", { name: "Planning history", exact: true })).toHaveCount(0);
 	await expect(page.getByRole("button", { name: "Allow once", exact: true })).toHaveCount(1);
 	await expect(page.getByLabel("Message", { exact: true })).toHaveCount(1);
+	await chat.getByLabel("Message", { exact: true }).fill("  \n ");
+	const request = page.waitForRequest(
+		(request) => request.url().endsWith("/interrupt") && request.method() === "POST",
+	);
+	await interrupt.click();
+	expect((await request).postDataJSON()).toEqual({});
 });
 
 test("one ticket timeline retains revisions, approval, drafts and history through steering and completion", async ({
@@ -1471,7 +1487,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 					historical && phase !== "planning"
 						? [{ id: "historical-request", kind: "command", description: "Old approval", questions: [] }]
 						: [],
-				truncated: false,
+				truncated: historical,
 			},
 		});
 	});
@@ -1479,6 +1495,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	const modal = page.getByRole("dialog", { name: "TASK-1", exact: true });
 	const message = modal.getByLabel("Message", { exact: true });
 	const send = modal.getByRole("button", { name: "Send message", exact: true });
+	const interrupt = modal.getByRole("button", { name: "Interrupt", exact: true });
 	await expect(modal.getByRole("tab")).toHaveCount(3);
 	await expect(modal.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
 	await expect(modal.getByRole("heading", { name: "Initial plan" })).toBeVisible();
@@ -1487,7 +1504,8 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	await expect.poll(() => submissions.length).toBe(1);
 	await expect(modal.getByRole("button", { name: "Approve plan" })).toHaveCount(0);
 	state = "running";
-	await expect(send).toBeDisabled();
+	await expect(interrupt).toBeEnabled();
+	await expect(modal.getByText("Messages unavailable while running.", { exact: true })).toHaveCount(0);
 	plans.push({ id: "plan-2", role: "assistant", kind: "plan", text: "# Streaming revision\n\nAdd **filtering**." });
 	await expect(modal.getByRole("heading", { name: "Streaming revision" })).toBeAttached();
 	await expect(modal.getByRole("button", { name: "Approve plan" })).toHaveCount(0);
@@ -1522,7 +1540,8 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	started = true;
 	state = "running";
 	activity.push({ id: "working", role: "assistant", text: "Implementing filtering" });
-	await expect(modal.getByRole("button", { name: "Interrupt", exact: true })).toBeVisible();
+	await expect(send).toBeEnabled();
+	await expect(interrupt).toHaveCount(0);
 	await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(80);
 	await expect(latest).toHaveClass(/agent-scroll-unseen/);
 	await expect(message).toHaveValue("Retain this draft across approval");
@@ -1530,6 +1549,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	await expect(history).toHaveCount(1);
 	await expect(modal.getByRole("separator")).toHaveCount(1);
 	await expect(modal.getByText("Retained planning message 0", { exact: true })).toBeAttached();
+	await expect(modal.getByText("Some history or output was omitted.", { exact: true })).toHaveCount(0);
 	await expect(modal.getByRole("button", { name: "Allow once" })).toHaveCount(0);
 	reject = true;
 	await send.click();
@@ -1541,6 +1561,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	reject = false;
 	await send.click();
 	await expect(message).toHaveValue("");
+	await expect(interrupt).toBeEnabled();
 	expect(submissions.at(-1)).toEqual({
 		text: "Retain this draft across approval",
 		expectedTurnId: "implementation-turn",

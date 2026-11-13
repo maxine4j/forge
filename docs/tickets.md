@@ -206,6 +206,8 @@ above it and implementer history appears below it. Codex owns separate threads i
 the same worktree; the fresh implementer receives only the approved plan.
 Historical requests are inactive. Only the current agent exposes reply and
 interruption controls. Completed tickets and preview fixtures are read-only.
+During an active turn, the composer button interrupts when the draft is empty or
+contains only whitespace. A draft with text shows Send and can steer eligible turns.
 The Chat composer shows a context ring for the current conversation when Codex
 reports a sample, with the latest used token count, percentage and model context
 limit. The last reported sample is retained across restarts.
@@ -221,8 +223,8 @@ execution slot and turn identity. Steering is serialized with ticket completion
 and merge transitions. Stale turns, completed tickets and merge-queued submissions
 are rejected. Failed or ambiguous steering is never replayed automatically; the
 browser retains its draft and refreshes status. Planning messages remain limited
-to idle/failed turns. Queued, dispatching and uncertain execution disable sending
-with status text. Structured input and permission requests retain their dedicated
+to idle/failed turns. Queued, dispatching and uncertain execution disable sending.
+Structured input and permission requests retain their dedicated
 reply controls. See the [agent protocol contract](agents.md#interactive-agents).
 
 ### Epics and grouped backlog
@@ -338,9 +340,8 @@ remain shared across polling, reopening and planner-to-implementer transitions.
 Done and archived tickets retain their settings but cannot change them.
 
 One selection applies across planning, implementation, feedback and rebase turns.
-The workflow snapshots it under dispatch coordination; changes during execution
-show “Applies to next turn” and cannot change active-turn steering or bypass stale
-turn checks. Unset fields inherit the [Forge defaults](agents.md#interactive-agents)
+The workflow snapshots it under dispatch coordination. Changes during execution
+apply on the next turn. Unset fields inherit the [Forge defaults](agents.md#interactive-agents)
 on the next turn. Each planner and implementer pins the global provider when its
 record is created. Clarifications, follow-ups and rebase use their existing
 agent's provider. Explicit selections are validated against that provider at
