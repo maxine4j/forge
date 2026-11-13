@@ -52,6 +52,7 @@ export const AgentComposer = ({
 	draft,
 	change,
 	send,
+	interrupt,
 	disabled,
 	sendable,
 	settings,
@@ -66,6 +67,7 @@ export const AgentComposer = ({
 	draft: string;
 	change: (value: string) => void;
 	send: (settings: AgentSettings) => void;
+	interrupt?: { action: () => void; disabled: boolean };
 	disabled: boolean;
 	sendable: boolean;
 	settings: AgentSettings;
@@ -191,8 +193,11 @@ export const AgentComposer = ({
 		update(value, start + insertion.length);
 		setDismissed(true);
 	};
+	const hasMessage = Boolean(draft.trim());
+	const stop = hasMessage ? undefined : interrupt;
+	const actionLabel = stop ? "Interrupt" : "Send message";
 	const submit = () => {
-		if (sendable && !disabled && draft.trim()) send({ permissions: "ask", ...selection });
+		if (sendable && !disabled && hasMessage) send({ permissions: "ask", ...selection });
 	};
 	return (
 		<form
@@ -303,10 +308,12 @@ export const AgentComposer = ({
 				<div className='agent-composer-actions'>
 					{contextWindow && <ContextWindow {...contextWindow} />}
 					<button
+						type={stop ? "button" : "submit"}
 						className='agent-send'
-						aria-label='Send message'
-						title='Send message'
-						disabled={disabled || !sendable || !draft.trim()}
+						aria-label={actionLabel}
+						title={actionLabel}
+						onClick={stop?.action}
+						disabled={disabled || (stop ? stop.disabled : !sendable || !hasMessage)}
 					>
 						<svg
 							viewBox='0 0 24 24'
@@ -317,7 +324,11 @@ export const AgentComposer = ({
 							strokeWidth='2'
 							aria-hidden='true'
 						>
-							<path d='M12 19V5m-6 6 6-6 6 6' />
+							{stop ? (
+								<rect x='6' y='6' width='12' height='12' rx='2' fill='currentColor' stroke='none' />
+							) : (
+								<path d='M12 19V5m-6 6 6-6 6 6' />
+							)}
 						</svg>
 					</button>
 				</div>

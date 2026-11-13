@@ -334,6 +334,7 @@ export const Conversation = ({
 			});
 	};
 	const status = view?.thread.status;
+	const ticketChat = Boolean(messagePath);
 	const active = status === "running" || status === "waiting";
 	const sendable =
 		status
@@ -373,39 +374,44 @@ export const Conversation = ({
 					</button>
 				)}
 				{loadingHistory && <p role='status'>Loading planning history…</p>}
-				{view?.truncated && <p className='agent-notice'>Some history or output was omitted.</p>}
 				<AgentActivity items={view?.items ?? []} />
 			</>
 		);
 	return (
 		<section className='agent-conversation' aria-label='Chat conversation'>
-			<div className='agent-chat-heading'>
-				{navigation}
-				<div>
-					<span className={`agent-status agent-status-${displayStatus}`}>{displayStatus ?? "loading"}</span>
-				</div>
-				<div className='agent-actions'>
-					{historyFailed && (
-						<button
-							disabled={busy || loadingHistory}
-							onClick={() => {
-								recoveryBlocked.current = false;
-								historyNeeded.current = true;
-								setLoadingHistory(true);
-								setError("");
-								poller.current?.refresh();
-							}}
-						>
-							Retry loading history
-						</button>
+			{(!ticketChat || historyFailed) && (
+				<div className='agent-chat-heading'>
+					{navigation}
+					{!ticketChat && (
+						<div>
+							<span className={`agent-status agent-status-${displayStatus}`}>
+								{displayStatus ?? "loading"}
+							</span>
+						</div>
 					)}
-					{active && !readOnly && (
-						<button disabled={busy || !view?.thread.turnId} onClick={() => act("interrupt", {})}>
-							Interrupt
-						</button>
-					)}
+					<div className='agent-actions'>
+						{historyFailed && (
+							<button
+								disabled={busy || loadingHistory}
+								onClick={() => {
+									recoveryBlocked.current = false;
+									historyNeeded.current = true;
+									setLoadingHistory(true);
+									setError("");
+									poller.current?.refresh();
+								}}
+							>
+								Retry loading history
+							</button>
+						)}
+						{!ticketChat && active && !readOnly && (
+							<button disabled={busy || !view?.thread.turnId} onClick={() => act("interrupt", {})}>
+								Interrupt
+							</button>
+						)}
+					</div>
 				</div>
-			</div>
+			)}
 			{!connected && (
 				<p className='agent-notice' role='status'>
 					Reconnecting to live updates…
@@ -421,7 +427,7 @@ export const Conversation = ({
 					Loading history…
 				</p>
 			)}
-			{view?.truncated && <p className='agent-notice'>Some history or output was omitted.</p>}
+			{!ticketChat && view?.truncated && <p className='agent-notice'>Some history or output was omitted.</p>}
 			<div className='agent-history'>
 				<div
 					ref={messages}
@@ -477,7 +483,7 @@ export const Conversation = ({
 									{failureNotice}
 								</p>
 							)}
-							{active && (
+							{!ticketChat && active && (
 								<p
 									className={`agent-notice ${status === "running" ? "agent-working-highlight" : ""}`}
 									role='status'
@@ -528,6 +534,11 @@ export const Conversation = ({
 					draft={draft}
 					disabled={busy || readOnly}
 					sendable={Boolean(sendable)}
+					interrupt={
+						ticketChat && active && !readOnly
+							? { action: () => act("interrupt", {}), disabled: !view.thread.turnId }
+							: undefined
+					}
 					settings={executionSettings ?? view.thread}
 					settingsChanged={settingsChanged}
 					settingsDisabled={settingsDisabled}

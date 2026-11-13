@@ -1577,9 +1577,12 @@ button.ticket-description-text:hover {
 	overflow: hidden;
 }
 .ticket-details .agent-composer textarea {
-	height: 64px;
-	min-height: 40px;
-	resize: none;
+	line-height: 1.5;
+	height: 1.5lh;
+	padding: 0;
+}
+.ticket-details .agent-composer-footer {
+	margin-top: 4px;
 }
 .ticket-details .agent-composer label {
 	margin: 0 0 4px;
@@ -1627,9 +1630,6 @@ button.ticket-description-text:hover {
 		max-width: 120px;
 		font-size: 11px;
 		padding: 3px;
-	}
-	.ticket-details .agent-composer textarea {
-		height: 48px;
 	}
 	.ticket-details .agent-composer {
 		gap: 4px;

@@ -665,7 +665,6 @@ export const TicketDetails = ({
 				{ticket.status !== "backlog" && <p>Scope is fixed after planning starts. Discuss changes in chat.</p>}
 			</div>
 			<div className='ticket-chat' {...panel("chat")}>
-				{job?.state === "running" && <small role='status'>Applies to next turn</small>}
 				{currentId ? (
 					<Conversation
 						key={currentId}
@@ -720,9 +719,6 @@ export const TicketDetails = ({
 								: "Move this ticket to Ready for development to queue planning."
 							: "Waiting for a ticket agent to start."}
 					</p>
-				)}
-				{blocked && ticket.status === "in-progress" && (
-					<p role='status'>Messages unavailable while {job?.state ?? "loading"}.</p>
 				)}
 			</div>
 			<div className='ticket-cost' {...panel("cost")}>
