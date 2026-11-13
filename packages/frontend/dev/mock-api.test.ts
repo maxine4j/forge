@@ -23,7 +23,13 @@ import {
 	pullRequestPreviewSchema,
 } from "@forge/contracts/pull-requests";
 import { terminalStatusSchema } from "@forge/contracts/terminal";
-import { ticketsSchema, ticketSchema, ticketWorkflowSchema } from "@forge/contracts/tickets";
+import {
+	epicDetailSchema,
+	epicsSchema,
+	ticketsSchema,
+	ticketSchema,
+	ticketWorkflowSchema,
+} from "@forge/contracts/tickets";
 import { createServer, resolveConfig } from "vite";
 import type { ViteDevServer } from "vite";
 import { afterAll, beforeAll, expect, test } from "vitest";
@@ -127,6 +133,26 @@ test("mock board exposes global tickets across the workflow", async () => {
 			);
 		}
 	}
+});
+
+test("mock epic and planning chat open from the ticket awaiting review", async () => {
+	const epics = epicsSchema.parse(await read("/api/epics"));
+	expect(epics.length).toBeGreaterThan(1);
+	const ticket = ticketSchema.parse(await read("/api/tickets/TASK-2"));
+	const epic = epics.find(({ id }) => id === ticket.epicId);
+	expect(epic).toBeDefined();
+	const detail = epicDetailSchema.parse(await read(`/api/epics/${epic!.id}`));
+	expect(detail.children).toContainEqual(ticket);
+	expect(detail.total).toBe(detail.children.length);
+	const workflow = ticketWorkflowSchema.parse(await read("/api/tickets/TASK-2/workflow"));
+	expect(workflow.plannerId).toBeDefined();
+	const chat = agentViewSchema.parse(await read(`/api/agents/${workflow.plannerId}`));
+	expect(chat.thread.projectId).toBe(ticket.repositoryIds[0]);
+	expect(chat.items.map(({ role }) => role)).toEqual(expect.arrayContaining(["user", "activity", "assistant"]));
+	expect(chat.items.at(-1)).toMatchObject({ kind: "plan", text: workflow.plan?.text });
+	const events = await fetch(new URL(`/api/agents/${workflow.plannerId}/events`, origin), { method: "HEAD" });
+	expect(events.status).toBe(200);
+	expect(events.headers.get("content-type")).toBe("text/event-stream");
 });
 
 test("mock board serves container statistics and rejects Docker cleanup", async () => {

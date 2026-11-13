@@ -358,14 +358,20 @@ for (const view of ["board", "backlog"]) {
 		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 		await dialog.getByLabel("Status", { exact: true }).selectOption("todo");
 		await dialog.getByRole("tab", { name: "Details", exact: true }).click();
-		await expect(dialog.getByLabel("Title", { exact: true })).toBeDisabled();
+		await expect(dialog.getByRole("button", { name: /^Edit title:/ })).toHaveCount(0);
 		await dialog.getByLabel("Status", { exact: true }).selectOption("backlog");
-		await expect(dialog.getByLabel("Title", { exact: true })).toBeEnabled();
-		await expect(dialog.getByLabel("Epic", { exact: true })).toBeEnabled();
+		await dialog.getByRole("button", { name: /^Edit title:/ }).click();
+		await expect(dialog.getByRole("button", { name: "Add epic" })).toBeEnabled();
 		await dialog.getByLabel("Title", { exact: true }).fill("Returned scope");
+		await dialog.getByLabel("Title", { exact: true }).press("Enter");
+		await expect(dialog.getByRole("button", { name: /^Edit title:/ })).toHaveText("Returned scope");
 		const reference = "123e4567-e89b-42d3-a456-426614174001";
-		await dialog.getByLabel("Add repository").selectOption(reference);
-		await dialog.getByRole("button", { name: "Move repository 2 up", exact: true }).click();
+		const repositories = dialog.getByRole("button", { name: "Repositories", exact: true });
+		await repositories.click();
+		await dialog.getByRole("button", { name: "Clear repositories" }).click();
+		await dialog.getByRole("checkbox", { name: "Reference repo" }).check();
+		await dialog.getByRole("checkbox", { name: "Forge", exact: true }).check();
+		await repositories.press("Escape");
 		await dialog.getByRole("button", { name: "Save", exact: true }).click();
 		await page.getByRole("button", { name: "TASK-1 Returned scope", exact: true }).click();
 		await dialog.getByLabel("Status", { exact: true }).selectOption("todo");
@@ -399,7 +405,7 @@ test("Ready drag returns to Backlog and stale return refreshes pickup eligibilit
 	await expect(page.getByLabel("Status", { exact: true })).toBeDisabled();
 	await expect(page.getByRole("dialog").getByRole("alert")).toContainText("This transition is not available");
 	await page.getByRole("tab", { name: "Details", exact: true }).click();
-	await expect(page.getByLabel("Title", { exact: true })).toBeDisabled();
+	await expect(page.getByRole("button", { name: /^Edit title:/ })).toHaveCount(0);
 });
 
 test("task views persist URL selection, history and ticket deep links with keyboard tabs", async ({ page }) => {
@@ -452,7 +458,7 @@ test("backlog filters unfinished tickets in API order and polling retains an ope
 	await expect(table.getByRole("img", { name: "Action required" })).toHaveCount(1);
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
-	await expect(dialog.getByLabel("Title", { exact: true })).toBeDisabled();
+	await expect(dialog.getByRole("button", { name: /^Edit title:/ })).toHaveCount(0);
 	f.tickets()[0]!.status = "done";
 	await expect(table.locator("tbody tr:has(td)")).toHaveCount(2);
 	await expect(dialog).toBeVisible();
@@ -479,12 +485,16 @@ test("epic groups include empty and completed sections, preserve collapse throug
 	f.tickets().push({ ...f.tickets()[0]!, id: "TASK-3", status: "done", epicId: "EPIC-3" });
 	f.tickets().push({ ...f.tickets()[0]!, id: "TASK-4", status: "done", epicId: "EPIC-1" });
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
-	await expect(page.locator(".epic-heading")).toHaveText([
+	await expect(page.getByRole("table")).toHaveCount(4);
+	await expect(page.locator(".backlog-section-header")).toHaveText([
 		"No epic",
 		/EPIC-1.*1 unfinished.*1\/2 Done/,
 		/EPIC-2.*0 unfinished.*0\/0 Done/,
 		/EPIC-3.*0 unfinished.*1\/1 Done.*Complete/,
 	]);
+	const epicTable = page.getByRole("table", { name: "EPIC-1 · Epic 1", exact: true });
+	await expect(epicTable.getByRole("button", { name: "TASK-1 First task", exact: true })).toBeVisible();
+	await expect(page.getByRole("table", { name: "No epic", exact: true })).not.toContainText("TASK-1");
 	const collapse = page.getByRole("button", { name: "Collapse EPIC-1", exact: true });
 	await collapse.focus();
 	await collapse.press("Enter");
@@ -508,6 +518,8 @@ test("epic groups include empty and completed sections, preserve collapse throug
 	await page.evaluate(() => localStorage.setItem("forge.epics.collapsed.v1", "malformed"));
 	await page.reload();
 	await expect(page.getByRole("button", { name: "Collapse EPIC-1", exact: true })).toBeVisible();
+	await page.getByRole("heading", { name: "EPIC-1 · Epic 1", exact: true }).getByRole("button").click();
+	await expect(page.getByRole("dialog", { name: "EPIC-1", exact: true })).toBeVisible();
 });
 
 test("epic details edit with retry, restore history, link Done children and preselect ticket creation", async ({
@@ -565,9 +577,7 @@ test("epic details edit with retry, restore history, link Done children and pres
 	await expect(dialog).toBeVisible();
 });
 
-test("epic selector assigns, removes and reassigns drafts and becomes read-only at Ready on narrow screens", async ({
-	page,
-}) => {
+test("epic breadcrumb assigns, changes and removes a draft parent and links to the epic at Ready", async ({ page }) => {
 	const f = await setup(page);
 	f.epics.push(
 		...[1, 2].map((number) => ({
@@ -579,22 +589,32 @@ test("epic selector assigns, removes and reassigns drafts and becomes read-only 
 	);
 	await page.setViewportSize({ width: 390, height: 844 });
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
-	for (const epicId of ["EPIC-1", "EPIC-2", ""]) {
+	for (const [action, choice, epicId] of [
+		["Add epic", "EPIC-1 · Milestone 1", "EPIC-1"],
+		["Change epic", "EPIC-2 · Milestone 2", "EPIC-2"],
+		["Change epic", "Remove epic", null],
+		["Add epic", "EPIC-1 · Milestone 1", "EPIC-1"],
+	] as const) {
 		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
-		await dialog.getByLabel("Epic", { exact: true }).selectOption(epicId);
+		await dialog.getByRole("button", { name: action, exact: true }).click();
+		await dialog
+			.getByRole("group", { name: "Choose epic" })
+			.getByRole("button", { name: choice, exact: true })
+			.click();
 		await dialog.getByRole("button", { name: "Save", exact: true }).click();
 		await expect(dialog).toHaveCount(0);
-		expect(f.tickets()[0]!.epicId).toBe(epicId || null);
+		expect(f.tickets()[0]!.epicId).toBe(epicId);
 	}
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 	await dialog.getByLabel("Status", { exact: true }).selectOption("todo");
-	await expect(dialog.getByLabel("Epic", { exact: true })).toBeDisabled();
-	await dialog.getByRole("button", { name: "Close ticket", exact: true }).click();
+	await expect(dialog.getByRole("button", { name: "Change epic" })).toHaveCount(0);
 	await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
-	await page.getByRole("button", { name: "EPIC-1 · Milestone 1", exact: true }).click();
+	await dialog.getByRole("button", { name: "EPIC-1 · Milestone 1", exact: true }).click();
 	await expect(page.getByRole("dialog", { name: "EPIC-1", exact: true })).toBeVisible();
+	await page.goBack();
+	await expect(dialog.getByRole("button", { name: "EPIC-1 · Milestone 1", exact: true })).toBeVisible();
 	await page.screenshot({ path: "../../artifacts/forge-browser/epic-mobile.png" });
 });
 
@@ -609,7 +629,7 @@ test("epic disclosure works without browser storage and section creation presele
 	const f = await setup(page);
 	f.epics.push({ id: "EPIC-1", title: "Milestone", description: "", createdAt });
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
-	const header = page.locator(".epic-heading").filter({ hasText: "EPIC-1" });
+	const header = page.locator(".backlog-section-header").filter({ hasText: "EPIC-1" });
 	await header.getByRole("button", { name: "Collapse EPIC-1", exact: true }).click();
 	await expect(header.getByRole("button", { name: "Expand EPIC-1", exact: true })).toHaveAttribute(
 		"aria-expanded",
@@ -623,6 +643,54 @@ test("epic disclosure works without browser storage and section creation presele
 		"aria-expanded",
 		"false",
 	);
+});
+
+test("inline ticket title saves independently and supports keyboard and button discard", async ({ page }) => {
+	const f = await setup(page);
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	const details = dialog.getByRole("tabpanel", { name: "Details" });
+	const settings = details.getByRole("group", { name: "Agent Settings" });
+	const description = details.getByLabel("Description", { exact: true });
+	const edit = dialog.getByRole("button", { name: /^Edit title:/ });
+	const title = dialog.getByRole("textbox", { name: "Title", exact: true });
+	await expect(edit).toHaveText("First task");
+	await expect(title).toHaveCount(0);
+	await expect(settings.getByLabel("Model", { exact: true })).toBeVisible();
+	const repos = await details.getByRole("button", { name: "Repositories", exact: true }).boundingBox();
+	expect((await settings.boundingBox())!.y).toBeGreaterThan(repos!.y);
+	await description.fill("Unsaved scope");
+	await edit.click();
+	await expect(title).toBeFocused();
+	await title.fill("Discard via keyboard");
+	await title.press("Escape");
+	await expect(edit).toBeFocused();
+	await expect(edit).toHaveText("First task");
+	await edit.press("Enter");
+	await title.fill("Discard via button");
+	await dialog.getByRole("button", { name: "Discard title changes" }).click();
+	await expect(edit).toHaveText("First task");
+	await edit.click();
+	await title.fill("   ");
+	await title.press("Enter");
+	await expect(dialog.getByRole("alert")).toContainText("Enter a title");
+	await title.fill("Updated via keyboard");
+	f.failSaves(true);
+	await title.press("Enter");
+	await expect(dialog.getByRole("alert")).toBeVisible();
+	await expect(title).toHaveValue("Updated via keyboard");
+	f.failSaves(false);
+	await title.press("Enter");
+	await expect(edit).toHaveText("Updated via keyboard");
+	await expect(edit).toBeFocused();
+	await expect(description).toHaveValue("Unsaved scope");
+	expect(f.tickets()[0]!.description).not.toBe("Unsaved scope");
+	await edit.click();
+	await title.fill("Updated via button");
+	await dialog.getByRole("button", { name: "Save title" }).click();
+	await expect(edit).toHaveText("Updated via button");
+	await expect(dialog).toBeVisible();
+	expect(f.tickets()[0]!.title).toBe("Updated via button");
 });
 
 test("backlog creation and scope saves retain failed drafts and share changes with Board", async ({ page }) => {
@@ -645,10 +713,10 @@ test("backlog creation and scope saves retain failed drafts and share changes wi
 	await open.focus();
 	await open.press("Enter");
 	dialog = page.getByRole("dialog", { name: "TASK-3", exact: true });
-	await dialog.getByLabel("Title", { exact: true }).fill("   ");
-	await dialog.getByRole("button", { name: "Save", exact: true }).click();
-	await expect(dialog.getByRole("alert")).toContainText("Enter a title");
+	await dialog.getByRole("button", { name: /^Edit title:/ }).click();
 	await dialog.getByLabel("Title", { exact: true }).fill("Updated task");
+	await dialog.getByLabel("Title", { exact: true }).press("Enter");
+	await expect(dialog.getByRole("button", { name: /^Edit title:/ })).toHaveText("Updated task");
 	await dialog.getByLabel("Description", { exact: true }).fill("Updated scope");
 	f.failSaves(true);
 	await dialog.getByRole("button", { name: "Save", exact: true }).click();
@@ -664,7 +732,7 @@ test("backlog creation and scope saves retain failed drafts and share changes wi
 	await expect(page.getByRole("button", { name: "TASK-3 Updated task", exact: true })).toBeVisible();
 	await page.getByRole("button", { name: "TASK-3 Updated task", exact: true }).click();
 	await dialog.getByLabel("Status", { exact: true }).selectOption("todo");
-	await expect(dialog.getByLabel("Title", { exact: true })).toBeDisabled();
+	await expect(dialog.getByRole("button", { name: /^Edit title:/ })).toHaveCount(0);
 	await dialog.getByRole("button", { name: "Close ticket" }).click();
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
 	await expect(page.getByRole("row").filter({ hasText: "Updated task" })).toContainText("Ready for development");
@@ -721,8 +789,7 @@ for (const width of [1280, 390]) {
 		});
 		await expect(page.getByRole("columnheader", { name: "Key", exact: true })).toBeInViewport();
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-		if (width === 390)
-			expect(await scroll.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(true);
+		expect(await scroll.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
 		await page.screenshot({ path: `../../artifacts/forge-browser/tasks-backlog-${width}.png` });
 	});
 }
@@ -742,20 +809,26 @@ test("global board creates unassigned tickets and saves ordered references", asy
 	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
 	dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
 	await dialog.getByLabel("Title", { exact: true }).fill("Several repositories");
-	await dialog.getByLabel("Add repository").selectOption(projectId);
+	await dialog.getByRole("button", { name: "Repositories" }).click();
 	const first = "123e4567-e89b-42d3-a456-426614174001";
-	await dialog.getByLabel("Add repository").selectOption(first);
-	await dialog.getByRole("button", { name: "Move repository 2 up", exact: true }).click();
+	await dialog.getByRole("checkbox", { name: "Reference repo" }).check();
+	await dialog.getByRole("checkbox", { name: "Forge", exact: true }).check();
+	await page.keyboard.press("Escape");
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-	await expect(dialog.getByText("Reference repo · Execution repository", { exact: true })).toBeVisible();
 	await dialog.getByRole("button", { name: "Create", exact: true }).click();
 	expect(f.tickets().find((ticket) => ticket.id === "TASK-4")?.repositoryIds).toEqual([first, projectId]);
 	await page.reload();
 	await page.getByRole("button", { name: "TASK-4 Several repositories", exact: true }).click();
 	const details = page.getByRole("dialog", { name: "TASK-4", exact: true });
-	await expect(details.getByText("Reference repo · Execution repository", { exact: true })).toBeVisible();
-	await details.getByRole("button", { name: "Move repository 2 up", exact: true }).click();
+	await details.getByRole("button", { name: "Repositories", exact: true }).click();
+	await expect(details.getByRole("checkbox", { name: "Reference repo" })).toBeChecked();
+	await details.getByRole("button", { name: "Clear repositories" }).click();
+	await expect(details.getByRole("checkbox", { name: "Reference repo" })).not.toBeChecked();
+	await details.getByRole("checkbox", { name: "Forge", exact: true }).check();
+	await details.getByRole("checkbox", { name: "Reference repo" }).check();
+	await page.keyboard.press("Escape");
 	await details.getByRole("button", { name: "Save", exact: true }).click();
+	await expect(details).toHaveCount(0);
 	expect(f.tickets().find((ticket) => ticket.id === "TASK-4")?.repositoryIds).toEqual([projectId, first]);
 	await expect(page.getByRole("button", { name: "TASK-3 No repositories needed", exact: true })).toBeVisible();
 });
@@ -1530,9 +1603,10 @@ test("create and edit tickets; status menu queues planning and survives reopenin
 	await dialog.getByRole("button", { name: "Create", exact: true }).click();
 	await expect(page.getByRole("button", { name: "TASK-3 New task", exact: true })).toBeVisible();
 	await page.getByRole("button", { name: "TASK-3 New task", exact: true }).click();
+	await dialog.getByRole("button", { name: /^Edit title:/ }).click();
 	await dialog.getByLabel("Title", { exact: true }).fill("Updated task");
-	await dialog.getByRole("button", { name: "Save", exact: true }).click();
-	await page.getByRole("button", { name: "TASK-3 Updated task", exact: true }).click();
+	await dialog.getByRole("button", { name: "Save title" }).click();
+	await expect(dialog.getByRole("button", { name: /^Edit title:/ })).toHaveText("Updated task");
 	await dialog.getByLabel("Status", { exact: true }).selectOption("todo");
 	await expect(dialog.getByLabel("Status", { exact: true })).toHaveValue("todo");
 	await dialog.getByRole("button", { name: "Close ticket", exact: true }).click();
@@ -1649,11 +1723,22 @@ test("a plan needs attention on the four-column board and approval submits the d
 	await expect(dot).toBeVisible();
 	await card.getByRole("button", { name: "TASK-1 First task" }).click();
 	const panel = page.getByRole("dialog");
-	await expect(panel.getByRole("heading", { name: "Search plan" })).toBeVisible();
-	await expect(panel.getByRole("listitem")).toHaveText("Add filtering.");
-	await expect(panel.getByText("unsafe")).toHaveCount(0);
-	await panel.getByRole("button", { name: "Approve plan", exact: true }).click();
+	const details = panel.getByRole("tab", { name: "Details", exact: true });
+	const chat = panel.getByRole("tab", { name: "Chat", exact: true });
+	await details.click();
+	const plan = panel.getByRole("region", { name: "Plan", exact: true });
+	await expect(plan.getByRole("heading", { name: "Search plan" })).toBeVisible();
+	await expect(plan.getByRole("listitem")).toHaveText("Add filtering.");
+	await expect(plan.getByText("unsafe")).toHaveCount(0);
+	await plan.getByRole("button", { name: "Request changes", exact: true }).click();
+	await expect(chat).toHaveAttribute("aria-selected", "true");
+	await expect(panel.getByLabel("Message", { exact: true })).toHaveValue("");
+	expect(f.approvals).toEqual([]);
+	await details.click();
+	await plan.getByRole("button", { name: "Approve plan", exact: true }).click();
 	await expect.poll(() => f.approvals).toEqual([{ revision: 1 }]);
+	await expect(plan.getByRole("button")).toHaveCount(0);
+	await expect(plan.getByRole("heading", { name: "Search plan" })).toBeVisible();
 	await panel.getByRole("button", { name: "Close ticket" }).click();
 	await expect(dot).toHaveCount(0);
 	await expect(card.getByRole("img", { name: "Agent queued" })).toBeVisible();
@@ -1682,7 +1767,7 @@ for (const archived of [false, true]) {
 		await expect(modal.getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
 		if (archived) {
 			await expect(modal.getByText("Archived · Read only")).toBeVisible();
-			await expect(modal.getByLabel("Title", { exact: true })).toBeDisabled();
+			await expect(modal.getByRole("button", { name: /^Edit title:/ })).toHaveCount(0);
 			await expect(modal.getByLabel("Description", { exact: true })).toBeDisabled();
 			await expect(modal.getByLabel("Status", { exact: true })).toBeDisabled();
 			await expect(modal.getByRole("button", { name: "Archive ticket" })).toBeDisabled();

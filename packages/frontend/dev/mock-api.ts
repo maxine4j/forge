@@ -1,7 +1,8 @@
 import type { Costs } from "@forge/contracts";
+import type { AgentView } from "@forge/contracts/agents";
 import type { DockerOverview } from "@forge/contracts/docker";
 import { defaultForgeSettings } from "@forge/contracts/settings";
-import { defaultBoardSettings } from "@forge/contracts/tickets";
+import { defaultBoardSettings, type EpicDetail, type Ticket } from "@forge/contracts/tickets";
 import type { Plugin } from "vite";
 
 import { costFixture, phaseFixtures } from "./cost-fixture.ts";
@@ -34,6 +35,18 @@ const projects = [
 	},
 	{ id: "123e4567-e89b-42d3-a456-426614174010", name: "Homelab dashboard", status: "ready", createdAt: date },
 ];
+const epics = [
+	{
+		id: "EPIC-1",
+		title: "Repository experience",
+		description: "Improve how people browse and navigate repositories.",
+	},
+	{ id: "EPIC-2", title: "Dashboard foundations", description: "Build the first set of Homelab dashboard features." },
+];
+const navigationPlan = {
+	revision: 1,
+	text: "## Repository navigation\n\n- Keep the active section visible on mobile.\n- Preserve links to each section when the layout changes.",
+};
 const dockerOverview: DockerOverview = {
 	available: true,
 	statisticsAt: date,
@@ -89,9 +102,8 @@ export class MockApi implements IMockApi {
 			github: { connection: "available", login: { state: "idle" } },
 		}));
 		const costData: Costs[] = [];
-		const boardTickets: unknown[] = [];
+		const boardTickets: Ticket[] = [];
 		this.routes.set("/api/tickets", () => boardTickets);
-		this.routes.set("/api/epics", () => []);
 		this.routes.set("/api/costs", () => {
 			const first = costData[0]!;
 			return {
@@ -119,7 +131,8 @@ export class MockApi implements IMockApi {
 				})),
 			};
 		});
-		for (const project of projects) {
+		for (const [projectIndex, project] of projects.entries()) {
+			const epicId = epics[projectIndex]!.id;
 			const id = project.id.replace(/0$/, "1");
 			const prId = project.id.replace(/0$/, "2");
 			const workspace = {
@@ -153,10 +166,11 @@ export class MockApi implements IMockApi {
 				status: "waiting",
 			};
 			this.routes.set(`${projectRoot}/agents`, () => [agent]);
-			this.routes.set(`/api/agents/${agent.id}/options`, () => ({
+			const agentOptions = () => ({
 				models: [{ id: "preview-model", name: "Codex", isDefault: true }],
 				skills: [{ name: "review", description: "Review changes and check behavior" }],
-			}));
+			});
+			this.routes.set(`/api/agents/${agent.id}/options`, agentOptions);
 			this.routes.set(`/api/agents/${agent.id}/files`, () => ["src/main.ts"]);
 			this.routes.set(`/api/agents/${agent.id}`, () => ({
 				thread: agent,
@@ -199,11 +213,12 @@ export class MockApi implements IMockApi {
 				],
 				truncated: false,
 			}));
-			const tickets = [
+			const tickets: Ticket[] = [
 				{
 					id: `TASK-${project.id === projects.at(0)!.id ? 11 : 13}`,
 					repositoryIds: [project.id],
 					title: "Add keyboard navigation",
+					epicId,
 					description: "Support keyboard shortcuts.",
 					status: "todo",
 					agentStatus: "queued",
@@ -230,6 +245,7 @@ export class MockApi implements IMockApi {
 					id: `TASK-${project.id === projects.at(0)!.id ? 2 : 5}`,
 					repositoryIds: [project.id],
 					title: "Improve repository navigation",
+					epicId,
 					description:
 						"Review the completed navigation plan. The orange card and red dot remain until the plan is approved.",
 					status: "in-progress",
@@ -240,6 +256,7 @@ export class MockApi implements IMockApi {
 					id: `TASK-${project.id === projects.at(0)!.id ? 3 : 6}`,
 					repositoryIds: [project.id],
 					title: "Set up the repository",
+					epicId,
 					description: "Create the initial repository.",
 					status: "done",
 					createdAt: date,
@@ -317,8 +334,47 @@ export class MockApi implements IMockApi {
 					ticket: row,
 				}));
 			for (const ticket of tickets) {
+				const plannerId = ticket.needsAttention ? project.id.replace(/0$/, "7") : undefined;
+				if (plannerId) {
+					const conversation: AgentView = {
+						thread: {
+							id: plannerId,
+							projectId: project.id,
+							workspaceId: id,
+							title: ticket.title,
+							createdAt: date,
+							status: "idle",
+						},
+						items: [
+							{
+								id: "scope",
+								role: "user",
+								text: "Make repository navigation easier to use on smaller screens.",
+							},
+							{
+								id: "inspect",
+								role: "activity",
+								title: "Read repository navigation",
+								status: "completed",
+								text: "Reviewed the repository tabs and their links at desktop and mobile widths.",
+							},
+							{
+								id: "findings",
+								role: "assistant",
+								text: "The tabs can overflow on narrow screens. I’ll keep the active tab in view and preserve links to each section.",
+							},
+							{ id: "plan", role: "assistant", kind: "plan", text: navigationPlan.text },
+						],
+						requests: [],
+						truncated: false,
+						contextWindow: { used: 8200, max: 128000 },
+					};
+					this.routes.set(`/api/agents/${plannerId}`, () => conversation);
+					this.routes.set(`/api/agents/${plannerId}/options`, agentOptions);
+					this.routes.set(`/api/agents/${plannerId}/files`, () => Object.keys(files));
+				}
 				this.routes.set(`/api/tickets/${ticket.id}`, () => ticket);
-				this.routes.set(`/api/tickets/${ticket.id}/model-options`, () => ({ models: [], skills: [] }));
+				this.routes.set(`/api/tickets/${ticket.id}/model-options`, agentOptions);
 				this.routes.set(`/api/tickets/${ticket.id}/workflow`, () => ({
 					ticketId: ticket.id,
 					phase: ticket.status === "done" ? "implementation" : "planning",
@@ -329,14 +385,7 @@ export class MockApi implements IMockApi {
 								? "running"
 								: "idle",
 					mergeAttempts: 0,
-					...(ticket.needsAttention
-						? {
-								plan: {
-									revision: 1,
-									text: "## Repository navigation\n\n- Keep the active section visible on mobile.\n- Preserve links to each section when the layout changes.",
-								},
-							}
-						: {}),
+					...(plannerId ? { plannerId, plan: navigationPlan } : {}),
 				}));
 			}
 			const workspaceRoot = `/api/workspaces/${id}`;
@@ -478,6 +527,23 @@ export class MockApi implements IMockApi {
 				diff: change,
 			}));
 		}
+		const summaries = epics.map((epic) => {
+			const children = boardTickets.filter((ticket) => ticket.epicId === epic.id);
+			const counts = { backlog: 0, todo: 0, "in-progress": 0, done: 0 };
+			for (const child of children) counts[child.status]++;
+			const summary = {
+				...epic,
+				createdAt: date,
+				counts,
+				total: children.length,
+				done: counts.done,
+				complete: children.length > 0 && counts.done === children.length,
+			};
+			const detail: EpicDetail = { ...summary, children };
+			this.routes.set(`/api/epics/${epic.id}`, () => detail);
+			return summary;
+		});
+		this.routes.set("/api/epics", () => summaries);
 	}
 
 	read(url: URL): unknown {
@@ -538,6 +604,15 @@ export const mockApi = (): Plugin => ({
 				response.setHeader("Allow", "GET, HEAD");
 				response.end(JSON.stringify({ error: "mock-read-only" }));
 				return;
+			}
+			if (/^\/api\/agents\/[^/]+\/events$/u.test(url.pathname)) {
+				const agentUrl = new URL(url.pathname.slice(0, -"/events".length), url);
+				if (api.read(agentUrl)) {
+					response.setHeader("Content-Type", "text/event-stream");
+					if (request.method === "HEAD") response.end();
+					else response.write(": connected\n\n");
+					return;
+				}
 			}
 			const value = api.read(url);
 			response.statusCode = value === undefined ? 404 : 200;

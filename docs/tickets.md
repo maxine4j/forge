@@ -7,13 +7,13 @@ Tasks has nested Board and Backlog tabs. `/tasks` opens Board by default;
 Board. Both preserve `?ticket=:id` for details, reload and browser history,
 including existing archived-ticket links from [Costs](#ticket-cost).
 
-Backlog is a compact Key, Title and Status table of non-archived tickets in
+Backlog shows compact Key, Title and Status tables of non-archived tickets in
 Backlog, Ready for development and In progress; Done is excluded. Its visible
 count follows shared one-second polling; rows retain API order within epic sections.
 Both views use the same collection, create/details dialogs, status transitions,
 archive controls and attention/agent indicators. Polling removes completed or
-archived rows without closing an open ticket. The table scrolls with a sticky
-header and horizontal overflow on narrow screens. Arrow keys, Home and End
+archived rows without closing an open ticket. The tables scroll with sticky
+column headers and wrap ticket titles on narrow screens. Arrow keys, Home and End
 select views; ticket-open buttons and dialog tabs support keyboard navigation.
 Creation starts in Backlog. Scope and repository selection remain editable only
 in Backlog status, regardless of selected view; Ready and In progress retain
@@ -48,8 +48,9 @@ creation. New tickets start in Backlog, where the owner can edit a trimmed title
 (1–120 characters), plain-text description (0–4000 characters, default empty), and
 ordered `repositoryIds`. Duplicate and unknown references are rejected. Backlog
 allows no references. The first selection is the execution repository; additional
-selections are references only. The GUI supports adding, removing and reordering
-selections. References never filter visibility or determine board position.
+selections are references only. The repository dropdown keeps selections in the
+order they were added. Clear the field and select repositories again to change
+their order. References never filter visibility or determine board position.
 There can be at most 1000 active tickets across the board.
 
 Moving to Ready requires a ready first repository. Dispatch revalidates readiness
@@ -185,9 +186,12 @@ checks. Transition conflicts return 409. Board and ticket details refresh while
 execution continues. The global board opens at `/tasks`; selection uses `/tasks?ticket=:id`. Details,
 workflow, model options and cost load by ticket ID even outside active board
 membership. Removed repository ticket APIs return not-found. The ticket modal has keyboard-accessible Details, Chat and Cost
-tabs. Chat opens by default once planning starts. One scroll container shows the
-planner conversation and native Markdown plan revisions chronologically. Approve
-plan attaches to the latest completed plan only while the workflow is idle;
+tabs. Details shows the latest saved Markdown plan below Description, including
+after approval. While a plan awaits approval, Details offers Approve plan and
+Request changes, which opens Chat. Chat opens by default once planning starts.
+One scroll container shows the planner conversation and native Markdown plan
+revisions chronologically. Approve plan applies to the latest completed plan
+only while the workflow is idle;
 feedback queues a revision and disables approval until it finishes. The saved
 workflow revision remains the approval authority.
 
@@ -238,9 +242,10 @@ or membership. Both persist atomically inside the workflow serialization boundar
 shared with Ready transitions. Membership never changes ticket positions.
 
 Backlog shows No epic first, then every epic in increasing numeric order,
-including empty and completed epics. Each section preserves the unfinished-ticket
-filter and ticket order. Headers show key, title, unfinished count and Done/total,
-with separate disclosure and details buttons. Disclosures have `aria-expanded`
+including empty and completed epics. Each section has its own table and preserves
+the unfinished-ticket filter and ticket order. Headers show the epic icon, key,
+title, unfinished count and Done/total. The title opens the epic and the adjacent
+chevron collapses or expands its table. Disclosures have `aria-expanded`
 and `aria-controls`; collapsed IDs use browser storage key
 `forge.epics.collapsed.v1`, tolerating malformed or unavailable storage. One-second
 polling and mutations refresh tickets and epic summaries together, preserving
@@ -248,8 +253,9 @@ collapse state and unsaved dialog edits. Errors remain retryable in open dialogs
 
 Create epic opens an editable dialog with progress and child links. The URL
 `/tasks?view=backlog&epic=EPIC-n` restores it on reload and Back/Forward. Ticket
-creation and draft editing offer an optional Epic selector with No epic; later
-statuses show membership read-only. Create ticket in an epic header or its details
+creation offers an optional Epic selector. In ticket details, the header shows a
+linked breadcrumb for an assigned epic. Backlog drafts can add, change or remove
+their parent there and persist the change with Save. Create ticket in an epic header or its details
 preselects that epic. See [persistence](architecture.md#persistence-and-recovery)
 and the required [database backup and recreation](development.md#development-databases).
 
@@ -311,8 +317,9 @@ ticket cleanup.
 Tickets accept optional `executionSettings: {model?, reasoningEffort?, permissions?}`
 on creation and return the saved selection on reads. Owner-authorized
 `PATCH /api/tickets/:id/settings` replaces that selection independently of Backlog
-scope editing, with exact-origin checks. Settings are editable in Details before
-moving to Ready and in the shared chat composer. Changes save immediately and
+scope editing, with exact-origin checks. The title above the ticket tabs saves
+independently of other Backlog edits. Agent Settings appear below Repositories
+in Details and are shared with the chat composer. Changes save immediately and
 remain shared across polling, reopening and planner-to-implementer transitions.
 Done and archived tickets retain their settings but cannot change them.
 

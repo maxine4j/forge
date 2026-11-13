@@ -422,6 +422,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 			{visible && selectedTicket && (
 				<TicketDetails
 					epics={epics}
+					openEpic={openEpic}
 					key={selectedTicket.id}
 					ticket={
 						selectedTicket.archivedAt
@@ -444,7 +445,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 					}
 					move={move}
 					refreshBoard={() => poller.current?.refresh()}
-					save={(input) =>
+					save={(input, closeAfterSave = true) =>
 						mutate(async () => {
 							const updated = await api.read(
 								`tickets/${selectedTicket.id}`,
@@ -455,7 +456,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 							setTickets((current) =>
 								current.map((ticket) => (ticket.id === updated.id ? updated : ticket)),
 							);
-							closeTicket();
+							if (closeAfterSave) closeTicket();
 						})
 					}
 				/>

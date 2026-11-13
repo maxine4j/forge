@@ -3,6 +3,14 @@ import { lazy, Suspense, type ReactNode } from "react";
 
 const Markdown = lazy(() => import("react-markdown"));
 
+export const PlanMarkdown = ({ text }: { text: string }) => (
+	<Suspense fallback={<div>{text}</div>}>
+		<Markdown skipHtml disallowedElements={["img"]}>
+			{text}
+		</Markdown>
+	</Suspense>
+);
+
 const ToolGroup = ({ items }: { items: AgentItem[] }) => {
 	const running = items.some((item) => item.status === "running");
 	const failed = items.some((item) => item.status === "failed");
@@ -80,15 +88,7 @@ export const AgentActivity = ({
 				className={`agent-message agent-message-${item.role}`}
 				aria-label={item.role === "user" ? "You" : "Codex"}
 			>
-				{item.kind === "plan" ? (
-					<Suspense fallback={<div>{item.text}</div>}>
-						<Markdown skipHtml disallowedElements={["img"]}>
-							{item.text}
-						</Markdown>
-					</Suspense>
-				) : (
-					<div>{item.text}</div>
-				)}
+				{item.kind === "plan" ? <PlanMarkdown text={item.text} /> : <div>{item.text}</div>}
 				{item === latestPlan && item.text.trim() === planText && planAction}
 			</article>
 		);

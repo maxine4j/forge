@@ -1,9 +1,9 @@
 import type { EpicSummary } from "@forge/contracts/tickets";
-import { Fragment } from "react";
 
+import { EpicIcon } from "./epic-icon.tsx";
 import type { TaskViewProps } from "./task-board.tsx";
-import { ticketLabels } from "./ticket-details.tsx";
 import { TicketIndicator } from "./ticket-indicator.tsx";
+import { ticketLabels } from "./ticket-labels.ts";
 export const TaskBacklog = ({
 	tickets,
 	busy,
@@ -60,51 +60,69 @@ export const TaskBacklog = ({
 				tabIndex={0}
 				aria-busy={busy || loading}
 			>
-				<table className='backlog-table'>
-					<caption>Unfinished tickets</caption>
-					<thead>
-						<tr>
-							<th scope='col'>Key</th>
-							<th scope='col'>Title</th>
-							<th scope='col'>Status</th>
-						</tr>
-					</thead>
-					{[undefined, ...epics].map((epic) => {
-						const rows = unfinished.filter((ticket) => (ticket.epicId ?? undefined) === epic?.id);
-						const expanded = !epic || !collapsed.includes(epic.id);
-						return (
-							<Fragment key={epic?.id ?? "none"}>
-								<tbody>
-									<tr className='epic-heading'>
-										<th colSpan={3} scope='colgroup'>
-											{epic ? (
-												<div className='epic-controls'>
-													<button
-														aria-expanded={expanded}
-														aria-controls={`children-${epic.id}`}
-														aria-label={`${expanded ? "Collapse" : "Expand"} ${epic.id}`}
-														onClick={() => toggleEpic(epic.id)}
-													>
-														{expanded ? "▾" : "▸"}
-													</button>
-													<button onClick={() => openEpic(epic.id)}>
-														{epic.id} · {epic.title}
-													</button>
-													<span>
-														{rows.length} unfinished · {epic.done}/{epic.total} Done
-														{epic.complete ? " · Complete" : ""}
-													</span>
-													<button disabled={busy} onClick={() => createInEpic(epic.id)}>
-														Create ticket
-													</button>
-												</div>
-											) : (
-												"No epic"
-											)}
-										</th>
+				{[undefined, ...epics].map((epic) => {
+					const rows = unfinished.filter((ticket) => (ticket.epicId ?? undefined) === epic?.id);
+					const expanded = !epic || !collapsed.includes(epic.id);
+					const titleId = `backlog-title-${epic?.id ?? "no-epic"}`;
+					const childrenId = `children-${epic?.id ?? "no-epic"}`;
+					return (
+						<section key={titleId} className='backlog-section'>
+							<div className='backlog-section-header'>
+								{epic && (
+									<button
+										className='backlog-epic-toggle'
+										aria-expanded={expanded}
+										aria-controls={childrenId}
+										aria-label={`${expanded ? "Collapse" : "Expand"} ${epic.id}`}
+										onClick={() => toggleEpic(epic.id)}
+									>
+										<span className='ticket-chevron' aria-hidden='true' />
+									</button>
+								)}
+								<h3 id={titleId}>
+									{epic ? (
+										<button className='backlog-epic-link' onClick={() => openEpic(epic.id)}>
+											<EpicIcon />
+											<span>
+												<span className='backlog-epic-key'>{epic.id}</span>
+												{" · "}
+												{epic.title}
+											</span>
+										</button>
+									) : (
+										"No epic"
+									)}
+								</h3>
+								{epic && (
+									<>
+										<span className='backlog-epic-progress'>
+											{rows.length} unfinished · {epic.done}/{epic.total} Done
+											{epic.complete ? " · Complete" : ""}
+										</span>
+										<button
+											className='backlog-epic-create'
+											disabled={busy}
+											onClick={() => createInEpic(epic.id)}
+										>
+											<span aria-hidden='true'>+</span> Create ticket
+										</button>
+									</>
+								)}
+							</div>
+							<table
+								className='backlog-table'
+								id={childrenId}
+								aria-labelledby={titleId}
+								hidden={!expanded}
+							>
+								<thead>
+									<tr>
+										<th scope='col'>Key</th>
+										<th scope='col'>Title</th>
+										<th scope='col'>Status</th>
 									</tr>
-								</tbody>
-								<tbody id={epic ? `children-${epic.id}` : "children-no-epic"} hidden={!expanded}>
+								</thead>
+								<tbody>
 									{rows.map((ticket) => (
 										<tr key={ticket.id} className={ticket.needsAttention ? "needs-attention" : ""}>
 											<td>
@@ -121,7 +139,11 @@ export const TaskBacklog = ({
 												{ticket.title}
 												<TicketIndicator ticket={ticket} />
 											</td>
-											<td>{ticketLabels[ticket.status]}</td>
+											<td>
+												<span className={`backlog-status ticket-status-${ticket.status}`}>
+													{ticketLabels[ticket.status]}
+												</span>
+											</td>
 										</tr>
 									))}
 									{epic && !rows.length && (
@@ -130,10 +152,10 @@ export const TaskBacklog = ({
 										</tr>
 									)}
 								</tbody>
-							</Fragment>
-						);
-					})}
-				</table>
+							</table>
+						</section>
+					);
+				})}
 				{!loading && !error && !unfinished.length && (
 					<p className='kanban-empty'>No unfinished tickets. Create a ticket to get started.</p>
 				)}
