@@ -17,6 +17,12 @@ export interface IRepositoryClient {
 	prepare(id: string, source?: string): Promise<void>;
 	/** Requires an owned bare repository, not merely an existing path. */
 	verify(id: string): Promise<void>;
+	/** Git configuration is authoritative; presence does not imply a readable/allowed URL. */
+	hasUpstream(id: string): Promise<boolean>;
+	/** Returns the configured URL after applying import URL restrictions. */
+	upstreamUrl(id: string): Promise<string>;
+	/** Adds only a missing upstream; preserves all existing configuration and refs. */
+	configureUpstream(id: string, source: string): Promise<void>;
 }
 export class RepositoryClient implements IRepositoryClient {
 	constructor(
@@ -35,6 +41,7 @@ export class RepositoryClient implements IRepositoryClient {
 			const target = join(root, `${id}.git`);
 			if (await this.exists(target)) {
 				await this.verify(id);
+				if (source !== undefined) await this.configureUpstream(id, source);
 				return;
 			}
 			const staging = join(root, `.${id}.pending`);
@@ -53,6 +60,7 @@ export class RepositoryClient implements IRepositoryClient {
 			await this.git.run(["init", "--bare", "--initial-branch=main", repository]);
 			await this.requireBare(repository);
 			if (source !== undefined) {
+				await this.addUpstream(repository, source);
 				// Fetching explicit heads/tags is idempotent after a crash; never runs checkout hooks or submodules.
 				await this.git.run([
 					"-C",
@@ -89,6 +97,39 @@ export class RepositoryClient implements IRepositoryClient {
 		} catch (cause) {
 			throw new RepositoryError({ cause });
 		}
+	}
+	async hasUpstream(id: string): Promise<boolean> {
+		await this.verify(id);
+		return this.remotePresent(join(this.dataDirectory, "repositories", `${id}.git`));
+	}
+	async upstreamUrl(id: string): Promise<string> {
+		await this.verify(id);
+		const url = (
+			await this.git.run([
+				"-C",
+				join(this.dataDirectory, "repositories", `${id}.git`),
+				"config",
+				"--local",
+				"--get",
+				"remote.upstream.url",
+			])
+		).trim();
+		this.validateSource(url);
+		return url;
+	}
+	async configureUpstream(id: string, source: string): Promise<void> {
+		await this.verify(id);
+		await this.addUpstream(join(this.dataDirectory, "repositories", `${id}.git`), source);
+	}
+	private async remotePresent(directory: string): Promise<boolean> {
+		const remotes = await this.git.run(["-C", directory, "remote"]);
+		return remotes.split(/\r?\n/u).includes("upstream");
+	}
+	private async addUpstream(directory: string, source: string): Promise<void> {
+		if (await this.remotePresent(directory)) return;
+		this.validateSource(source);
+		// One config write is atomic and retryable, with no fetch/ref changes.
+		await this.git.run(["-C", directory, "config", "--local", "remote.upstream.url", source]);
 	}
 	private validateSource(source: string): void {
 		remoteSourceSchema.parse(source);

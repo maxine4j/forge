@@ -1,51 +1,48 @@
 import { join } from "node:path";
 
-import { gitShaSchema } from "@forge/contracts";
+import { branchNameSchema, gitShaSchema } from "@forge/contracts";
 
 import { GitError, type IGitTransport } from "./git-transport.ts";
 import type { IRepositoryClient } from "./repository-client.ts";
-import type { GithubSyncDrift, GithubSyncResult } from "./types.ts";
+import type { UpstreamSyncDrift, UpstreamSyncResult } from "./types.ts";
 
-export interface IGithubSyncClient {
-	/** Compares the observed main refs. Throws if either ref or the remote is unavailable. */
-	status(id: string): Promise<GithubSyncDrift>;
-	/** Updates main by expected head, then pushes a descendant of the observed remote head. */
-	sync(id: string): Promise<GithubSyncResult>;
+export interface IUpstreamSyncClient {
+	/** Compares upstream's default branch. Throws if either ref or the remote is unavailable. */
+	status(id: string): Promise<UpstreamSyncDrift>;
+	/** Updates the captured branch by expected head, then pushes normally to the captured URL. */
+	sync(id: string): Promise<UpstreamSyncResult>;
 }
 
-export const forgeGithubRemote = "https://github.com/maxine4j/forge.git";
-const main = "refs/heads/main";
-
-export class GithubSyncClient implements IGithubSyncClient {
+export class UpstreamSyncClient implements IUpstreamSyncClient {
 	constructor(
 		private readonly dataDirectory: string,
 		private readonly repositories: IRepositoryClient,
 		private readonly git: IGitTransport,
 		private readonly remote: IGitTransport,
 	) {}
-	async status(id: string): Promise<GithubSyncDrift> {
-		const { ahead, behind } = await this.compare(id);
-		return { ahead, behind };
+	async status(id: string): Promise<UpstreamSyncDrift> {
+		const { branch, ahead, behind } = await this.compare(id);
+		return { branch, ahead, behind };
 	}
-	async sync(id: string): Promise<GithubSyncResult> {
-		const { directory, localHead, remoteHead, ahead, behind } = await this.compare(id);
+	async sync(id: string): Promise<UpstreamSyncResult> {
+		const { directory, url, branch, ref, localHead, remoteHead, ahead, behind } = await this.compare(id);
 		let head = localHead;
 		if (behind > 0) {
 			if (ahead === 0) head = remoteHead;
 			else {
-				const merged = await this.merge(directory, localHead, remoteHead);
+				const merged = await this.merge(directory, branch, localHead, remoteHead);
 				if (merged === undefined) return { outcome: "conflict" };
 				head = merged;
 			}
 		}
 		const localUpdated = head !== localHead;
 		try {
-			if (localUpdated) await this.git.run(["-C", directory, "update-ref", main, head, localHead]);
+			if (localUpdated) await this.git.run(["-C", directory, "update-ref", ref, head, localHead]);
 		} catch (error) {
-			if ((await this.mainHead(directory)) !== localHead) return { outcome: "changed" };
+			if ((await this.branchHead(directory, ref)) !== localHead) return { outcome: "changed" };
 			throw error;
 		}
-		if ((await this.mainHead(directory)) !== head) return { outcome: "changed" };
+		if ((await this.branchHead(directory, ref)) !== head) return { outcome: "changed" };
 		if (ahead > 0) {
 			try {
 				await this.remote.run([
@@ -54,20 +51,25 @@ export class GithubSyncClient implements IGithubSyncClient {
 					"push",
 					"--no-follow-tags",
 					"--recurse-submodules=no",
-					forgeGithubRemote,
-					`${head}:${main}`,
+					url,
+					`${head}:${ref}`,
 				]);
 			} catch {
 				return { outcome: "push-failed", head, localUpdated };
 			}
 		}
-		return { outcome: "synced", head };
+		return { outcome: "synced", head, branch };
 	}
 	private async compare(id: string) {
 		await this.repositories.verify(id);
 		const directory = join(this.dataDirectory, "repositories", `${id}.git`);
-		const remoteRef = (await this.remote.run(["ls-remote", "--refs", forgeGithubRemote, main])).trim();
-		const remoteHead = gitShaSchema.parse(/^([0-9a-f]+)\trefs\/heads\/main$/u.exec(remoteRef)?.at(1));
+		const url = await this.repositories.upstreamUrl(id);
+		const remoteRef = await this.remote.run(["ls-remote", "--symref", url, "HEAD"]);
+		const branch = branchNameSchema.parse(/^ref: refs\/heads\/([^\s]+)\tHEAD$/mu.exec(remoteRef)?.at(1));
+		const ref = `refs/heads/${branch}`;
+		await this.git.run(["check-ref-format", ref]);
+		const remoteHead = gitShaSchema.parse(/^([0-9a-f]+)\tHEAD$/mu.exec(remoteRef)?.at(1));
+		const localHead = await this.branchHead(directory, ref);
 		try {
 			await this.git.run(["-C", directory, "cat-file", "-e", `${remoteHead}^{commit}`]);
 		} catch (error) {
@@ -80,11 +82,10 @@ export class GithubSyncClient implements IGithubSyncClient {
 				"--no-recurse-submodules",
 				"--no-write-fetch-head",
 				"--refmap=",
-				forgeGithubRemote,
+				url,
 				remoteHead,
 			]);
 		}
-		const localHead = await this.mainHead(directory);
 		const counts = await this.git.run([
 			"-C",
 			directory,
@@ -97,12 +98,19 @@ export class GithubSyncClient implements IGithubSyncClient {
 		const ahead = Number(match?.at(1));
 		const behind = Number(match?.at(2));
 		if (!Number.isSafeInteger(ahead) || !Number.isSafeInteger(behind)) throw new GitError();
-		return { directory, localHead, remoteHead, ahead, behind };
+		return { directory, url, branch, ref, localHead, remoteHead, ahead, behind };
 	}
-	private async mainHead(directory: string): Promise<string> {
-		return gitShaSchema.parse((await this.git.run(["-C", directory, "rev-parse", "--verify", main])).trim());
+	private async branchHead(directory: string, ref: string): Promise<string> {
+		return gitShaSchema.parse(
+			(await this.git.run(["-C", directory, "rev-parse", "--verify", `${ref}^{commit}`])).trim(),
+		);
 	}
-	private async merge(directory: string, localHead: string, remoteHead: string): Promise<string | undefined> {
+	private async merge(
+		directory: string,
+		branch: string,
+		localHead: string,
+		remoteHead: string,
+	): Promise<string | undefined> {
 		let tree: string;
 		try {
 			await this.git.run(["-C", directory, "merge-base", localHead, remoteHead]);
@@ -131,7 +139,7 @@ export class GithubSyncClient implements IGithubSyncClient {
 					"-p",
 					remoteHead,
 					"-m",
-					"Merge GitHub main",
+					`Merge upstream ${branch}`,
 				])
 			).trim(),
 		);

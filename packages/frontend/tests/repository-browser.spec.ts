@@ -31,7 +31,7 @@ test.beforeEach(async ({ page }) => {
 			const json = (value: unknown) => route.fulfill({ json: value });
 			if (path === "/api/projects")
 				return json([
-					{ id: projectId, name: "Forge", status: "ready", createdAt: date, githubSyncAvailable: true },
+					{ id: projectId, name: "Forge", status: "ready", createdAt: date, upstreamSyncAvailable: true },
 				]);
 			if (path.endsWith("/workspaces"))
 				return json([
@@ -58,7 +58,7 @@ test.beforeEach(async ({ page }) => {
 					commits: [{ ...commit, subject: `${url.searchParams.get("branch")} commit` }],
 					hasMore: false,
 				});
-			if (path.endsWith("/github-sync")) return json({ state: "ready", ahead: 0, behind: 0 });
+			if (path.endsWith("/upstream-sync")) return json({ state: "ready", branch: "main", ahead: 0, behind: 0 });
 			if (path.endsWith("/tree")) {
 				const dir = url.searchParams.get("path") ?? "";
 				const values = dir
@@ -133,17 +133,27 @@ test("editor sidebar shows every root file without expansion controls", async ({
 	await expect(page.getByRole("button", { name: /Show all|Show fewer/ })).toHaveCount(0);
 });
 
+test("an eligible empty repository shows unavailable sync without fabricating a branch", async ({ page }) => {
+	await page.route("**/repository/branches", (route) => route.fulfill({ json: [] }));
+	await page.reload();
+	await expect(page.getByText("No branches yet.")).toBeVisible();
+	const sync = page.getByRole("button", { name: "Sync with upstream", exact: true });
+	await expect(sync).toBeDisabled();
+	await expect(sync).toHaveAttribute("title", "The upstream default branch must exist locally before syncing.");
+	await expect(page.getByRole("combobox", { name: "Branch" })).toHaveCount(0);
+});
+
 test("Code shows main drift, refreshes after sync, and reports merge conflicts", async ({ page }) => {
-	let counts = { ahead: 2, behind: 1 };
+	let counts = { branch: "main", ahead: 2, behind: 1 };
 	let posts = 0;
 	let conflict = false;
-	await page.route("**/repository/github-sync", (route) => {
+	await page.route("**/repository/upstream-sync", (route) => {
 		if (route.request().method() === "GET") return route.fulfill({ json: { state: "ready", ...counts } });
 		expect(route.request().method()).toBe("POST");
 		posts++;
-		if (conflict) return route.fulfill({ status: 409, json: { error: "github-sync-conflict" } });
-		counts = { ahead: 0, behind: 0 };
-		return route.fulfill({ json: { head: "b".repeat(40) } });
+		if (conflict) return route.fulfill({ status: 409, json: { error: "upstream-sync-conflict" } });
+		counts = { branch: "main", ahead: 0, behind: 0 };
+		return route.fulfill({ json: { head: "b".repeat(40), branch: "main" } });
 	});
 	await page.route(/\/repository\/file\?/, (route) => {
 		const path = new URL(route.request().url()).searchParams.get("path");
@@ -151,20 +161,20 @@ test("Code shows main drift, refreshes after sync, and reports merge conflicts",
 		return route.fulfill({ json: { path, content: posts ? "updated by GitHub" : "original file" } });
 	});
 	await page.reload();
-	const sync = page.getByRole("button", { name: /Sync with GitHub/ });
+	const sync = page.getByRole("button", { name: /Sync with upstream/ });
 	await expect(sync).toContainText("↑2 ↓1");
 	expect(posts).toBe(0);
 	await page.getByRole("button", { name: "file-0.ts", exact: true }).click();
 	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("original file");
 	await sync.click();
-	await expect(sync).toHaveText("Sync with GitHub");
+	await expect(sync).toHaveText("Sync with upstream main");
 	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("updated by GitHub");
 	expect(posts).toBe(1);
 
 	await selectBranch(page, "feature");
-	await expect(sync).toBeHidden();
+	await expect(sync).toBeVisible();
 	conflict = true;
-	counts = { ahead: 1, behind: 1 };
+	counts = { branch: "main", ahead: 1, behind: 1 };
 	await selectBranch(page, "main");
 	await expect(sync).toContainText("↑1 ↓1");
 	await sync.click();
@@ -172,35 +182,101 @@ test("Code shows main drift, refreshes after sync, and reports merge conflicts",
 	await expect(sync).toContainText("↑1 ↓1");
 });
 
-test("main drafts stay in the editor and block sync until committed or discarded", async ({ page }) => {
-	await page.route("**/repository/github-sync", (route) =>
-		route.fulfill({ json: { state: "ready", ahead: 0, behind: 1 } }),
+test("drafts on any branch block sync until committed or discarded", async ({ page }) => {
+	await page.route("**/repository/upstream-sync", (route) =>
+		route.fulfill({ json: { state: "ready", branch: "main", ahead: 0, behind: 1 } }),
 	);
 	await page.reload();
 	await page.getByRole("button", { name: "file-0.ts", exact: true }).click();
 	const editor = page.getByRole("textbox", { name: "File editor" });
-	const sync = page.getByRole("button", { name: /Sync with GitHub/ });
+	const sync = page.getByRole("button", { name: /Sync with upstream/ });
 	await expect(sync).toBeEnabled();
 	await editor.fill("draft");
 	await expect(sync).toBeDisabled();
 	await expect(editor).toHaveText("draft");
+	await selectBranch(page, "feature");
+	await expect(sync).toBeDisabled();
+	await expect(sync).toHaveAttribute("title", "Commit or discard drafts before syncing.");
+	await selectBranch(page, "main");
 	await page.getByRole("button", { name: "Discard all drafts" }).click();
 	await expect(sync).toBeEnabled();
+});
+
+test("sync from another branch identifies and refreshes the resolved target", async ({ page }) => {
+	let synced = false;
+	await page.route("**/repository/upstream-sync", (route) => {
+		if (route.request().method() === "GET")
+			return route.fulfill({
+				json: { state: "ready", branch: "feature/navigation", ahead: 0, behind: synced ? 0 : 1 },
+			});
+		synced = true;
+		return route.fulfill({ json: { branch: "feature/navigation", head } });
+	});
+	await page.route(/\/repository\/file\?/, (route) => {
+		const url = new URL(route.request().url());
+		if (url.searchParams.get("path") !== "file-0.ts") return route.fallback();
+		return route.fulfill({
+			json: {
+				path: "file-0.ts",
+				content: `${url.searchParams.get("branch")}: ${synced ? "updated" : "original"}`,
+			},
+		});
+	});
+	await selectBranch(page, "feature/navigation");
+	await page.getByRole("button", { name: "file-0.ts", exact: true }).click();
+	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("feature/navigation: original");
+	await selectBranch(page, "main");
+	const sync = page.getByRole("button", { name: /Sync with upstream/ });
+	await expect(sync.getByLabel("Target branch")).toHaveText("feature/navigation");
+	await sync.click();
+	await expect(page.getByRole("status")).toContainText("feature/navigation synced with upstream.");
+	await expect(page.getByRole("combobox", { name: "Branch" })).toHaveValue("main");
+	await selectBranch(page, "feature/navigation");
+	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("feature/navigation: updated");
+});
+
+test("unavailable status keeps an actionable sync control and ignores stale drift after navigation", async ({
+	page,
+}) => {
+	const pending = Promise.withResolvers<void>();
+	let reads = 0;
+	let navigated = false;
+	await page.route("**/repository/upstream-sync", async (route) => {
+		reads++;
+		if (!navigated) {
+			await pending.promise;
+			return route.fulfill({ json: { state: "ready", branch: "main", ahead: 99, behind: 99 } });
+		}
+		return route.fulfill({ json: { state: "unavailable" } });
+	});
+	await page.reload();
+	await expect.poll(() => reads).toBeGreaterThanOrEqual(1);
+	navigated = true;
+	await selectBranch(page, "feature");
+	const sync = page.getByRole("button", { name: /Sync with upstream/ });
+	try {
+		await expect(page.getByRole("alert")).toContainText("Upstream drift unavailable.");
+		await expect(sync).toBeEnabled();
+	} finally {
+		pending.resolve();
+	}
+	await expect(sync).toHaveText("Sync with upstream");
+	await expect(sync).not.toContainText("99");
 });
 
 test("visible main refreshes the drift counts without a click", async ({ page }) => {
 	await page.clock.install();
 	let behind = 1;
-	await page.route("**/repository/github-sync", (route) => {
+	await page.route("**/repository/upstream-sync", (route) => {
 		expect(route.request().method()).toBe("GET");
-		return route.fulfill({ json: { state: "ready", ahead: 0, behind } });
+		return route.fulfill({ json: { state: "ready", branch: "main", ahead: 0, behind } });
 	});
 	await page.reload();
-	const sync = page.getByRole("button", { name: /Sync with GitHub/ });
-	await expect(sync).toHaveText("Sync with GitHub ↓1");
+	const sync = page.getByRole("button", { name: /Sync with upstream/ });
+	await expect(sync).toHaveText("Sync with upstream main ↓1");
 	behind = 3;
 	await page.clock.fastForward(31_000);
-	await expect(sync).toHaveText("Sync with GitHub ↓3");
+	await expect(sync).toHaveText("Sync with upstream main ↓3");
 });
 
 test("sync renders while drift is pending and shows only positive counts", async ({ page }) => {
@@ -208,39 +284,40 @@ test("sync renders while drift is pending and shows only positive counts", async
 	const pending = new Promise<void>((resolve) => {
 		release = resolve;
 	});
-	await page.route("**/repository/github-sync", async (route) => {
+	await page.route("**/repository/upstream-sync", async (route) => {
 		await pending;
-		await route.fulfill({ json: { state: "ready", ahead: 2, behind: 0 } });
+		await route.fulfill({ json: { state: "ready", branch: "main", ahead: 2, behind: 0 } });
 	});
 	await page.reload();
-	const sync = page.getByRole("button", { name: /Sync with GitHub/ });
+	const sync = page.getByRole("button", { name: /Sync with upstream/ });
 	let initialBounds;
 	try {
-		await expect(sync).toHaveText("Sync with GitHub");
+		await expect(sync).toHaveText("Sync with upstream");
 		initialBounds = await sync.boundingBox();
 	} finally {
 		release();
 	}
-	await expect(sync).toHaveText("Sync with GitHub ↑2");
-	expect(await sync.boundingBox()).toEqual(initialBounds);
+	await expect(sync).toHaveText("Sync with upstream main ↑2");
+	expect((await sync.boundingBox())?.height).toEqual(initialBounds?.height);
 });
 
 test("sync feedback floats at bottom left and can expire or be dismissed", async ({ page }) => {
 	await page.clock.install();
 	let conflict = false;
-	await page.route("**/repository/github-sync", (route) => {
-		if (route.request().method() === "GET") return route.fulfill({ json: { state: "ready", ahead: 1, behind: 0 } });
+	await page.route("**/repository/upstream-sync", (route) => {
+		if (route.request().method() === "GET")
+			return route.fulfill({ json: { state: "ready", branch: "main", ahead: 1, behind: 0 } });
 		return conflict
-			? route.fulfill({ status: 409, json: { error: "github-sync-conflict" } })
-			: route.fulfill({ json: { head } });
+			? route.fulfill({ status: 409, json: { error: "upstream-sync-conflict" } })
+			: route.fulfill({ json: { head, branch: "main" } });
 	});
 	await page.reload();
-	const sync = page.getByRole("button", { name: /Sync with GitHub/ });
+	const sync = page.getByRole("button", { name: /Sync with upstream/ });
 	const list = page.getByRole("table", { name: "Repository files" });
 	await expect(list).toBeVisible();
 	const before = await list.boundingBox();
 	await sync.click();
-	const toast = page.getByRole("status").filter({ hasText: "Main synced with GitHub." });
+	const toast = page.getByRole("status").filter({ hasText: "main synced with upstream." });
 	await expect(toast).toBeVisible();
 	await expect(toast).toHaveCSS("position", "fixed");
 	const box = (await toast.boundingBox())!;

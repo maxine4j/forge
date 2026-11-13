@@ -2190,8 +2190,9 @@ summary {
 }
 .repository-sync-button {
 	min-inline-size: 13.5rem;
+	max-inline-size: 100%;
 	text-align: start;
-	white-space: nowrap;
+	overflow-wrap: anywhere;
 	font-variant-numeric: tabular-nums;
 }
 .repository-toast {

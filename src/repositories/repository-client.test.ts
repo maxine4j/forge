@@ -26,6 +26,7 @@ test("creates a real owned bare repository with main HEAD and recovers after pub
 	await client.prepare(id);
 	await client.verify(id);
 	const path = join(root, "repositories", `${id}.git`);
+	expect(await client.hasUpstream(id)).toBe(false);
 	expect(await git.run(["-C", path, "rev-parse", "--is-bare-repository"])).toBe("true\n");
 	expect(await git.run(["-C", path, "symbolic-ref", "HEAD"])).toBe("refs/heads/main\n");
 	expect((await files.stat(join(root, "repositories"))).mode & 0o777).toBe(0o700);
@@ -102,6 +103,8 @@ test("import accepts configured credential-free HTTPS hosts only and uses idempo
 	}
 	expect(run).not.toHaveBeenCalled();
 	await client.prepare(id, "https://github.com/owner/repo.git");
+	expect(await client.hasUpstream(id)).toBe(true);
+	expect(await client.upstreamUrl(id)).toBe("https://github.com/owner/repo.git");
 	expect(
 		run.mock.calls.some(
 			([args]) => args.includes("--no-recurse-submodules") && args.includes("+refs/heads/*:refs/heads/*"),
@@ -110,4 +113,45 @@ test("import accepts configured credential-free HTTPS hosts only and uses idempo
 	expect(await real.run(["-C", join(root, "repositories", `${id}.git`), "symbolic-ref", "HEAD"])).toBe(
 		"refs/heads/develop\n",
 	);
+});
+
+test("backfills missing upstream idempotently, preserving existing configuration and data", async () => {
+	const root = await directory();
+	const git = new GitTransport();
+	const client = new RepositoryClient(root, ["example.com"], files, git);
+	await client.prepare(id);
+	const path = join(root, "repositories", `${id}.git`);
+	await git.run(["-C", path, "config", "credential.helper", "preserved-helper"]);
+	await client.configureUpstream(id, "https://example.com/first");
+	await client.configureUpstream(id, "https://example.com/second");
+	await client.prepare(id, "https://example.com/third");
+	expect(await client.upstreamUrl(id)).toBe("https://example.com/first");
+	expect((await git.run(["-C", path, "config", "--local", "credential.helper"])).trim()).toBe("preserved-helper");
+	// Existing invalid remotes remain authoritative but cannot be used for network operations.
+	await git.run(["-C", path, "config", "remote.upstream.url", "https://user:secret@example.com/private"]);
+	await client.configureUpstream(id, "https://example.com/replacement");
+	expect(await client.hasUpstream(id)).toBe(true);
+	await expect(client.upstreamUrl(id)).rejects.toThrow();
+});
+
+test("interrupted import retains upstream through retry before publication", async () => {
+	const root = await directory();
+	const git = new GitTransport();
+	let interrupted = true;
+	const client = new RepositoryClient(root, ["example.com"], files, {
+		run: async (args) => {
+			if (args.includes("fetch")) {
+				if (interrupted) throw new Error("Interrupted fetch");
+				return "";
+			}
+			if (args.includes("ls-remote")) return "";
+			return git.run(args);
+		},
+	});
+	await expect(client.prepare(id, "https://example.com/source")).rejects.toThrow();
+	const staged = join(root, "repositories", `.${id}.pending`, "repository.git");
+	expect((await git.run(["-C", staged, "config", "remote.upstream.url"])).trim()).toBe("https://example.com/source");
+	interrupted = false;
+	await client.prepare(id, "https://example.com/source");
+	expect(await client.upstreamUrl(id)).toBe("https://example.com/source");
 });

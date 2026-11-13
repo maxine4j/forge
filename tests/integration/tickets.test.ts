@@ -76,7 +76,15 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	);
 	const projectService = new ProjectService(
 		projects,
-		{ prepare: async () => {}, verify: async () => {} },
+		{
+			prepare: async () => {},
+			verify: async () => {},
+			hasUpstream: async () => false,
+			configureUpstream: async () => {},
+			upstreamUrl: async () => {
+				throw new Error("No upstream");
+			},
+		},
 		access,
 		() => projectId,
 		() => new Date(),

@@ -1,12 +1,12 @@
 import {
-	githubSyncResultSchema,
-	githubSyncStatusSchema,
+	upstreamSyncResultSchema,
+	upstreamSyncStatusSchema,
 	repositoryBranchesSchema,
 	repositoryTreeSchema,
 	repositoryFileSchema,
 	repositoryHistorySchema,
 	repositoryCommitResultSchema,
-	type GithubSyncStatus,
+	type UpstreamSyncStatus,
 	type RepositoryBranch,
 	type RepositoryTree,
 	type RepositoryFile,
@@ -63,6 +63,11 @@ const BranchBrowser = ({
 	branchControl,
 	search,
 	syncVisible,
+	syncBlocked,
+	onSynced,
+	refreshVersion,
+	syncInProgress,
+	onSyncingChange,
 }: {
 	branchControl: ReactNode;
 	root: string;
@@ -73,6 +78,11 @@ const BranchBrowser = ({
 	dirtyChange: (branch: string, dirty: boolean) => void;
 	search?: string;
 	syncVisible: boolean;
+	syncBlocked: boolean;
+	onSynced: (branch: string) => void;
+	refreshVersion: number;
+	syncInProgress: boolean;
+	onSyncingChange: (syncing: boolean) => void;
 }) => {
 	const navigate = useNavigate();
 	const [retainedSearch, setRetainedSearch] = useState("");
@@ -107,9 +117,16 @@ const BranchBrowser = ({
 	const [message, setMessage] = useState("");
 	const [revision, setRevision] = useState(0);
 	const [toast, setToast] = useState<{ message: string; error?: boolean }>();
-	const [syncStatus, setSyncStatus] = useState<GithubSyncStatus>();
+	const [syncStatus, setSyncStatus] = useState<UpstreamSyncStatus>();
 	const [syncing, setSyncing] = useState(false);
 	const driftUnavailable = useRef(false);
+	const [seenRefresh, setSeenRefresh] = useState(refreshVersion);
+	if (seenRefresh !== refreshVersion) {
+		setSeenRefresh(refreshVersion);
+		setDrafts({});
+		setBaseHead("");
+		setRevision((value) => value + 1);
+	}
 	const reportError = useCallback(
 		(message: string) => {
 			setError(message);
@@ -125,7 +142,7 @@ const BranchBrowser = ({
 	const readyDrift = syncStatus?.state === "ready" ? syncStatus : undefined;
 	const changed = Object.entries(drafts).filter(([, draft]) => draft.original !== draft.content);
 	const dirty = changed.length > 0;
-	const disabled = busy || loading || syncing;
+	const disabled = busy || loading || syncing || syncInProgress;
 	const draft = drafts[active];
 	const breadcrumbPath = active && !showingHistory ? active.split("/").slice(0, -1).join("/") : path;
 	const entries = [...(tree?.entries ?? [])].sort((a, b) =>
@@ -154,11 +171,11 @@ const BranchBrowser = ({
 		let checking = false;
 		let unconfigured = false;
 		let timer: ReturnType<typeof setTimeout> | undefined;
-		const updateStatus = (status: GithubSyncStatus) => {
+		const updateStatus = (status: UpstreamSyncStatus) => {
 			if (cancelled) return;
 			setSyncStatus(status);
 			if (status.state === "unavailable" && !driftUnavailable.current) {
-				setToast((current) => current ?? { message: "GitHub drift unavailable.", error: true });
+				setToast((current) => current ?? { message: "Upstream drift unavailable.", error: true });
 			}
 			driftUnavailable.current = status.state === "unavailable";
 		};
@@ -167,7 +184,7 @@ const BranchBrowser = ({
 			clearTimeout(timer);
 			checking = true;
 			try {
-				const status = await api.read(`${root}/github-sync`, githubSyncStatusSchema);
+				const status = await api.read(`${root}/upstream-sync`, upstreamSyncStatusSchema);
 				updateStatus(status);
 				unconfigured = status.state === "unconfigured";
 			} catch {
@@ -299,23 +316,26 @@ const BranchBrowser = ({
 			throw new Error("Branch changed. Reopen commit history to refresh.");
 		setHistory(more && history ? { ...value, commits: [...history.commits, ...value.commits] } : value);
 	};
-	const syncGithub = async () => {
+	const syncUpstream = async () => {
 		setSyncing(true);
+		onSyncingChange(true);
 		setToast(undefined);
+		let targetBranch = readyDrift?.branch;
 		try {
-			await api.read(`${root}/github-sync`, githubSyncResultSchema, "POST");
-			setToast({ message: "Main synced with GitHub." });
+			const result = await api.read(`${root}/upstream-sync`, upstreamSyncResultSchema, "POST");
+			targetBranch = result.branch;
+			setToast({ message: `${result.branch} synced with upstream.` });
 		} catch (failure) {
 			setToast({
-				message: failure instanceof Error ? failure.message : "Could not sync with GitHub.",
+				message: failure instanceof Error ? failure.message : "Could not sync with upstream.",
 				error: true,
 			});
 		} finally {
-			setDrafts({});
-			setBaseHead("");
-			setLoading(true);
+			// Failed pushes can still update the target branch locally.
+			if (targetBranch) onSynced(targetBranch);
 			setRevision((value) => value + 1);
 			setSyncing(false);
+			onSyncingChange(false);
 		}
 	};
 	const historyButton = (
@@ -367,11 +387,12 @@ const BranchBrowser = ({
 					<button
 						className='repository-sync-button'
 						type='button'
-						disabled={disabled || dirty}
-						title={dirty ? "Commit or discard main drafts before syncing." : undefined}
-						onClick={() => void syncGithub()}
+						disabled={disabled || dirty || syncBlocked}
+						title={dirty || syncBlocked ? "Commit or discard drafts before syncing." : undefined}
+						onClick={() => void syncUpstream()}
 					>
-						{syncing ? "Syncing with GitHub…" : "Sync with GitHub"}
+						{syncing ? "Syncing with upstream…" : "Sync with upstream"}
+						{readyDrift && <span aria-label='Target branch'> {readyDrift.branch}</span>}
 						{!!readyDrift?.ahead && (
 							<>
 								{" "}
@@ -464,10 +485,10 @@ const BranchBrowser = ({
 								{draft && (
 									<div className='repository-code'>
 										<Editor
-											key={`${active}:${syncing}`}
+											key={`${active}:${syncing || syncInProgress}`}
 											path={active}
 											content={draft.content}
-											readOnly={syncing}
+											readOnly={syncing || syncInProgress}
 											change={(content) =>
 												setDrafts((current) => ({
 													...current,
@@ -670,13 +691,13 @@ const BranchBrowser = ({
 export const RepositoryBrowser = ({
 	projectId,
 	repositoryName,
-	githubSyncAvailable,
+	upstreamSyncAvailable,
 	api,
 	dirtyChange,
 }: {
 	projectId: string;
 	repositoryName: string;
-	githubSyncAvailable: boolean;
+	upstreamSyncAvailable: boolean;
 	api: IWorkspaceApi;
 	dirtyChange: (branch: string, dirty: boolean) => void;
 }) => {
@@ -695,6 +716,20 @@ export const RepositoryBrowser = ({
 	const [error, setError] = useState("");
 	const [revision, setRevision] = useState(0);
 	const root = `projects/${projectId}/repository`;
+	const [dirtyBranches, setDirtyBranches] = useState<Record<string, boolean>>({});
+	const [branchVersions, setBranchVersions] = useState<Record<string, number>>({});
+	const [syncInProgress, setSyncInProgress] = useState(false);
+	const reportDirty = useCallback(
+		(name: string, dirty: boolean) => {
+			setDirtyBranches((current) => (current[name] === dirty ? current : { ...current, [name]: dirty }));
+			dirtyChange(name, dirty);
+		},
+		[dirtyChange],
+	);
+	const refreshBranch = useCallback((name: string) => {
+		setBranchVersions((current) => ({ ...current, [name]: (current[name] ?? 0) + 1 }));
+		setRevision((value) => value + 1);
+	}, []);
 	if (inCode && branchExists) {
 		if (retainedBranch !== branch) setRetainedBranch(branch);
 		if (!visited.includes(branch)) setVisited([...visited, branch]);
@@ -734,6 +769,16 @@ export const RepositoryBrowser = ({
 				</p>
 			)}
 			{!showingCommit && !branches.length && !error && <p>No branches yet.</p>}
+			{inCode && !showingCommit && !branches.length && !error && upstreamSyncAvailable && (
+				<button
+					className='repository-sync-button'
+					type='button'
+					disabled
+					title='The upstream default branch must exist locally before syncing.'
+				>
+					Sync with upstream
+				</button>
+			)}
 			{visited.map((value) => (
 				<div key={value} hidden={branch !== value || showingCommit}>
 					<BranchBrowser
@@ -742,11 +787,14 @@ export const RepositoryBrowser = ({
 						repositoryName={repositoryName}
 						branch={value}
 						search={inCode && branch === value && !showingCommit ? location.search : undefined}
-						syncVisible={
-							githubSyncAvailable && inCode && branch === "main" && value === "main" && !showingCommit
-						}
+						syncVisible={upstreamSyncAvailable && inCode && branch === value && !showingCommit}
 						api={api}
-						dirtyChange={dirtyChange}
+						dirtyChange={reportDirty}
+						syncBlocked={Object.values(dirtyBranches).some(Boolean)}
+						onSynced={refreshBranch}
+						refreshVersion={branchVersions[value] ?? 0}
+						syncInProgress={syncInProgress}
+						onSyncingChange={setSyncInProgress}
 						branchControl={
 							<label className='branch-picker'>
 								<span aria-hidden='true'>⑂</span>

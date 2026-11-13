@@ -37,7 +37,7 @@ export interface Project {
 	name: string;
 	status: "creating" | "ready" | "failed";
 	createdAt: string;
-	githubSyncAvailable?: true;
+	upstreamSyncAvailable?: true;
 }
 
 export type AccountProvider = "codex" | "github";

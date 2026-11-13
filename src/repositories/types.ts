@@ -20,12 +20,13 @@ export interface GitTransportConfiguration {
 	deadlineMs?: number;
 	githubConfigDirectory?: string;
 }
-export interface GithubSyncDrift {
+export interface UpstreamSyncDrift {
+	branch: string;
 	ahead: number;
 	behind: number;
 }
-export type GithubSyncResult =
-	| { outcome: "synced"; head: string }
+export type UpstreamSyncResult =
+	| { outcome: "synced"; head: string; branch: string }
 	| { outcome: "conflict" }
 	| { outcome: "changed" }
 	| { outcome: "push-failed"; head: string; localUpdated: boolean };

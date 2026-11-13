@@ -2,9 +2,9 @@ import { expect, test, vi } from "vitest";
 
 import { AccessService } from "../auth/access-service.ts";
 import type { ProjectRecord } from "../projects/types.ts";
-import type { IGithubSyncClient } from "./github-sync-client.ts";
-import { GithubSyncService } from "./github-sync-service.ts";
-import type { GithubSyncResult } from "./types.ts";
+import type { UpstreamSyncResult } from "./types.ts";
+import type { IUpstreamSyncClient } from "./upstream-sync-client.ts";
+import { UpstreamSyncService } from "./upstream-sync-service.ts";
 
 const owner = { username: "owner" };
 const project: ProjectRecord = {
@@ -17,30 +17,43 @@ const project: ProjectRecord = {
 const setup = (record: ProjectRecord = project) => {
 	const access = new AccessService({ owner: owner.username, origin: "https://forge.example" });
 	const client = {
-		status: vi.fn<IGithubSyncClient["status"]>().mockResolvedValue({ ahead: 2, behind: 1 }),
-		sync: vi.fn<IGithubSyncClient["sync"]>().mockResolvedValue({ outcome: "synced", head: "a".repeat(40) }),
+		status: vi.fn<IUpstreamSyncClient["status"]>().mockResolvedValue({ branch: "main", ahead: 2, behind: 1 }),
+		sync: vi
+			.fn<IUpstreamSyncClient["sync"]>()
+			.mockResolvedValue({ outcome: "synced", branch: "main", head: "a".repeat(40) }),
 	};
 	const store = { get: vi.fn().mockResolvedValue(record) };
-	return { service: new GithubSyncService(client, store, access), client, store };
+	const repositories = { hasUpstream: vi.fn().mockResolvedValue(true) };
+	return { service: new UpstreamSyncService(client, store, access, repositories), client, store, repositories };
 };
 
-test("matches the saved Forge import source and enforces owner access", async () => {
+test("uses actual upstream presence and enforces owner access", async () => {
 	const { service, store } = setup();
 	await expect(service.status({ username: "stranger" }, project.id)).rejects.toThrow();
 	expect(store.get).not.toHaveBeenCalled();
-	expect(await service.status(owner, project.id)).toEqual({ state: "ready", ahead: 2, behind: 1 });
-	expect(await service.sync(owner, project.id)).toEqual({ outcome: "synced", head: "a".repeat(40) });
+	expect(await service.status(owner, project.id)).toEqual({ state: "ready", branch: "main", ahead: 2, behind: 1 });
+	expect(await service.sync(owner, project.id)).toEqual({ outcome: "synced", branch: "main", head: "a".repeat(40) });
 });
 
 test.each([undefined, "https://github.com/maxine4j/different", "https://other.example/maxine4j/forge"])(
-	"does not enable sync for source %s",
+	"saved source %s alone does not enable sync",
 	async (source) => {
 		const { source: _source, ...record } = project;
-		const { service, client } = setup({ ...record, name: "Forge", ...(source ? { source } : {}) });
+		const { service, client, repositories } = setup({ ...record, name: "Forge", ...(source ? { source } : {}) });
+		repositories.hasUpstream.mockResolvedValue(false);
 		expect(await service.status(owner, project.id)).toEqual({ state: "unconfigured" });
 		expect(await service.sync(owner, project.id)).toEqual({ outcome: "unconfigured" });
 		expect(client.status).not.toHaveBeenCalled();
 		expect(client.sync).not.toHaveBeenCalled();
+	},
+);
+
+test.each([undefined, "https://example.com/team/repository"])(
+	"upstream presence qualifies arbitrary source %s",
+	async (source) => {
+		const { source: _source, ...record } = project;
+		const { service } = setup({ ...record, ...(source ? { source } : {}) });
+		expect(await service.status(owner, project.id)).toMatchObject({ state: "ready", branch: "main" });
 	},
 );
 
@@ -56,9 +69,9 @@ test("reports unavailable reads safely and allows retry after an unsuccessful sy
 test("deduplicates drift reads and rejects concurrent syncs for the Forge remote", async () => {
 	const { service, client } = setup();
 	const reads = await Promise.all([service.status(owner, project.id), service.status(owner, project.id)]);
-	expect(reads).toEqual(Array(2).fill({ state: "ready", ahead: 2, behind: 1 }));
+	expect(reads).toEqual(Array(2).fill({ state: "ready", branch: "main", ahead: 2, behind: 1 }));
 	expect(client.status).toHaveBeenCalledTimes(1);
-	const operation = Promise.withResolvers<GithubSyncResult>();
+	const operation = Promise.withResolvers<UpstreamSyncResult>();
 	const started = Promise.withResolvers<void>();
 	client.sync.mockImplementationOnce(() => {
 		started.resolve();
@@ -69,7 +82,7 @@ test("deduplicates drift reads and rejects concurrent syncs for the Forge remote
 	try {
 		expect(await service.sync(owner, project.id)).toEqual({ outcome: "busy" });
 	} finally {
-		operation.resolve({ outcome: "synced", head: "a".repeat(40) });
+		operation.resolve({ outcome: "synced", branch: "main", head: "a".repeat(40) });
 		await first;
 	}
 	expect(client.sync).toHaveBeenCalledTimes(1);

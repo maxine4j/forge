@@ -1,44 +1,45 @@
-import { projectIdSchema, type GithubSyncStatus } from "@forge/contracts";
+import { projectIdSchema, type UpstreamSyncStatus } from "@forge/contracts";
 
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
 import { InvalidProjectError, ProjectNotFoundError, ProjectUnavailableError } from "../projects/errors.ts";
 import type { ProjectRecord } from "../projects/types.ts";
-import type { IGithubSyncClient } from "./github-sync-client.ts";
-import { isForgeGithubSource } from "./github-sync-eligibility.ts";
-import type { GithubSyncResult } from "./types.ts";
+import type { IRepositoryClient } from "./repository-client.ts";
+import type { UpstreamSyncResult } from "./types.ts";
+import type { IUpstreamSyncClient } from "./upstream-sync-client.ts";
 
 interface ISyncProjects {
 	get(id: string): Promise<ProjectRecord | undefined>;
 }
 
-export interface IGithubSyncService {
-	status(actor: Actor, id: string): Promise<GithubSyncStatus>;
-	sync(actor: Actor, id: string): Promise<GithubSyncResult | { outcome: "unconfigured" | "unavailable" | "busy" }>;
+export interface IUpstreamSyncService {
+	status(actor: Actor, id: string): Promise<UpstreamSyncStatus>;
+	sync(actor: Actor, id: string): Promise<UpstreamSyncResult | { outcome: "unconfigured" | "unavailable" | "busy" }>;
 }
 
-export class GithubSyncService implements IGithubSyncService {
-	private readonly reads = new Map<string, Promise<GithubSyncStatus>>();
+export class UpstreamSyncService implements IUpstreamSyncService {
+	private readonly reads = new Map<string, Promise<UpstreamSyncStatus>>();
 	private syncing = false;
 
 	constructor(
-		private readonly client: IGithubSyncClient,
+		private readonly client: IUpstreamSyncClient,
 		private readonly projects: ISyncProjects,
 		private readonly access: IAccessService,
+		private readonly repositories: Pick<IRepositoryClient, "hasUpstream">,
 	) {}
-	async status(actor: Actor, id: string): Promise<GithubSyncStatus> {
+	async status(actor: Actor, id: string): Promise<UpstreamSyncStatus> {
 		if (!(await this.eligible(actor, id))) return { state: "unconfigured" };
 		const pending = this.reads.get(id);
 		if (pending) return pending;
 		const read = this.client
 			.status(id)
-			.then((counts): GithubSyncStatus => ({ state: "ready", ...counts }))
-			.catch((): GithubSyncStatus => ({ state: "unavailable" }))
+			.then((counts): UpstreamSyncStatus => ({ state: "ready", ...counts }))
+			.catch((): UpstreamSyncStatus => ({ state: "unavailable" }))
 			.finally(() => this.reads.delete(id));
 		this.reads.set(id, read);
 		return read;
 	}
-	async sync(actor: Actor, id: string): ReturnType<IGithubSyncService["sync"]> {
+	async sync(actor: Actor, id: string): ReturnType<IUpstreamSyncService["sync"]> {
 		if (!(await this.eligible(actor, id))) return { outcome: "unconfigured" };
 		if (this.syncing) return { outcome: "busy" };
 		this.syncing = true;
@@ -56,6 +57,6 @@ export class GithubSyncService implements IGithubSyncService {
 		const project = await this.projects.get(id);
 		if (!project) throw new ProjectNotFoundError();
 		if (project.status !== "ready") throw new ProjectUnavailableError();
-		return isForgeGithubSource(project.source);
+		return this.repositories.hasUpstream(id);
 	}
 }

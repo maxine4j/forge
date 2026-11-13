@@ -29,7 +29,7 @@ const projects = [
 		name: "Forge",
 		status: "ready",
 		createdAt: date,
-		githubSyncAvailable: true,
+		upstreamSyncAvailable: true,
 	},
 	{ id: "123e4567-e89b-42d3-a456-426614174010", name: "Homelab dashboard", status: "ready", createdAt: date },
 ];
@@ -375,8 +375,10 @@ export class MockApi implements IMockApi {
 					};
 				});
 			}
-			this.routes.set(`${repositoryRoot}/github-sync`, () =>
-				project.githubSyncAvailable ? { state: "ready", ahead: 2, behind: 1 } : { state: "unconfigured" },
+			this.routes.set(`${repositoryRoot}/upstream-sync`, () =>
+				project.upstreamSyncAvailable
+					? { state: "ready", branch: "main", ahead: 2, behind: 1 }
+					: { state: "unconfigured" },
 			);
 			this.routes.set(projectRoot, () => project);
 			this.routes.set(`${projectRoot}/workspaces`, () => [workspace]);

@@ -9,7 +9,6 @@ import {
 
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
-import { isForgeGithubSource } from "../repositories/github-sync-eligibility.ts";
 import type { IRepositoryClient } from "../repositories/repository-client.ts";
 import { InvalidProjectError, ProjectNotFoundError, ProjectUnavailableError } from "./errors.ts";
 import type { IProjectStore } from "./project-store.ts";
@@ -51,7 +50,15 @@ export class ProjectService implements IProjectService {
 	}
 	async list(actor: Actor): Promise<Project[]> {
 		this.access.assertOwner(actor);
-		return (await this.store.list()).map((record) => this.publicProject(record));
+		const records = await this.store.list();
+		const projects: Project[] = [];
+		// Remote inspection spawns Git: bound concurrency for the 1,000-project list.
+		for (let index = 0; index < records.length; index += 8) {
+			projects.push(
+				...(await Promise.all(records.slice(index, index + 8).map((record) => this.publicProject(record)))),
+			);
+		}
+		return projects;
 	}
 	async get(actor: Actor, id: string): Promise<Project> {
 		this.access.assertOwner(actor);
@@ -79,6 +86,8 @@ export class ProjectService implements IProjectService {
 				} else {
 					try {
 						await this.repositories.verify(record.id);
+						if (record.source !== undefined)
+							await this.repositories.configureUpstream(record.id, record.source);
 					} catch (err) {
 						this.log.error(
 							{ err, projectId: record.id },
@@ -110,13 +119,13 @@ export class ProjectService implements IProjectService {
 		if (!record) throw new ProjectNotFoundError();
 		return record;
 	}
-	private publicProject({ id, name, status, createdAt, source }: ProjectRecord): Project {
+	private async publicProject({ id, name, status, createdAt }: ProjectRecord): Promise<Project> {
 		return projectSchema.parse({
 			id,
 			name,
 			status,
 			createdAt,
-			...(status === "ready" && isForgeGithubSource(source) ? { githubSyncAvailable: true } : {}),
+			...(status === "ready" && (await this.repositories.hasUpstream(id)) ? { upstreamSyncAvailable: true } : {}),
 		});
 	}
 	private serialize<T>(operation: () => Promise<T>): Promise<T> {

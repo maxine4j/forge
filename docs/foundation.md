@@ -88,7 +88,8 @@ Repository management retains the internal project API: `GET/POST /api/projects`
 `GET /api/projects/:id`, and `POST /api/projects/:id/retry`. Inputs and responses
 use `@forge/contracts`. Public project values contain ID, name, creation
 timestamp, and `creating/ready/failed` status. Ready projects eligible for
-[GitHub sync](git-and-ci.md#sync-forge-main-with-github) also include `githubSyncAvailable: true`.
+[upstream sync](git-and-ci.md#sync-with-upstream) also include `upstreamSyncAvailable: true`,
+derived from actual Git remote presence, independently of the saved source.
 Repository IDs initially
 equal project UUIDs. Inputs are limited to a 120-character name and optional
 2048-character HTTPS source; JSON bodies are limited to 16 KiB. The initial store
@@ -105,7 +106,12 @@ path. Startup reconciles `creating` intents and verifies `ready` paths before
 serving requests. Failures retain intent and data as `failed`; only explicit retry
 repeats failed work. Recovery never deletes or overwrites unrelated paths. Import
 fetches heads/tags idempotently and preserves the remote symbolic HEAD when
-available. It does not create a checkout or run hooks/submodules.
+available. Before publication, the validated source is saved as Git remote
+`upstream`. Interrupted imports and startup recovery add missing upstream remotes
+from saved sources without overwriting existing remote configuration, refs,
+objects or credentials. Newly created repositories have no upstream. Git
+configuration remains authoritative; no remote URL is exposed by the project API.
+Imports do not create a checkout or run hooks/submodules.
 
 Remote import supports credential-free HTTPS on port 443 only, without query or
 fragment, against the configured exact host allowlist. The owner must trust the
@@ -160,7 +166,7 @@ before another login; late notifications cannot complete a replacement attempt.
 GitHub login uses `gh auth login --web --insecure-storage --scopes workflow`
 against `github.com` with HTTPS Git. The `workflow` scope supplements the CLI's default scopes so
 authenticated pushes can update `.github/workflows/*`, including through
-[Code tab sync](git-and-ci.md#sync-forge-main-with-github). Each owner-initiated
+[Code tab sync](git-and-ci.md#sync-with-upstream). Each owner-initiated
 login requests this scope; existing credentials are preserved without automatic
 refresh or scope detection. Login validates the known device prompt, bounds
 prompt/verification commands to 15 seconds and 64 KiB output, and stops an outstanding login after

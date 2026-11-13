@@ -139,7 +139,7 @@ export const Workbench = ({
 				<RepositoryBrowser
 					projectId={project.id}
 					repositoryName={project.name}
-					githubSyncAvailable={project.githubSyncAvailable === true}
+					upstreamSyncAvailable={project.upstreamSyncAvailable === true}
 					api={api}
 					dirtyChange={dirtyChange}
 				/>

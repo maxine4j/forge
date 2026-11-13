@@ -119,13 +119,18 @@ export const commitPatchSchema = z.strictObject({
 });
 export type CommitDetail = z.infer<typeof commitDetailSchema>;
 export type CommitPatch = z.infer<typeof commitPatchSchema>;
-export const githubSyncStatusSchema = z.discriminatedUnion("state", [
+export const upstreamSyncStatusSchema = z.discriminatedUnion("state", [
 	z.strictObject({ state: z.literal("unconfigured") }),
 	z.strictObject({ state: z.literal("unavailable") }),
-	z.strictObject({ state: z.literal("ready"), ahead: z.int().nonnegative(), behind: z.int().nonnegative() }),
+	z.strictObject({
+		state: z.literal("ready"),
+		branch: branchNameSchema,
+		ahead: z.int().nonnegative(),
+		behind: z.int().nonnegative(),
+	}),
 ]);
-export const githubSyncResultSchema = z.strictObject({ head: gitShaSchema });
-export type GithubSyncStatus = z.infer<typeof githubSyncStatusSchema>;
+export const upstreamSyncResultSchema = z.strictObject({ head: gitShaSchema, branch: branchNameSchema });
+export type UpstreamSyncStatus = z.infer<typeof upstreamSyncStatusSchema>;
 export type RepositoryCommit = z.infer<typeof repositoryCommitSchema>;
 export type RepositoryBranch = z.infer<typeof repositoryBranchesSchema>[number];
 export type RepositoryTree = z.infer<typeof repositoryTreeSchema>;

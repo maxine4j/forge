@@ -61,16 +61,17 @@ export class WorkspaceApi implements IWorkspaceApi {
 				"workspace-conflict":
 					"The branch changed. Your drafts are preserved. Copy them before discarding drafts to reload the branch.",
 				"workspace-unavailable": "Repository files unavailable. Retry opening files.",
-				"github-sync-unconfigured": "GitHub sync is unavailable for this repository.",
-				"github-sync-unavailable":
-					"Could not sync with GitHub. Check that both main branches are available and try again.",
-				"github-sync-busy": "GitHub sync is already running. Try again when it finishes.",
-				"github-sync-conflict": "Forge and GitHub main cannot be merged automatically.",
-				"github-sync-changed": "Forge main changed during sync. Check the updated counts and try again.",
-				"github-sync-push-failed":
-					"Could not push to GitHub. Check the connected account and repository access.",
-				"github-sync-push-failed-local-updated":
-					"Forge main was updated, but the push to GitHub failed. Check the connected account and repository access.",
+				"upstream-sync-unconfigured": "Upstream sync is unavailable for this repository.",
+				"upstream-sync-unavailable":
+					"Could not sync with upstream. Check that its default branch exists locally and the remote is readable and try again.",
+				"upstream-sync-busy": "Upstream sync is already running. Try again when it finishes.",
+				"upstream-sync-conflict": "Forge and upstream cannot be merged automatically.",
+				"upstream-sync-changed":
+					"The local branch changed during sync. Check the updated counts and try again.",
+				"upstream-sync-push-failed":
+					"Could not push to upstream. Check the repository access and authentication.",
+				"upstream-sync-push-failed-local-updated":
+					"The local branch was updated, but the push to upstream failed. Check the repository access and authentication.",
 				"file-conflict": "Your draft is preserved. Compare the server version before retrying.",
 				"file-not-found": "Refresh the file tree.",
 				"file-unsupported": "The file is binary, too large, or uses an unsupported path.",

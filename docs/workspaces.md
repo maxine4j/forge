@@ -238,14 +238,18 @@ The branch dropdown lists all local branches and defaults to `main`, or the firs
 branch when `main` is absent. Every branch supports owner editing. There is no
 Working changes option. Listings read committed files and show each entry's latest
 commit subject and date. Browsing and committing never switch or reset a checkout.
-On `main` of the project imported from GitHub's Forge repository, **Sync with
-GitHub** appears before the counts load and shows each nonzero count for commits
+For any ready repository with an upstream remote, **Sync with upstream** appears
+on every branch before counts load, identifies the resolved target branch when
+available, and shows each nonzero count for commits
 ahead (↑) or behind (↓). Code checks the counts when
 opened, every 30 seconds while visible, and after committing or syncing.
-Commit or discard main drafts before syncing. Code reloads the current view
-after an attempt. Sync results and repository operation errors appear in a
+Commit or discard editor drafts before syncing; drafts on any branch disable the
+action with branch-neutral guidance. Code refreshes the affected branch's content
+after success, including when browsing another branch, and refreshes counts after
+an attempt. Sync results and repository operation errors appear in a
 bottom-left toast for five seconds or until dismissed with its close button.
-See [GitHub sync](git-and-ci.md#sync-forge-main-with-github) for failure outcomes.
+See [upstream sync](git-and-ci.md#sync-with-upstream) for failure outcomes and
+[imports](foundation.md#repositories-and-imports) for upstream configuration/recovery.
 Directory tables, including the root, use Name, Last commit message and Last commit
 date headers. Nested directories start with a `..` folder entry for navigating up.
 Breadcrumbs start with the repository's project name followed by directory segments.

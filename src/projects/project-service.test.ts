@@ -18,7 +18,13 @@ const fixture = () => {
 			records.get(key)!.status = status;
 		}),
 	} satisfies IProjectStore;
-	const repositories = { prepare: vi.fn(async () => {}), verify: vi.fn(async () => {}) };
+	const repositories = {
+		prepare: vi.fn(async () => {}),
+		verify: vi.fn(async () => {}),
+		hasUpstream: vi.fn(async () => false),
+		upstreamUrl: vi.fn(async () => "https://github.com/owner/repo"),
+		configureUpstream: vi.fn(async () => {}),
+	};
 	const access = new AccessService({ owner: "owner", origin: "https://forge.example.com" });
 	const service = new ProjectService(
 		store,
@@ -55,15 +61,16 @@ test("authorization and domain validation run before effects even for non-HTTP c
 	expect(store.insert).not.toHaveBeenCalled();
 });
 
-test("ready Forge imports advertise GitHub sync without returning their source", async () => {
-	const { service } = fixture();
+test("ready repositories advertise configured upstream without returning its URL", async () => {
+	const { service, repositories } = fixture();
+	repositories.hasUpstream.mockResolvedValue(true);
 	const actor = { username: "owner" };
 	const project = await service.create(actor, {
 		name: "Renamed",
 		source: "https://github.com:443/MAXINE4J/forge.git/",
 	});
 	for (const value of [project, await service.get(actor, id), ...(await service.list(actor))]) {
-		expect(value).toHaveProperty("githubSyncAvailable", true);
+		expect(value).toHaveProperty("upstreamSyncAvailable", true);
 		expect(value).not.toHaveProperty("source");
 	}
 });
@@ -92,4 +99,18 @@ test("startup reconciles creating intents and verifies ready repository ownershi
 	expect(records.get(id)?.status).toBe("failed");
 	await service.recover();
 	expect(repositories.prepare).toHaveBeenCalledOnce();
+});
+
+test("startup backfills imported ready repositories through the injected client", async () => {
+	const { service, records, repositories } = fixture();
+	records.set(id, {
+		id,
+		name: "Imported",
+		createdAt: "2026-11-02T00:00:00.000Z",
+		status: "ready",
+		source: "https://example.com/source",
+	});
+	await service.recover();
+	expect(repositories.configureUpstream).toHaveBeenCalledWith(id, "https://example.com/source");
+	expect(repositories.prepare).not.toHaveBeenCalled();
 });

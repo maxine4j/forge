@@ -84,13 +84,14 @@ Docker 503. The UI polls selected active runs every two seconds, stopping on
 terminal state/navigation. Text labels accompany colors; empty/invalid workflows,
 unavailable Docker and execution failures have visible messages.
 
-## Sync Forge main with GitHub
+## Sync with upstream
 
-The owner can sync a ready Forge project imported from
-`https://github.com/maxine4j/forge` through its [Code page](workspaces.md#slice-2-integrated-manual-workspace-and-pr-review).
-The [project API](foundation.md#projects-and-repository-imports) exposes eligibility
-from the saved import source so the Code page can show the button before checking drift.
-The saved import source identifies the repository. GitHub HTTPS requests use
+The owner can sync any ready repository with a Git remote named `upstream`
+through its [Code page](workspaces.md#slice-2-integrated-manual-workspace-and-pr-review).
+The [project API](foundation.md#repositories-and-imports) exposes eligibility
+from actual remote presence so Code can show the action before checking drift.
+The configured upstream URL must satisfy the same credential-free HTTPS,
+port 443 and configured host restrictions as imports. GitHub HTTPS requests use
 `gh auth git-credential`, scoped to `github.com`, and the persistent account in
 `<dataDirectory>/github` via `GH_CONFIG_DIR`. Remote comparison, fetch, and push
 all use this authenticated transport, which excludes ambient GitHub tokens.
@@ -98,17 +99,23 @@ Credentials remain in the helper rather than being copied into arguments,
 remote URLs, or application storage. [GitHub login](foundation.md#account-login-and-application-access)
 requests the additional `workflow` scope for workflow-file pushes.
 
-Owner-only `GET /api/projects/:id/repository/github-sync` reports `ready`
-with ahead and behind counts, `unavailable` if the comparison failed, or
-`unconfigured` for other projects. Git reads GitHub's current `main` and
+Owner-only `GET /api/projects/:id/repository/upstream-sync` reports `ready`
+with `branch`, ahead and behind counts, `unavailable` if the comparison failed, or
+`unconfigured` when upstream is absent. Git discovers upstream's live symbolic
+`HEAD` with `ls-remote --symref`, validates its branch and
 fetches missing objects without updating branch refs. Counts compare the two
-commit graphs. `POST` to the same route requires the configured browser origin
-and an empty body or object, then compares fresh refs and returns `{head}` on
-success. One sync can run at a time.
+commit graphs for the same-named local branch. Missing/invalid symbolic HEAD,
+missing remote or local branches, and unreadable remotes are unavailable; no
+branch is guessed or created. `POST` to the same route requires the configured
+browser origin and an empty body or object, then compares fresh refs and returns
+`{head, branch}` on success. One sync can run at a time globally.
 
-Sync fast-forwards local `main` or creates a clean two-parent merge in the
-bare repository, then pushes if GitHub needs commits. Forge updates local
-`main` with an expected-head check and GitHub with a normal push. Conflicts and
+Each operation captures the URL, branch and observed heads, using that target
+consistently even if configuration changes during the operation. Sync fast-forwards
+the local branch or creates a clean two-parent merge in the bare repository,
+then pushes if upstream needs commits. Forge updates the local branch with an
+expected-head check and upstream with a normal push, never a force push. Forge's
+own symbolic HEAD remains unchanged. Conflicts and
 unrelated histories leave both branch refs untouched. If a push fails after
 the local update, Forge reports the partial result and retains the local head.
 A retry compares the current refs again. Restart never replays a push.
@@ -116,4 +123,6 @@ A retry compares the current refs again. Restart never replays a push.
 The API reports fixed errors for conflicts, concurrent changes or sync
 (409), unavailable refs or comparison (503), a failed push (502), and
 unconfigured projects (404). Push failure has a distinct error code when
-local `main` was updated.
+the local branch was updated. Error codes use the `upstream-sync-` prefix:
+`unconfigured`, `unavailable`, `busy`, `conflict`, `changed`, `push-failed`, and
+`push-failed-local-updated`. There is no GitHub-specific sync API.

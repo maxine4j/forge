@@ -53,13 +53,13 @@ import { PullRequestService } from "./pull-requests/pull-request-service.ts";
 import { PullRequestStore } from "./pull-requests/pull-request-store.ts";
 import { GitDiffClient } from "./repositories/git-diff-client.ts";
 import { GitTransport } from "./repositories/git-transport.ts";
-import { GithubSyncClient } from "./repositories/github-sync-client.ts";
-import { GithubSyncRouter } from "./repositories/github-sync-router.ts";
-import { GithubSyncService } from "./repositories/github-sync-service.ts";
 import { RepositoryBrowserClient } from "./repositories/repository-browser-client.ts";
 import { RepositoryBrowserRouter } from "./repositories/repository-browser-router.ts";
 import { RepositoryBrowserService } from "./repositories/repository-browser-service.ts";
 import { RepositoryClient } from "./repositories/repository-client.ts";
+import { UpstreamSyncClient } from "./repositories/upstream-sync-client.ts";
+import { UpstreamSyncRouter } from "./repositories/upstream-sync-router.ts";
+import { UpstreamSyncService } from "./repositories/upstream-sync-service.ts";
 import { GitSystemConfig } from "./settings/git-system-config.ts";
 import { SettingsRouter } from "./settings/settings-router.ts";
 import { SettingsService } from "./settings/settings-service.ts";
@@ -340,11 +340,12 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			new EpicRouter(epics),
 			new CostRouter(cost),
 			new WorkspaceRouter(workspaces),
-			new GithubSyncRouter(
-				new GithubSyncService(
-					new GithubSyncClient(config.dataDirectory, repositories, git, githubGit),
+			new UpstreamSyncRouter(
+				new UpstreamSyncService(
+					new UpstreamSyncClient(config.dataDirectory, repositories, git, githubGit),
 					store,
 					access,
+					repositories,
 				),
 			),
 			new RepositoryBrowserRouter(
