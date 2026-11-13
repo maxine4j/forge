@@ -71,8 +71,8 @@ test("pinned Codex streams a custom-provider turn and resumes it after restart w
 						content: [{ type: "output_text", text: answer, annotations: [] }],
 					};
 			if (input.model !== "fixture:latest" || body.includes("Fail the fixture turn")) {
-				response.writeHead(400);
-				response.end("Fixture rejects unsupported requests.");
+				response.writeHead(500, { "Content-Type": "application/json" });
+				response.end(JSON.stringify({ error: { type: "api_error", message: "Private template error" } }));
 				return;
 			}
 			const events = [
@@ -195,7 +195,9 @@ test("pinned Codex streams a custom-provider turn and resumes it after restart w
 		await vi.waitFor(() => expect(client.read(id).status).toBe("completed"), { timeout: 5000 });
 		expect(client.read(id).plan).toContain("# Greeting");
 		await client.send(id, path, "Fail the fixture turn.", { permissions: "ask" });
-		await vi.waitFor(() => expect(client.read(id).status).toBe("failed"), { timeout: 5000 });
+		await vi.waitFor(() => expect(client.read(id).status).toBe("failed"), { timeout: 40000, interval: 100 });
+		expect(client.read(id).turnFailure).toBe("provider-request");
+		expect(JSON.stringify(client.read(id))).not.toContain("Private template error");
 		expect(track).not.toHaveBeenCalled();
 		expect(requests.length).toBeGreaterThanOrEqual(2);
 		for (const request of requests) {
@@ -211,4 +213,4 @@ test("pinned Codex streams a custom-provider turn and resumes it after restart w
 		await new Promise<void>((done) => server.close(() => done()));
 		await files.rm(root, { recursive: true, force: true });
 	}
-}, 20000);
+}, 60000);

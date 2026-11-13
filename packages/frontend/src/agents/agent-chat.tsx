@@ -346,6 +346,12 @@ export const Conversation = ({
 	const eligiblePlanAction =
 		!busy && !blocked && !loadingHistory && !historyFailed && status === "completed" && planAction;
 	const displayStatus = status === "uncertain" ? (historyFailed ? "unavailable" : "loading") : status;
+	const failureNotice =
+		view?.turnFailure === "provider-request"
+			? "The model request failed. Check that Forge can reach the inference endpoint and that the selected model supports Codex requests."
+			: view?.turnFailure === "context-window"
+				? "This turn exceeded the model's context window. Try a shorter prompt or start a new chat."
+				: "Codex could not complete this turn.";
 	if (historyOnly)
 		return (
 			<>
@@ -466,6 +472,11 @@ export const Conversation = ({
 									/>
 								)}
 							{suffix}
+							{status === "failed" && (
+								<p className='error' role='alert'>
+									{failureNotice}
+								</p>
+							)}
 							{active && (
 								<p
 									className={`agent-notice ${status === "running" ? "agent-working-highlight" : ""}`}

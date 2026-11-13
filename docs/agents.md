@@ -137,8 +137,12 @@ Ollama accepts **Ask** and **Full access**. Codex 0.164.0 requests a separate
 `codex-auto-review` model for **Approve for me**, outside Forge's single-model
 Ollama configuration. Forge rejects that selection until the owner chooses
 another permission mode. The configured model and server must support streamed
-stateless Responses with function calls. Verify the chosen deployment and model
-with chat, tool execution, restart, and ticket planning and implementation.
+stateless Responses with function calls and multiple developer messages. Verify
+the chosen deployment and model with chat, tool execution, restart, and ticket
+planning and implementation. On Ollama 0.40.16, `qwen3.8:27b` handled chat and
+tool calls. The `qwen3.8-27b-turbo:q4_k_s` template rejected Codex's developer
+messages with HTTP 500 and “System message must be at the beginning.” When
+switching models in Config, start a new chat to pick up the new tag.
 
 Codex's curated process environment explicitly supplies
 `DOCKER_HOST=unix:///run/forge/docker.sock`, as do workspace terminals. CLI,
@@ -170,8 +174,9 @@ Browser-safe schemas are exported from `@forge/contracts/agents`:
 
 Every operation rechecks owner access; HTTP mutations retain exact-origin checks.
 Errors are `invalid-request` (400), `agent-not-found` (404), `agent-conflict` (409),
-`agent-unavailable` (503), plus existing access/project/workspace failures. Raw
-Codex diagnostics stay in operator logs. Conversation/tool text is owner-visible
+`agent-unavailable` (503), plus existing access/project/workspace failures. A
+failed turn may expose a normalized `turnFailure` in the agent view for the chat
+notice. Raw Codex diagnostics stay in operator logs. Conversation/tool text is owner-visible
 content, not a credential-redaction guarantee.
 
 Messages are limited to 8000 characters. Views retain at most 500 items, 32000

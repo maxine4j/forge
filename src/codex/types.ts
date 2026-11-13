@@ -1,4 +1,10 @@
-import type { AgentContextWindow, AgentItem, AgentRequest, AgentStatus } from "@forge/contracts/agents";
+import type {
+	AgentContextWindow,
+	AgentItem,
+	AgentRequest,
+	AgentStatus,
+	AgentTurnFailure,
+} from "@forge/contracts/agents";
 export type ExecutionReconciliation =
 	| { state: "active"; turnId: string }
 	| { state: "inactive" | "missing" }
@@ -11,4 +17,5 @@ export interface AgentRuntimeView {
 	requests: AgentRequest[];
 	truncated: boolean;
 	contextWindow?: AgentContextWindow;
+	turnFailure?: AgentTurnFailure;
 }

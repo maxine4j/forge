@@ -111,6 +111,7 @@ export const agentViewSchema = z.strictObject({
 	requests: z.array(agentRequestSchema).max(32),
 	truncated: z.boolean(),
 	contextWindow: agentContextWindowSchema.optional(),
+	turnFailure: z.enum(["provider-request", "context-window", "other"]).optional(),
 });
 export type {
 	AgentStatus,
@@ -120,6 +121,7 @@ export type {
 	AgentThread,
 	AgentView,
 	AgentContextWindow,
+	AgentTurnFailure,
 	AgentReply,
 	AgentSettings,
 	AgentOptions,

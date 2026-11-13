@@ -511,6 +511,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			requests: runtime?.requests ?? requests,
 			truncated: runtime?.truncated ?? false,
 			...(contextWindow && { contextWindow }),
+			...(thread.status === "failed" && runtime?.turnFailure && { turnFailure: runtime.turnFailure }),
 		};
 	}
 	private async sync(record: AgentThreadRecord): Promise<AgentView> {

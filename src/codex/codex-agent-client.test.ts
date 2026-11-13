@@ -812,8 +812,17 @@ test("terminal Codex errors stop the turn while retryable errors keep it active"
 	await client.send(id, "/data/worktrees/one", "Hello");
 	notify("error", { threadId: id, turnId: "turn-1", willRetry: true, error: { message: "Retry" } });
 	expect(client.read(id).status).toBe("running");
-	notify("error", { threadId: id, turnId: "turn-1", willRetry: false, error: { message: "Signed out" } });
-	expect(client.read(id).status).toBe("failed");
+	expect(client.read(id).turnFailure).toBeUndefined();
+	notify("error", {
+		threadId: id,
+		turnId: "turn-1",
+		willRetry: false,
+		error: { message: "Private diagnostic", codexErrorInfo: "internalServerError" },
+	});
+	expect(client.read(id)).toMatchObject({ status: "failed", turnFailure: "provider-request" });
+	expect(JSON.stringify(client.read(id))).not.toContain("Private diagnostic");
+	await client.send(id, "/data/worktrees/one", "Try again");
+	expect(client.read(id).turnFailure).toBeUndefined();
 });
 test("reused Codex callback IDs cannot authorize a replacement request after reconnect", async () => {
 	const { client, request, notify } = setup();

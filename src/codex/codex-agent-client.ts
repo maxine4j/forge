@@ -6,6 +6,7 @@ import {
 	type AgentItem,
 	type AgentSettings,
 	type AgentOptions,
+	type AgentTurnFailure,
 } from "@forge/contracts/agents";
 import type { InferenceProvider } from "@forge/contracts/settings";
 import { z } from "zod";
@@ -130,6 +131,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			const view = this.views.get(id) ?? this.hydrate(thread);
 			view.status = view.requests.length ? "waiting" : "running";
 			view.turnId = turn.id;
+			delete view.turnFailure;
 			this.views.set(id, view);
 			return { state: "active", turnId: turn.id };
 		} catch (err) {
@@ -142,6 +144,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 		view.status = "interrupted";
 		view.requests = [];
 		delete view.plan;
+		delete view.turnFailure;
 		for (const [key, request] of this.pending) if (request.threadId === id) this.pending.delete(key);
 		this.views.set(id, view);
 		this.settled.add(id);
@@ -170,6 +173,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			if (this.settled.has(id)) {
 				view.status = live.status;
 				view.turnId = live.turnId;
+				view.turnFailure = live.turnFailure;
 				if (live.status !== "completed") delete view.plan;
 			}
 			view.requests = live.requests;
@@ -178,6 +182,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 				view.status = live.status;
 				if (view.turnId !== live.turnId) delete view.plan;
 				view.turnId = live.turnId;
+				view.turnFailure = live.turnFailure;
 				if (live.plan !== undefined) view.plan = live.plan;
 				view.truncated ||= live.truncated;
 				for (const item of live.items) if (before.get(item.id) !== item.text) this.put(view, item);
@@ -206,6 +211,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 				const settled = this.views.get(id)!;
 				view.status = settled.status;
 				view.turnId = settled.turnId;
+				view.turnFailure = settled.turnFailure;
 				if (settled.status !== "completed") delete view.plan;
 			}
 			view.contextWindow = this.views.get(id)?.contextWindow;
@@ -318,6 +324,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			this.settled.delete(id);
 			delete view.turnId;
 			delete view.plan;
+			delete view.turnFailure;
 			try {
 				if (usage && !ollama) await this.usageTracker?.track(id, usage, model);
 				const result = z.object({ turn: turnSchema }).parse(
@@ -355,6 +362,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 				if (!view.turnId) {
 					view.turnId = result.turn.id;
 					view.status = this.status(result.turn.status);
+					if (view.status === "failed") view.turnFailure = this.turnFailure(result.turn.error);
 				}
 			} catch (cause) {
 				view.status = "uncertain";
@@ -509,6 +517,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			requests: [],
 			truncated: false,
 		};
+		if (view.status === "failed") view.turnFailure = this.turnFailure(last?.error);
 		for (const turn of thread.turns) {
 			for (const item of turn.items) this.item(view, item, turn.id === last?.id && turn.status === "completed");
 			this.finishTools(view, this.status(turn.status));
@@ -704,12 +713,15 @@ export class CodexAgentClient implements ICodexAgentClient {
 				}
 				if (view.status === "waiting" && !view.requests.length) view.status = "running";
 			} else if (method === "error") {
-				const error = z.object({ turnId: z.string(), willRetry: z.boolean() }).parse(params);
+				const error = z
+					.object({ turnId: z.string(), willRetry: z.boolean(), error: turnErrorSchema })
+					.parse(params);
 				if (view.turnId && error.turnId !== view.turnId) return;
 				if (!error.willRetry) {
 					this.settled.add(id);
 					view.turnId = error.turnId;
 					view.status = "failed";
+					view.turnFailure = this.turnFailure(error.error);
 					this.finishTools(view, "failed");
 					view.requests = [];
 					for (const [key, request] of this.pending) if (request.threadId === id) this.pending.delete(key);
@@ -722,6 +734,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 				}
 				view.turnId = turn.id;
 				view.status = this.status(turn.status);
+				view.turnFailure = view.status === "failed" ? this.turnFailure(turn.error) : undefined;
 				for (const item of turn.items) this.item(view, item, turn.status === "completed");
 				if (method === "turn/completed") {
 					this.settled.add(id);
@@ -751,6 +764,25 @@ export class CodexAgentClient implements ICodexAgentClient {
 			view.status = "uncertain";
 			this.emit(id);
 		}
+	}
+	private turnFailure(error: z.infer<typeof turnErrorSchema>): AgentTurnFailure {
+		const info = error?.codexErrorInfo;
+		if (info === "contextWindowExceeded") return "context-window";
+		if (
+			info === "internalServerError"
+			|| info === "badRequest"
+			|| info === "unauthorized"
+			|| (typeof info === "object"
+				&& info !== null
+				&& [
+					"httpConnectionFailed",
+					"responseStreamConnectionFailed",
+					"responseStreamDisconnected",
+					"responseTooManyFailedAttempts",
+				].some((key) => Object.hasOwn(info, key)))
+		)
+			return "provider-request";
+		return "other";
 	}
 	private serverRequest(rpcId: string | number, method: string, params: unknown): boolean {
 		if (
@@ -835,10 +867,12 @@ export class CodexAgentClient implements ICodexAgentClient {
 	}
 }
 
+const turnErrorSchema = z.object({ codexErrorInfo: z.unknown().optional() }).nullish();
 const turnSchema = z.object({
 	id: z.string().min(1).max(256),
 	status: z.enum(["inProgress", "completed", "interrupted", "failed"]),
 	items: z.array(z.unknown()),
+	error: turnErrorSchema,
 });
 const contextUpdate = z.object({
 	turnId: z.string(),

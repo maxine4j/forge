@@ -292,6 +292,17 @@ test("Agents has one compact creation button and no redundant headings or title 
 	expect(fixture.views[0]!.thread.title).toBe("Chat 1");
 });
 
+test("chat shows guidance when an inference request fails", async ({ page }) => {
+	const fixture = await setup(page);
+	await fixture.create();
+	const view = fixture.views.at(0)!;
+	view.thread.status = "failed";
+	view.turnFailure = "provider-request";
+	await fixture.event();
+	await expect(page.getByRole("alert")).toContainText("Check that Forge can reach the inference endpoint");
+	await expect(page.getByRole("textbox", { name: "Message", exact: true })).toBeEnabled();
+});
+
 test("independent chats retain drafts and running activity across tabs and reopening", async ({ page }) => {
 	const fixture = await setup(page);
 	await fixture.create();

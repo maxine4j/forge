@@ -58,12 +58,14 @@ export interface AgentContextWindow {
 	used: number;
 	max: number;
 }
+export type AgentTurnFailure = "provider-request" | "context-window" | "other";
 export interface AgentView {
 	thread: AgentThread;
 	items: AgentItem[];
 	requests: AgentRequest[];
 	truncated: boolean;
 	contextWindow?: AgentContextWindow;
+	turnFailure?: AgentTurnFailure;
 }
 export interface AgentReply {
 	requestId: string;
