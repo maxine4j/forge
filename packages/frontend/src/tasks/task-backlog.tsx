@@ -15,19 +15,21 @@ export const TaskBacklog = ({
 	toggleEpic,
 	openEpic,
 	createInEpic,
+	createUnassigned,
 }: TaskViewProps & {
 	epics: EpicSummary[];
 	collapsed: string[];
 	toggleEpic: (id: string) => void;
 	openEpic: (id: string) => void;
 	createInEpic: (id: string) => void;
+	createUnassigned: () => void;
 }) => {
 	const unfinished = tickets.filter((ticket) => !ticket.archivedAt && ticket.status !== "done");
 	return (
 		<div className='task-backlog'>
 			{error && (
 				<p role='alert' className='error'>
-					{error} Use Refresh to retry.
+					{error}
 				</p>
 			)}
 			<p role='status'>
@@ -47,7 +49,7 @@ export const TaskBacklog = ({
 					const titleId = `backlog-title-${epic?.id ?? "no-epic"}`;
 					const childrenId = `children-${epic?.id ?? "no-epic"}`;
 					return (
-						<section key={titleId} className='backlog-section'>
+						<section key={titleId} className='backlog-section' aria-labelledby={titleId}>
 							<div className='backlog-section-header'>
 								{epic && (
 									<button
@@ -74,18 +76,14 @@ export const TaskBacklog = ({
 										"No epic"
 									)}
 								</h3>
-								{epic && (
-									<>
-										<EpicProgress done={epic.done} total={epic.total} />
-										<button
-											className='backlog-epic-create'
-											disabled={busy}
-											onClick={() => createInEpic(epic.id)}
-										>
-											<span aria-hidden='true'>+</span> Create ticket
-										</button>
-									</>
-								)}
+								{epic && <EpicProgress done={epic.done} total={epic.total} />}
+								<button
+									className='backlog-epic-create'
+									disabled={busy}
+									onClick={epic ? () => createInEpic(epic.id) : createUnassigned}
+								>
+									<span aria-hidden='true'>+</span> Create ticket
+								</button>
 							</div>
 							<TicketTable
 								id={childrenId}

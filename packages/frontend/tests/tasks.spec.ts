@@ -497,7 +497,7 @@ test("epic groups include empty and completed sections, preserve collapse throug
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
 	await expect(page.getByRole("table")).toHaveCount(4);
 	await expect(page.locator(".backlog-section-header")).toHaveText([
-		"No epic",
+		/No epic.*Create ticket/,
 		/EPIC-1.*1 \/ 2 done/,
 		/EPIC-2.*0 \/ 0 done/,
 		/EPIC-3.*1 \/ 1 done/,
@@ -553,20 +553,34 @@ test("epic details edit with retry, restore history, link Done children and pres
 	dialog = page.getByRole("dialog", { name: "EPIC-1", exact: true });
 	await expect(dialog).toBeVisible();
 	await expect(dialog.getByRole("alert")).toContainText("Tickets are unavailable");
-	await expect(dialog.getByLabel("Description", { exact: true })).toHaveValue("Epic scope");
+	const editDescription = dialog.getByRole("button", { name: "Edit description", exact: true });
+	await expect(editDescription).toHaveText("Epic scope");
+	await expect(dialog.locator(".epic-status")).toHaveText("Backlog");
 	f.failLists(false);
 	await dialog.getByRole("button", { name: "Refresh", exact: true }).click();
 	await expect(dialog.getByRole("alert")).toHaveCount(0);
 	await expect(page).toHaveURL("/tasks?view=backlog&epic=EPIC-1");
+	await dialog.getByRole("button", { name: "Edit title: First milestone", exact: true }).click();
 	await dialog.getByLabel("Title", { exact: true }).fill("Edited milestone");
 	await page.waitForTimeout(1200);
 	await expect(dialog.getByLabel("Title", { exact: true })).toHaveValue("Edited milestone");
 	f.failSaves(true);
-	await dialog.getByRole("button", { name: "Save epic", exact: true }).click();
+	await dialog.getByRole("button", { name: "Save title", exact: true }).click();
 	await expect(dialog.getByRole("alert")).toBeVisible();
 	f.failSaves(false);
-	await dialog.getByRole("button", { name: "Save epic", exact: true }).click();
+	await dialog.getByLabel("Title", { exact: true }).press("Enter");
 	await expect.poll(() => f.epics[0]?.title).toBe("Edited milestone");
+	await expect(dialog.getByRole("button", { name: "Edit title: Edited milestone", exact: true })).toBeFocused();
+	await editDescription.click();
+	const description = dialog.getByLabel("Description", { exact: true });
+	await description.fill("Discard this draft");
+	await description.press("Escape");
+	await expect(editDescription).toBeFocused();
+	await expect(editDescription).toHaveText("Epic scope");
+	await editDescription.click();
+	await description.fill("Updated epic scope");
+	await dialog.getByRole("button", { name: "Save description", exact: true }).click();
+	await expect(editDescription).toHaveText("Updated epic scope");
 	await dialog.getByRole("button", { name: "Create ticket", exact: true }).click();
 	const editor = page.getByRole("dialog", { name: "Create ticket", exact: true });
 	await expect(editor.getByLabel("Epic", { exact: true })).toHaveValue("EPIC-1");
@@ -574,9 +588,15 @@ test("epic details edit with retry, restore history, link Done children and pres
 	await editor.getByRole("button", { name: "Create", exact: true }).click();
 	await expect(editor).toHaveCount(0);
 	expect(f.tickets().at(-1)?.epicId).toBe("EPIC-1");
-	f.tickets().at(-1)!.status = "done";
 	await page.getByRole("button", { name: "EPIC-1 · Edited milestone", exact: true }).click();
+	const child = f.tickets().at(-1)!;
+	child.status = "todo";
+	await expect(dialog.locator(".epic-status")).toHaveText("Ready for development");
+	child.status = "in-progress";
+	await expect(dialog.locator(".epic-status")).toHaveText("In progress");
+	child.status = "done";
 	await expect(dialog.getByRole("progressbar", { name: "1 / 1 done", exact: true })).toBeVisible();
+	await expect(dialog.locator(".epic-status")).toHaveText("Done");
 	const children = dialog.getByRole("table", { name: "Child work items", exact: true });
 	await expect(children.getByText("Done", { exact: true })).toBeVisible();
 	await children.getByRole("button", { name: "TASK-3 Epic child", exact: true }).click();
@@ -584,7 +604,7 @@ test("epic details edit with retry, restore history, link Done children and pres
 	await page.goBack();
 	await expect(dialog).toBeVisible();
 	await page.reload();
-	await expect(dialog.getByLabel("Title", { exact: true })).toHaveValue("Edited milestone");
+	await expect(dialog.getByRole("button", { name: "Edit title: Edited milestone", exact: true })).toBeVisible();
 	await dialog.getByRole("button", { name: "Close epic", exact: true }).click();
 	await page.goBack();
 	await expect(dialog).toBeVisible();
@@ -655,6 +675,13 @@ test("epic disclosure works without browser storage and section creation presele
 		"aria-expanded",
 		"false",
 	);
+	const createUnassigned = page
+		.getByRole("region", { name: "No epic", exact: true })
+		.getByRole("button", { name: "Create ticket", exact: true });
+	await createUnassigned.click();
+	await expect(dialog.getByLabel("Epic", { exact: true })).toHaveValue("");
+	await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
+	await expect(createUnassigned).toBeFocused();
 });
 
 test("inline ticket title saves independently and supports keyboard and button discard", async ({ page }) => {
@@ -711,7 +738,9 @@ test("inline ticket title saves independently and supports keyboard and button d
 test("backlog creation and scope saves retain failed drafts and share changes with Board", async ({ page }) => {
 	const f = await setup(page);
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
-	const create = page.getByRole("button", { name: "Create ticket", exact: true });
+	const create = page
+		.getByRole("group", { name: "Backlog actions" })
+		.getByRole("button", { name: "Create ticket", exact: true });
 	await create.click();
 	let dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
 	await dialog.getByLabel("Title", { exact: true }).fill("  New task  ");
@@ -786,20 +815,15 @@ test("switching views shares tickets and the single pending list request", async
 	await expect(page.getByRole("status")).toHaveText("2 unfinished tickets");
 });
 
-test("backlog has loading, empty and recoverable list errors", async ({ page }) => {
+test("backlog recovers from list errors on the next successful poll", async ({ page }) => {
 	const f = await setup(page);
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
 	await expect(page.getByRole("table").locator("tbody tr:has(td)")).toHaveCount(2);
-	f.blockReads();
-	await page.getByRole("button", { name: "Refresh", exact: true }).click();
-	await expect(page.getByRole("status")).toHaveText("Loading tickets…");
-	await expect(page.getByRole("region", { name: "Unfinished tickets" })).toHaveAttribute("aria-busy", "true");
+	await expect(page.getByRole("button", { name: "Refresh", exact: true })).toHaveCount(0);
 	f.failLists(true);
-	f.releaseReads();
-	await expect(page.getByRole("alert")).toContainText("Use Refresh to retry");
-	f.failLists(false);
+	await expect(page.getByRole("alert")).toContainText("Tickets are unavailable");
 	f.tickets().splice(0);
-	await page.getByRole("button", { name: "Refresh", exact: true }).click();
+	f.failLists(false);
 	await expect(page.getByRole("status")).toHaveText("0 unfinished tickets");
 	await expect(page.getByText("No unfinished tickets. Create a ticket to get started.")).toBeVisible();
 	await expect(page.getByRole("alert")).toHaveCount(0);

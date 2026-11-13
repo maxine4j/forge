@@ -411,9 +411,6 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 							>
 								Create epic
 							</button>
-							<button type='button' disabled={actionsBusy} onClick={refresh}>
-								Refresh
-							</button>
 						</>
 					)}
 					<button type='button' className='primary' disabled={actionsBusy} onClick={create}>
@@ -451,6 +448,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 								toggleEpic={toggleEpic}
 								openEpic={openEpic}
 								createInEpic={createInEpic}
+								createUnassigned={create}
 								tickets={tickets}
 								busy={busy}
 								loading={loading}

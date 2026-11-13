@@ -1159,9 +1159,34 @@
 }
 .ticket-dialog.epic-details {
 	width: min(780px, calc(100vw - 24px));
+	padding: 12px;
+}
+.epic-details .ticket-details-heading {
+	align-items: center;
+	margin-bottom: 4px;
+}
+.epic-details .ticket-details-key-row {
+	margin-bottom: 0;
+}
+.epic-details .ticket-title-editor {
+	margin-inline-start: -6px;
+}
+.epic-details .ticket-description-editor {
+	margin-top: 12px;
+}
+.epic-details .ticket-description-editor .ticket-detail-section {
+	margin-bottom: 0;
+	padding: 2px 6px 4px;
 }
 .epic-children {
 	margin-top: 20px;
+}
+.epic-children .backlog-section-header {
+	padding: 2px 8px;
+}
+.epic-children .backlog-table td {
+	padding-block: 4px;
+	padding-inline-start: 8px;
 }
 .ticket-dialog.ticket-details {
 	position: fixed;
@@ -1270,20 +1295,26 @@
 	background: #1b392a;
 	color: #7ee787;
 }
+.epic-status,
 .ticket-status-select select {
-	appearance: none;
-	field-sizing: content;
 	max-width: 100%;
-	padding: 5px 23px 5px 8px;
-	border: 0;
-	border-radius: inherit;
-	background: transparent;
-	color: inherit;
 	font-family: inherit;
 	font-size: 11px;
 	font-weight: 700;
 	line-height: 16px;
 	text-transform: uppercase;
+}
+.ticket-status-select.epic-status {
+	padding: 5px 8px;
+}
+.ticket-status-select select {
+	appearance: none;
+	field-sizing: content;
+	padding: 5px 23px 5px 8px;
+	border: 0;
+	border-radius: inherit;
+	background: transparent;
+	color: inherit;
 	cursor: pointer;
 }
 .ticket-status-select select:disabled {
@@ -1333,6 +1364,7 @@
 	margin: 0;
 }
 .ticket-details .ticket-title,
+.epic-details .ticket-title,
 .ticket-title-editor input {
 	margin: 0;
 	font-size: 20px;
@@ -1496,7 +1528,7 @@
 .ticket-description-edit {
 	position: relative;
 }
-.ticket-fields .ticket-description-text {
+.ticket-description-editor .ticket-description-text {
 	display: block;
 	width: 100%;
 	margin: 0;
@@ -1512,10 +1544,16 @@
 button.ticket-description-text:hover {
 	background: #21262d;
 }
-.ticket-fields textarea.ticket-description-text {
+.ticket-description-editor textarea.ticket-description-text {
 	field-sizing: content;
 	min-height: calc(1lh + 10px);
 	resize: none;
+}
+.epic-details .ticket-description-editor .ticket-description-text {
+	padding: 2px 4px;
+}
+.epic-details .ticket-description-editor textarea.ticket-description-text {
+	min-height: calc(1lh + 6px);
 }
 .ticket-description-actions {
 	position: absolute;
@@ -1603,8 +1641,8 @@ button.ticket-description-text:hover {
 	margin-bottom: 16px;
 	font-size: 13px;
 }
-.ticket-dialog:not(.ticket-details) input,
-.ticket-dialog:not(.ticket-details) textarea,
+.ticket-dialog:not(.ticket-details) input:not(.ticket-title-editor input),
+.ticket-dialog:not(.ticket-details) textarea:not(.ticket-description-text),
 .ticket-dialog:not(.ticket-details) select,
 .ticket-fields input,
 .ticket-fields textarea {

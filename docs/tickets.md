@@ -254,15 +254,21 @@ chevron collapses or expands its table. Disclosures have `aria-expanded`
 and `aria-controls`; collapsed IDs use browser storage key
 `forge.epics.collapsed.v1`, tolerating malformed or unavailable storage. One-second
 polling and mutations refresh tickets and epic summaries together, preserving
-collapse state and unsaved dialog edits. Errors remain retryable in open dialogs.
+collapse state and unsaved dialog edits. Backlog list errors clear after a
+successful poll. Errors remain retryable in open dialogs.
 
-Create epic opens an editable dialog. Existing epics show a child work items table
-with progress and links to all non-archived children, including Done. The URL
+Create epic opens an editable dialog. Existing epics open in a centered dialog
+with inline title and description editing and a child work items table with
+progress and links to all non-archived children, including Done. The status
+shows Done when complete, In progress when any child is In progress or Done
+and work remains, Ready for development when any remaining child is Ready
+and work has yet to start, and Backlog otherwise. The URL
 `/tasks?view=backlog&epic=EPIC-n` restores it on reload and Back/Forward. Ticket
 creation offers an optional Epic selector. In ticket details, the header shows a
 linked breadcrumb for an assigned epic. Backlog drafts can add, change or remove
 their parent there and save it immediately. Create ticket in an epic header or its details
-preselects that epic. See [persistence](architecture.md#persistence-and-recovery)
+preselects that epic. Create ticket in No epic starts without an epic selected.
+See [persistence](architecture.md#persistence-and-recovery)
 and the required [database backup and recreation](development.md#development-databases).
 
 ### Docker containers

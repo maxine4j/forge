@@ -17,6 +17,7 @@ import { AgentOptionsRevision, ExecutionSettings } from "../agents/execution-set
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { EpicIcon } from "./epic-icon.tsx";
+import { InlineTicketDescription, InlineTicketTitle } from "./inline-ticket-fields.tsx";
 import { RepositorySelection } from "./repository-selection.tsx";
 import { TicketCost } from "./ticket-cost.tsx";
 import { ticketLabels } from "./ticket-labels.ts";
@@ -443,59 +444,18 @@ export const TicketDetails = ({
 					</button>
 				</div>
 			</div>
-			{editingTitle ? (
-				<form
-					className='ticket-title-editor'
-					onSubmit={(event) => {
-						event.preventDefault();
-						void saveTitle();
-					}}
-					onKeyDown={(event) => {
-						if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
-						event.preventDefault();
-						if (!busy) finishTitleEdit();
-					}}
-				>
-					<input
-						ref={titleInput}
-						aria-label='Title'
-						aria-invalid={titleError ? true : undefined}
-						maxLength={120}
-						value={titleDraft}
-						readOnly={busy}
-						onChange={(event) => setTitleDraft(event.target.value)}
-					/>
-					<button type='submit' aria-label='Save title' title='Save title' disabled={busy}>
-						✓
-					</button>
-					<button
-						type='button'
-						aria-label='Discard title changes'
-						title='Discard title changes'
-						disabled={busy}
-						onClick={finishTitleEdit}
-					>
-						✕
-					</button>
-				</form>
-			) : (
-				<h3 className='ticket-title'>
-					{editable ? (
-						<button
-							ref={editTitle}
-							type='button'
-							aria-label={`Edit title: ${ticket.title}`}
-							title='Edit title'
-							disabled={busy}
-							onClick={() => setTitleDraft(ticket.title)}
-						>
-							{ticket.title}
-						</button>
-					) : (
-						ticket.title
-					)}
-				</h3>
-			)}
+			<InlineTicketTitle
+				value={ticket.title}
+				draft={titleDraft}
+				editable={editable}
+				busy={busy}
+				trigger={editTitle}
+				input={titleInput}
+				change={setTitleDraft}
+				save={() => void saveTitle()}
+				discard={finishTitleEdit}
+				invalid={!!titleError}
+			/>
 			{archived && <small>Archived · Read only</small>}
 			{editingTitle && titleError && (
 				<p role='alert' className='error'>
@@ -617,69 +577,17 @@ export const TicketDetails = ({
 				</button>
 			)}
 			<div className='ticket-fields' {...panel("details")}>
-				<form
-					className='ticket-description-editor'
-					onSubmit={(event) => {
-						event.preventDefault();
-						void saveDescription();
-					}}
-					onKeyDown={(event) => {
-						if (!editingDescription || event.key !== "Escape" || event.nativeEvent.isComposing) return;
-						event.preventDefault();
-						if (!busy) finishDescriptionEdit();
-					}}
-				>
-					<fieldset className='ticket-detail-section'>
-						<legend id={`${fieldId}-description-label`}>Description</legend>
-						{editingDescription ? (
-							<div className='ticket-description-edit'>
-								<textarea
-									ref={descriptionInput}
-									className='ticket-description-text'
-									aria-labelledby={`${fieldId}-description-label`}
-									rows={1}
-									maxLength={4000}
-									value={descriptionDraft}
-									readOnly={busy}
-									onChange={(event) => setDescriptionDraft(event.target.value)}
-								/>
-								<div className='ticket-description-actions'>
-									<button
-										type='submit'
-										aria-label='Save description'
-										title='Save description'
-										disabled={busy}
-									>
-										✓
-									</button>
-									<button
-										type='button'
-										aria-label='Discard description changes'
-										title='Discard description changes'
-										disabled={busy}
-										onClick={finishDescriptionEdit}
-									>
-										✕
-									</button>
-								</div>
-							</div>
-						) : editable ? (
-							<button
-								ref={editDescription}
-								className='ticket-description-text'
-								type='button'
-								aria-label='Edit description'
-								title='Edit description'
-								disabled={busy}
-								onClick={() => setDescriptionDraft(ticket.description)}
-							>
-								{ticket.description || "Add a description"}
-							</button>
-						) : (
-							<p className='ticket-description-text'>{ticket.description || "No description"}</p>
-						)}
-					</fieldset>
-				</form>
+				<InlineTicketDescription
+					value={ticket.description}
+					draft={descriptionDraft}
+					editable={editable}
+					busy={busy}
+					trigger={editDescription}
+					input={descriptionInput}
+					change={setDescriptionDraft}
+					save={() => void saveDescription()}
+					discard={finishDescriptionEdit}
+				/>
 				{plan && (
 					<fieldset className='ticket-detail-section'>
 						<legend>Plan</legend>
