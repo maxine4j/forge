@@ -1670,9 +1670,11 @@ small {
 }
 .accounts-section {
 	max-width: 960px;
+	margin-inline: auto;
 }
 .forge-settings {
 	max-width: 960px;
+	margin-inline: auto;
 	margin-top: 32px;
 }
 .forge-settings fieldset {
