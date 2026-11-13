@@ -1104,6 +1104,136 @@ test("backlog recovers from list errors on the next successful poll", async ({ p
 	await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
+for (const width of [320, 390, 600, 601, 1280]) {
+	test(`compact ticket rows and responsive epic progress at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 844 });
+		const f = await setup(page);
+		const longTitle = "Long ticket title ".repeat(6);
+		f.epics.push(
+			...[1, 2, 3].map((n) => ({
+				id: `EPIC-${n}`,
+				title: "Long epic header ".repeat(7),
+				description: "",
+				createdAt,
+			})),
+		);
+		const base = f.tickets()[0]!;
+		f.tickets().splice(
+			0,
+			2,
+			{ ...base, title: longTitle, epicId: "EPIC-2", agentStatus: "queued", status: "todo" },
+			{
+				...base,
+				id: "TASK-2",
+				title: "W".repeat(120),
+				epicId: "EPIC-2",
+				agentStatus: "working",
+				status: "in-progress",
+			},
+			{ ...base, id: "TASK-3", title: longTitle, epicId: "EPIC-2", resetting: true },
+			{ ...base, id: "TASK-4", title: longTitle, epicId: "EPIC-2", needsAttention: true },
+			{ ...base, id: "TASK-5", epicId: "EPIC-2", status: "done" },
+			{ ...base, id: "TASK-6", epicId: "EPIC-3", status: "done" },
+		);
+		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+		const assertRows = async (table: Locator) => {
+			await expect(table.locator(".backlog-title-text")).toHaveCount(4);
+			for (const text of await table.locator(".backlog-title-text, .backlog-status").all()) {
+				await expect(text).toHaveCSS("white-space", "nowrap");
+				await expect(text).toHaveCSS("overflow", "hidden");
+				await expect(text).toHaveCSS("text-overflow", "ellipsis");
+			}
+			const ready = table.locator(".ticket-status-todo");
+			await expect(ready).toHaveAttribute("title", "Ready for development");
+			expect(await ready.evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(true);
+			const working = table.locator(".ticket-status-in-progress");
+			expect((await working.boundingBox())!.width).toBe(80);
+			expect(await working.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+			const statusCell = await working.locator("..").boundingBox();
+			expect(statusCell!.width).toBeLessThanOrEqual(104);
+			// The previous expanding column consumed this much title space.
+			expect(statusCell!.width).toBeLessThan(Math.max(116, Math.min(width * 0.19, 190)));
+			const unbrokenTitle = table.locator(".backlog-title-text").nth(1);
+			expect(await unbrokenTitle.evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(true);
+			for (const label of [
+				"Agent queued",
+				"Agent working",
+				"Cancellation and cleanup pending",
+				"Action required",
+			]) {
+				const indicator = table.getByRole("img", { name: label, exact: true });
+				await expect(indicator).toBeVisible();
+				const icon = (await indicator.boundingBox())!;
+				const title = (await indicator.locator("..").locator(".backlog-title-text").boundingBox())!;
+				expect(Math.abs(icon.y + icon.height / 2 - title.y - title.height / 2)).toBeLessThan(1);
+				await expect(indicator).toHaveCSS("position", "static");
+			}
+			expect(await table.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+			await expect(table.getByRole("button", { name: `TASK-1 ${longTitle}`, exact: true })).toHaveAttribute(
+				"title",
+				longTitle,
+			);
+		};
+		const table = page.locator("#children-EPIC-2");
+		await assertRows(table);
+		await expect(page.getByRole("progressbar")).toHaveCount(3);
+		for (const [index, done, total] of [
+			[0, 0, 0],
+			[1, 1, 5],
+			[2, 1, 1],
+		]) {
+			const progress = page.getByRole("progressbar").nth(index!);
+			await expect(progress).toHaveAccessibleName(`${done} / ${total} done`);
+			await expect(progress).toHaveAttribute("aria-valuenow", String(done));
+			await expect(progress).toHaveAttribute("aria-valuemax", String(total || 1));
+			await expect(progress).toHaveAttribute("aria-valuemin", "0");
+			await expect(progress).toHaveAttribute("aria-valuetext", `${done} / ${total} done`);
+			await expect(progress.locator(".epic-progress-ring")).toBeVisible({ visible: width <= 600 });
+			if (width <= 600) {
+				await expect(progress.locator(".epic-progress-ring")).toHaveCSS("width", "20px");
+				await expect(progress.locator(".epic-progress-ring")).toHaveCSS("height", "20px");
+			}
+			await expect(progress.locator("progress")).toBeVisible({ visible: width > 600 });
+			await expect(progress.locator(":scope > span")).toBeVisible({ visible: width > 600 });
+			await expect(progress.locator(".epic-progress-completion")).toHaveAttribute(
+				"stroke-dasharray",
+				`${total ? (done! / total) * 100 : 0} 100`,
+			);
+		}
+		for (const heading of await page.locator(".backlog-epic-link > span").all()) {
+			await expect(heading).toHaveCSS("text-overflow", "ellipsis");
+		}
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		const scroll = page.getByRole("region", { name: "Unfinished tickets" });
+		expect(await scroll.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		for (const indicator of await table.locator(".is-working").all())
+			await expect(indicator).toHaveCSS("animation-name", "none");
+		const toggle = page.getByRole("button", { name: "Collapse EPIC-2" });
+		await toggle.focus();
+		await toggle.press("Enter");
+		await expect(table).toBeHidden();
+		await page.getByRole("button", { name: "Expand EPIC-2" }).press("Space");
+		await expect(table).toBeVisible();
+		await page.screenshot({ path: `../../artifacts/forge-browser/compact-backlog-${width}.png` });
+		await page.locator(".backlog-epic-link").nth(1).click();
+		const dialog = page.getByRole("dialog");
+		await expect(dialog.locator(".backlog-title-text")).toHaveCount(5);
+		await expect(dialog.locator(".ticket-status-done")).toHaveText("Done");
+		// Polling removes archived children from the shared detail table too.
+		f.tickets().find((t) => t.id === "TASK-5")!.archivedAt = createdAt;
+		await expect(dialog.locator(".backlog-title-text")).toHaveCount(4);
+		await assertRows(dialog.locator(".backlog-table"));
+		await expect(dialog.getByRole("progressbar")).toHaveCount(1);
+		await expect(dialog.locator(".epic-progress-ring")).toBeVisible({ visible: width <= 600 });
+		await page.screenshot({ path: `../../artifacts/forge-browser/compact-epic-${width}.png` });
+		const open = dialog.getByRole("button", { name: `TASK-1 ${longTitle}`, exact: true });
+		await open.focus();
+		await open.press("Enter");
+		await expect(page).toHaveURL(/ticket=TASK-1/);
+	});
+}
+
 for (const width of [1280, 390]) {
 	test(`backlog scrolls with a sticky header and fits the page at ${width}px`, async ({ page }) => {
 		await page.setViewportSize({ width, height: 844 });

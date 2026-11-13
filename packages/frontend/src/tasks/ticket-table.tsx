@@ -6,8 +6,28 @@ import { ticketLabels } from "./ticket-labels.ts";
 export const EpicProgress = ({ done, total }: Pick<EpicSummary, "done" | "total">) => {
 	const label = `${done} / ${total} done`;
 	return (
-		<span className='epic-progress'>
-			<progress value={done} max={total || 1} aria-label={label} />
+		<span
+			className='epic-progress'
+			role='progressbar'
+			aria-label={label}
+			aria-valuemin={0}
+			aria-valuemax={total || 1}
+			aria-valuenow={done}
+			aria-valuetext={label}
+			title={label}
+		>
+			<svg className='epic-progress-ring' viewBox='0 0 20 20' aria-hidden='true'>
+				<circle className='epic-progress-track' cx='10' cy='10' r='8' />
+				<circle
+					className='epic-progress-completion'
+					cx='10'
+					cy='10'
+					r='8'
+					pathLength='100'
+					strokeDasharray={`${total ? (done / total) * 100 : 0} 100`}
+				/>
+			</svg>
+			<progress value={done} max={total || 1} aria-hidden='true' />
 			<span aria-hidden='true'>{label}</span>
 		</span>
 	);
@@ -44,6 +64,7 @@ export const TicketTable = ({
 							className='backlog-open'
 							disabled={busy}
 							aria-label={`${ticket.id} ${ticket.title}`}
+							title={ticket.title}
 							onClick={() => open(ticket)}
 						>
 							<span
@@ -56,11 +77,18 @@ export const TicketTable = ({
 						</button>
 					</td>
 					<td className='backlog-title'>
-						{ticket.title}
-						<TicketIndicator ticket={ticket} />
+						<div className='backlog-title-content'>
+							<span className='backlog-title-text' title={ticket.title}>
+								{ticket.title}
+							</span>
+							<TicketIndicator ticket={ticket} />
+						</div>
 					</td>
 					<td>
-						<span className={`backlog-status ticket-status-${ticket.status}`}>
+						<span
+							className={`backlog-status ticket-status-${ticket.status}`}
+							title={ticketLabels[ticket.status]}
+						>
 							{ticketLabels[ticket.status]}
 						</span>
 					</td>

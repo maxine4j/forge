@@ -64,7 +64,11 @@ export const TaskBacklog = ({
 								)}
 								<h3 id={titleId}>
 									{epic ? (
-										<button className='backlog-epic-link' onClick={() => openEpic(epic.id)}>
+										<button
+											className='backlog-epic-link'
+											title={epic.title}
+											onClick={() => openEpic(epic.id)}
+										>
 											<EpicIcon />
 											<span>
 												<span className='backlog-epic-key'>{epic.id}</span>

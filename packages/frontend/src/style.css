@@ -645,6 +645,7 @@
 }
 .backlog-section-header h3 {
 	min-width: 0;
+	flex: 1;
 	margin: 0;
 	font-size: 14px;
 }
@@ -658,6 +659,7 @@
 	background: #21262d;
 }
 .backlog-section-header .backlog-epic-toggle {
+	flex-shrink: 0;
 	display: grid;
 	width: 28px;
 	place-items: center;
@@ -671,7 +673,15 @@
 	gap: 7px;
 	max-width: 100%;
 	text-align: start;
-	overflow-wrap: anywhere;
+}
+.backlog-epic-link > span {
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.backlog-epic-link > svg {
+	flex-shrink: 0;
 }
 .backlog-epic-link:hover {
 	color: #79c0ff;
@@ -681,11 +691,27 @@
 }
 .epic-progress {
 	display: inline-flex;
+	flex-shrink: 0;
 	align-items: center;
 	gap: 8px;
 	color: #8b949e;
 	font-size: 12px;
 	white-space: nowrap;
+}
+.epic-progress-ring {
+	display: none;
+	width: 20px;
+	height: 20px;
+	fill: none;
+	stroke-width: 2;
+}
+.epic-progress-track {
+	stroke: #30363d;
+}
+.epic-progress-completion {
+	stroke: #3fb950;
+	transform: rotate(-90deg);
+	transform-origin: center;
 }
 .epic-progress progress {
 	appearance: none;
@@ -726,7 +752,7 @@
 	width: clamp(100px, 14vw, 132px);
 }
 .backlog-status-column {
-	width: clamp(116px, 19vw, 190px);
+	width: 104px;
 }
 .backlog-table tbody tr:last-child td:first-child {
 	border-bottom-left-radius: 7px;
@@ -743,10 +769,24 @@
 .backlog-table .needs-attention:focus-within {
 	background: #402b16;
 }
-.backlog-title {
-	position: relative;
-	overflow-wrap: anywhere;
-	padding-right: 40px !important;
+.backlog-title-content {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	min-width: 0;
+}
+.backlog-title-text {
+	min-width: 0;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.backlog-title-content .ticket-agent-status {
+	position: static;
+	flex-shrink: 0;
+	display: inline-grid;
+	place-items: center;
+	line-height: 16px;
 }
 .backlog-open {
 	display: inline-flex;
@@ -764,6 +804,11 @@
 }
 .backlog-status {
 	display: block;
+	box-sizing: border-box;
+	width: 80px;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 	padding: 2px 7px;
 	border-radius: 5px;
 	font-size: 11px;
@@ -780,6 +825,16 @@
 	color: #d2b8ff;
 }
 @media (max-width: 600px) {
+	.epic-progress-ring {
+		display: block;
+	}
+	.epic-progress progress,
+	.epic-progress > span {
+		display: none;
+	}
+	.backlog-status-column {
+		width: 92px;
+	}
 	.backlog-table td {
 		padding-inline: 6px;
 	}

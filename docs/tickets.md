@@ -14,7 +14,10 @@ count follows shared one-second polling; rows retain API order within epic secti
 Both views use the same collection, create/details dialogs, status transitions,
 archive controls and attention/agent indicators. Polling removes completed or
 archived rows without closing an open ticket. Sections scroll with sticky
-section headings and wrap ticket titles on narrow screens. Arrow keys, Home and End
+section headings. Ticket titles and fixed 80px status pills stay on one line
+with ellipsis truncation at every width; ticket buttons retain full accessible
+titles and hover text, and status hover text exposes the full label. Indicators
+remain centered beside titles without shrinking. Arrow keys, Home and End
 select views; ticket-open buttons and dialog tabs support keyboard navigation.
 Creation starts in Backlog. Scope and repository selection remain editable only
 in Backlog status, regardless of selected view; Ready and In progress retain
@@ -288,7 +291,13 @@ shared with Ready transitions. Membership never changes ticket positions.
 Backlog shows No epic first, then every epic in increasing numeric order,
 including empty and completed epics. Each section has its own table and preserves
 the unfinished-ticket filter and ticket order. Headers show the epic icon, key,
-title and a compact completion bar with the done and total counts. The title opens the epic and the adjacent
+title and a compact completion bar with the done and total counts. At widths of
+600px and below, a 20px circular ring replaces the bar and visible counts;
+empty epics show an empty ring. Each epic exposes one accessible progressbar
+with completion values and the full “X / Y done” label at every width. Long
+header titles truncate while disclosure and progress remain visible, and header
+actions can wrap. Epic-detail child tables share the single-line row layout and
+responsive progress. The title opens the epic and the adjacent
 chevron collapses or expands its table. Disclosures have `aria-expanded`
 and `aria-controls`; collapsed IDs use browser storage key
 `forge.epics.collapsed.v1`, tolerating malformed or unavailable storage. One-second
