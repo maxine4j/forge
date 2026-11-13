@@ -12,6 +12,7 @@ test("owner authorization precedes every workspace lookup", async () => {
 		prepare: vi.fn(),
 		verify: vi.fn(),
 		removeMerged: vi.fn(),
+		removeAbandoned: vi.fn(),
 		location: vi.fn(),
 		head: vi.fn(),
 		tree: vi.fn(),

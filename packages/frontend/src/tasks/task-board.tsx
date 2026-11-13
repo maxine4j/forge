@@ -1,4 +1,10 @@
-import { ticketStatuses, type Ticket, type TicketStatus, type MoveTicket } from "@forge/contracts/tickets";
+import {
+	ticketStatuses,
+	ticketMoveTargets,
+	type Ticket,
+	type TicketStatus,
+	type MoveTicket,
+} from "@forge/contracts/tickets";
 import { Fragment, useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 
 import { EpicIcon } from "./epic-icon.tsx";
@@ -55,11 +61,7 @@ export const TaskBoard = ({
 		if (!column || !board.current?.contains(column)) return;
 		const status = column.dataset["dropStatus"] as TicketStatus;
 		const source = dragging.current?.ticket.status;
-		if (
-			source !== status
-			&& !(source === "backlog" && status === "todo")
-			&& !(dragging.current?.ticket.canReturnToBacklog && source === "todo" && status === "backlog")
-		)
+		if (source !== status && !(dragging.current && ticketMoveTargets(dragging.current.ticket).includes(status)))
 			return;
 		const cards = [...column.querySelectorAll<HTMLElement>("[data-ticket-id]")].filter(
 			(card) => card.dataset["ticketId"] !== id,

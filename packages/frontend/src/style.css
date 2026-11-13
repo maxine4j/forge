@@ -1222,6 +1222,7 @@
 }
 .ticket-details-heading {
 	align-items: flex-start;
+	flex-wrap: wrap;
 }
 .ticket-details-key-row,
 .ticket-details-key-row h2,
@@ -1344,6 +1345,7 @@
 }
 .ticket-details-actions {
 	display: flex;
+	margin-left: auto;
 	flex-shrink: 0;
 	gap: 6px;
 }

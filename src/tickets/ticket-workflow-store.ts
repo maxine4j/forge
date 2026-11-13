@@ -39,7 +39,7 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 		const jobs: TicketWorkflowRecord[] = [];
 		for (let offset = 0; ; offset += 500) {
 			const page = await this.read(
-				"SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId WHERE t.archivedAt IS NULL AND t.status NOT IN ('backlog','done') AND json_extract(w.record,'$.state') IN ('queued','running','dispatching','uncertain','merge-queued') ORDER BY CASE json_extract(w.record,'$.state') WHEN 'running' THEN 0 WHEN 'merge-queued' THEN 1 ELSE 2 END,t.position,t.number LIMIT 500 OFFSET ?",
+				"SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId WHERE t.archivedAt IS NULL AND (json_extract(w.record,'$.state')='resetting' OR (t.status NOT IN ('backlog','done') AND json_extract(w.record,'$.state') IN ('queued','running','dispatching','uncertain','merge-queued'))) ORDER BY CASE json_extract(w.record,'$.state') WHEN 'running' THEN 0 WHEN 'merge-queued' THEN 1 ELSE 2 END,t.position,t.number LIMIT 500 OFFSET ?",
 				[String(offset)],
 			);
 			jobs.push(...page);

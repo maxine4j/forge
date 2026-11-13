@@ -27,7 +27,13 @@ import { AgentCatalogError, AgentError } from "./errors.ts";
 import type { AgentThreadRecord } from "./types.ts";
 export interface IAgentWorkspaces {
 	get(actor: Actor, id: string): Promise<Workspace>;
-	create(actor: Actor, projectId: string, input: CreateWorkspace): Promise<Workspace>;
+	create(
+		actor: Actor,
+		projectId: string,
+		input: CreateWorkspace,
+		allocated?: (workspaceId: string) => Promise<void>,
+	): Promise<Workspace>;
+	retry(actor: Actor, id: string): Promise<Workspace>;
 	resolve(actor: Actor, id: string): Promise<WorkspaceLocation>;
 	tree(actor: Actor, id: string, path: string): Promise<WorkspaceTree>;
 }
@@ -46,6 +52,8 @@ export interface IAgentService {
 	shutdown(): Promise<void>;
 }
 export interface ITicketAgents {
+	/** Reconciles and interrupts only these managed threads. True requires confirmed settlement. */
+	stopTicket(actor: Actor, ids: string[]): Promise<boolean>;
 	catalogOptions(actor: Actor, threadId?: string): Promise<AgentOptions>;
 	assertRepositoryReady(actor: Actor, id: string): Promise<void>;
 	steer(actor: Actor, id: string, turnId: string, text: string): Promise<AgentView>;
@@ -55,6 +63,7 @@ export interface ITicketAgents {
 		title: string,
 		workspaceId?: string,
 		reserveSlot?: boolean,
+		allocated?: (workspaceId: string) => Promise<void>,
 	): Promise<AgentView>;
 	dispatch(
 		actor: Actor,
@@ -76,6 +85,8 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 	private readonly log = createLogger(AgentService.name);
 	private readonly queues = new Map<string, Promise<unknown>>();
 	private readonly identities = new Map<string, string>();
+	private readonly abandoning = new Set<string>();
+	private readonly ticketThreads = new Set<string>();
 	private readonly listeners = new Map<string, Set<() => void>>();
 	private readonly unsubscribe: () => void;
 	private closed = false;
@@ -111,8 +122,9 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		title: string,
 		workspaceId?: string,
 		reserveSlot = false,
+		allocated?: (workspaceId: string) => Promise<void>,
 	): Promise<AgentView> {
-		return this.createThread(actor, projectId, title, true, workspaceId, reserveSlot);
+		return this.createThread(actor, projectId, title, true, workspaceId, reserveSlot, allocated);
 	}
 	async list(actor: Actor, projectId: string): Promise<AgentThread[]> {
 		this.authorize(actor);
@@ -175,10 +187,18 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		if (!agentMessageSchema.safeParse({ text }).success) throw new AgentError("invalid-request");
 		return this.serialize(id, async () => {
 			const record = await this.require(id);
-			if (!record.managed || !record.codexId || record.turnId !== turnId || record.status !== "running")
+			if (
+				record.abandoned
+				|| this.abandoning.has(id)
+				|| !record.managed
+				|| !record.codexId
+				|| record.turnId !== turnId
+				|| record.status !== "running"
+			)
 				throw new AgentError("agent-conflict");
 			const location = await this.workspaces.resolve(actor, record.workspaceId);
 			if (location.workspace.projectId !== record.projectId) throw new AgentError("agent-conflict");
+			if (this.abandoning.has(id)) throw new AgentError("agent-conflict");
 			await this.client.steer(record.codexId, turnId, text.trim(), location.path);
 			return this.sync(record);
 		});
@@ -206,6 +226,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		const revision = this.stopRevision;
 		const view = await this.serialize(id, async () => {
 			const record = await this.require(id);
+			if (record.abandoned || this.abandoning.has(id)) throw new AgentError("agent-conflict");
 			if (this.stopping || revision !== this.stopRevision) {
 				this.pool.observe(id, record.status);
 				throw new AgentError("agent-capacity");
@@ -256,7 +277,12 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				}
 				record.status = "running";
 				await this.store.update(record);
-				if (this.stopping || revision !== this.stopRevision || (allowed && !allowed())) {
+				if (
+					this.abandoning.has(id)
+					|| this.stopping
+					|| revision !== this.stopRevision
+					|| (allowed && !allowed())
+				) {
 					record.status = previousStatus;
 					await this.store.update(record);
 					this.pool.observe(id, previousStatus);
@@ -377,12 +403,42 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			this.stopping--;
 		}
 	}
+	async stopTicket(actor: Actor, ids: string[]): Promise<boolean> {
+		this.authorize(actor);
+		for (const id of ids) if (this.ticketThreads.has(id)) this.abandoning.add(id);
+		const settled = await Promise.all(
+			ids.map((id) =>
+				this.serialize(id, async () => {
+					let record = await this.require(id);
+					if (!record.managed) throw new AgentError("agent-conflict");
+					this.abandoning.add(id);
+					if (!record.abandoned) {
+						record = { ...record, abandoned: true, requests: [] };
+						await this.store.update(record);
+					}
+					if (!["creating", "uncertain", "running", "waiting"].includes(record.status)) {
+						this.pool.observe(id, record.status);
+						return true;
+					}
+					const result = await this.reconcile(actor, record);
+					if (result.state !== "active") return true;
+					await this.client.interrupt(record.codexId!, result.turnId);
+					// Keep the slot until reconciliation proves termination, even after acknowledgment.
+					const after = await this.reconcile(actor, await this.require(id));
+					return after.state !== "active";
+				}),
+			),
+		);
+		return settled.every(Boolean);
+	}
 	async reply(actor: Actor, id: string, input: AgentReply): Promise<AgentView> {
 		this.authorize(actor);
 		return this.serialize(id, async () => {
 			const record = await this.require(id);
-			if (!record.codexId || record.status !== "waiting") throw new AgentError("agent-conflict");
+			if (record.abandoned || this.abandoning.has(id) || !record.codexId || record.status !== "waiting")
+				throw new AgentError("agent-conflict");
 			await this.workspaces.resolve(actor, record.workspaceId);
+			if (this.abandoning.has(id)) throw new AgentError("agent-conflict");
 			this.client.reply(record.codexId, input);
 			return this.sync(record);
 		});
@@ -410,7 +466,10 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		const records = (
 			await Promise.all((await this.projects.list(actor)).map((project) => this.store.list(project.id)))
 		).flat();
-		for (const record of records) this.pool.observe(record.id, record.status);
+		for (const record of records) {
+			this.pool.observe(record.id, record.status);
+			if (record.managed) this.ticketThreads.add(record.id);
+		}
 	}
 	/** Background reconciliation never replays a turn; unavailable runtimes retain slots. */
 	async recover(actor: Actor): Promise<void> {
@@ -448,6 +507,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		managed: boolean,
 		workspaceId?: string,
 		reserveSlot = false,
+		allocated?: (workspaceId: string) => Promise<void>,
 	): Promise<AgentView> {
 		this.authorize(actor);
 		const input = createAgentSchema.safeParse({ title });
@@ -456,9 +516,11 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		if (reserveSlot && this.stopping) throw new AgentError("agent-capacity");
 		if (reserveSlot) this.pool.claim(id);
 		return this.serialize(id, async () => {
+			if (workspaceId && managed && (await this.workspaces.get(actor, workspaceId)).status === "failed")
+				await this.workspaces.retry(actor, workspaceId);
 			const workspace = workspaceId
 				? (await this.workspaces.resolve(actor, workspaceId)).workspace
-				: await this.workspaces.create(actor, projectId, { name: input.data.title });
+				: await this.workspaces.create(actor, projectId, { name: input.data.title }, allocated);
 			if (workspace.projectId !== projectId) throw new AgentError("agent-conflict");
 			const record: AgentThreadRecord = {
 				id,
@@ -472,6 +534,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				provider: this.provider(),
 			};
 			await this.store.insert(record);
+			if (managed) this.ticketThreads.add(id);
 			return this.view(record);
 		}).catch((cause: unknown) => {
 			if (reserveSlot) this.pool.observe(id, "idle");
@@ -500,6 +563,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			codexId: _codexId,
 			managed: _managed,
 			provider: _provider,
+			abandoned: _abandoned,
 			requests,
 			contextWindow: savedContext,
 			...thread

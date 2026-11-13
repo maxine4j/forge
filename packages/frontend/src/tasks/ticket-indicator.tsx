@@ -1,6 +1,15 @@
 import type { Ticket } from "@forge/contracts/tickets";
 export const TicketIndicator = ({ ticket }: { ticket: Ticket }) =>
-	ticket.needsAttention ? (
+	ticket.resetting ? (
+		<span
+			className='ticket-agent-status is-working'
+			role='img'
+			aria-label='Cancellation and cleanup pending'
+			title='Cancellation and cleanup pending'
+		>
+			↻
+		</span>
+	) : ticket.needsAttention ? (
 		<span
 			className='ticket-agent-status ticket-attention'
 			role='img'

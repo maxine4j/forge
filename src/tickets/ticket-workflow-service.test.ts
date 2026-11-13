@@ -19,6 +19,7 @@ const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => 
 	const plans = new Map<string, string>();
 	const pool = new AgentExecutionPool();
 	const agents = {
+		stopTicket: vi.fn<ITicketAgents["stopTicket"]>(async () => true),
 		assertRepositoryReady: vi.fn(async () => {}),
 		catalogOptions: vi.fn<ITicketAgents["catalogOptions"]>(async () => ({
 			models: [
@@ -90,6 +91,7 @@ const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => 
 		move: vi.fn(),
 	};
 	const merges = {
+		isMerged: vi.fn(async () => false),
 		candidate: vi.fn(async () => "b".repeat(40)),
 		verify: vi.fn(async () => {}),
 		merge: vi.fn(async (): Promise<"merged" | "rebase"> => "merged"),
@@ -97,18 +99,22 @@ const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => 
 	};
 	const wake = vi.fn();
 	const cleanup = vi.fn(async (_actor: typeof actor, _workspaceId: string, _candidate: string) => {});
-	const service = new TicketWorkflowService(
-		store,
-		ticketStore,
-		agents,
-		pool,
-		merges,
-		{ cleanupMerged: cleanup },
-		new TicketPrompts(),
-		new AccessService({ owner: "owner", origin: "https://forge.example" }),
-		wake,
-		dispatchMode,
-	);
+	const cleanupAbandoned = vi.fn(async (_actor: typeof actor, _workspaceId: string) => {});
+	const makeService = () =>
+		new TicketWorkflowService(
+			store,
+			ticketStore,
+			agents,
+			pool,
+			merges,
+			{ cleanupMerged: cleanup },
+			new TicketPrompts(),
+			new AccessService({ owner: "owner", origin: "https://forge.example" }),
+			wake,
+			dispatchMode,
+			{ cleanupAbandoned },
+		);
+	const service = makeService();
 	const create = (id = "TASK-1") => {
 		const ticket: Ticket = {
 			id,
@@ -128,7 +134,21 @@ const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => 
 		else plans.delete(id);
 		pool.observe(id, "completed");
 	};
-	return { service, jobs, tickets, views, pool, agents, merges, create, complete, wake, cleanup };
+	return {
+		service,
+		makeService,
+		jobs,
+		tickets,
+		views,
+		pool,
+		agents,
+		merges,
+		create,
+		complete,
+		wake,
+		cleanup,
+		cleanupAbandoned,
+	};
 };
 
 test("Ready requires a first ready repository and dispatch revalidates it", async () => {
@@ -186,6 +206,7 @@ test.each(["paused", "capacity"] as const)(
 			`${ticket.id} planning`,
 			undefined,
 			true,
+			expect.any(Function),
 		);
 		expect(f.agents.dispatch.mock.calls[0]?.[2]).toContain("Updated scope");
 	},
@@ -219,7 +240,7 @@ test("return winning serialization prevents a concurrent scheduler dispatch", as
 });
 
 test.each(["success", "setup-failure", "capacity"] as const)(
-	"pickup winning serialization prevents return after %s",
+	"pickup racing return rechecks eligibility after %s",
 	async (outcome) => {
 		const f = fixture();
 		const ticket = f.create();
@@ -243,22 +264,17 @@ test.each(["success", "setup-failure", "capacity"] as const)(
 		});
 		const ticking = f.service.tick(actor);
 		await started;
-		expect(await f.service.capabilities(actor, stale)).toEqual({});
+		expect(await f.service.capabilities(actor, stale)).toEqual({ canReturnToBacklog: true });
 		const returning = f.service.move(actor, stale, { status: "backlog" });
-		const rejected = expect(returning).rejects.toThrow("ticket-conflict");
 		release();
 		await ticking;
-		await rejected;
-		expect(ticket.status).toBe(outcome === "capacity" ? "todo" : "in-progress");
-		expect(await f.service.capabilities(actor, ticket)).toEqual({});
-		if (outcome === "setup-failure") {
-			await f.service.recover(actor, ticket.id);
-			await expect(f.service.move(actor, ticket, { status: "backlog" })).rejects.toThrow("ticket-conflict");
-		}
+		await returning;
+		await f.service.recover(actor, ticket.id);
+		expect(ticket.status).toBe("backlog");
 	},
 );
 
-test("return eligibility rejects any recorded execution context or later workflow state", async () => {
+test("return eligibility covers recorded execution context and later workflow states", async () => {
 	const f = fixture();
 	const ticket = f.create();
 	ticket.status = "todo";
@@ -278,10 +294,203 @@ test("return eligibility rejects any recorded execution context or later workflo
 		{ state: "merge-queued" },
 		{ phase: "implementation" },
 	] as Partial<TicketWorkflowRecord>[]) {
+		ticket.status = "todo";
 		f.jobs.set(ticket.id, { ...base, ...context });
-		expect(await f.service.capabilities(actor, ticket)).toEqual({});
-		await expect(f.service.move(actor, ticket, { status: "backlog" })).rejects.toThrow("ticket-conflict");
+		expect(await f.service.capabilities(actor, ticket)).toEqual({ canReturnToBacklog: true });
+		await f.service.move(actor, ticket, { status: "backlog" });
+		await f.service.recover(actor, ticket.id);
+		expect(f.jobs.get(ticket.id)).toMatchObject({ state: "idle", phase: "planning" });
 	}
+});
+
+test.each(["planning", "implementation", "review", "rebase"] as const)(
+	"abandon %s, wait for settlement, retry cleanup and ignore late results",
+	async (phase) => {
+		const f = fixture();
+		const ticket = f.create();
+		await f.service.move(actor, ticket, { status: "todo" });
+		await f.service.tick(actor);
+		const original = f.jobs.get(ticket.id)!;
+		f.jobs.set(ticket.id, {
+			...original,
+			phase,
+			plan: { revision: 2, text: "Saved plan" },
+			approvedRevision: 2,
+			message: "Feedback",
+			resultSha: "b".repeat(40),
+			mergeAttempts: 3,
+		});
+		f.agents.stopTicket.mockResolvedValue(false);
+		await f.service.move(actor, ticket, { status: "backlog" });
+		await f.service.recover(actor, ticket.id);
+		expect(await f.service.get(actor, ticket.id)).toMatchObject({
+			state: "resetting",
+			resetStage: "stopping",
+			plan: { text: "Saved plan" },
+		});
+		expect(await f.service.get(actor, ticket.id)).not.toHaveProperty("abandonment");
+		expect(f.cleanupAbandoned).not.toHaveBeenCalled();
+		await expect(f.service.clearPlan(actor, ticket)).rejects.toThrow("ticket-conflict");
+		await expect(f.service.move(actor, ticket, { status: "todo" })).rejects.toThrow("ticket-conflict");
+		await expect(f.service.message(actor, ticket, "late feedback")).rejects.toThrow("ticket-conflict");
+		f.complete(original.plannerId!, "Late plan");
+		f.agents.stopTicket.mockResolvedValue(true);
+		f.cleanupAbandoned.mockRejectedValueOnce(new Error("Disk busy"));
+		await f.service.recover(actor, ticket.id);
+		expect(await f.service.get(actor, ticket.id)).toMatchObject({
+			state: "resetting",
+			resetStage: "cleanup",
+			resetError: expect.any(String),
+		});
+		await f.service.recover(actor, ticket.id);
+		expect(f.jobs.get(ticket.id)).toEqual({
+			ticketId: ticket.id,
+			plan: { revision: 2, text: "Saved plan" },
+			mergeAttempts: 0,
+			phase: "planning",
+			approvedRevision: undefined,
+			state: "idle",
+		});
+		expect(f.merges.merge).not.toHaveBeenCalled();
+		await f.service.move(actor, ticket, { status: "todo" });
+		await f.service.tick(actor);
+		expect(f.jobs.get(ticket.id)).toMatchObject({ phase: "implementation", state: "running", approvedRevision: 2 });
+		expect(f.agents.createTicketThread).toHaveBeenLastCalledWith(
+			actor,
+			projectId,
+			`${ticket.id} implementation`,
+			undefined,
+			true,
+			expect.any(Function),
+		);
+		expect(f.jobs.get(ticket.id)?.workspaceId).not.toBe(original.workspaceId);
+		expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Saved plan");
+	},
+);
+
+test("clear plan is idempotent and restarts planning with current scope", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	f.jobs.set(ticket.id, {
+		ticketId: ticket.id,
+		phase: "planning",
+		state: "idle",
+		mergeAttempts: 0,
+		plan: { revision: 1, text: "Old plan" },
+		approvedRevision: 1,
+	});
+	await expect(f.service.clearPlan({ username: "outsider" }, ticket)).rejects.toThrow("Access denied");
+	await f.service.clearPlan(actor, ticket);
+	await f.service.clearPlan(actor, ticket);
+	await f.service.update(actor, ticket.id, {
+		title: "New scope",
+		description: "Current description",
+		repositoryIds: [projectId],
+	});
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)?.phase).toBe("planning");
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("New scope. Current description");
+	await expect(f.service.clearPlan(actor, ticket)).rejects.toThrow("ticket-conflict");
+});
+
+test.each(["stopping", "cleanup"] as const)(
+	"startup resumes abandonment in %s without replaying agents",
+	async (stage) => {
+		const f = fixture();
+		const ticket = f.create();
+		f.jobs.set(ticket.id, {
+			ticketId: ticket.id,
+			state: "resetting",
+			phase: "planning",
+			mergeAttempts: 0,
+			plan: { revision: 1, text: "Retained" },
+			resetStage: stage,
+			abandonment: { workspaceId: "old-workspace", plannerId: "old-planner" },
+		});
+		const restarted = f.makeService();
+		await restarted.recover(actor, ticket.id);
+		expect(f.agents.stopTicket).toHaveBeenCalledTimes(stage === "stopping" ? 1 : 0);
+		expect(f.cleanupAbandoned).toHaveBeenCalledWith(actor, "old-workspace");
+		expect(f.jobs.get(ticket.id)).toMatchObject({ state: "idle", plan: { text: "Retained" } });
+		expect(f.agents.dispatch).not.toHaveBeenCalled();
+	},
+);
+
+test("delayed termination does not hold workflow serialization or dispatch unrelated tickets", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	const stop = Promise.withResolvers<boolean>();
+	f.agents.stopTicket.mockReturnValue(stop.promise);
+	await f.service.move(actor, ticket, { status: "backlog" });
+	const other = f.create("TASK-2");
+	await f.service.move(actor, other, { status: "todo" });
+	await f.service.tick(actor);
+	expect(f.jobs.get(other.id)?.state).toBe("running");
+	expect(f.jobs.get(ticket.id)?.state).toBe("resetting");
+	await f.service.move(actor, ticket, { status: "backlog" });
+	expect(f.agents.stopTicket).toHaveBeenCalledTimes(1);
+	stop.resolve(true);
+	await f.service.recover(actor, ticket.id);
+	expect(f.jobs.get(ticket.id)?.state).toBe("idle");
+});
+
+test("return cancels a queued merge, but rejects a merge that already completed", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	const job = f.jobs.get(ticket.id)!;
+	f.jobs.set(ticket.id, { ...job, phase: "implementation", state: "merge-queued", resultSha: "b".repeat(40) });
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.recover(actor, ticket.id);
+	expect(f.merges.merge).not.toHaveBeenCalled();
+	ticket.status = "in-progress";
+	f.jobs.set(ticket.id, { ...job, phase: "implementation", state: "merge-queued", resultSha: "b".repeat(40) });
+	const stale = { ...ticket };
+	await f.service.tick(actor);
+	await expect(f.service.move(actor, stale, { status: "backlog" })).rejects.toThrow("ticket-conflict");
+	expect(ticket.status).toBe("done");
+});
+
+test("scheduler ticks retry failed Backlog abandonment without blocking dispatch", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	f.jobs.set(ticket.id, {
+		ticketId: ticket.id,
+		state: "resetting",
+		phase: "planning",
+		mergeAttempts: 0,
+		resetStage: "cleanup",
+		abandonment: { workspaceId: "old-workspace" },
+	});
+	f.cleanupAbandoned.mockRejectedValueOnce(new Error("Busy"));
+	await f.service.recover(actor, ticket.id);
+	expect(f.jobs.get(ticket.id)?.resetError).toBeDefined();
+	await f.service.tick(actor);
+	await vi.waitFor(() => expect(f.jobs.get(ticket.id)?.state).toBe("idle"));
+	expect(f.cleanupAbandoned).toHaveBeenCalledTimes(2);
+});
+
+test("return recovers an already applied Git merge before moving the ticket", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	ticket.status = "in-progress";
+	f.jobs.set(ticket.id, {
+		ticketId: ticket.id,
+		phase: "implementation",
+		state: "merge-queued",
+		mergeAttempts: 0,
+		workspaceId: "workspace",
+		resultSha: "b".repeat(40),
+	});
+	f.merges.isMerged.mockResolvedValue(true);
+	await expect(f.service.move(actor, ticket, { status: "backlog" })).rejects.toThrow("ticket-conflict");
+	expect(ticket.status).toBe("done");
+	expect(f.agents.stopTicket).not.toHaveBeenCalled();
+	expect(f.cleanupAbandoned).not.toHaveBeenCalled();
 });
 
 test("execution records the first reference and reuses it and its workspace for implementation", async () => {
@@ -293,7 +502,14 @@ test("execution records the first reference and reuses it and its workspace for 
 	await f.service.tick(actor);
 	const job = f.jobs.get(ticket.id)!;
 	expect(job.executionRepositoryId).toBe(first);
-	expect(f.agents.createTicketThread).toHaveBeenCalledWith(actor, first, `${ticket.id} planning`, undefined, true);
+	expect(f.agents.createTicketThread).toHaveBeenCalledWith(
+		actor,
+		first,
+		`${ticket.id} planning`,
+		undefined,
+		true,
+		expect.any(Function),
+	);
 	f.complete(job.plannerId!, "# Plan");
 	await f.service.tick(actor);
 	await f.service.approve(actor, f.tickets.get(ticket.id)!, 1);
@@ -307,6 +523,7 @@ test("execution records the first reference and reuses it and its workspace for 
 		`${ticket.id} implementation`,
 		job.workspaceId,
 		true,
+		expect.any(Function),
 	);
 	expect(f.jobs.get(ticket.id)?.workspaceId).toBe(job.workspaceId);
 	await expect(

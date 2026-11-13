@@ -4,6 +4,7 @@ export interface AgentThreadRecord extends AgentThread {
 	codexId?: string;
 	requests: AgentRequest[];
 	managed?: boolean;
+	abandoned?: boolean;
 	contextWindow?: AgentContextWindow;
 	provider?: InferenceProvider;
 }

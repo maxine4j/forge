@@ -6,6 +6,8 @@ import type { IGitTransport } from "../repositories/git-transport.ts";
 import { TicketError } from "../tickets/errors.ts";
 
 export interface ITicketMergeClient {
+	/** Read-only recovery check for a candidate already reachable from local main. */
+	isMerged(actor: Actor, workspaceId: string, candidate: string): Promise<boolean>;
 	/** Advances main to the persisted candidate only. Verifies both refs atomically; throws TicketError. */
 	merge(actor: Actor, workspaceId: string, candidate: string): Promise<"merged" | "rebase">;
 	/** Requires clean, committed work on the owned branch, outside an unfinished rebase. */
@@ -19,6 +21,18 @@ export class WorkspaceMergeClient implements ITicketMergeClient {
 		private readonly workspaces: IAgentWorkspaces,
 		private readonly git: IGitTransport,
 	) {}
+	async isMerged(actor: Actor, workspaceId: string, candidate: string): Promise<boolean> {
+		try {
+			gitShaSchema.parse(candidate);
+			const { path } = await this.workspaces.resolve(actor, workspaceId);
+			const base = gitShaSchema.parse(
+				(await this.git.run(["-C", path, "merge-base", "refs/heads/main", candidate])).trim(),
+			);
+			return base === candidate;
+		} catch (cause) {
+			throw new TicketError("ticket-unavailable", { cause });
+		}
+	}
 	async base(actor: Actor, workspaceId: string): Promise<string> {
 		const { workspace } = await this.workspaces.resolve(actor, workspaceId);
 		if (!workspace.baseSha) throw new TicketError("ticket-unavailable");

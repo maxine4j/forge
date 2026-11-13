@@ -19,4 +19,5 @@ export interface Ticket extends CreateTicket {
 	needsAttention?: true;
 	agentStatus?: "queued" | "working";
 	canReturnToBacklog?: true;
+	resetting?: true;
 }

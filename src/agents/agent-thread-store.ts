@@ -84,6 +84,7 @@ export class AgentThreadStore implements IAgentThreadStore {
 }
 const recordSchema = agentThreadSchema.extend({
 	managed: z.boolean().optional(),
+	abandoned: z.boolean().optional(),
 	codexId: z.string().min(1).max(256).optional(),
 	requests: z.array(agentRequestSchema).max(32),
 	contextWindow: agentContextWindowSchema.optional(),

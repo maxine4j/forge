@@ -44,10 +44,12 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	const workflowStore = new TicketWorkflowStore(db);
 	await workflowStore.initialize();
 	const steer = vi.fn();
+	const stopTicket = vi.fn(async () => true);
 	const workflow = new TicketWorkflowService(
 		workflowStore,
 		store,
 		{
+			stopTicket,
 			assertRepositoryReady: vi.fn(async () => {}),
 			catalogOptions: vi.fn(async () => ({ models: [], skills: [] })),
 			createTicketThread: vi.fn(),
@@ -58,7 +60,7 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 			plan: vi.fn(),
 		},
 		new AgentExecutionPool(),
-		{ merge: vi.fn(), base: vi.fn(), verify: vi.fn(), candidate: vi.fn() },
+		{ isMerged: vi.fn(async () => false), merge: vi.fn(), base: vi.fn(), verify: vi.fn(), candidate: vi.fn() },
 		{ cleanupMerged: vi.fn() },
 		new TicketPrompts(),
 		access,
@@ -200,9 +202,10 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	const queued = (await workflowStore.get(ticket.id))!;
 	for (const state of ["queued", "setup-failed"] as const) {
 		await workflowStore.save({ ...queued, state, executionRepositoryId: projectId });
-		expect((await (await request(`tickets/${ticket.id}`)).json()).canReturnToBacklog).toBeUndefined();
-		expect((await request(`tickets/${ticket.id}/move`, "POST", { status: "backlog" })).status).toBe(409);
-		expect(await workflowStore.get(ticket.id)).toMatchObject({ state, executionRepositoryId: projectId });
+		expect((await (await request(`tickets/${ticket.id}`)).json()).canReturnToBacklog).toBe(true);
+		expect((await request(`tickets/${ticket.id}/move`, "POST", { status: "backlog" })).status).toBe(200);
+		expect(await workflowStore.get(ticket.id)).toMatchObject({ state: "idle" });
+		await request(`tickets/${ticket.id}/move`, "POST", { status: "todo" });
 	}
 	await workflowStore.save(queued);
 	for (const [path, method, body, status] of [
@@ -273,6 +276,46 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 			).status,
 		).toBe(403);
 	expect(steer).toHaveBeenCalledTimes(1);
+	const savedPlan = { revision: 3, text: "Saved plan across return" };
+	await workflowStore.save({ ...(await workflowStore.get("TASK-4"))!, plan: savedPlan, approvedRevision: 3 });
+	stopTicket.mockResolvedValue(false);
+	await db.run(
+		"CREATE TRIGGER reject_abandon BEFORE UPDATE OF status ON tickets WHEN NEW.status='backlog' BEGIN SELECT RAISE(ABORT,'blocked'); END",
+	);
+	expect((await request("tickets/TASK-4/move", "POST", { status: "backlog", beforeId: ticket.id })).status).toBe(409);
+	// An archived destination still fails validation before an atomic write.
+	expect((await request("tickets/TASK-4/move", "POST", { status: "backlog" })).status).toBe(503);
+	expect((await workflowStore.get("TASK-4"))?.state).toBe("running");
+	expect((await store.get("TASK-4"))?.status).toBe("in-progress");
+	await db.run("DROP TRIGGER reject_abandon");
+	expect((await request("tickets/TASK-4/move", "POST", { status: "backlog" })).status).toBe(200);
+	expect(await (await request("tickets/TASK-4/workflow")).json()).toMatchObject({
+		state: "resetting",
+		resetStage: "stopping",
+		plan: savedPlan,
+	});
+	expect((await workflowStore.list()).map(({ ticketId }) => ticketId)).toContain("TASK-4");
+	expect((await request("tickets/TASK-4/clear-plan", "POST")).status).toBe(409);
+	expect((await request("tickets/TASK-4/move", "POST", { status: "todo" })).status).toBe(409);
+	const recoveredStore = new TicketWorkflowStore(db);
+	expect(await recoveredStore.get("TASK-4")).toMatchObject({
+		state: "resetting",
+		abandonment: { implementerId },
+		plan: savedPlan,
+	});
+	stopTicket.mockResolvedValue(true);
+	await request("tickets/TASK-4/reconcile", "POST");
+	expect((await recoveredStore.get("TASK-4"))?.state).toBe("idle");
+	expect(await (await request("tickets/TASK-4/clear-plan", "POST")).json()).not.toHaveProperty("plan");
+	expect((await request("tickets/TASK-4/clear-plan", "POST")).status).toBe(200);
+	for (const headers of [
+		{ "x-webauth-user": "stranger", origin: "https://forge.example.com" },
+		{ "x-webauth-user": "owner", origin: "https://other.example.com" },
+	])
+		expect(
+			(await fetch(`http://127.0.0.1:${address.port}/api/tickets/TASK-4/clear-plan`, { method: "POST", headers }))
+				.status,
+		).toBe(403);
 
 	// Independent epic identities and strict CRUD transport contracts.
 	const epic = await (await request("epics", "POST", { title: "  First epic  " })).json();

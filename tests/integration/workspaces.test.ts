@@ -59,6 +59,56 @@ const setup = async () => {
 	return { root, db, git, store, client, service, project, projects, access };
 };
 
+test("abandonment discards dirty unmerged work and retries branch deletion without losing metadata", async () => {
+	const { service, project, git, root, store, client } = await setup();
+	const workspace = await service.create(owner, project.id, { name: "Ticket" });
+	const { path } = await service.resolve(owner, workspace.id);
+	await files.writeFile(join(path, "tracked.txt"), "commit\n");
+	await git.run(["-C", path, "add", "tracked.txt"]);
+	await git.run([
+		"-C",
+		path,
+		"-c",
+		"user.name=Test",
+		"-c",
+		"user.email=test@example.com",
+		"commit",
+		"-m",
+		"Unmerged",
+	]);
+	await files.writeFile(join(path, "tracked.txt"), "dirty\n");
+	await files.writeFile(join(path, "untracked.txt"), "discard\n");
+	const repo = join(root, "repositories", `${project.id}.git`);
+	const main = (await git.run(["-C", repo, "rev-parse", "main"])).trim();
+	// Simulate a crash between worktree removal and branch deletion.
+	await git.run(["-C", repo, "worktree", "unlock", path]);
+	await git.run(["-C", repo, "worktree", "remove", "--force", path]);
+	await service.cleanupAbandoned(owner, workspace.id);
+	await service.cleanupAbandoned(owner, workspace.id);
+	expect((await store.get(workspace.id))?.status).toBe("archived");
+	expect((await store.get(workspace.id))?.name).toBe("Ticket");
+	expect((await git.run(["-C", repo, "rev-parse", "main"])).trim()).toBe(main);
+	expect((await git.run(["-C", repo, "for-each-ref", `refs/heads/${workspace.branch}`])).trim()).toBe("");
+	const dirty = await service.create(owner, project.id, { name: "Dirty" });
+	const dirtyPath = (await service.resolve(owner, dirty.id)).path;
+	await files.writeFile(join(dirtyPath, "untracked.txt"), "discard\n");
+	await service.cleanupAbandoned(owner, dirty.id);
+	await expect(files.lstat(dirtyPath)).rejects.toMatchObject({ code: "ENOENT" });
+	const protectedWorkspace = await service.create(owner, project.id, { name: "Protected" });
+	const record = (await store.get(protectedWorkspace.id))!;
+	await expect(client.removeAbandoned({ ...record, branch: "main" })).rejects.toThrow("workspace-unavailable");
+	// Altering the recorded owner or path may never adopt another checkout.
+	await expect(client.removeAbandoned({ ...record, projectId: randomUUID() })).rejects.toThrow(
+		"workspace-unavailable",
+	);
+	const claim = join(root, "worktrees", `.${record.id}.claim`);
+	const originalClaim = await files.readFile(claim);
+	await files.writeFile(claim, "Wrong claim");
+	await expect(client.removeAbandoned(record)).rejects.toThrow("workspace-unavailable");
+	await files.writeFile(claim, originalClaim!);
+	expect((await service.get(owner, record.id)).status).toBe("ready");
+});
+
 test("owned worktrees remain resolvable during a conflicted rebase, but unrelated detached HEADs are rejected", async () => {
 	const { service, project, git } = await setup();
 	const seed = await service.create(owner, project.id, { name: "Seed" });

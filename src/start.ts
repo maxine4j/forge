@@ -80,6 +80,7 @@ import { TicketStore } from "./tickets/ticket-store.ts";
 import { TicketWorkflowService } from "./tickets/ticket-workflow-service.ts";
 import { TicketWorkflowStore } from "./tickets/ticket-workflow-store.ts";
 import type { StartOptions } from "./types.ts";
+import { AbandonedWorkspaceCleanup } from "./workspaces/abandoned-workspace-cleanup.ts";
 import { WorkspaceClient } from "./workspaces/workspace-client.ts";
 import { WorkspaceDiffClient } from "./workspaces/workspace-diff-client.ts";
 import { WorkspaceMergeClient } from "./workspaces/workspace-merge-client.ts";
@@ -293,6 +294,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		access,
 		wakeScheduler,
 		() => boardSettings.dispatchMode(),
+		new AbandonedWorkspaceCleanup(terminals, workspaces),
 	);
 	const tickets = new TicketService(ticketStore, store, access, () => new Date(), workflow, epicStore);
 	const epics = new EpicService(epicStore, ticketStore, access, () => new Date());

@@ -146,6 +146,20 @@ integration; entry points must never serialize it. Future PR services can inspec
 workspace identity/head through the same service interface. Startup initializes
 the workspace store and completes recovery before listening.
 
+## Ticket abandonment cleanup
+
+The dedicated injected abandonment cleanup interface is separate from merged
+worktree cleanup. After [ticket agents settle](agents.md#ticket-cancellation), it
+closes the workspace terminal, removes the owned checkout including dirty and
+untracked files, and deletes the unmerged branch. It retains claim/path, repository,
+branch and linked-worktree ownership checks and rejects branches checked out
+elsewhere. Branch deletion uses its expected tip. Missing runtime resources succeed
+on retry, including a crash between checkout removal and branch deletion.
+Workspace metadata becomes archived; repositories, agent records, usage and
+credentials remain. The [ticket workflow](tickets.md#abandonment-and-restart)
+persists failures and retries at startup, on scheduler ticks and through reconciliation.
+Merged cleanup still requires a clean checkout and a candidate reachable from main.
+
 ## Slice 2 integrated manual workspace and PR review
 
 Forge uses a dark GitHub-style layout throughout. Global navigation is Tasks

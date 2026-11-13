@@ -1,5 +1,5 @@
 import type { DockerOverview, DockerOperation } from "@forge/contracts/docker";
-import type { Epic } from "@forge/contracts/tickets";
+import type { Epic, TicketWorkflow } from "@forge/contracts/tickets";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -24,6 +24,8 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		skills: [{ name: "review", description: "Review changes" }],
 	};
 	let approved = false;
+	let planCleared = false;
+	let workflowOverride: Partial<TicketWorkflow> = {};
 	let boardSettings = { dispatch: "running", maxAgents: 3 };
 	let stopRequests = 0;
 	let dockerReads = 0;
@@ -49,6 +51,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		needsAttention?: true;
 		agentStatus?: "queued" | "working";
 		canReturnToBacklog?: true;
+		resetting?: true;
 	}[] = [
 		{
 			id: "TASK-1",
@@ -70,7 +73,10 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	let release = () => {};
 	let held = 0;
 	const operations: string[] = [];
-	if (agentic) tickets[0]!.status = "in-progress";
+	if (agentic) {
+		tickets[0]!.status = "in-progress";
+		tickets[0]!.canReturnToBacklog = true;
+	}
 	if (agentic && !review) tickets[0]!.needsAttention = true;
 	if (crowded)
 		tickets = Array.from({ length: 60 }, (_, i) => ({
@@ -161,7 +167,18 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 					},
 				});
 			}
-			if (path.endsWith("/workflow") || path.endsWith("/messages") || path.endsWith("/approve")) {
+			if (
+				path.endsWith("/workflow")
+				|| path.endsWith("/messages")
+				|| path.endsWith("/approve")
+				|| path.endsWith("/clear-plan")
+				|| path.endsWith("/reconcile")
+			) {
+				if (path.endsWith("/clear-plan")) {
+					operations.push("clear-plan");
+					planCleared = true;
+				}
+				if (path.endsWith("/reconcile")) operations.push("reconcile");
 				if (path.endsWith("/messages")) messages++;
 				if (path.endsWith("/approve")) {
 					approvals.push(route.request().postDataJSON());
@@ -176,7 +193,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 						state: review ? "running" : approved ? "queued" : "idle",
 						mergeAttempts: 0,
 						...(review ? { implementerId: threadId } : {}),
-						...(agentic
+						...(agentic && !planCleared
 							? {
 									plannerId: threadId,
 									plan: {
@@ -185,6 +202,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 									},
 								}
 							: {}),
+						...workflowOverride,
 					},
 				});
 			}
@@ -279,8 +297,17 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 					const { status, beforeId } = route.request().postDataJSON();
 					if (pickupOnReturn && ticket.status === "todo" && status === "backlog") {
 						ticket.status = "in-progress";
-						delete ticket.canReturnToBacklog;
+						ticket.canReturnToBacklog = true;
 						return route.fulfill({ status: 409, json: { error: "ticket-conflict" } });
+					}
+					if (ticket.status === "in-progress" && agentic) {
+						ticket.resetting = true;
+						workflowOverride = {
+							state: "resetting",
+							resetStage: "stopping",
+							plannerId: undefined,
+							implementerId: undefined,
+						};
 					}
 					ticket.status = status;
 					if (status === "todo") ticket.canReturnToBacklog = true;
@@ -303,6 +330,17 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	await page.goto("/");
 	await expect(page).toHaveURL("/tasks");
 	return {
+		finishReset: () => {
+			delete tickets.find((ticket) => ticket.id === "TASK-1")!.resetting;
+			workflowOverride = { state: "idle", phase: "planning", plannerId: undefined, implementerId: undefined };
+		},
+		failReset: () => {
+			workflowOverride = {
+				...workflowOverride,
+				resetStage: "cleanup",
+				resetError: "Cleanup failed. Will retry automatically.",
+			};
+		},
 		pickupOnReturn: () => {
 			pickupOnReturn = true;
 		},
@@ -349,6 +387,63 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		},
 	};
 };
+
+for (const width of [1280, 390]) {
+	test(`return header retains details, polls cleanup, and clears saved plan at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 850 });
+		const f = await setup(page, false, true);
+		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+		const dialog = page.getByRole("dialog");
+		await page.getByRole("tab", { name: "Details", exact: true }).click();
+		await expect(dialog.getByRole("button", { name: "Clear plan", exact: true })).toHaveCount(0);
+		const returning = dialog.getByRole("button", { name: "Return to backlog", exact: true });
+		await returning.focus();
+		await returning.press("Enter");
+		await expect(dialog).toBeVisible();
+		await expect(dialog.getByLabel("Status", { exact: true })).toHaveValue("backlog");
+		await expect(dialog.getByText("Stopping ticket agents…", { exact: true })).toBeVisible();
+		await expect(dialog.getByLabel("Status", { exact: true })).toBeDisabled();
+		await expect(dialog.getByRole("button", { name: "Clear plan", exact: true })).toBeDisabled();
+		await expect(dialog.getByRole("button", { name: "Archive ticket", exact: true })).toBeDisabled();
+		f.failReset();
+		await expect(dialog.getByText("Removing abandoned work…", { exact: true })).toBeVisible();
+		await expect(dialog.getByRole("alert")).toContainText("Cleanup failed");
+		await dialog.getByRole("button", { name: "Retry cleanup", exact: true }).click();
+		await expect.poll(() => f.operations).toContain("reconcile");
+		f.finishReset();
+		const clear = dialog.getByRole("button", { name: "Clear plan", exact: true });
+		await expect(clear).toBeEnabled();
+		await clear.focus();
+		await clear.press("Enter");
+		await expect(clear).toHaveCount(0);
+		await expect(dialog.getByText("Search plan", { exact: true })).toHaveCount(0);
+		await expect(dialog.getByLabel("Status", { exact: true })).toBeEnabled();
+		expect(f.operations.filter((op) => op === "move")).toHaveLength(1);
+		expect(await dialog.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+	});
+}
+
+for (const status of ["backlog", "todo"] as const) {
+	test(`In progress drag to ${status} shares status-menu transitions`, async ({ page }) => {
+		const f = await setup(page, false, true);
+		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+		const menu = page.getByLabel("Status", { exact: true });
+		await expect(menu.locator("option")).toHaveText(["In progress", "Backlog", "Ready for development"]);
+		await page.getByRole("button", { name: "Close ticket", exact: true }).click();
+		await page.getByRole("button", { name: "Drag TASK-1", exact: true }).hover();
+		await page.mouse.down();
+		const region = page.getByRole("region", {
+			name: status === "backlog" ? "Backlog" : "Ready for development",
+			exact: true,
+		});
+		const box = (await region.boundingBox())!;
+		await page.mouse.move(box.x + 100, box.y + 100, { steps: 8 });
+		await expect(page.locator(".ticket-drop-placeholder")).toBeVisible();
+		await page.mouse.up();
+		await expect(region.getByText("First task", { exact: true })).toBeVisible();
+		expect(f.tickets().find((ticket) => ticket.id === "TASK-1")).toMatchObject({ status, resetting: true });
+	});
+}
 
 for (const view of ["board", "backlog"]) {
 	test(`unclaimed Ready returns from the status menu in ${view} and restores editing`, async ({ page }) => {
@@ -401,7 +496,7 @@ test("Ready drag returns to Backlog and stale return refreshes pickup eligibilit
 	f.pickupOnReturn();
 	await page.getByLabel("Status", { exact: true }).selectOption("backlog");
 	await expect(page.getByLabel("Status", { exact: true })).toHaveValue("in-progress");
-	await expect(page.getByLabel("Status", { exact: true })).toBeDisabled();
+	await expect(page.getByLabel("Status", { exact: true })).toBeEnabled();
 	await expect(page.getByRole("dialog").getByRole("alert")).toContainText("This transition is not available");
 	await page.getByRole("tab", { name: "Details", exact: true }).click();
 	await expect(page.getByRole("button", { name: /^Edit title:/ })).toHaveCount(0);

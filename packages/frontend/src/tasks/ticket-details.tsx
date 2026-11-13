@@ -5,7 +5,7 @@ import {
 	type AgentOptions,
 	type AgentSettings,
 } from "@forge/contracts/agents";
-import { updateTicketSchema, ticketSchema } from "@forge/contracts/tickets";
+import { updateTicketSchema, ticketSchema, ticketMoveTargets } from "@forge/contracts/tickets";
 import {
 	ticketWorkflowSchema,
 	type Ticket,
@@ -100,7 +100,8 @@ export const TicketDetails = ({
 	const editDescription = useRef<HTMLButtonElement>(null);
 	const descriptionInput = useRef<HTMLTextAreaElement>(null);
 	const restoreDescriptionFocus = useRef(false);
-	const editable = !archived && ticket.status === "backlog";
+	const resetting = ticket.resetting || job?.state === "resetting";
+	const editable = !archived && !resetting && ticket.status === "backlog";
 	const parentId = ticket.epicId ?? null;
 	const epic = epics.find(({ id }) => id === parentId);
 	const epicPicker = useRef<HTMLDivElement>(null);
@@ -285,7 +286,13 @@ export const TicketDetails = ({
 			)}
 		</div>
 	) : undefined;
-	const target = ticket.status === "backlog" ? "todo" : ticket.canReturnToBacklog ? "backlog" : undefined;
+	const targets = resetting ? [] : ticketMoveTargets(ticket);
+	const moveTo = (status: TicketStatus) => {
+		setMoveError("");
+		void move(ticket.id, { status })
+			.catch((err: unknown) => setMoveError(err instanceof Error ? err.message : "Cannot move ticket."))
+			.finally(refresh);
+	};
 	const canQueueMerge =
 		ticket.status === "in-progress"
 		&& job?.resultSha
@@ -370,18 +377,15 @@ export const TicketDetails = ({
 							<select
 								aria-label='Status'
 								value={ticket.status}
-								disabled={archived || busy || !target || editingTitle}
-								onChange={(event) => {
-									setMoveError("");
-									void move(ticket.id, { status: event.target.value as TicketStatus })
-										.catch((err: unknown) =>
-											setMoveError(err instanceof Error ? err.message : "Cannot move ticket."),
-										)
-										.finally(refresh);
-								}}
+								disabled={archived || busy || acting || !targets.length || editingTitle}
+								onChange={(event) => moveTo(event.target.value as TicketStatus)}
 							>
 								<option value={ticket.status}>{ticketLabels[ticket.status]}</option>
-								{target && <option value={target}>{ticketLabels[target]}</option>}
+								{targets.map((target) => (
+									<option key={target} value={target}>
+										{ticketLabels[target]}
+									</option>
+								))}
 							</select>
 							<span className='ticket-chevron' aria-hidden='true' />
 						</div>
@@ -418,12 +422,21 @@ export const TicketDetails = ({
 					)}
 				</div>
 				<div className='ticket-details-actions'>
+					{!archived && ticket.canReturnToBacklog && (
+						<button
+							type='button'
+							disabled={busy || acting || !!resetting}
+							onClick={() => moveTo("backlog")}
+						>
+							Return to backlog
+						</button>
+					)}
 					<button
 						type='button'
 						className='ticket-archive-action'
 						aria-label='Archive ticket'
 						title='Archive ticket'
-						disabled={archived || busy || acting}
+						disabled={archived || busy || acting || !!resetting}
 						onClick={() => {
 							setArchiveError("");
 							archiveDialog.current?.showModal();
@@ -508,13 +521,25 @@ export const TicketDetails = ({
 			</dialog>
 			<div className='ticket-details-toolbar'>
 				<span role='status'>
-					{reviewPlan
-						? "Plan ready for review"
-						: job?.state === "merge-queued"
-							? "Queued to merge"
-							: (job?.state ?? "Loading")}
+					{resetting
+						? job?.resetStage === "cleanup"
+							? "Removing abandoned work…"
+							: "Stopping ticket agents…"
+						: reviewPlan
+							? "Plan ready for review"
+							: job?.state === "merge-queued"
+								? "Queued to merge"
+								: (job?.state ?? "Loading")}
 				</span>
 			</div>
+			{job?.resetError && (
+				<div className='ticket-recovery' role='alert'>
+					<span>{job.resetError}</span>
+					<button type='button' disabled={acting} onClick={() => act("reconcile", {})}>
+						Retry cleanup
+					</button>
+				</div>
+			)}
 			<div role='tablist' aria-label='Ticket sections' className='section-tabs'>
 				{tabs.map((name, index) => (
 					<button
@@ -600,6 +625,15 @@ export const TicketDetails = ({
 				{plan && (
 					<fieldset className='ticket-detail-section'>
 						<legend>Plan</legend>
+						{!archived && ticket.status === "backlog" && (
+							<button
+								type='button'
+								disabled={acting || busy || !!resetting}
+								onClick={() => act("clear-plan", {})}
+							>
+								Clear plan
+							</button>
+						)}
 						<div className='ticket-plan-markdown'>
 							<PlanMarkdown text={plan.text} />
 						</div>
@@ -619,7 +653,7 @@ export const TicketDetails = ({
 						settings={settings}
 						options={options}
 						change={changeSettings}
-						disabled={archived || savingSettings || ticket.status === "done"}
+						disabled={archived || savingSettings || !!resetting || ticket.status === "done"}
 					/>
 					<RepositorySelection
 						api={api}
@@ -681,7 +715,9 @@ export const TicketDetails = ({
 				) : (
 					<p>
 						{ticket.status === "backlog"
-							? "Move this ticket to Ready for development to queue planning."
+							? plan
+								? "Move this ticket to Ready for development to implement the saved plan."
+								: "Move this ticket to Ready for development to queue planning."
 							: "Waiting for a ticket agent to start."}
 					</p>
 				)}

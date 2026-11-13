@@ -128,6 +128,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				access,
 				undefined,
 				() => dispatch,
+				workspaces,
 			);
 		let workflow = workflowService(agents);
 		let tickets = new TicketService(
@@ -295,7 +296,9 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		const completed = (await jobs.get(ticket.id))!;
 		// Reconstruct services from persisted intent at the Git/SQLite crash boundary.
 		expect(completed.state).toBe("merge-queued");
+		expect(await merges.isMerged(owner, planning.workspaceId!, completed.resultSha!)).toBe(false);
 		await expect(merges.merge(owner, planning.workspaceId!, completed.resultSha!)).resolves.toBe("merged");
+		expect(await merges.isMerged(owner, planning.workspaceId!, completed.resultSha!)).toBe(true);
 		const localFile = join(path, "local-notes.txt");
 		await files.writeFile(localFile, "Uncommitted notes");
 		await expect(workspaces.cleanupMerged(owner, planning.workspaceId!, completed.resultSha!)).rejects.toThrow(
@@ -357,6 +360,74 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect(recorded.tickets.at(0)?.apiUsd).toBeCloseTo(0.0115);
 		expect(recorded.limits?.windows.at(0)).toMatchObject({ minutes: 300, usedPercent: 40 });
 		expect((await cost.read(owner)).phases.map(({ phase }) => phase)).toContain("chat");
+
+		const returning = await tickets.create(owner, {
+			repositoryIds: [project.id],
+			title: "Restart cleanly",
+			description: "Current scope",
+		});
+		await tickets.move(owner, returning.id, { status: "todo" });
+		await workflow.tick(owner);
+		await expect
+			.poll(async () => {
+				await workflow.tick(owner);
+				return (await jobs.get(returning.id))?.plan?.revision;
+			})
+			.toBe(1);
+		const old = (await jobs.get(returning.id))!;
+		const oldPath = (await workspaces.resolve(owner, old.workspaceId!)).path;
+		await files.writeFile(join(oldPath, "dirty-notes.txt"), "Discard on return");
+		await expect
+			.poll(async () => (await cost.read(owner)).tickets.find(({ id }) => id === returning.id)?.turns)
+			.toBe(1);
+		const beforeReturn = (await cost.read(owner)).tickets.find(({ id }) => id === returning.id)!;
+		await tickets.move(owner, returning.id, { status: "backlog" });
+		await workflow.recover(owner, returning.id);
+		expect(await jobs.get(returning.id)).toMatchObject({ state: "idle", plan: old.plan });
+		await expect(files.lstat(oldPath)).rejects.toMatchObject({ code: "ENOENT" });
+		expect((await workspaces.get(owner, old.workspaceId!)).status).toBe("archived");
+		await restart();
+		expect((await jobs.get(returning.id))?.plan).toEqual(old.plan);
+		expect((await cost.read(owner)).tickets.find(({ id }) => id === returning.id)).toEqual(beforeReturn);
+		const calls = rpc.mock.calls.filter(([method]) => method === "turn/start").length;
+		await tickets.move(owner, returning.id, { status: "todo" });
+		await workflow.tick(owner);
+		const fresh = (await jobs.get(returning.id))!;
+		expect(fresh).toMatchObject({ phase: "implementation", state: "running", approvedRevision: 1 });
+		expect(fresh.workspaceId).not.toBe(old.workspaceId);
+		expect(fresh.implementerId).not.toBe(old.plannerId);
+		expect(fresh.baseSha).toBe(completed.resultSha);
+		expect(rpc.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(calls + 1);
+		await tickets.move(owner, returning.id, { status: "backlog" });
+		await workflow.recover(owner, returning.id);
+		const usageBeforeClear = (await cost.read(owner)).tickets.find(({ id }) => id === returning.id);
+		await workflow.clearPlan(owner, (await ticketStore.get(returning.id))!);
+		expect((await jobs.get(returning.id))?.plan).toBeUndefined();
+		expect((await cost.read(owner)).tickets.find(({ id }) => id === returning.id)).toEqual(usageBeforeClear);
+		const prepare = workspaceClient.prepare.bind(workspaceClient);
+		for (const stage of ["before", "after"] as const) {
+			const failedTicket = await tickets.create(owner, {
+				repositoryIds: [project.id],
+				title: `Setup failure ${stage}`,
+				description: "",
+			});
+			vi.spyOn(workspaceClient, "prepare").mockImplementationOnce(async (record) => {
+				if (stage === "after") await prepare(record);
+				throw new Error("Preparation failed");
+			});
+			await tickets.move(owner, failedTicket.id, { status: "todo" });
+			await workflow.tick(owner);
+			const failedJob = (await jobs.get(failedTicket.id))!;
+			expect(failedJob).toMatchObject({ state: "setup-failed", workspaceId: expect.any(String) });
+			expect(failedJob.plannerId).toBeUndefined();
+			await tickets.move(owner, failedTicket.id, { status: "backlog" });
+			await workflow.recover(owner, failedTicket.id);
+			expect((await jobs.get(failedTicket.id))?.state).toBe("idle");
+			expect((await workspaces.get(owner, failedJob.workspaceId!)).status).toBe("archived");
+			await expect(files.lstat(join(root, "worktrees", failedJob.workspaceId!))).rejects.toMatchObject({
+				code: "ENOENT",
+			});
+		}
 	} finally {
 		await agents?.shutdown();
 		await usage?.close();

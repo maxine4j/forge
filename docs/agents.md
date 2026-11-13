@@ -1,5 +1,17 @@
 # Codex and interactive agents
 
+## Ticket cancellation
+
+[Returning a ticket](tickets.md#abandonment-and-restart) records durable abandonment
+before requesting ticket-scoped cancellation through the injected agent interface.
+Only the recorded managed planner and implementer are interrupted; unrelated
+tickets and standalone chats keep running. Agents retain a private abandonment
+flag rejecting further dispatch, steering and approval replies. Reconciliation
+uses the same termination evidence as Stop all agents, without replaying ambiguous
+turns. Interrupt acknowledgment alone does not release capacity or allow worktree
+removal. Confirmed settlement permits [owned workspace cleanup](workspaces.md#ticket-abandonment-cleanup).
+Agent records, conversations and historical cost attribution survive abandonment.
+
 ## Codex harness and lifecycle
 
 Use Codex CLI's app-server as the built-in harness. Forge orchestrates tickets and

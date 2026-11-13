@@ -37,6 +37,7 @@ export const ticketSchema = z.strictObject({
 	needsAttention: z.literal(true).optional(),
 	agentStatus: z.enum(["queued", "working"]).optional(),
 	canReturnToBacklog: z.literal(true).optional(),
+	resetting: z.literal(true).optional(),
 });
 export const ticketsSchema = z.array(ticketSchema).max(1000);
 export const editEpicSchema = createTicketSchema.pick({ title: true, description: true });
@@ -65,7 +66,19 @@ export const ticketWorkflowSchema = z.strictObject({
 	plannerId: z.uuid().optional(),
 	implementerId: z.uuid().optional(),
 	phase: z.enum(["planning", "implementation", "review", "rebase"]),
-	state: z.enum(["idle", "queued", "dispatching", "running", "merge-queued", "setup-failed", "failed", "uncertain"]),
+	state: z.enum([
+		"idle",
+		"queued",
+		"dispatching",
+		"running",
+		"merge-queued",
+		"setup-failed",
+		"failed",
+		"uncertain",
+		"resetting",
+	]),
+	resetStage: z.enum(["stopping", "cleanup"]).optional(),
+	resetError: z.string().optional(),
 	plan: z.strictObject({ revision: z.number().int().positive(), text: z.string().min(1).max(32000) }).optional(),
 	approvedRevision: z.number().int().positive().optional(),
 	message: z.string().max(8000).optional(),
@@ -80,5 +93,12 @@ export const ticketWorkflowSchema = z.strictObject({
 		.optional(),
 });
 export type TicketWorkflow = z.infer<typeof ticketWorkflowSchema>;
+/** Shared status-menu and drag eligibility. The server rechecks under workflow serialization. */
+export function ticketMoveTargets(ticket: z.infer<typeof ticketSchema>): z.infer<typeof ticketStatusSchema>[] {
+	if (ticket.archivedAt || ticket.resetting || ticket.status === "done") return [];
+	if (ticket.status === "backlog") return ["todo"];
+	if (!ticket.canReturnToBacklog) return [];
+	return ticket.status === "in-progress" ? ["backlog", "todo"] : ["backlog"];
+}
 export type { Ticket, TicketStatus, CreateTicket, MoveTicket } from "./types.ts";
 export * from "./board-settings.ts";

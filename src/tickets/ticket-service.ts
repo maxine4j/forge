@@ -41,11 +41,14 @@ export class TicketService implements ITicketService {
 		const [tickets, summary] = await Promise.all([this.store.list(), this.workflow.boardSummary(actor)]);
 		return Promise.all(
 			tickets.map(async (ticket) => {
-				if (ticket.status === "backlog" || ticket.status === "done") return ticket;
+				if (ticket.status === "done") return ticket;
 				return {
 					...ticket,
 					...(await this.workflow.capabilities(actor, ticket)),
-					...(summary.get(ticket.id) ?? (ticket.status === "todo" ? { agentStatus: "queued" as const } : {})),
+					...(ticket.status === "backlog"
+						? {}
+						: (summary.get(ticket.id)
+							?? (ticket.status === "todo" ? { agentStatus: "queued" as const } : {}))),
 				};
 			}),
 		);

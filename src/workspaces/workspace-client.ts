@@ -24,6 +24,8 @@ export interface IWorkspaceClient {
 	verify(record: WorkspaceRecord): Promise<void>;
 	/** Removes only a clean owned checkout and the exact branch tip already reachable from main. */
 	removeMerged(record: WorkspaceRecord, candidate: string): Promise<void>;
+	/** Discards owned ticket work after confirmed agent settlement. */
+	removeAbandoned(record: WorkspaceRecord): Promise<void>;
 	/** Verified internal runtime path; never a public response field. */
 	location(record: WorkspaceRecord): Promise<string>;
 	head(record: WorkspaceRecord): Promise<string>;
@@ -170,13 +172,16 @@ export class WorkspaceClient implements IWorkspaceClient {
 		return this.path(record);
 	}
 	async removeMerged(record: WorkspaceRecord, candidate: string): Promise<void> {
+		return this.removeOwned(record, candidate);
+	}
+	async removeAbandoned(record: WorkspaceRecord): Promise<void> {
+		return this.removeOwned(record);
+	}
+	private async removeOwned(record: WorkspaceRecord, candidate?: string): Promise<void> {
 		await this.boundary(async () => {
 			this.validateRecord(record);
-			gitShaSchema.parse(candidate);
+			if (candidate !== undefined) gitShaSchema.parse(candidate);
 			await this.repositories.verify(record.projectId);
-			await this.requireDirectory(dirname(this.path(record)));
-			await this.requireClaim(record);
-			await this.base(record);
 			const repo = ["-C", this.repository(record)];
 			const branch = `refs/heads/${record.branch}`;
 			const refs = await this.git.run([...repo, "for-each-ref", "--format=%(refname) %(objectname)", branch]);
@@ -184,9 +189,26 @@ export class WorkspaceClient implements IWorkspaceClient {
 				.split("\n")
 				.find((line) => line.startsWith(`${branch} `))
 				?.slice(branch.length + 1);
-			if (tip && tip !== candidate) throw new Error("Merged workspace branch changed");
-			const main = gitShaSchema.parse((await this.git.run([...repo, "rev-parse", "refs/heads/main"])).trim());
-			await this.git.run([...repo, "merge-base", "--is-ancestor", candidate, main]);
+			const root = dirname(this.path(record));
+			if (!(await this.exists(root))) {
+				if (candidate || tip) throw new Error("Missing workspace ownership");
+				return;
+			}
+			await this.requireDirectory(root);
+			if (
+				!candidate
+				&& !tip
+				&& !(await this.exists(this.claim(record)))
+				&& !(await this.exists(this.path(record)))
+			)
+				return;
+			await this.requireClaim(record);
+			if (candidate) await this.base(record);
+			if (candidate && tip && tip !== candidate) throw new Error("Merged workspace branch changed");
+			const main = candidate
+				? gitShaSchema.parse((await this.git.run([...repo, "rev-parse", "refs/heads/main"])).trim())
+				: undefined;
+			if (candidate && main) await this.git.run([...repo, "merge-base", "--is-ancestor", candidate, main]);
 
 			const path = this.path(record);
 			const registeredPath = join(await this.files.realpath(dirname(path)), record.id);
@@ -199,17 +221,25 @@ export class WorkspaceClient implements IWorkspaceClient {
 				throw new Error("Merged workspace branch is checked out elsewhere");
 			const exists = await this.exists(path);
 			if (entry) {
-				if (!tip || !entry.includes(`branch ${branch}`) || !entry.includes(`HEAD ${candidate}`))
+				if (
+					!tip
+					|| (candidate
+						? !entry.includes(`branch ${branch}`) || !entry.includes(`HEAD ${candidate}`)
+						: !exists && !entry.includes(`branch ${branch}`))
+				)
 					throw new Error("Merged worktree identity changed");
 				if (exists) {
 					await this.verify(record);
-					if ((await this.git.run(["-C", path, "status", "--porcelain", "--untracked-files=all"])).trim())
+					if (
+						candidate
+						&& (await this.git.run(["-C", path, "status", "--porcelain", "--untracked-files=all"])).trim()
+					)
 						throw new Error("Merged worktree has local changes");
 				}
 				const locked = entry.some((field) => field === "locked" || field.startsWith("locked "));
 				if (locked) await this.git.run([...repo, "worktree", "unlock", path]);
 				try {
-					await this.git.run([...repo, "worktree", "remove", path]);
+					await this.git.run([...repo, "worktree", "remove", ...(!candidate ? ["--force"] : []), path]);
 				} catch (cause) {
 					if (locked)
 						await this.git.run([
@@ -228,7 +258,7 @@ export class WorkspaceClient implements IWorkspaceClient {
 			if (tip)
 				await this.git.run(
 					[...repo, "update-ref", "--stdin"],
-					`start\nverify refs/heads/main ${main}\ndelete ${branch} ${candidate}\nprepare\ncommit\n`,
+					`start\n${main ? `verify refs/heads/main ${main}\n` : ""}delete ${branch} ${tip}\nprepare\ncommit\n`,
 				);
 		});
 	}

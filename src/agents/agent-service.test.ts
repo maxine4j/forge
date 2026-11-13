@@ -36,6 +36,7 @@ const setup = (
 		recover: vi.fn(),
 	};
 	const workspaces: IAgentWorkspaces = {
+		retry: vi.fn(),
 		get: vi.fn<IAgentWorkspaces["get"]>(async (_actor, workspaceId) => ({
 			id: workspaceId,
 			projectId,
@@ -384,6 +385,54 @@ test("stop all interrupts both chat and ticket turns and reports individual fail
 	]);
 	expect((await service.get(owner, ticket.thread.id)).thread.status).toBe("interrupted");
 	await service.shutdown();
+});
+
+test("ticket cancellation retains capacity until settlement and leaves other executions running", async () => {
+	const f = setup();
+	const ticket = await f.service.createTicketThread(owner, projectId, "Ticket");
+	const other = await f.service.createTicketThread(owner, projectId, "Other ticket");
+	const chat = await f.service.create(owner, projectId, "Chat");
+	await f.service.dispatch(owner, ticket.thread.id, "Plan");
+	await f.service.dispatch(owner, other.thread.id, "Implement");
+	await f.service.send(owner, chat.thread.id, "Work");
+	await expect(f.service.stopTicket({ username: "outsider" }, [ticket.thread.id])).rejects.toThrow("Access denied");
+	expect(await f.service.stopTicket(owner, [ticket.thread.id])).toBe(false);
+	expect(f.pool.activeIds()).toContain(ticket.thread.id);
+	expect(f.client.interrupt.mock.calls).toEqual([["codex-1", "turn"]]);
+	expect(f.records.get(ticket.thread.id)?.abandoned).toBe(true);
+	await expect(f.service.dispatch(owner, ticket.thread.id, "Late work")).rejects.toThrow("agent-conflict");
+	await expect(f.service.steer(owner, ticket.thread.id, "turn", "Late feedback")).rejects.toThrow("agent-conflict");
+	f.views.get("codex-1")!.status = "interrupted";
+	expect(await f.service.stopTicket(owner, [ticket.thread.id])).toBe(true);
+	expect(f.pool.activeIds()).not.toContain(ticket.thread.id);
+	expect(f.pool.activeIds()).toEqual(expect.arrayContaining([other.thread.id, chat.thread.id]));
+	expect(await f.service.stopTicket(owner, [ticket.thread.id])).toBe(true);
+	await f.service.shutdown();
+});
+
+test("a ticket stop blocks an approval already waiting on workspace access", async () => {
+	const f = setup();
+	const ticket = await f.service.createTicketThread(owner, projectId, "Ticket");
+	await f.service.dispatch(owner, ticket.thread.id, "Work");
+	f.records.get(ticket.thread.id)!.status = "waiting";
+	f.views.get("codex-1")!.status = "waiting";
+	const entered = Promise.withResolvers<void>();
+	const proceed = Promise.withResolvers<void>();
+	const original = f.workspaces.resolve;
+	vi.mocked(f.workspaces.resolve).mockImplementationOnce(async (...args) => {
+		entered.resolve();
+		await proceed.promise;
+		return original(...args);
+	});
+	const replying = f.service.reply(owner, ticket.thread.id, { requestId: "approval", decision: "accept" });
+	const rejected = expect(replying).rejects.toThrow("agent-conflict");
+	await entered.promise;
+	const stopping = f.service.stopTicket(owner, [ticket.thread.id]);
+	proceed.resolve();
+	await rejected;
+	await stopping;
+	expect(f.client.reply).not.toHaveBeenCalled();
+	await f.service.shutdown();
 });
 
 test("a stop during ticket setup holds the turn before sending it to Codex", async () => {

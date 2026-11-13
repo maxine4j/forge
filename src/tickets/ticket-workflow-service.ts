@@ -13,7 +13,7 @@ import { AgentCatalogError, AgentError } from "../agents/errors.ts";
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
 import type { ITicketMergeClient } from "../workspaces/workspace-merge-client.ts";
-import type { IMergedWorkspaceCleanup } from "../workspaces/workspace-service.ts";
+import type { IMergedWorkspaceCleanup, IAbandonedWorkspaceCleanup } from "../workspaces/workspace-service.ts";
 import { TicketError } from "./errors.ts";
 import type { ITicketPrompts } from "./ticket-prompts.ts";
 import type { ITicketStore } from "./ticket-store.ts";
@@ -28,7 +28,8 @@ export interface ITicketWorkflowService {
 	/** Archives between scheduler operations. Active or unresolved execution and pending merges conflict. */
 	archive(actor: Actor, ticket: Ticket, archivedAt: string): Promise<void>;
 	move(actor: Actor, ticket: Ticket, input: MoveTicket): Promise<void>;
-	capabilities(actor: Actor, ticket: Ticket): Promise<Pick<Ticket, "canReturnToBacklog">>;
+	clearPlan(actor: Actor, ticket: Ticket): Promise<TicketWorkflow>;
+	capabilities(actor: Actor, ticket: Ticket): Promise<Pick<Ticket, "canReturnToBacklog" | "resetting">>;
 	get(actor: Actor, id: string): Promise<TicketWorkflow>;
 	boardSummary(actor: Actor): Promise<Map<string, Pick<Ticket, "agentStatus" | "needsAttention">>>;
 	approve(actor: Actor, ticket: Ticket, revision: number): Promise<TicketWorkflow>;
@@ -41,6 +42,7 @@ export interface ITicketWorkflowService {
 export class TicketWorkflowService implements ITicketWorkflowService {
 	private tail: Promise<unknown> = Promise.resolve();
 	private readonly settingUp = new Set<string>();
+	private readonly resetting = new Map<string, Promise<void>>();
 	private readonly log = createLogger(TicketWorkflowService.name);
 	async options(actor: Actor, ticketId?: string): Promise<AgentOptions> {
 		this.access.assertOwner(actor);
@@ -66,6 +68,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		await this.serialize(async () => {
 			const current = await this.tickets.get(ticket.id);
 			if (!current || current.archivedAt || current.status === "done") throw new TicketError("ticket-conflict");
+			if ((await this.record(ticket.id)).state === "resetting") throw new TicketError("ticket-conflict");
 			const options = await this.options(actor, ticket.id);
 			const previous = current.executionSettings;
 			const { model, reasoningEffort, permissions } = parsed.data;
@@ -94,12 +97,14 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		private readonly access: IAccessService,
 		private readonly wake: () => void = () => {},
 		private readonly dispatchMode: () => BoardSettings["dispatch"] = () => "running",
+		private readonly abandonmentCleanup?: IAbandonedWorkspaceCleanup,
 	) {}
 	async update(actor: Actor, id: string, input: CreateTicket): Promise<void> {
 		this.access.assertOwner(actor);
 		await this.serialize(async () => {
 			const ticket = await this.tickets.get(id);
 			if (!ticket || ticket.archivedAt || ticket.status !== "backlog") throw new TicketError("ticket-conflict");
+			if ((await this.record(id)).state === "resetting") throw new TicketError("ticket-conflict");
 			await this.tickets.update(id, input);
 		});
 	}
@@ -107,7 +112,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		this.access.assertOwner(actor);
 		await this.serialize(async () => {
 			const job = await this.record(ticket.id);
-			if (["running", "dispatching", "uncertain", "merge-queued"].includes(job.state))
+			if (["running", "dispatching", "uncertain", "merge-queued", "resetting"].includes(job.state))
 				throw new TicketError("ticket-conflict");
 			await this.tickets.archive(ticket.id, archivedAt);
 		});
@@ -116,53 +121,90 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		this.access.assertOwner(actor);
 		await this.serialize(async () => {
 			const current = await this.tickets.get(ticket.id);
-			if (!current || current.archivedAt || current.status !== ticket.status)
-				throw new TicketError("ticket-conflict");
+			if (!current || current.archivedAt) throw new TicketError("ticket-conflict");
 			if (input.beforeId) {
 				const before = await this.tickets.get(input.beforeId);
-				if (before?.archivedAt || before?.status !== input.status) throw new TicketError("ticket-conflict");
+				if (before?.id === ticket.id || before?.archivedAt || before?.status !== input.status)
+					throw new TicketError("ticket-conflict");
 			}
 			const job = await this.record(ticket.id);
-			if (input.status === ticket.status) {
+			if (job.state === "resetting") {
+				if (input.status !== current.status) throw new TicketError("ticket-conflict");
 				await this.store.save(job, input);
-			} else if (ticket.status === "backlog" && input.status === "todo") {
+				return;
+			}
+			if (input.status === current.status) {
+				await this.store.save(job, input);
+			} else if (current.status === "backlog" && input.status === "todo") {
 				const repositoryId = current.repositoryIds[0];
 				if (!repositoryId) throw new TicketError("ticket-conflict");
 				await this.requireExecutionRepository(actor, repositoryId);
-				await this.store.save({ ...job, phase: "planning", state: "queued" }, input);
-			} else if (input.status === "backlog" && this.canReturnToBacklog(current, job)) {
-				await this.store.save({ ...job, phase: "planning", state: "idle" }, input);
+				await this.store.save(
+					{
+						...job,
+						phase: job.plan ? "implementation" : "planning",
+						approvedRevision: job.plan?.revision,
+						state: "queued",
+					},
+					input,
+				);
+			} else if (
+				(input.status === "backlog" || (input.status === "todo" && current.status === "in-progress"))
+				&& this.canReturnToBacklog(current, job)
+			) {
+				if (
+					job.workspaceId
+					&& job.resultSha
+					&& (await this.merges.isMerged(actor, job.workspaceId, job.resultSha))
+				) {
+					// Recover a completed Git update before accepting a destructive reset.
+					await this.store.save({ ...job, state: "idle", message: undefined }, { status: "done" });
+					throw new TicketError("ticket-conflict");
+				}
+				const abandonment = {
+					workspaceId: job.workspaceId,
+					plannerId: job.plannerId,
+					implementerId: job.implementerId,
+				};
+				const hasResources = Object.values(abandonment).some(Boolean);
+				const next: TicketWorkflowRecord = {
+					ticketId: job.ticketId,
+					plan: job.plan,
+					phase: !hasResources && input.status === "todo" && job.plan ? "implementation" : "planning",
+					mergeAttempts: 0,
+					approvedRevision: !hasResources && input.status === "todo" ? job.plan?.revision : undefined,
+					state: hasResources ? "resetting" : input.status === "todo" ? "queued" : "idle",
+					...(hasResources ? { abandonment, resetStage: "stopping" as const } : {}),
+				};
+				await this.store.save(next, input);
+				if (hasResources) void this.reset(actor, next);
 			} else {
 				throw new TicketError("ticket-conflict");
 			}
 		});
-		if (input.status === "todo") this.wake();
+		this.wake();
 	}
-	async capabilities(actor: Actor, ticket: Ticket): Promise<Pick<Ticket, "canReturnToBacklog">> {
+	async clearPlan(actor: Actor, ticket: Ticket): Promise<TicketWorkflow> {
 		this.access.assertOwner(actor);
-		if (ticket.status !== "todo" || ticket.archivedAt) return {};
-		return this.canReturnToBacklog(ticket, await this.record(ticket.id)) ? { canReturnToBacklog: true } : {};
+		return this.serialize(async () => {
+			const current = await this.tickets.get(ticket.id);
+			const job = await this.record(ticket.id);
+			if (!current || current.archivedAt || current.status !== "backlog" || job.state === "resetting")
+				throw new TicketError("ticket-conflict");
+			const next: TicketWorkflowRecord = { ...job, plan: undefined, approvedRevision: undefined };
+			await this.store.save(next);
+			return this.summary(next);
+		});
+	}
+	async capabilities(actor: Actor, ticket: Ticket): Promise<Pick<Ticket, "canReturnToBacklog" | "resetting">> {
+		this.access.assertOwner(actor);
+		if (ticket.archivedAt || ticket.status === "done") return {};
+		const job = await this.record(ticket.id);
+		if (job.state === "resetting") return { resetting: true };
+		return this.canReturnToBacklog(ticket, job) ? { canReturnToBacklog: true } : {};
 	}
 	private canReturnToBacklog(ticket: Ticket, job: TicketWorkflowRecord): boolean {
-		return (
-			ticket.status === "todo"
-			&& !ticket.archivedAt
-			&& job.phase === "planning"
-			&& ["idle", "queued"].includes(job.state)
-			&& !job.executionRepositoryId
-			&& !job.workspaceId
-			&& !job.plannerId
-			&& !job.implementerId
-			&& !job.turnId
-			&& !job.previousTurnId
-			&& !job.plan
-			&& !job.approvedRevision
-			&& !job.baseSha
-			&& !job.resultSha
-			&& !job.message
-			&& job.mergeAttempts === 0
-			&& !this.settingUp.has(ticket.id)
-		);
+		return ["todo", "in-progress"].includes(ticket.status) && !ticket.archivedAt && job.state !== "resetting";
 	}
 	async get(actor: Actor, id: string): Promise<TicketWorkflow> {
 		this.access.assertOwner(actor);
@@ -265,6 +307,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	}
 	async tick(actor: Actor): Promise<void> {
 		this.access.assertOwner(actor);
+		await this.processResets(actor);
 		return this.serialize(async () => {
 			for (const job of await this.store.list()) {
 				const ticket = await this.tickets.get(job.ticketId);
@@ -295,6 +338,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	}
 	async recover(actor: Actor, ticketId?: string): Promise<void> {
 		this.access.assertOwner(actor);
+		await this.processResets(actor, ticketId);
 		return this.serialize(async () => {
 			if (ticketId) {
 				const ticket = await this.tickets.get(ticketId);
@@ -337,12 +381,70 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	private async inProgress(id: string): Promise<TicketWorkflowRecord> {
 		const ticket = await this.tickets.get(id);
 		if (ticket?.archivedAt || ticket?.status !== "in-progress") throw new TicketError("ticket-conflict");
-		return this.record(id);
+		const job = await this.record(id);
+		if (job.state === "resetting") throw new TicketError("ticket-conflict");
+		return job;
+	}
+	private async processResets(actor: Actor, ticketId?: string): Promise<void> {
+		const jobs = ticketId ? [await this.record(ticketId)] : await this.store.list();
+		for (const job of jobs) {
+			if (job.state !== "resetting") continue;
+			const pending = this.reset(actor, job);
+			if (ticketId) await pending;
+		}
+	}
+	private reset(actor: Actor, job: TicketWorkflowRecord): Promise<void> {
+		const existing = this.resetting.get(job.ticketId);
+		if (existing) return existing;
+		const pending = this.finishReset(actor, job)
+			.catch((err: unknown) => {
+				this.log.error({ err, ticketId: job.ticketId }, "Could not persist ticket cleanup progress");
+			})
+			.finally(() => this.resetting.delete(job.ticketId));
+		this.resetting.set(job.ticketId, pending);
+		return pending;
+	}
+	private async finishReset(actor: Actor, job: TicketWorkflowRecord): Promise<void> {
+		try {
+			const abandoned = job.abandonment;
+			if (job.resetStage !== "cleanup") {
+				const ids = [abandoned?.plannerId, abandoned?.implementerId].filter((id): id is string => !!id);
+				if (!(await this.agents.stopTicket(actor, ids))) return;
+				job = { ...job, resetStage: "cleanup", resetError: undefined };
+				await this.serialize(() => this.store.save(job));
+			}
+			if (abandoned?.workspaceId) {
+				if (!this.abandonmentCleanup) throw new TicketError("ticket-unavailable");
+				await this.abandonmentCleanup.cleanupAbandoned(actor, abandoned.workspaceId);
+			}
+			await this.serialize(async () => {
+				const ticket = await this.tickets.get(job.ticketId);
+				const ready = ticket?.status === "todo";
+				await this.store.save({
+					ticketId: job.ticketId,
+					plan: job.plan,
+					mergeAttempts: 0,
+					phase: ready && job.plan ? "implementation" : "planning",
+					approvedRevision: ready ? job.plan?.revision : undefined,
+					state: ready ? "queued" : "idle",
+				});
+			});
+			this.wake();
+		} catch (err) {
+			this.log.error({ err, ticketId: job.ticketId }, "Abandoned ticket cleanup is pending");
+			await this.serialize(() =>
+				this.store.save({
+					...job,
+					resetError: "Could not finish cancellation or cleanup. Will retry automatically.",
+				}),
+			);
+		}
 	}
 	private summary({
 		previousTurnId: _previous,
 		turnId: _turn,
 		workspaceCleaned: _cleaned,
+		abandonment: _abandonment,
 		...workflow
 	}: TicketWorkflowRecord): TicketWorkflow {
 		return workflow;
@@ -375,13 +477,16 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		this.settingUp.add(ticket.id);
 		try {
 			if (!id) {
-				if (!planning && !job.workspaceId) throw new TicketError("ticket-conflict");
 				const view = await this.agents.createTicketThread(
 					actor,
 					repositoryId,
 					`${ticket.id} ${planning ? "planning" : "implementation"}`,
 					job.workspaceId,
 					true,
+					async (workspaceId) => {
+						job.workspaceId = workspaceId;
+						await this.store.save(job);
+					},
 				);
 				id = view.thread.id;
 				releaseReservation = true;
@@ -390,10 +495,10 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 					job.workspaceId = view.thread.workspaceId;
 				} else {
 					job.implementerId = id;
+					job.workspaceId = view.thread.workspaceId;
 				}
 			}
-			if (planning && !job.baseSha && job.workspaceId)
-				job.baseSha = await this.merges.base(actor, job.workspaceId);
+			if (!job.baseSha && job.workspaceId) job.baseSha = await this.merges.base(actor, job.workspaceId);
 			job.previousTurnId = (await this.agents.get(actor, id)).thread.turnId;
 			job.turnId = undefined;
 			job.state = "dispatching";

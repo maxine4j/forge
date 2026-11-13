@@ -29,21 +29,46 @@ prefixed by the epic icon and key followed by a slash when the ticket belongs
 to an epic. Cards support pointer and touch reordering, edge scrolling and
 cancellation. Moving from Backlog to Ready for development is available by
 dragging or through the ticket's status menu.
-An unclaimed Ready ticket can return to Backlog through the same status menu or
-by dragging its card into Backlog. This restores scope, ordered repository and
-epic editing while preserving identity, membership and execution settings.
-Without `beforeId`, the returned ticket is appended to Backlog; the usual
-destination ordering rules apply. Moving it to Ready again validates its current
-first repository.
+Ready and In progress tickets offer **Return to backlog** beside Archive and Close.
+It executes without confirmation and keeps details open. Dragging and the keyboard
+status menu share eligibility: Ready can move to Backlog, and In progress can move
+to Backlog or Ready. These moves abandon execution through the existing move API.
+Identity, scope, ordered repositories, epic, settings and the latest saved plan
+survive; approval, feedback, candidate, retries and active execution references clear.
+Without `beforeId`, moves append to the destination. Existing ordering and destination
+validation apply. Done and archived tickets cannot return.
 
-Return is available while dispatch is paused or agent capacity is exhausted,
-only until agent pickup starts. Beginning setup locks the ticket even if setup
-later fails or capacity causes it to be queued again. Recorded execution repository,
-workspace, thread or turn context also prevents return. The optional derived
-`canReturnToBacklog: true` capability on list and individual ticket responses
-drives browser controls; a pickup racing a move can still produce a 409. The
-workflow guard and scheduler share a serialization boundary, and a successful
-return atomically resets the untouched workflow to planning/idle with the move.
+### Abandonment and restart
+
+The workflow serialization boundary rechecks status against scheduler pickup and
+merges, then atomically saves the move and abandonment intent. A queued merge is
+canceled; a completed merge cannot be undone. Public `resetting` state reports
+`resetStage: stopping|cleanup` and an optional recoverable `resetError`. The old
+workspace and agent IDs stay in private abandonment metadata until cleanup finishes.
+Workspace allocation records its ID in workflow intent before preparation, so setup
+failure before agent creation can still be abandoned and cleaned safely.
+Cancellation is requested promptly for only these ticket agents. Reconciliation
+never replays ambiguous dispatches and retains execution capacity until confirmed
+settlement. Workflow dispatch, feedback, approval and merge reject pending resets;
+late results cannot advance the abandoned execution.
+
+Cancellation and cleanup run outside the global workflow queue. Normal ticks and
+startup recovery include resetting Backlog tickets. After agents settle, Forge
+closes the terminal and [discards the owned worktree and unmerged branch](workspaces.md#ticket-abandonment-cleanup).
+Failures persist for automatic retry; the existing reconcile action explicitly
+retries cleanup. Metadata, agent records, historical usage, repositories and
+credentials remain. The board exposes `resetting: true`; shared browser transition
+eligibility disables restarting, Clear plan and conflicting actions until completion.
+
+After cleanup Backlog is planning/idle; Ready is queued under normal dispatch and
+capacity controls. Restarting with a saved plan creates a fresh implementer and
+worktree from the selected repository's latest local main, automatically using the
+plan without another planning or approval turn. **Clear plan** appears beside a
+saved plan only on non-archived Backlog tickets. Owner-only
+`POST /api/tickets/:id/clear-plan` returns the updated workflow and idempotently
+clears the plan and approval after cleanup, preserving scope and usage. Restarting
+after clearing begins fresh planning from the current scope. Abandoned threads and
+worktrees are never reused. See [ticket cancellation](agents.md#ticket-cancellation).
 
 Tickets belong to the global board, independently of repositories. SQLite allocates
 immutable global increasing keys (`TASK-1`, ...) across restarts and concurrent
@@ -173,13 +198,14 @@ Browser contracts are exported from `@forge/contracts/tickets`:
 | `GET/POST /api/tickets`              | Ordered active tickets with attention flags and optional derived `agentStatus` / create scope and ordered repository references.      |
 | `GET/PATCH /api/tickets/:id`         | Read by ticket ID / edit scope and references in Backlog.                                                                             |
 | `POST /api/tickets/:id/archive`      | Archive an eligible ticket and return it with `archivedAt`. Safe to retry.                                                            |
-| `POST /api/tickets/:id/move`         | Reorder, move Backlog to Ready, or return unclaimed Ready tickets to Backlog with optional beforeId.                                  |
+| `POST /api/tickets/:id/move`         | Reorder, start Backlog, return Ready/In progress to Backlog, or abandon In progress to Ready, with optional beforeId.                 |
+| `POST /api/tickets/:id/clear-plan`   | Clear plan and approval on a settled Backlog ticket; returns workflow. Idempotent.                                                    |
 | `GET /api/tickets/:id/model-options` | Catalog for the current phase's pinned provider, or the global selection before an agent exists. Independent of repository readiness. |
 | `GET /api/tickets/:id/workflow`      | Current plan revision, phase, execution state and Forge conversation/workspace IDs.                                                   |
 | `POST /api/tickets/:id/approve`      | Approve the current idle plan with `{revision}`.                                                                                      |
 | `POST /api/tickets/:id/messages`     | Queue feedback, or steer implementation/rebase with `{text,expectedTurnId}`.                                                          |
 | `POST /api/tickets/:id/merge`        | Queue a legacy review candidate or retry a failed merge.                                                                              |
-| `POST /api/tickets/:id/reconcile`    | Reconcile uncertain execution or retry a failed setup.                                                                                |
+| `POST /api/tickets/:id/reconcile`    | Reconcile uncertain execution, retry failed setup, or retry pending abandonment cleanup.                                              |
 | `GET/PATCH /api/board/settings`      | Read settings or update `maxAgents` and ticket dispatch (`running` or `paused`).                                                      |
 | `POST /api/board/settings/stop`      | Stop ticket dispatch and return interruption request and failure counts.                                                              |
 

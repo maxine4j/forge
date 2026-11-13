@@ -28,7 +28,12 @@ import type { IWorkspaceStore } from "./workspace-store.ts";
 
 export interface IWorkspaceService {
 	/** Owner authorization is rechecked for every public operation. All API writes are serialized. */
-	create(actor: Actor, projectId: string, input: CreateWorkspace): Promise<Workspace>;
+	create(
+		actor: Actor,
+		projectId: string,
+		input: CreateWorkspace,
+		allocated?: (workspaceId: string) => Promise<void>,
+	): Promise<Workspace>;
 	list(actor: Actor, projectId: string): Promise<Workspace[]>;
 	get(actor: Actor, id: string): Promise<Workspace>;
 	rename(actor: Actor, id: string, input: CreateWorkspace): Promise<Workspace>;
@@ -51,7 +56,11 @@ export interface IMergedWorkspaceCleanup {
 	/** Removes a verified merged worktree and branch, retaining archived workspace metadata. Safe to retry. */
 	cleanupMerged(actor: Actor, id: string, candidate: string): Promise<void>;
 }
-export class WorkspaceService implements IWorkspaceService, IMergedWorkspaceCleanup {
+export interface IAbandonedWorkspaceCleanup {
+	/** Closes terminals and discards owned unmerged work, preserving archived metadata. */
+	cleanupAbandoned(actor: Actor, id: string): Promise<void>;
+}
+export class WorkspaceService implements IWorkspaceService, IMergedWorkspaceCleanup, IAbandonedWorkspaceCleanup {
 	private readonly log = createLogger(WorkspaceService.name);
 	private tail: Promise<unknown> = Promise.resolve();
 	constructor(
@@ -63,7 +72,12 @@ export class WorkspaceService implements IWorkspaceService, IMergedWorkspaceClea
 		private readonly now: () => Date,
 		private readonly differences: IWorkspaceDiffClient,
 	) {}
-	async create(actor: Actor, projectId: string, input: CreateWorkspace): Promise<Workspace> {
+	async create(
+		actor: Actor,
+		projectId: string,
+		input: CreateWorkspace,
+		allocated?: (workspaceId: string) => Promise<void>,
+	): Promise<Workspace> {
 		this.access.assertOwner(actor);
 		const data = createWorkspaceSchema.safeParse(input);
 		if (!data.success) throw new WorkspaceError("invalid-request");
@@ -79,6 +93,8 @@ export class WorkspaceService implements IWorkspaceService, IMergedWorkspaceClea
 				createdAt: this.now().toISOString(),
 				status: "creating",
 			};
+			// Persist the caller's ownership reference before metadata or filesystem allocation.
+			await allocated?.(id);
 			await this.store.insert(record);
 			return this.prepare(record);
 		});
@@ -117,6 +133,17 @@ export class WorkspaceService implements IWorkspaceService, IMergedWorkspaceClea
 		await this.serialize(async () => {
 			const record = await this.require(id);
 			await this.client.removeMerged(record, candidate);
+			if (record.status !== "archived") await this.store.update({ ...record, status: "archived" });
+		});
+	}
+	async cleanupAbandoned(actor: Actor, id: string): Promise<void> {
+		this.access.assertOwner(actor);
+		await this.serialize(async () => {
+			if (!workspaceIdSchema.safeParse(id).success) throw new WorkspaceError("invalid-request");
+			const record = await this.store.get(id);
+			// Allocation intent can precede workspace metadata and every filesystem side effect.
+			if (!record) return;
+			await this.client.removeAbandoned(record);
 			if (record.status !== "archived") await this.store.update({ ...record, status: "archived" });
 		});
 	}

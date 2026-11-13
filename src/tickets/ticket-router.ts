@@ -24,6 +24,10 @@ export class TicketRouter implements IHttpRouter {
 	) {}
 	create(): Router<{ actor: Actor }> {
 		const router = new Router<{ actor: Actor }>();
+		router.post("/api/tickets/:id/clear-plan", async (ctx) => {
+			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);
+			ctx.body = ticketWorkflowSchema.parse(await this.workflow.clearPlan(ctx.state.actor, ticket));
+		});
 		router.get("/api/tickets/:id/model-options", async (ctx) => {
 			await this.service.get(ctx.state.actor, ctx.params["id"]!);
 			ctx.body = agentOptionsSchema.parse(await this.workflow.options(ctx.state.actor, ctx.params["id"]!));
