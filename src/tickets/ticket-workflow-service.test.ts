@@ -4,6 +4,7 @@ import { expect, test, vi } from "vitest";
 
 import { AgentExecutionPool } from "../agents/agent-execution-pool.ts";
 import type { ITicketAgents } from "../agents/agent-service.ts";
+import { AgentError } from "../agents/errors.ts";
 import { AccessService } from "../auth/access-service.ts";
 import { TicketPrompts } from "./ticket-prompts.ts";
 import { TicketWorkflowService } from "./ticket-workflow-service.ts";
@@ -11,7 +12,7 @@ import type { TicketWorkflowRecord } from "./types.ts";
 
 const actor = { username: "owner" };
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
-const fixture = () => {
+const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => {
 	const jobs = new Map<string, TicketWorkflowRecord>();
 	const tickets = new Map<string, Ticket>();
 	const views = new Map<string, AgentView>();
@@ -80,7 +81,9 @@ const fixture = () => {
 		get: async (id: string) => structuredClone(tickets.get(id)),
 		list: vi.fn(),
 		insert: vi.fn(),
-		update: vi.fn(),
+		update: vi.fn(async (id: string, input) => {
+			Object.assign(tickets.get(id)!, input);
+		}),
 		archive: vi.fn(async (id: string, archivedAt: string) => {
 			tickets.get(id)!.archivedAt ??= archivedAt;
 		}),
@@ -104,6 +107,7 @@ const fixture = () => {
 		new TicketPrompts(),
 		new AccessService({ owner: "owner", origin: "https://forge.example" }),
 		wake,
+		dispatchMode,
 	);
 	const create = (id = "TASK-1") => {
 		const ticket: Ticket = {
@@ -141,6 +145,143 @@ test("Ready requires a first ready repository and dispatch revalidates it", asyn
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)?.state).toBe("setup-failed");
 	expect(f.agents.createTicketThread).not.toHaveBeenCalled();
+});
+
+test.each(["paused", "capacity"] as const)(
+	"unclaimed Ready returns during %s and revalidates edited scope",
+	async (mode) => {
+		let paused = mode === "paused";
+		const f = fixture(() => (paused ? "paused" : "running"));
+		if (mode === "capacity") {
+			f.pool.setLimit(1);
+			f.pool.claim("other");
+		}
+		const ticket = f.create();
+		ticket.epicId = "EPIC-1";
+		ticket.executionSettings = { permissions: "full-access" };
+		await f.service.move(actor, ticket, { status: "todo" });
+		await f.service.tick(actor);
+		expect(f.agents.createTicketThread).not.toHaveBeenCalled();
+		expect(await f.service.capabilities(actor, ticket)).toEqual({ canReturnToBacklog: true });
+		await f.service.move(actor, ticket, { status: "backlog" });
+		expect(f.jobs.get(ticket.id)).toMatchObject({ phase: "planning", state: "idle" });
+		expect(ticket).toMatchObject({ epicId: "EPIC-1", executionSettings: { permissions: "full-access" } });
+		const repositoryIds = ["123e4567-e89b-42d3-a456-426614174099", projectId];
+		await f.service.update(actor, ticket.id, {
+			title: "Updated scope",
+			description: "New description",
+			repositoryIds,
+			epicId: null,
+		});
+		f.agents.assertRepositoryReady.mockRejectedValueOnce(new Error("Unavailable"));
+		await expect(f.service.move(actor, ticket, { status: "todo" })).rejects.toThrow("ticket-conflict");
+		await f.service.move(actor, ticket, { status: "todo" });
+		paused = false;
+		f.pool.observe("other", "idle");
+		await f.service.tick(actor);
+		expect(f.jobs.get(ticket.id)?.executionRepositoryId).toBe(repositoryIds[0]);
+		expect(f.agents.createTicketThread).toHaveBeenCalledWith(
+			actor,
+			repositoryIds[0],
+			`${ticket.id} planning`,
+			undefined,
+			true,
+		);
+		expect(f.agents.dispatch.mock.calls[0]?.[2]).toContain("Updated scope");
+	},
+);
+
+test("return winning serialization prevents a concurrent scheduler dispatch", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.move(actor, ticket, { status: "todo" });
+	let release!: () => void;
+	let entered!: () => void;
+	const started = new Promise<void>((resolve) => {
+		entered = resolve;
+	});
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	f.agents.catalogOptions.mockImplementationOnce(async () => {
+		entered();
+		await held;
+		return { models: [], skills: [] };
+	});
+	const blocker = f.service.settings(actor, ticket, {});
+	await started;
+	const returning = f.service.move(actor, { ...ticket }, { status: "backlog" });
+	const ticking = f.service.tick(actor);
+	release();
+	await Promise.all([blocker, returning, ticking]);
+	expect(ticket.status).toBe("backlog");
+	expect(f.agents.createTicketThread).not.toHaveBeenCalled();
+});
+
+test.each(["success", "setup-failure", "capacity"] as const)(
+	"pickup winning serialization prevents return after %s",
+	async (outcome) => {
+		const f = fixture();
+		const ticket = f.create();
+		await f.service.move(actor, ticket, { status: "todo" });
+		const stale = { ...ticket };
+		let release!: () => void;
+		let entered!: () => void;
+		const started = new Promise<void>((resolve) => {
+			entered = resolve;
+		});
+		const held = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		const original = f.agents.createTicketThread.getMockImplementation()!;
+		f.agents.createTicketThread.mockImplementationOnce(async (...args) => {
+			entered();
+			await held;
+			if (outcome === "setup-failure") throw new Error("Setup failed");
+			if (outcome === "capacity") throw new AgentError("agent-capacity");
+			return original(...args);
+		});
+		const ticking = f.service.tick(actor);
+		await started;
+		expect(await f.service.capabilities(actor, stale)).toEqual({});
+		const returning = f.service.move(actor, stale, { status: "backlog" });
+		const rejected = expect(returning).rejects.toThrow("ticket-conflict");
+		release();
+		await ticking;
+		await rejected;
+		expect(ticket.status).toBe(outcome === "capacity" ? "todo" : "in-progress");
+		expect(await f.service.capabilities(actor, ticket)).toEqual({});
+		if (outcome === "setup-failure") {
+			await f.service.recover(actor, ticket.id);
+			await expect(f.service.move(actor, ticket, { status: "backlog" })).rejects.toThrow("ticket-conflict");
+		}
+	},
+);
+
+test("return eligibility rejects any recorded execution context or later workflow state", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	ticket.status = "todo";
+	const base: TicketWorkflowRecord = { ticketId: ticket.id, phase: "planning", state: "queued", mergeAttempts: 0 };
+	for (const context of [
+		{ executionRepositoryId: projectId },
+		{ workspaceId: projectId },
+		{ plannerId: projectId },
+		{ implementerId: projectId },
+		{ turnId: "turn" },
+		{ previousTurnId: "turn" },
+		{ state: "setup-failed" },
+		{ state: "failed" },
+		{ state: "running" },
+		{ state: "dispatching" },
+		{ state: "uncertain" },
+		{ state: "merge-queued" },
+		{ phase: "implementation" },
+	] as Partial<TicketWorkflowRecord>[]) {
+		f.jobs.set(ticket.id, { ...base, ...context });
+		expect(await f.service.capabilities(actor, ticket)).toEqual({});
+		await expect(f.service.move(actor, ticket, { status: "backlog" })).rejects.toThrow("ticket-conflict");
+	}
 });
 
 test("execution records the first reference and reuses it and its workspace for implementation", async () => {

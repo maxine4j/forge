@@ -55,6 +55,7 @@ const fixture = () => {
 		() => now,
 		{
 			options: vi.fn(),
+			capabilities: vi.fn(async () => ({})),
 			update: async (_actor, id, input) => store.update(id, input),
 			settings: vi.fn(),
 			validateSettings: vi.fn(),

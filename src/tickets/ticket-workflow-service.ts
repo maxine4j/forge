@@ -28,6 +28,7 @@ export interface ITicketWorkflowService {
 	/** Archives between scheduler operations. Active or unresolved execution and pending merges conflict. */
 	archive(actor: Actor, ticket: Ticket, archivedAt: string): Promise<void>;
 	move(actor: Actor, ticket: Ticket, input: MoveTicket): Promise<void>;
+	capabilities(actor: Actor, ticket: Ticket): Promise<Pick<Ticket, "canReturnToBacklog">>;
 	get(actor: Actor, id: string): Promise<TicketWorkflow>;
 	boardSummary(actor: Actor): Promise<Map<string, Pick<Ticket, "agentStatus" | "needsAttention">>>;
 	approve(actor: Actor, ticket: Ticket, revision: number): Promise<TicketWorkflow>;
@@ -114,11 +115,39 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				if (!repositoryId) throw new TicketError("ticket-conflict");
 				await this.requireExecutionRepository(actor, repositoryId);
 				await this.store.save({ ...job, phase: "planning", state: "queued" }, input);
+			} else if (input.status === "backlog" && this.canReturnToBacklog(current, job)) {
+				await this.store.save({ ...job, phase: "planning", state: "idle" }, input);
 			} else {
 				throw new TicketError("ticket-conflict");
 			}
 		});
 		if (input.status === "todo") this.wake();
+	}
+	async capabilities(actor: Actor, ticket: Ticket): Promise<Pick<Ticket, "canReturnToBacklog">> {
+		this.access.assertOwner(actor);
+		if (ticket.status !== "todo" || ticket.archivedAt) return {};
+		return this.canReturnToBacklog(ticket, await this.record(ticket.id)) ? { canReturnToBacklog: true } : {};
+	}
+	private canReturnToBacklog(ticket: Ticket, job: TicketWorkflowRecord): boolean {
+		return (
+			ticket.status === "todo"
+			&& !ticket.archivedAt
+			&& job.phase === "planning"
+			&& ["idle", "queued"].includes(job.state)
+			&& !job.executionRepositoryId
+			&& !job.workspaceId
+			&& !job.plannerId
+			&& !job.implementerId
+			&& !job.turnId
+			&& !job.previousTurnId
+			&& !job.plan
+			&& !job.approvedRevision
+			&& !job.baseSha
+			&& !job.resultSha
+			&& !job.message
+			&& job.mergeAttempts === 0
+			&& !this.settingUp.has(ticket.id)
+		);
 	}
 	async get(actor: Actor, id: string): Promise<TicketWorkflow> {
 		this.access.assertOwner(actor);

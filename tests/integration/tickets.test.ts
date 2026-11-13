@@ -159,8 +159,44 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		phase: "planning",
 	});
 	expect(await (await request(listPath)).json()).toEqual([
-		{ ...(await store.get(ticket.id)), agentStatus: "queued" },
+		{ ...(await store.get(ticket.id)), agentStatus: "queued", canReturnToBacklog: true },
 	]);
+	expect((await (await request(`tickets/${ticket.id}`)).json()).canReturnToBacklog).toBe(true);
+	const destination = await store.insert({ title: "Backlog target", description: "" }, "2026-11-03T00:00:00.000Z");
+	for (const beforeId of [ticket.id, "TASK-999", unassigned.id]) {
+		expect((await request(`tickets/${ticket.id}/move`, "POST", { status: "backlog", beforeId })).status).toBe(409);
+	}
+	await db.run(
+		"CREATE TRIGGER reject_return BEFORE UPDATE OF status ON tickets WHEN NEW.status='backlog' BEGIN SELECT RAISE(ABORT,'blocked'); END",
+	);
+	expect((await request(`tickets/${ticket.id}/move`, "POST", { status: "backlog" })).status).toBe(503);
+	expect((await workflowStore.get(ticket.id))?.state).toBe("queued");
+	expect((await store.get(ticket.id))?.status).toBe("todo");
+	await db.run("DROP TRIGGER reject_return");
+	expect(
+		(await request(`tickets/${ticket.id}/move`, "POST", { status: "backlog", beforeId: destination.id })).status,
+	).toBe(200);
+	expect((await store.list()).map((value) => value.id)).toEqual([ticket.id, destination.id]);
+	expect((await workflowStore.get(ticket.id))?.state).toBe("idle");
+	await request(`tickets/${ticket.id}/move`, "POST", { status: "todo" });
+	await request(`tickets/${ticket.id}/move`, "POST", { status: "backlog" });
+	expect((await store.list()).map((value) => value.id)).toEqual([destination.id, ticket.id]);
+	expect(await (await request(`tickets/${ticket.id}`)).json()).toMatchObject({
+		title: "Edited",
+		description: "New scope",
+		repositoryIds: [projectId],
+		executionSettings: { permissions: "full-access" },
+	});
+	await request(`tickets/${ticket.id}/move`, "POST", { status: "todo" });
+	await store.archive(destination.id, "2026-11-03T00:00:00.000Z");
+	const queued = (await workflowStore.get(ticket.id))!;
+	for (const state of ["queued", "setup-failed"] as const) {
+		await workflowStore.save({ ...queued, state, executionRepositoryId: projectId });
+		expect((await (await request(`tickets/${ticket.id}`)).json()).canReturnToBacklog).toBeUndefined();
+		expect((await request(`tickets/${ticket.id}/move`, "POST", { status: "backlog" })).status).toBe(409);
+		expect(await workflowStore.get(ticket.id)).toMatchObject({ state, executionRepositoryId: projectId });
+	}
+	await workflowStore.save(queued);
 	for (const [path, method, body, status] of [
 		[listPath, "POST", { title: " " }, 400],
 		[`tickets/${ticket.id}`, "PATCH", { title: "Task", id: "TASK-99" }, 400],
@@ -190,11 +226,11 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	expect(await workflowStore.list()).toEqual([]);
 	expect(await (await request(`tickets/${ticket.id}/workflow`)).json()).toMatchObject({ state: "queued" });
 	const next = await request(listPath, "POST", { title: "Next ticket" });
-	expect(await next.json()).toMatchObject({ id: "TASK-3" });
+	expect(await next.json()).toMatchObject({ id: "TASK-4" });
 	const implementerId = "123e4567-e89b-42d3-a456-426614174010";
 	await workflowStore.save(
 		{
-			ticketId: "TASK-3",
+			ticketId: "TASK-4",
 			phase: "implementation",
 			state: "running",
 			mergeAttempts: 0,
@@ -203,7 +239,7 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		},
 		{ status: "in-progress" },
 	);
-	const messagePath = "tickets/TASK-3/messages";
+	const messagePath = "tickets/TASK-4/messages";
 	expect((await request(messagePath, "POST", { text: "Focus on tests", expectedTurnId: "active-turn" })).status).toBe(
 		200,
 	);

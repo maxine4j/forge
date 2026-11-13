@@ -2,6 +2,20 @@ import { expect, test } from "vitest";
 
 import { createTicketSchema, updateTicketSchema, moveTicketSchema, ticketSchema, ticketStatuses } from "./index.ts";
 
+test("return capability is optional and only true when supplied", () => {
+	const ticket = {
+		id: "TASK-1",
+		title: "Task",
+		description: "",
+		repositoryIds: [],
+		status: "todo",
+		createdAt: "2026-11-03T00:00:00.000Z",
+	};
+	expect(ticketSchema.safeParse(ticket).success).toBe(true);
+	expect(ticketSchema.parse({ ...ticket, canReturnToBacklog: true }).canReturnToBacklog).toBe(true);
+	expect(ticketSchema.safeParse({ ...ticket, canReturnToBacklog: false }).success).toBe(false);
+});
+
 test("board exposes exactly four workflow stages", () => {
 	expect(ticketStatuses).toEqual(["backlog", "todo", "in-progress", "done"]);
 	expect(moveTicketSchema.safeParse({ status: "planning" }).success).toBe(false);

@@ -39,13 +39,16 @@ export class TicketService implements ITicketService {
 	async list(actor: Actor): Promise<Ticket[]> {
 		this.access.assertOwner(actor);
 		const [tickets, summary] = await Promise.all([this.store.list(), this.workflow.boardSummary(actor)]);
-		return tickets.map((ticket) => {
-			if (ticket.status === "backlog" || ticket.status === "done") return ticket;
-			return {
-				...ticket,
-				...(summary.get(ticket.id) ?? (ticket.status === "todo" ? { agentStatus: "queued" as const } : {})),
-			};
-		});
+		return Promise.all(
+			tickets.map(async (ticket) => {
+				if (ticket.status === "backlog" || ticket.status === "done") return ticket;
+				return {
+					...ticket,
+					...(await this.workflow.capabilities(actor, ticket)),
+					...(summary.get(ticket.id) ?? (ticket.status === "todo" ? { agentStatus: "queued" as const } : {})),
+				};
+			}),
+		);
 	}
 	async create(actor: Actor, input: CreateTicket): Promise<Ticket> {
 		this.access.assertOwner(actor);
@@ -64,7 +67,7 @@ export class TicketService implements ITicketService {
 		if (!ticketIdSchema.safeParse(id).success) throw new TicketError("invalid-request");
 		const ticket = await this.store.get(id);
 		if (!ticket) throw new TicketError("ticket-not-found");
-		return ticket;
+		return { ...ticket, ...(await this.workflow.capabilities(actor, ticket)) };
 	}
 	async update(actor: Actor, id: string, input: CreateTicket): Promise<Ticket> {
 		this.access.assertOwner(actor);

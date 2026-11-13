@@ -270,7 +270,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 					return await readCollection();
 				} catch (error) {
 					failure = error;
-					throw error;
+					return await readCollection();
 				}
 			});
 			if (failure) throw failure;

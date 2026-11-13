@@ -97,6 +97,7 @@ export const TicketDetails = ({
 	}
 	const settings = savedSettings ?? ticket.executionSettings ?? {};
 	const [error, setError] = useState("");
+	const [moveError, setMoveError] = useState("");
 	const [scopeError, setScopeError] = useState("");
 	const [options, setOptions] = useState<AgentOptions>();
 	const optionsRevision = useContext(AgentOptionsRevision);
@@ -133,6 +134,7 @@ export const TicketDetails = ({
 	};
 	const [archiveError, setArchiveError] = useState("");
 	const [refresh] = useState(() => () => poller.current?.refresh());
+	useEffect(refresh, [refresh, ticket.status, ticket.canReturnToBacklog]);
 	useEffect(() => {
 		dialog.current?.showModal();
 	}, []);
@@ -180,7 +182,7 @@ export const TicketDetails = ({
 			)}
 		</div>
 	) : undefined;
-	const target = ticket.status === "backlog" ? "todo" : undefined;
+	const target = ticket.status === "backlog" ? "todo" : ticket.canReturnToBacklog ? "backlog" : undefined;
 	const canQueueMerge =
 		ticket.status === "in-progress"
 		&& job?.resultSha
@@ -294,10 +296,12 @@ export const TicketDetails = ({
 						value={ticket.status}
 						disabled={archived || busy || !target || unsavedRepositories}
 						onChange={(event) => {
-							setError("");
-							void move(ticket.id, { status: event.target.value as TicketStatus }).catch((err: unknown) =>
-								setError(err instanceof Error ? err.message : "Cannot move ticket."),
-							);
+							setMoveError("");
+							void move(ticket.id, { status: event.target.value as TicketStatus })
+								.catch((err: unknown) =>
+									setMoveError(err instanceof Error ? err.message : "Cannot move ticket."),
+								)
+								.finally(refresh);
 						}}
 					>
 						<option value={ticket.status}>{ticketLabels[ticket.status]}</option>
@@ -341,9 +345,9 @@ export const TicketDetails = ({
 					</button>
 				))}
 			</div>
-			{(scopeError || error || settingsError) && (
+			{(scopeError || error || settingsError || moveError) && (
 				<p role='alert' className='error'>
-					{scopeError || settingsError || error}
+					{scopeError || settingsError || moveError || error}
 				</p>
 			)}
 			{job?.state === "uncertain" && (

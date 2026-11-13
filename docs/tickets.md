@@ -26,6 +26,21 @@ Done. The corresponding API statuses are `backlog`, `todo`, `in-progress` and
 `done`. Cards support pointer and touch reordering, edge scrolling and
 cancellation. Moving from Backlog to Ready for development is available by
 dragging or through the ticket's status menu.
+An unclaimed Ready ticket can return to Backlog through the same status menu or
+by dragging its card into Backlog. This restores scope, ordered repository and
+epic editing while preserving identity, membership and execution settings.
+Without `beforeId`, the returned ticket is appended to Backlog; the usual
+destination ordering rules apply. Moving it to Ready again validates its current
+first repository.
+
+Return is available while dispatch is paused or agent capacity is exhausted,
+only until agent pickup starts. Beginning setup locks the ticket even if setup
+later fails or capacity causes it to be queued again. Recorded execution repository,
+workspace, thread or turn context also prevents return. The optional derived
+`canReturnToBacklog: true` capability on list and individual ticket responses
+drives browser controls; a pickup racing a move can still produce a 409. The
+workflow guard and scheduler share a serialization boundary, and a successful
+return atomically resets the untouched workflow to planning/idle with the move.
 
 Tickets belong to the global board, independently of repositories. SQLite allocates
 immutable global increasing keys (`TASK-1`, ...) across restarts and concurrent
@@ -153,7 +168,7 @@ Browser contracts are exported from `@forge/contracts/tickets`:
 | `GET/POST /api/tickets`              | Ordered active tickets with attention flags and optional derived `agentStatus` / create scope and ordered repository references. |
 | `GET/PATCH /api/tickets/:id`         | Read by ticket ID / edit scope and references in Backlog.                                                                        |
 | `POST /api/tickets/:id/archive`      | Archive an eligible ticket and return it with `archivedAt`. Safe to retry.                                                       |
-| `POST /api/tickets/:id/move`         | Reorder or move Backlog to Ready with optional beforeId.                                                                         |
+| `POST /api/tickets/:id/move`         | Reorder, move Backlog to Ready, or return unclaimed Ready tickets to Backlog with optional beforeId.                             |
 | `GET /api/tickets/:id/model-options` | Shared model catalog, independent of repository readiness and references.                                                        |
 | `GET /api/tickets/:id/workflow`      | Current plan revision, phase, execution state and Forge conversation/workspace IDs.                                              |
 | `POST /api/tickets/:id/approve`      | Approve the current idle plan with `{revision}`.                                                                                 |

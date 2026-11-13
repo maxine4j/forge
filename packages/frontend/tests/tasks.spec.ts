@@ -48,6 +48,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		executionSettings?: import("@forge/contracts/agents").AgentSettings;
 		needsAttention?: true;
 		agentStatus?: "queued" | "working";
+		canReturnToBacklog?: true;
 	}[] = [
 		{
 			id: "TASK-1",
@@ -60,6 +61,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		{ id: "TASK-2", repositoryIds: [], title: "Second task", description: "", status: "backlog", createdAt },
 	];
 	let failMove = false;
+	let pickupOnReturn = false;
 	const epics: Epic[] = [];
 	let failArchive = false;
 	let failSave = false;
@@ -275,7 +277,14 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 					operations.push("move");
 					if (failMove) return route.fulfill({ status: 503, json: { error: "ticket-unavailable" } });
 					const { status, beforeId } = route.request().postDataJSON();
+					if (pickupOnReturn && ticket.status === "todo" && status === "backlog") {
+						ticket.status = "in-progress";
+						delete ticket.canReturnToBacklog;
+						return route.fulfill({ status: 409, json: { error: "ticket-conflict" } });
+					}
 					ticket.status = status;
+					if (status === "todo") ticket.canReturnToBacklog = true;
+					else delete ticket.canReturnToBacklog;
 					tickets = tickets.filter((value) => value.id !== ticket.id);
 					const index = tickets.findIndex((value) => value.id === beforeId);
 					tickets.splice(index < 0 ? tickets.length : index, 0, ticket);
@@ -294,6 +303,9 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	await page.goto("/");
 	await expect(page).toHaveURL("/tasks");
 	return {
+		pickupOnReturn: () => {
+			pickupOnReturn = true;
+		},
 		epics,
 		tickets: () => tickets,
 		failSaves: (value: boolean) => {
@@ -337,6 +349,58 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		},
 	};
 };
+
+for (const view of ["board", "backlog"]) {
+	test(`unclaimed Ready returns from the status menu in ${view} and restores editing`, async ({ page }) => {
+		const f = await setup(page);
+		if (view === "backlog") await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+		await dialog.getByLabel("Status", { exact: true }).selectOption("todo");
+		await dialog.getByRole("tab", { name: "Details", exact: true }).click();
+		await expect(dialog.getByLabel("Title", { exact: true })).toBeDisabled();
+		await dialog.getByLabel("Status", { exact: true }).selectOption("backlog");
+		await expect(dialog.getByLabel("Title", { exact: true })).toBeEnabled();
+		await expect(dialog.getByLabel("Epic", { exact: true })).toBeEnabled();
+		await dialog.getByLabel("Title", { exact: true }).fill("Returned scope");
+		const reference = "123e4567-e89b-42d3-a456-426614174001";
+		await dialog.getByLabel("Add repository").selectOption(reference);
+		await dialog.getByRole("button", { name: "Move repository 2 up", exact: true }).click();
+		await dialog.getByRole("button", { name: "Save", exact: true }).click();
+		await page.getByRole("button", { name: "TASK-1 Returned scope", exact: true }).click();
+		await dialog.getByLabel("Status", { exact: true }).selectOption("todo");
+		await expect(dialog.getByLabel("Status", { exact: true })).toHaveValue("todo");
+		expect(f.tickets().find((ticket) => ticket.id === "TASK-1")).toMatchObject({
+			title: "Returned scope",
+			repositoryIds: [reference, projectId],
+			status: "todo",
+		});
+	});
+}
+
+test("Ready drag returns to Backlog and stale return refreshes pickup eligibility", async ({ page }) => {
+	const f = await setup(page);
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	await page.getByLabel("Status", { exact: true }).selectOption("todo");
+	await page.getByRole("button", { name: "Close ticket", exact: true }).click();
+	const handle = page.getByRole("button", { name: "Drag TASK-1", exact: true });
+	await handle.hover();
+	await page.mouse.down();
+	const target = (await page.getByRole("region", { name: "Backlog", exact: true }).boundingBox())!;
+	await page.mouse.move(target.x + 100, target.y + 100, { steps: 8 });
+	await expect(page.locator(".ticket-drop-placeholder")).toBeVisible();
+	await page.mouse.up();
+	await expect(page.getByRole("region", { name: "Backlog", exact: true }).getByText("First task")).toBeVisible();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	await page.getByLabel("Status", { exact: true }).selectOption("todo");
+	f.pickupOnReturn();
+	await page.getByLabel("Status", { exact: true }).selectOption("backlog");
+	await expect(page.getByLabel("Status", { exact: true })).toHaveValue("in-progress");
+	await expect(page.getByLabel("Status", { exact: true })).toBeDisabled();
+	await expect(page.getByRole("dialog").getByRole("alert")).toContainText("This transition is not available");
+	await page.getByRole("tab", { name: "Details", exact: true }).click();
+	await expect(page.getByLabel("Title", { exact: true })).toBeDisabled();
+});
 
 test("task views persist URL selection, history and ticket deep links with keyboard tabs", async ({ page }) => {
 	await setup(page);

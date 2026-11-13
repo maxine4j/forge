@@ -41,7 +41,12 @@ export const TaskBoard = ({
 		if (!column || !board.current?.contains(column)) return;
 		const status = column.dataset["dropStatus"] as TicketStatus;
 		const source = dragging.current?.ticket.status;
-		if (source !== status && !(source === "backlog" && status === "todo")) return;
+		if (
+			source !== status
+			&& !(source === "backlog" && status === "todo")
+			&& !(dragging.current?.ticket.canReturnToBacklog && source === "todo" && status === "backlog")
+		)
+			return;
 		const cards = [...column.querySelectorAll<HTMLElement>("[data-ticket-id]")].filter(
 			(card) => card.dataset["ticketId"] !== id,
 		);
