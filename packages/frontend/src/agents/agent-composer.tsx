@@ -12,6 +12,12 @@ import { AgentOptionsRevision, ExecutionSettings } from "./execution-settings.ts
 
 const number = new Intl.NumberFormat("en-AU");
 
+const composerSettings = ({ model, reasoningEffort, permissions }: AgentSettings): AgentSettings => ({
+	model,
+	reasoningEffort,
+	permissions: permissions ?? "ask",
+});
+
 const ContextWindow = ({ used, max }: AgentContextWindow) => {
 	const tooltipId = useId();
 	const percent = 100 * (used / max);
@@ -93,10 +99,12 @@ export const AgentComposer = ({
 	const settingsKey = JSON.stringify([settings.model, settings.reasoningEffort, settings.permissions]);
 	const [localSelection, setSelection] = useState<{ source: string; value: AgentSettings }>({
 		source: settingsKey,
-		value: settings,
+		value: composerSettings(settings),
 	});
-	const selection = settingsChanged || localSelection.source !== settingsKey ? settings : localSelection.value;
-	const selectSettings = (value: AgentSettings) => {
+	const selection =
+		settingsChanged || localSelection.source !== settingsKey ? composerSettings(settings) : localSelection.value;
+	const selectSettings = (updated: AgentSettings) => {
+		const value = composerSettings(updated);
 		setSelection({ source: settingsKey, value });
 		settingsChanged?.(value);
 	};
@@ -197,7 +205,7 @@ export const AgentComposer = ({
 	const stop = hasMessage ? undefined : interrupt;
 	const actionLabel = stop ? "Interrupt" : "Send message";
 	const submit = () => {
-		if (sendable && !disabled && hasMessage) send({ permissions: "ask", ...selection });
+		if (sendable && !disabled && hasMessage) send(composerSettings(selection));
 	};
 	return (
 		<form

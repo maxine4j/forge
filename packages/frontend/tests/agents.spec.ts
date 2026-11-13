@@ -1,4 +1,4 @@
-import type { AgentView } from "@forge/contracts/agents";
+import { agentMessageSchema, type AgentView } from "@forge/contracts/agents";
 import { defaultForgeSettings, type ForgeSettings } from "@forge/contracts/settings";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
@@ -95,12 +95,16 @@ const setup = async (page: Page, initialItems: AgentView["items"] = []) => {
 					reads++;
 					return route.fulfill({ json: view });
 				}
+				if (path.endsWith("/messages") && !agentMessageSchema.safeParse(route.request().postDataJSON()).success)
+					return route.fulfill({ status: 400, json: { error: "invalid-request" } });
 				if (fail) return route.fulfill({ status: 503, json: { error: "agent-unavailable" } });
 				if (path.endsWith("/messages")) {
+					const { text, ...settings } = agentMessageSchema.parse(route.request().postDataJSON());
+					Object.assign(view.thread, settings);
 					view.items.push({
 						id: `user-${writes.length}`,
 						role: "user",
-						text: route.request().postDataJSON().text,
+						text,
 					});
 					view.thread.status = "running";
 					view.thread.turnId = "turn-1";
@@ -152,6 +156,75 @@ const setup = async (page: Page, initialItems: AgentView["items"] = []) => {
 	};
 };
 
+test("untouched defaults send the first message and a follow-up after completion", async ({ page }) => {
+	const fixture = await setup(page);
+	await fixture.create();
+	const message = page.getByRole("textbox", { name: "Message", exact: true });
+	for (const text of ["First message", "Follow-up"]) {
+		await message.fill(text);
+		const response = page.waitForResponse((response) => response.url().endsWith("/messages"));
+		await page.getByRole("button", { name: "Send message", exact: true }).click();
+		const sent = await response;
+		expect(sent.status()).toBe(200);
+		expect(sent.request().postDataJSON()).toEqual({ text, permissions: "ask" });
+		await expect(message).toHaveValue("");
+		fixture.views[0]!.thread.status = "completed";
+		await fixture.event();
+		await expect(page.locator(".agent-chat-heading")).toContainText("completed");
+	}
+	const settings = { model: "test-model", reasoningEffort: "high", permissions: "full-access" as const };
+	Object.assign(fixture.views[0]!.thread, settings);
+	await fixture.event();
+	await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("test-model");
+	await message.fill("After settings refresh");
+	const response = page.waitForResponse((response) => response.url().endsWith("/messages"));
+	await message.press("Enter");
+	const sent = await response;
+	expect(sent.status()).toBe(200);
+	expect(sent.request().postDataJSON()).toEqual({ text: "After settings refresh", ...settings });
+	await expect(message).toHaveValue("");
+});
+
+test("saved settings survive reopening and a failed send preserves selections and draft for retry", async ({
+	page,
+}) => {
+	const fixture = await setup(page);
+	await fixture.create();
+	const message = page.getByRole("textbox", { name: "Message", exact: true });
+	const model = page.getByRole("combobox", { name: "Model", exact: true });
+	const thinking = page.getByRole("combobox", { name: "Thinking level", exact: true });
+	const permissions = page.getByRole("combobox", { name: "Permissions", exact: true });
+	await model.selectOption("test-model");
+	await thinking.selectOption("high");
+	await permissions.selectOption("full-access");
+	const settings = { model: "test-model", reasoningEffort: "high", permissions: "full-access" };
+	const send = async (text: string, status: number) => {
+		await message.fill(text);
+		const response = page.waitForResponse((response) => response.url().endsWith("/messages"));
+		await message.press("Enter");
+		const sent = await response;
+		expect(sent.status()).toBe(status);
+		expect(sent.request().postDataJSON()).toEqual({ text, ...settings });
+	};
+	fixture.fail(true);
+	await send("Retry this", 503);
+	await expect(page.getByRole("alert")).toBeVisible();
+	await expect(message).toHaveValue("Retry this");
+	await expect(model).toHaveValue("test-model");
+	await expect(thinking).toHaveValue("high");
+	await expect(permissions).toHaveValue("full-access");
+	fixture.fail(false);
+	await send("Retry this", 200);
+	await expect(message).toHaveValue("");
+	fixture.views[0]!.thread.status = "completed";
+	await page.reload();
+	await expect(model).toHaveValue("test-model");
+	await expect(thinking).toHaveValue("high");
+	await expect(permissions).toHaveValue("full-access");
+	await send("After reopening", 200);
+	await expect(message).toHaveValue("");
+});
+
 test("composer selects model and permissions, completes skills/files, and sends with Enter", async ({ page }) => {
 	const fixture = await setup(page);
 	await fixture.create();
@@ -174,7 +247,7 @@ test("composer selects model and permissions, completes skills/files, and sends 
 	await expect(message).toHaveValue("Use $review \n\n@src/app.tsx ");
 	const request = page.waitForRequest((request) => request.url().endsWith("/messages"));
 	await message.press("Enter");
-	expect((await request).postDataJSON()).toMatchObject({
+	expect((await request).postDataJSON()).toEqual({
 		model: "other-model",
 		permissions: "approve-for-me",
 		text: "Use $review \n\n@src/app.tsx ",
@@ -194,7 +267,7 @@ test("default model can replace an explicit model and completion dismisses witho
 	await expect(page.getByRole("listbox", { name: "Skills" })).toHaveCount(0);
 	const request = page.waitForRequest((request) => request.url().endsWith("/messages"));
 	await message.press("Enter");
-	expect((await request).postDataJSON()).toMatchObject({ model: "test-model", permissions: "ask" });
+	expect((await request).postDataJSON()).toEqual({ text: "$rev", model: "test-model", permissions: "ask" });
 });
 
 test("standalone thinking uses catalog levels and resets on incompatible model changes", async ({ page }) => {
@@ -209,8 +282,11 @@ test("standalone thinking uses catalog levels and resets on incompatible model c
 	await page.getByRole("textbox", { name: "Message", exact: true }).fill("Think carefully");
 	const request = page.waitForRequest((request) => request.url().endsWith("/messages"));
 	await page.getByRole("button", { name: "Send message", exact: true }).click();
-	expect((await request).postDataJSON()).toMatchObject({ reasoningEffort: "high" });
-	expect((await request).postDataJSON()).not.toHaveProperty("model");
+	expect((await request).postDataJSON()).toEqual({
+		text: "Think carefully",
+		reasoningEffort: "high",
+		permissions: "ask",
+	});
 });
 
 test("Config changes refresh the default labels in an open chat and preserve its draft", async ({ page }) => {

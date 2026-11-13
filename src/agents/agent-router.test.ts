@@ -74,12 +74,23 @@ test("owner/origin validation, bounded inputs, safe failures and reconnectable S
 		expect(await (await request(`projects/${id}/agents`)).json()).toEqual([view.thread]);
 		expect((await request(`agents/${id}/messages`, "POST", { text: "Hello" })).status).toBe(200);
 		expect(vi.mocked(service.send).mock.calls[0]?.[3]).toStrictEqual({});
+		const settings = { model: "test-model", reasoningEffort: "high", permissions: "full-access" };
+		expect((await request(`agents/${id}/messages`, "POST", { text: "Think carefully", ...settings })).status).toBe(
+			200,
+		);
+		expect(service.send).toHaveBeenLastCalledWith({ username: "owner" }, id, "Think carefully", settings);
+		for (const metadata of [{ id }, { title: "Chat" }, { status: "completed" }, view.thread]) {
+			const invalid = await request(`agents/${id}/messages`, "POST", { text: "Hello", ...settings, ...metadata });
+			expect(invalid.status).toBe(400);
+			expect(await invalid.json()).toEqual({ error: "invalid-request" });
+			expect(service.send).toHaveBeenCalledTimes(2);
+		}
 		expect((await request(`agents/${id}/messages`, "POST", { text: "" })).status).toBe(400);
 		expect((await request(`agents/${id}/messages`, "POST", { text: "Hello" }, "outsider")).status).toBe(403);
 		expect(
 			(await request(`agents/${id}/messages`, "POST", { text: "Hello" }, "owner", "https://evil.example")).status,
 		).toBe(403);
-		expect(service.send).toHaveBeenCalledTimes(1);
+		expect(service.send).toHaveBeenCalledTimes(2);
 		const conflict = await request(`agents/${id}/interrupt`, "POST", {});
 		expect(conflict.status).toBe(409);
 		expect(await conflict.json()).toEqual({ error: "agent-conflict" });
