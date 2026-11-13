@@ -17,7 +17,8 @@ archived rows without closing an open ticket. Sections scroll with sticky
 section headings. Ticket titles and fixed 80px status pills stay on one line
 with ellipsis truncation at every width; ticket buttons retain full accessible
 titles and hover text, and status hover text exposes the full label. Indicators
-remain centered beside titles without shrinking. Arrow keys, Home and End
+align to the right edge of the title column before the status pill, stay vertically
+centered and do not shrink. Arrow keys, Home and End
 select views; ticket-open buttons and dialog tabs support keyboard navigation.
 Creation starts in Backlog. Scope and repository selection remain editable only
 in Backlog status, regardless of selected view; Ready and In progress retain

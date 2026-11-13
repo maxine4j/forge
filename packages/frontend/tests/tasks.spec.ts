@@ -1267,12 +1267,13 @@ for (const width of [320, 390, 600, 601, 1280]) {
 				agentStatus: "working",
 				status: "in-progress",
 			},
-			{ ...base, id: "TASK-3", title: longTitle, epicId: "EPIC-2", resetting: true },
-			{ ...base, id: "TASK-4", title: longTitle, epicId: "EPIC-2", needsAttention: true },
+			{ ...base, id: "TASK-3", title: "Cleanup", epicId: "EPIC-2", resetting: true },
+			{ ...base, id: "TASK-4", title: "Action", epicId: "EPIC-2", needsAttention: true },
 			{ ...base, id: "TASK-5", epicId: "EPIC-2", status: "done" },
 			{ ...base, id: "TASK-6", epicId: "EPIC-3", status: "done" },
 		);
 		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+		await page.emulateMedia({ reducedMotion: "reduce" });
 		const assertRows = async (table: Locator) => {
 			await expect(table.locator(".backlog-title-text")).toHaveCount(4);
 			for (const text of await table.locator(".backlog-title-text, .backlog-status").all()) {
@@ -1301,7 +1302,9 @@ for (const width of [320, 390, 600, 601, 1280]) {
 				const indicator = table.getByRole("img", { name: label, exact: true });
 				await expect(indicator).toBeVisible();
 				const icon = (await indicator.boundingBox())!;
+				const content = (await indicator.locator("..").boundingBox())!;
 				const title = (await indicator.locator("..").locator(".backlog-title-text").boundingBox())!;
+				expect(Math.abs(icon.x + icon.width - content.x - content.width)).toBeLessThan(1);
 				expect(Math.abs(icon.y + icon.height / 2 - title.y - title.height / 2)).toBeLessThan(1);
 				await expect(indicator).toHaveCSS("position", "static");
 			}
@@ -1343,7 +1346,6 @@ for (const width of [320, 390, 600, 601, 1280]) {
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 		const scroll = page.getByRole("region", { name: "Unfinished tickets" });
 		expect(await scroll.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
-		await page.emulateMedia({ reducedMotion: "reduce" });
 		for (const indicator of await table.locator(".is-working").all())
 			await expect(indicator).toHaveCSS("animation-name", "none");
 		const toggle = page.getByRole("button", { name: "Collapse EPIC-2" });

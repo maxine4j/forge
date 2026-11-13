@@ -783,6 +783,7 @@
 }
 .backlog-title-content .ticket-agent-status {
 	position: static;
+	margin-inline-start: auto;
 	flex-shrink: 0;
 	display: inline-grid;
 	place-items: center;
