@@ -67,6 +67,7 @@ test("Config persists agent defaults, instructions and Git identity and can clea
 	await expect(page.getByRole("status")).toHaveText("Settings saved.");
 	expect(updates).toEqual([
 		{
+			inferenceProvider: "openai",
 			localCurrency: "EUR",
 			monthlyPlanLocal: 45.5,
 			planningInstructions: "Check migrations.\nInclude rollback steps.",
@@ -95,4 +96,76 @@ test("Config persists agent defaults, instructions and Git identity and can clea
 	await expect(page.getByRole("status")).toHaveText("Settings saved.");
 	expect(updates.at(-1)).not.toHaveProperty("defaultAgentModel");
 	expect(updates.at(-1)).not.toHaveProperty("defaultAgentReasoningEffort");
+});
+
+test("Config switches providers while preserving accounts and both providers' settings", async ({ page }) => {
+	let settings = {
+		inferenceProvider: "openai",
+		localCurrency: "AUD",
+		monthlyPlanLocal: 30,
+		planningInstructions: "",
+		implementationInstructions: "",
+		gitName: "",
+		gitEmail: "",
+	};
+	const updates: unknown[] = [];
+	await page.route("**/api/projects", (route) => route.fulfill({ json: [] }));
+	await page.route("**/api/accounts", (route) =>
+		route.fulfill({
+			json: {
+				codex: { connection: "available", login: { state: "idle" } },
+				github: { connection: "available", login: { state: "idle" } },
+			},
+		}),
+	);
+	await page.route("**/api/accounts/codex/login", (route) =>
+		route.fulfill({
+			json: {
+				connection: "available",
+				login: { state: "idle" },
+			},
+		}),
+	);
+	await page.route("**/api/settings/model-options", (route) => route.fulfill({ json: { models: [], skills: [] } }));
+	await page.route("**/api/settings", (route) => {
+		if (route.request().method() === "PUT") {
+			settings = route.request().postDataJSON();
+			updates.push(settings);
+		}
+		return route.fulfill({ json: settings });
+	});
+	await page.goto("/config");
+	const upstream = page.getByRole("group", { name: "Version control upstream" });
+	const inference = page.getByRole("group", { name: "Inference provider" });
+	const provider = inference.getByLabel("Provider for new agents");
+	const save = page.getByRole("button", { name: "Save settings" });
+	await expect(
+		upstream.getByRole("region", { name: "GitHub" }).getByRole("button", { name: "Sign in" }),
+	).toBeVisible();
+	await provider.selectOption("ollama");
+	await save.click();
+	await expect(page.getByRole("alert")).toHaveText("Provide an Ollama endpoint and model tag.");
+	await inference.getByLabel("Ollama endpoint").fill("http://ollama.internal:11434/v1");
+	await inference.getByLabel("Ollama model").fill("local-model:latest");
+	const signIn = page.waitForRequest("**/api/accounts/codex/login");
+	await inference.getByRole("region", { name: "ChatGPT" }).getByRole("button", { name: "Sign in" }).click();
+	await signIn;
+	expect(updates).toHaveLength(0);
+	await save.click();
+	await expect(page.getByRole("status")).toHaveText("Settings saved.");
+	await provider.selectOption("openai");
+	await save.click();
+	await expect(page.getByRole("status")).toHaveText("Settings saved.");
+	await page.reload();
+	await expect(provider).toHaveValue("openai");
+	await expect(inference.getByLabel("Ollama model")).toHaveValue("local-model:latest");
+	await provider.selectOption("ollama");
+	await save.click();
+	await expect(page.getByRole("status")).toHaveText("Settings saved.");
+	expect(updates).toHaveLength(3);
+	expect(updates.at(-1)).toMatchObject({
+		inferenceProvider: "ollama",
+		ollamaEndpoint: "http://ollama.internal:11434/v1",
+		ollamaModel: "local-model:latest",
+	});
 });

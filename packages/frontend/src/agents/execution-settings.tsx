@@ -88,7 +88,13 @@ export const ExecutionSettings = ({
 					}
 				>
 					<option value='ask'>Ask</option>
-					<option value='approve-for-me'>Approve for me</option>
+					{(options?.supportsAutoReview !== false || settings.permissions === "approve-for-me") && (
+						<option value='approve-for-me' disabled={options?.supportsAutoReview === false}>
+							{options?.supportsAutoReview === false
+								? "Approve for me (unavailable on Ollama)"
+								: "Approve for me"}
+						</option>
+					)}
 					<option value='full-access'>Full access</option>
 				</select>
 			)}

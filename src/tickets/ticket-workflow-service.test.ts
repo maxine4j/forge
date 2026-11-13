@@ -20,7 +20,7 @@ const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => 
 	const pool = new AgentExecutionPool();
 	const agents = {
 		assertRepositoryReady: vi.fn(async () => {}),
-		catalogOptions: vi.fn(async () => ({
+		catalogOptions: vi.fn<ITicketAgents["catalogOptions"]>(async () => ({
 			models: [
 				{
 					id: "test-model",
@@ -327,11 +327,15 @@ test("ticket settings validate before saving and each phase snapshots the curren
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
 	expect(f.agents.dispatch.mock.calls[0]?.[5]).toEqual(settings);
+	await f.service.options(actor, ticket.id);
+	expect(f.agents.catalogOptions).toHaveBeenLastCalledWith(actor, f.jobs.get(ticket.id)?.plannerId);
 	await f.service.settings(actor, ticket, {});
 	expect(f.agents.dispatch.mock.calls[0]?.[5]).toEqual(settings);
 	f.complete(f.jobs.get(ticket.id)!.plannerId!, "# Plan");
 	await f.service.tick(actor);
 	await f.service.approve(actor, f.tickets.get(ticket.id)!, 1);
+	await f.service.options(actor, ticket.id);
+	expect(f.agents.catalogOptions).toHaveBeenLastCalledWith(actor, undefined);
 	await f.service.tick(actor);
 	expect(f.agents.dispatch.mock.calls[1]?.[5]).toEqual({});
 	await f.service.settings(actor, ticket, settings);

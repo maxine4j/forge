@@ -1,6 +1,6 @@
 import { agentOptionsSchema, type AgentOptions } from "@forge/contracts/agents";
 import { billingCurrencies, forgeSettingsSchema, type ForgeSettings } from "@forge/contracts/settings";
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { ExecutionSettings } from "../agents/execution-settings.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
@@ -38,7 +38,17 @@ const currencyFlags: Partial<Record<ForgeSettings["localCurrency"], string>> = {
 	ISK: "🇮🇸",
 };
 
-export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; defaultsSaved: () => void }) => {
+export const ForgeSettingsForm = ({
+	api,
+	defaultsSaved,
+	githubAccount,
+	chatgptAccount,
+}: {
+	api: IWorkspaceApi;
+	defaultsSaved: () => void;
+	githubAccount: ReactNode;
+	chatgptAccount: ReactNode;
+}) => {
 	const [draft, setDraft] = useState<ForgeSettings>();
 	const [options, setOptions] = useState<AgentOptions>();
 	const [optionsError, setOptionsError] = useState(false);
@@ -78,7 +88,7 @@ export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; 
 		};
 	}, [api, optionsAttempt]);
 
-	const change = (field: keyof ForgeSettings, value: string | number) => {
+	const change = (field: keyof ForgeSettings, value: string | number | undefined) => {
 		setDraft((current) => current && { ...current, [field]: value });
 		setError("");
 		setSaved(false);
@@ -90,10 +100,19 @@ export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; 
 		setSaved(false);
 		const parsed = forgeSettingsSchema.safeParse(draft);
 		if (!parsed.success) {
+			const providerIssue = parsed.error.issues.find(({ path }) => path.at(0) === "inferenceProvider");
+			const invalidEndpoint = parsed.error.issues.some(({ path }) => path.at(0) === "ollamaEndpoint");
+			const invalidModel = parsed.error.issues.some(({ path }) => path.at(0) === "ollamaModel");
 			setError(
-				Boolean(draft?.gitName.trim()) === Boolean(draft?.gitEmail.trim())
-					? "Check cost tracking values, Git identity and instruction lengths."
-					: "Provide both a Git name and email, or leave both blank.",
+				invalidEndpoint
+					? "Enter an absolute HTTP or HTTPS Ollama endpoint without credentials, a query, or a fragment."
+					: invalidModel
+						? "Enter an Ollama model tag without spaces."
+						: providerIssue
+							? providerIssue.message
+							: Boolean(draft?.gitName.trim()) === Boolean(draft?.gitEmail.trim())
+								? "Check cost tracking values, Git identity and instruction lengths."
+								: "Provide both a Git name and email, or leave both blank.",
 			);
 			return;
 		}
@@ -149,8 +168,40 @@ export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; 
 						<p>Applies to future turns. Historical costs keep their saved prices and exchange rates.</p>
 					</fieldset>
 					<fieldset disabled={saving}>
-						<legend>Agent defaults</legend>
-						<p>Apply to tickets and chats that use Default on their next turn.</p>
+						<legend>Inference provider</legend>
+						{chatgptAccount}
+						<label>
+							Provider for new agents
+							<select
+								value={draft.inferenceProvider}
+								onChange={(event) => change("inferenceProvider", event.target.value)}
+							>
+								<option value='openai'>OpenAI</option>
+								<option value='ollama'>Ollama</option>
+							</select>
+						</label>
+						<div className='forge-settings-fields'>
+							<label>
+								Ollama endpoint
+								<input
+									value={draft.ollamaEndpoint ?? ""}
+									maxLength={2048}
+									placeholder='http://ollama.internal:11434/v1'
+									onChange={(event) => change("ollamaEndpoint", event.target.value || undefined)}
+								/>
+							</label>
+							<label>
+								Ollama model
+								<input
+									value={draft.ollamaModel ?? ""}
+									maxLength={256}
+									onChange={(event) => change("ollamaModel", event.target.value || undefined)}
+								/>
+							</label>
+						</div>
+						<p>Use the Responses API base URL ending in /v1.</p>
+						<h3>OpenAI defaults</h3>
+						<p>Apply to OpenAI tickets and chats that use Default on their next turn.</p>
 						<ExecutionSettings
 							configureDefaults
 							options={options}
@@ -201,7 +252,8 @@ export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; 
 						</label>
 					</fieldset>
 					<fieldset disabled={saving}>
-						<legend>Git identity</legend>
+						<legend>Version control upstream</legend>
+						{githubAccount}
 						<p>Applies to commits across the Forge container. Leave both fields blank to clear it.</p>
 						<div className='forge-settings-fields'>
 							<label>
@@ -230,18 +282,26 @@ export const ForgeSettingsForm = ({ api, defaultsSaved }: { api: IWorkspaceApi; 
 						{saved && <p role='status'>Settings saved.</p>}
 					</div>
 				</form>
-			) : error ? (
-				<button
-					type='button'
-					onClick={() => {
-						setError("");
-						setLoadAttempt((value) => value + 1);
-					}}
-				>
-					Retry loading settings
-				</button>
 			) : (
-				<p role='status'>Loading settings…</p>
+				<>
+					<div className='account-grid'>
+						{chatgptAccount}
+						{githubAccount}
+					</div>
+					{error ? (
+						<button
+							type='button'
+							onClick={() => {
+								setError("");
+								setLoadAttempt((value) => value + 1);
+							}}
+						>
+							Retry loading settings
+						</button>
+					) : (
+						<p role='status'>Loading settings…</p>
+					)}
+				</>
 			)}
 			{error && (
 				<p role='alert' className='error'>

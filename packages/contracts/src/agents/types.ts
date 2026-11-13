@@ -21,6 +21,7 @@ export interface AgentSettings {
 	permissions?: "ask" | "approve-for-me" | "full-access";
 }
 export interface AgentOptions {
+	supportsAutoReview?: false;
 	models: {
 		id: string;
 		name: string;

@@ -168,20 +168,20 @@ readable through Codex.
 
 Browser contracts are exported from `@forge/contracts/tickets`:
 
-| Route                                | Contract                                                                                                                         |
-| ------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------- |
-| `GET/POST /api/tickets`              | Ordered active tickets with attention flags and optional derived `agentStatus` / create scope and ordered repository references. |
-| `GET/PATCH /api/tickets/:id`         | Read by ticket ID / edit scope and references in Backlog.                                                                        |
-| `POST /api/tickets/:id/archive`      | Archive an eligible ticket and return it with `archivedAt`. Safe to retry.                                                       |
-| `POST /api/tickets/:id/move`         | Reorder, move Backlog to Ready, or return unclaimed Ready tickets to Backlog with optional beforeId.                             |
-| `GET /api/tickets/:id/model-options` | Shared model catalog, independent of repository readiness and references.                                                        |
-| `GET /api/tickets/:id/workflow`      | Current plan revision, phase, execution state and Forge conversation/workspace IDs.                                              |
-| `POST /api/tickets/:id/approve`      | Approve the current idle plan with `{revision}`.                                                                                 |
-| `POST /api/tickets/:id/messages`     | Queue feedback, or steer implementation/rebase with `{text,expectedTurnId}`.                                                     |
-| `POST /api/tickets/:id/merge`        | Queue a legacy review candidate or retry a failed merge.                                                                         |
-| `POST /api/tickets/:id/reconcile`    | Reconcile uncertain execution or retry a failed setup.                                                                           |
-| `GET/PATCH /api/board/settings`      | Read settings or update `maxAgents` and ticket dispatch (`running` or `paused`).                                                 |
-| `POST /api/board/settings/stop`      | Stop ticket dispatch and return interruption request and failure counts.                                                         |
+| Route                                | Contract                                                                                                                              |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET/POST /api/tickets`              | Ordered active tickets with attention flags and optional derived `agentStatus` / create scope and ordered repository references.      |
+| `GET/PATCH /api/tickets/:id`         | Read by ticket ID / edit scope and references in Backlog.                                                                             |
+| `POST /api/tickets/:id/archive`      | Archive an eligible ticket and return it with `archivedAt`. Safe to retry.                                                            |
+| `POST /api/tickets/:id/move`         | Reorder, move Backlog to Ready, or return unclaimed Ready tickets to Backlog with optional beforeId.                                  |
+| `GET /api/tickets/:id/model-options` | Catalog for the current phase's pinned provider, or the global selection before an agent exists. Independent of repository readiness. |
+| `GET /api/tickets/:id/workflow`      | Current plan revision, phase, execution state and Forge conversation/workspace IDs.                                                   |
+| `POST /api/tickets/:id/approve`      | Approve the current idle plan with `{revision}`.                                                                                      |
+| `POST /api/tickets/:id/messages`     | Queue feedback, or steer implementation/rebase with `{text,expectedTurnId}`.                                                          |
+| `POST /api/tickets/:id/merge`        | Queue a legacy review candidate or retry a failed merge.                                                                              |
+| `POST /api/tickets/:id/reconcile`    | Reconcile uncertain execution or retry a failed setup.                                                                                |
+| `GET/PATCH /api/board/settings`      | Read settings or update `maxAgents` and ticket dispatch (`running` or `paused`).                                                      |
+| `POST /api/board/settings/stop`      | Stop ticket dispatch and return interruption request and failure counts.                                                              |
 
 Ticket conversations reuse the private agent read, resume, interrupt, reply and
 SSE APIs. Idle and failed ticket messages dispatch through the scheduler, and ticket threads stay
@@ -341,9 +341,11 @@ One selection applies across planning, implementation, feedback and rebase turns
 The workflow snapshots it under dispatch coordination; changes during execution
 show “Applies to next turn” and cannot change active-turn steering or bypass stale
 turn checks. Unset fields inherit the [Forge defaults](agents.md#interactive-agents)
-on the next turn. Explicit selections are validated against the runtime catalog.
-If a queued turn's explicit selection becomes unsupported, update its settings
-and retry setup. Ticket chats use the shared composer and completion controls with a
+on the next turn. Each planner and implementer pins the global provider when its
+record is created. Clarifications, follow-ups and rebase use their existing
+agent's provider. Explicit selections are validated against that provider at
+dispatch. If a selection becomes unsupported, use Default for model and thinking
+or select an available permission mode, then retry setup. Ticket chats use the shared composer and completion controls with a
 compact mobile header, a separately scrolling timeline and viewport-bounded popups.
 
 ### Ticket cost

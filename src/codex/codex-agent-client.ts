@@ -7,6 +7,7 @@ import {
 	type AgentSettings,
 	type AgentOptions,
 } from "@forge/contracts/agents";
+import type { InferenceProvider } from "@forge/contracts/settings";
 import { z } from "zod";
 
 import type { ICodexAgentConnection } from "../accounts/codex-connection.ts";
@@ -16,21 +17,23 @@ import type { UsageScope } from "../cost/types.ts";
 import type { ICodexUsageTracker } from "./codex-usage-client.ts";
 import type { AgentRuntimeView, ExecutionReconciliation } from "./types.ts";
 export interface ICodexAgentClient {
-	reconcile(id?: string, path?: string): Promise<ExecutionReconciliation>;
+	reconcile(id?: string, path?: string, provider?: InferenceProvider): Promise<ExecutionReconciliation>;
 	/** Uses persistent Codex history. Failures throw AgentError; requests are never replayed. */
-	start(path: string): Promise<string>;
-	resume(id: string, path: string): Promise<AgentRuntimeView>;
+	start(path: string, provider?: InferenceProvider): Promise<string>;
+	resume(id: string, path: string, provider?: InferenceProvider): Promise<AgentRuntimeView>;
 	/** Loads stored history without starting or subscribing to a runtime thread. Throws AgentError. */
 	loadHistory(id: string): Promise<AgentRuntimeView>;
 	read(id: string): AgentRuntimeView;
 	send(id: string, path: string, text: string, settings?: AgentSettings, usage?: UsageScope): Promise<void>;
-	options(path?: string): Promise<AgentOptions>;
+	options(path?: string, provider?: InferenceProvider): Promise<AgentOptions>;
 	files(path: string, query: string): Promise<string[]>;
 	interrupt(id: string, turnId: string): Promise<void>;
 	steer(id: string, turnId: string, text: string, path?: string): Promise<void>;
 	reply(id: string, input: AgentReply): void;
 	subscribe(listener: (id: string) => void): () => void;
 }
+const ollamaProviderId = "forge_ollama";
+
 export class CodexAgentClient implements ICodexAgentClient {
 	private readonly log = createLogger(CodexAgentClient.name);
 	private readonly views = new Map<string, AgentRuntimeView>();
@@ -39,6 +42,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 	private readonly revisions = new Map<string, number>();
 	private readonly resuming = new Set<string>();
 	private readonly models = new Map<string, string>();
+	private readonly ollamaThreads = new Set<string>();
 	private readonly creations = new Map<object, number>();
 	private readonly settled = new Set<string>();
 	private readonly initialEpoch: number;
@@ -52,24 +56,24 @@ export class CodexAgentClient implements ICodexAgentClient {
 		connection.subscribe((method, params) => this.notification(method, params));
 		connection.subscribeRequests((id, method, params) => this.serverRequest(id, method, params));
 	}
-	async start(path: string): Promise<string> {
+	async start(path: string, provider?: InferenceProvider): Promise<string> {
 		return this.guard(async () => {
 			path = await this.realpath(path);
 			await this.connection.initialize();
 			const creation = {};
 			this.creations.set(creation, this.connection.executionEpoch());
 			const result = threadResponse.parse(
-				await this.connection.request("thread/start", this.runtimeOptions(path)),
+				await this.connection.request("thread/start", this.runtimeOptions(path, provider)),
 			);
 			if (result.thread.cwd !== path) throw new Error("Codex workspace identity mismatch");
+			this.rememberRouting(result, provider);
 			this.creations.delete(creation);
 			this.views.set(result.thread.id, this.hydrate(result.thread));
-			if (result.model) this.models.set(result.thread.id, result.model);
 			return result.thread.id;
 		});
 	}
 	/** Execution metadata is independent of item/history pagination. Never replays input. */
-	async reconcile(id?: string, path?: string): Promise<ExecutionReconciliation> {
+	async reconcile(id?: string, path?: string, provider?: InferenceProvider): Promise<ExecutionReconciliation> {
 		try {
 			await this.connection.initialize(); // also awaits cleanup of a lost process
 			if (!id)
@@ -87,10 +91,13 @@ export class CodexAgentClient implements ICodexAgentClient {
 				const result = threadResponse.parse(
 					await this.connection.request("thread/resume", {
 						threadId: id,
-						...this.runtimeOptions(path),
+						...this.runtimeOptions(path, provider),
 						excludeTurns: true,
 					}),
 				);
+				if (result.thread.id !== id || result.thread.cwd !== path)
+					throw new Error("Codex workspace identity mismatch");
+				this.rememberRouting(result, provider);
 				thread = result.thread;
 			} catch (error) {
 				// Verified against 0.164.0: `thread not loaded` is NOT missing.
@@ -104,7 +111,6 @@ export class CodexAgentClient implements ICodexAgentClient {
 				}
 				throw error;
 			}
-			if (thread.id !== id || thread.cwd !== path) throw new Error("Codex workspace identity mismatch");
 			if (thread.status.type === "idle") {
 				this.settle(id);
 				return { state: "inactive" };
@@ -140,7 +146,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 		this.views.set(id, view);
 		this.settled.add(id);
 	}
-	async resume(id: string, path: string): Promise<AgentRuntimeView> {
+	async resume(id: string, path: string, provider?: InferenceProvider): Promise<AgentRuntimeView> {
 		this.resuming.add(id);
 		return this.guard(async () => {
 			const revision = this.revisions.get(id);
@@ -152,14 +158,13 @@ export class CodexAgentClient implements ICodexAgentClient {
 			const result = threadResponse.parse(
 				await this.connection.request("thread/resume", {
 					threadId: id,
-					...this.runtimeOptions(path),
+					...this.runtimeOptions(path, provider),
 					excludeTurns: true,
 				}),
 			);
 			if (result.thread.id !== id || result.thread.cwd !== path)
 				throw new Error("Codex workspace identity mismatch");
-			if (result.model) this.models.set(id, result.model);
-			else this.models.delete(id);
+			this.rememberRouting(result, provider);
 			const view = await this.history(result.thread);
 			const live = this.views.get(id)!;
 			if (this.settled.has(id)) {
@@ -213,8 +218,18 @@ export class CodexAgentClient implements ICodexAgentClient {
 		if (!view) throw new AgentError("agent-unavailable");
 		return structuredClone(view);
 	}
-	async options(path?: string): Promise<AgentOptions> {
+	async options(path?: string, provider?: InferenceProvider): Promise<AgentOptions> {
 		return this.guard(async () => {
+			if (provider?.kind === "ollama") {
+				if (path) await this.connection.initialize();
+				const skills = path ? await this.skills(path) : [];
+				return {
+					models: [{ id: provider.model, name: provider.model, isDefault: true }],
+					skills: skills.map(({ name, description }) => ({ name, description })),
+					defaultModel: provider.model,
+					supportsAutoReview: false,
+				};
+			}
 			await this.connection.initialize();
 			const models: AgentOptions["models"] = [];
 			let cursor: string | undefined;
@@ -286,6 +301,14 @@ export class CodexAgentClient implements ICodexAgentClient {
 			const view = this.views.get(id);
 			if (!view || ["running", "waiting", "uncertain"].includes(view.status))
 				throw new AgentError("agent-conflict");
+			const ollama = this.ollamaThreads.has(id);
+			if (
+				ollama
+				&& (settings?.permissions === "approve-for-me"
+					|| settings?.reasoningEffort
+					|| (settings?.model && settings.model !== this.models.get(id)))
+			)
+				throw new AgentError("unsupported-settings");
 			const selectedSkills = /(?:^|\s)\$[\w-]+/.test(text)
 				? (await this.skills(path)).filter((skill) => text.split(/\s+/).includes(`$${skill.name}`))
 				: [];
@@ -296,7 +319,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			delete view.turnId;
 			delete view.plan;
 			try {
-				if (usage) await this.usageTracker?.track(id, usage, model);
+				if (usage && !ollama) await this.usageTracker?.track(id, usage, model);
 				const result = z.object({ turn: turnSchema }).parse(
 					await this.connection.request("turn/start", {
 						threadId: id,
@@ -307,7 +330,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 										mode: "plan",
 										settings: {
 											model,
-											reasoning_effort: settings?.reasoningEffort ?? null,
+											...(!ollama ? { reasoning_effort: settings?.reasoningEffort ?? null } : {}),
 											developer_instructions: null,
 										},
 									},
@@ -316,7 +339,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 						...(settings
 							? {
 									...(model ? { model } : {}),
-									effort: settings.reasoningEffort ?? null,
+									...(!ollama ? { effort: settings.reasoningEffort ?? null } : {}),
 									approvalPolicy: settings.permissions === "full-access" ? "never" : "on-request",
 									approvalsReviewer:
 										settings.permissions === "approve-for-me" ? "auto_review" : "user",
@@ -433,13 +456,43 @@ export class CodexAgentClient implements ICodexAgentClient {
 		if (!entry || entry.errors.length || entry.skills.length > 500) throw new Error("Skills unavailable");
 		return entry.skills.filter((skill) => skill.enabled);
 	}
-	private runtimeOptions(path: string) {
+	private runtimeOptions(path: string, provider?: InferenceProvider) {
 		return {
 			cwd: path,
 			sandbox: "danger-full-access",
 			approvalPolicy: "on-request",
-			config: { features: { multi_agent: false } },
+			...(provider?.kind === "ollama" ? { model: provider.model, modelProvider: ollamaProviderId } : {}),
+			config: {
+				features: { multi_agent: false },
+				...(provider?.kind === "ollama"
+					? {
+							web_search: "disabled",
+							model_providers: {
+								[ollamaProviderId]: {
+									name: "Ollama",
+									base_url: provider.endpoint,
+									wire_api: "responses",
+									requires_openai_auth: false,
+								},
+							},
+						}
+					: {}),
+			},
 		};
+	}
+	private rememberRouting(result: z.infer<typeof threadResponse>, provider?: InferenceProvider): void {
+		const { id, modelProvider } = result.thread;
+		if (provider?.kind === "ollama") {
+			if (
+				modelProvider !== ollamaProviderId
+				|| result.modelProvider !== ollamaProviderId
+				|| result.model !== provider.model
+			)
+				throw new Error("Codex inference provider mismatch");
+			this.ollamaThreads.add(id);
+		}
+		if (result.model) this.models.set(id, result.model);
+		else this.models.delete(id);
 	}
 	private hydrate(thread: z.infer<typeof threadSchema>): AgentRuntimeView {
 		const last = thread.turns.at(-1);
@@ -798,8 +851,13 @@ const threadStatusSchema = z.object({ type: z.enum(["notLoaded", "idle", "active
 const threadSchema = z.object({
 	id: z.string().min(1).max(256),
 	cwd: z.string(),
+	modelProvider: z.string().optional(),
 	historyMode: z.literal("paginated"),
 	status: threadStatusSchema,
 	turns: z.array(turnSchema),
 });
-const threadResponse = z.object({ thread: threadSchema, model: z.string().optional() });
+const threadResponse = z.object({
+	thread: threadSchema,
+	model: z.string().optional(),
+	modelProvider: z.string().optional(),
+});

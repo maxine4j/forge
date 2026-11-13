@@ -39,7 +39,7 @@ test("persists thread identities and approvals; startup makes execution uncertai
 			title: "Chat",
 			status: "running" as const,
 			codexId: "codex-id",
-			reasoningEffort: "high",
+			provider: { kind: "ollama" as const, endpoint: "http://ollama.internal/v1", model: "local:latest" },
 			turnId: "turn",
 			createdAt,
 			requests: [{ id: "request", kind: "file" as const, description: "Edit", questions: [] }],

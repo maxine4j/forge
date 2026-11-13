@@ -52,6 +52,14 @@ const initializeSchema = z.object({
 	platformOs: z.string(),
 });
 const maximumFrameBytes = 16 * 1024 * 1024;
+const threadOptions = z.strictObject({
+	cwd: z.string().min(1),
+	sandbox: z.literal("danger-full-access"),
+	approvalPolicy: z.literal("on-request"),
+	config: z.record(z.string(), z.unknown()),
+	model: z.string().min(1).max(256).optional(),
+	modelProvider: z.literal("forge_ollama").optional(),
+});
 const methods = new Map<string, z.ZodType>([
 	["model/list", z.strictObject({ limit: z.literal(100), cursor: z.string().optional() })],
 	["skills/list", z.strictObject({ cwds: z.array(z.string().min(1)).length(1) })],
@@ -67,23 +75,11 @@ const methods = new Map<string, z.ZodType>([
 	["account/rateLimits/read", z.null()],
 	["account/login/start", z.strictObject({ type: z.literal("chatgptDeviceCode") })],
 	["account/login/cancel", z.strictObject({ loginId: z.string().min(1).max(256) })],
-	[
-		"thread/start",
-		z.strictObject({
-			cwd: z.string().min(1),
-			sandbox: z.literal("danger-full-access"),
-			approvalPolicy: z.literal("on-request"),
-			config: z.record(z.string(), z.unknown()),
-		}),
-	],
+	["thread/start", threadOptions],
 	[
 		"thread/resume",
-		z.strictObject({
+		threadOptions.extend({
 			threadId: z.string().min(1),
-			cwd: z.string().min(1),
-			sandbox: z.literal("danger-full-access"),
-			approvalPolicy: z.literal("on-request"),
-			config: z.record(z.string(), z.unknown()),
 			excludeTurns: z.literal(true),
 		}),
 	],
@@ -234,7 +230,7 @@ export class CodexConnection implements ICodexAgentConnection {
 			if (this.closed) throw new CodexConnectionError();
 			const handle = this.processes.spawn({
 				program: "codex",
-				arguments: ["app-server", "-c", 'cli_auth_credentials_store="file"'],
+				arguments: ["app-server", "-c", 'cli_auth_credentials_store="file"', "-c", 'model_provider="openai"'],
 				onOutput: (chunk) => {
 					if (this.handle === handle) this.receive(chunk);
 				},

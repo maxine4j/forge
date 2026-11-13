@@ -40,6 +40,7 @@ export const agentOptionsSchema = z.strictObject({
 	skills: z.array(z.strictObject({ name: z.string().min(1).max(256), description: z.string().max(4000) })).max(500),
 	defaultModel: agentSettingsSchema.shape.model,
 	defaultReasoningEffort: agentSettingsSchema.shape.reasoningEffort,
+	supportsAutoReview: z.literal(false).optional(),
 });
 
 export const resolveAgentSettings = (options: AgentOptions, settings: AgentSettings) => {
@@ -56,7 +57,9 @@ export const resolveAgentSettings = (options: AgentOptions, settings: AgentSetti
 			settings.reasoningEffort
 			?? (inherited && supportsEffort(inherited) ? inherited : model?.defaultReasoningEffort),
 		supported:
-			(!settings.model || !!model) && (!settings.reasoningEffort || supportsEffort(settings.reasoningEffort)),
+			(!settings.model || !!model)
+			&& (!settings.reasoningEffort || supportsEffort(settings.reasoningEffort))
+			&& (settings.permissions !== "approve-for-me" || options.supportsAutoReview !== false),
 	};
 };
 export const agentFilesSchema = z.array(z.string().min(1).max(4096)).max(100);

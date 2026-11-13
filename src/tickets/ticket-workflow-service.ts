@@ -22,7 +22,7 @@ import type { TicketWorkflowRecord } from "./types.ts";
 
 export interface ITicketWorkflowService {
 	update(actor: Actor, id: string, input: CreateTicket): Promise<void>;
-	options(actor: Actor): Promise<AgentOptions>;
+	options(actor: Actor, ticketId?: string): Promise<AgentOptions>;
 	validateSettings(actor: Actor, settings: AgentSettings): Promise<void>;
 	settings(actor: Actor, ticket: Ticket, settings: AgentSettings): Promise<void>;
 	/** Archives between scheduler operations. Active or unresolved execution and pending merges conflict. */
@@ -42,10 +42,12 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	private tail: Promise<unknown> = Promise.resolve();
 	private readonly settingUp = new Set<string>();
 	private readonly log = createLogger(TicketWorkflowService.name);
-	async options(actor: Actor): Promise<AgentOptions> {
+	async options(actor: Actor, ticketId?: string): Promise<AgentOptions> {
 		this.access.assertOwner(actor);
 		try {
-			return await this.agents.catalogOptions(actor);
+			const job = ticketId ? await this.store.get(ticketId) : undefined;
+			const threadId = job?.phase === "planning" ? job.plannerId : job?.implementerId;
+			return await this.agents.catalogOptions(actor, threadId);
 		} catch (cause) {
 			throw new TicketError("ticket-unavailable", { cause });
 		}
@@ -64,7 +66,20 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		await this.serialize(async () => {
 			const current = await this.tickets.get(ticket.id);
 			if (!current || current.archivedAt || current.status === "done") throw new TicketError("ticket-conflict");
-			await this.validateSettings(actor, parsed.data);
+			const options = await this.options(actor, ticket.id);
+			const previous = current.executionSettings;
+			const { model, reasoningEffort, permissions } = parsed.data;
+			const modelChanged = model !== previous?.model;
+			const effortChanged = reasoningEffort !== previous?.reasoningEffort;
+			const validateModel = modelChanged || (effortChanged && reasoningEffort !== undefined);
+			if (
+				!resolveAgentSettings(options, {
+					model: validateModel ? model : undefined,
+					reasoningEffort: validateModel ? reasoningEffort : undefined,
+					permissions: permissions === previous?.permissions ? undefined : permissions,
+				}).supported
+			)
+				throw new TicketError("unsupported-settings");
 			await this.tickets.updateSettings(ticket.id, parsed.data);
 		});
 	}

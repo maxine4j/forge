@@ -70,11 +70,12 @@ const AccountCard = ({
 					{status.login.state === "cancelled" && <p>Sign-in cancelled.</p>}
 					<div className='account-actions'>
 						{status.login.state === "pending" ? (
-							<button disabled={busy} onClick={() => action("cancel")}>
+							<button type='button' disabled={busy} onClick={() => action("cancel")}>
 								Cancel sign-in
 							</button>
 						) : (
 							<button
+								type='button'
 								disabled={busy}
 								onClick={() =>
 									action(
@@ -94,7 +95,7 @@ const AccountCard = ({
 							</button>
 						)}
 						{status.login.state === "uncertain" && (
-							<button disabled={busy} onClick={() => action("cancel")}>
+							<button type='button' disabled={busy} onClick={() => action("cancel")}>
 								Cancel sign-in
 							</button>
 						)}
@@ -471,27 +472,31 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 							Refresh accounts
 						</button>
 					</div>
-					<p className='accounts-description'>Connect ChatGPT for agents and GitHub for repository access.</p>
 					{accountError && (
 						<p role='alert' className='error'>
 							{accountError}
 						</p>
 					)}
-					<div className='account-grid'>
-						{(["codex", "github"] as const).map((provider) => (
-							<AccountCard
-								key={provider}
-								provider={provider}
-								status={accounts?.[provider]}
-								busy={accountBusy}
-								action={(action) => void accountAction(provider, action)}
-							/>
-						))}
-					</div>
 				</section>
 				{config && (
 					<ForgeSettingsForm
 						api={workspaceApi}
+						githubAccount={
+							<AccountCard
+								provider='github'
+								status={accounts?.github}
+								busy={accountBusy}
+								action={(action) => void accountAction("github", action)}
+							/>
+						}
+						chatgptAccount={
+							<AccountCard
+								provider='codex'
+								status={accounts?.codex}
+								busy={accountBusy}
+								action={(action) => void accountAction("codex", action)}
+							/>
+						}
 						defaultsSaved={() => setAgentOptionsRevision((revision) => revision + 1)}
 					/>
 				)}

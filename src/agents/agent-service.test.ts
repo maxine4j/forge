@@ -1,7 +1,9 @@
 import type { AgentOptions } from "@forge/contracts/agents";
+import type { InferenceProvider } from "@forge/contracts/settings";
 import { expect, test, vi } from "vitest";
 
 import { AccessService } from "../auth/access-service.ts";
+import type { ICodexAgentClient } from "../codex/codex-agent-client.ts";
 import type { AgentRuntimeView, ExecutionReconciliation } from "../codex/types.ts";
 import type { IProjectService } from "../projects/project-service.ts";
 import { AgentExecutionPool } from "./agent-execution-pool.ts";
@@ -11,7 +13,10 @@ import type { AgentThreadRecord } from "./types.ts";
 
 const owner = { username: "owner" };
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
-const setup = (defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = () => ({})) => {
+const setup = (
+	defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = () => ({}),
+	provider?: () => InferenceProvider,
+) => {
 	let sequence = 0;
 	const records = new Map<string, AgentThreadRecord>();
 	const views = new Map<string, AgentRuntimeView>();
@@ -72,27 +77,36 @@ const setup = (defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReaso
 				: { state: "inactive" as const };
 		}),
 		steer: vi.fn(async (_id: string, _turnId: string, _text: string) => {}),
-		options: vi.fn(async () => ({
-			models: [
-				{
-					id: "test-model",
-					name: "Test model",
-					isDefault: true,
-					supportedReasoningEfforts: [
-						{ reasoningEffort: "high", description: "High" },
-						{ reasoningEffort: "medium", description: "Medium" },
-					],
-					defaultReasoningEffort: "medium",
-				},
-				{
-					id: "alternate",
-					name: "Alternate",
-					isDefault: false,
-					supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Low" }],
-				},
-			],
-			skills: [],
-		})),
+		options: vi.fn<ICodexAgentClient["options"]>(async (_path, provider) =>
+			provider?.kind === "ollama"
+				? {
+						models: [{ id: provider.model, name: provider.model, isDefault: true }],
+						skills: [],
+						defaultModel: provider.model,
+						supportsAutoReview: false,
+					}
+				: {
+						models: [
+							{
+								id: "test-model",
+								name: "Test model",
+								isDefault: true,
+								supportedReasoningEfforts: [
+									{ reasoningEffort: "high", description: "High" },
+									{ reasoningEffort: "medium", description: "Medium" },
+								],
+								defaultReasoningEffort: "medium",
+							},
+							{
+								id: "alternate",
+								name: "Alternate",
+								isDefault: false,
+								supportedReasoningEfforts: [{ reasoningEffort: "low", description: "Low" }],
+							},
+						],
+						skills: [],
+					},
+		),
 		files: vi.fn(async () => ["src/main.ts"]),
 		start: vi.fn(async () => {
 			const key = `codex-${views.size + 1}`;
@@ -150,9 +164,64 @@ const setup = (defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReaso
 		() => new Date(createdAt),
 		pool,
 		defaults,
+		provider,
 	);
 	return { service, client, store, workspaces, records, views, pool, changed: (key: string) => changed(key) };
 };
+
+test("pins providers before lazy creation, through active work and when recovering legacy records", async () => {
+	const local: InferenceProvider = { kind: "ollama", endpoint: "http://ollama.internal/v1", model: "local:latest" };
+	let current: InferenceProvider = { kind: "openai" };
+	const { service, client, records, pool } = setup(
+		() => ({ defaultModel: "alternate", defaultReasoningEffort: "low" }),
+		() => current,
+	);
+	pool.setLimit(3);
+	const { thread: legacy } = await service.create(owner, projectId, "Old chat");
+	delete records.get(legacy.id)!.provider;
+	current = local;
+	const chat = await service.create(owner, projectId, "Ollama chat");
+	expect(chat.thread).not.toHaveProperty("provider");
+	const planner = await service.createTicketThread(owner, projectId, "Planner");
+	current = { kind: "ollama", endpoint: "https://different.test/v1", model: "different" };
+	expect((await service.catalogOptions(owner)).defaultModel).toBe("different");
+	expect((await service.catalogOptions(owner, planner.thread.id)).defaultModel).toBe(local.model);
+	expect(await service.options(owner, chat.thread.id)).toEqual({
+		models: [{ id: local.model, name: local.model, isDefault: true }],
+		skills: [],
+		defaultModel: local.model,
+		supportsAutoReview: false,
+	});
+	const scope = { ticketId: "TASK-1", phase: "planning" } as const;
+	for (const override of [
+		{ model: "alternate" },
+		{ reasoningEffort: "low" },
+		{ permissions: "approve-for-me" },
+	] as const)
+		await expect(
+			service.dispatch(owner, planner.thread.id, "Plan", scope, undefined, override),
+		).rejects.toMatchObject({ code: "unsupported-settings" });
+	expect(client.start).not.toHaveBeenCalled();
+	await service.send(owner, chat.thread.id, "Hello");
+	expect(client.start).toHaveBeenLastCalledWith(`/data/worktrees/${chat.thread.workspaceId}`, local);
+	expect(client.send).toHaveBeenLastCalledWith(
+		expect.any(String),
+		expect.any(String),
+		"Hello",
+		{ model: local.model, reasoningEffort: undefined, permissions: undefined },
+		{ projectId, phase: "chat" },
+	);
+	current = { kind: "openai" };
+	expect((await service.get(owner, chat.thread.id)).thread.status).toBe("running");
+	expect((await service.options(owner, chat.thread.id)).defaultModel).toBe(local.model);
+	await service.send(owner, legacy.id, "Hello from the old chat");
+	const old = records.get(legacy.id)!;
+	expect(client.start).toHaveBeenLastCalledWith(`/data/worktrees/${legacy.workspaceId}`, undefined);
+	old.status = "uncertain";
+	current = local;
+	await service.recover(owner);
+	expect(client.reconcile).toHaveBeenCalledWith(old.codexId, `/data/worktrees/${legacy.workspaceId}`, undefined);
+});
 
 test("repeated stop reconciles uncertain slots and reports acknowledgments as unresolved", async () => {
 	const f = setup();

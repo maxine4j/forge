@@ -58,6 +58,7 @@ test("Forge settings are owner-only, origin-protected and persist across startup
 				...(body === undefined ? {} : { body: JSON.stringify(body) }),
 			});
 		const settings = {
+			inferenceProvider: "openai",
 			localCurrency: "AUD",
 			monthlyPlanLocal: 30,
 			planningInstructions: "Review the design.\nInclude rollout steps.",
@@ -105,16 +106,22 @@ test("Forge settings are owner-only, origin-protected and persist across startup
 		catalog.mockRejectedValue(new Error("Codex offline"));
 		const updated = {
 			...configured,
+			inferenceProvider: "ollama",
+			ollamaEndpoint: "http://ollama.internal:11434/v1",
+			ollamaModel: "local:latest",
 			localCurrency: "EUR",
 			monthlyPlanLocal: 45.5,
 			planningInstructions: "Updated during outage.",
 		};
+		expect((await request("PUT", { ...configured, inferenceProvider: "ollama" })).status).toBe(400);
 		expect((await request("PUT", updated)).status).toBe(200);
+		const inactive = { ...updated, inferenceProvider: "openai" };
+		expect(await (await request("PUT", inactive)).json()).toEqual(inactive);
 		await db.close();
 		await reopened.initialize();
 		const recovered = new SettingsService(new SettingsStore(reopened), { publish }, access);
 		await recovered.initialize();
-		expect(recovered.get({ username: "owner" })).toEqual(updated);
+		expect(recovered.get({ username: "owner" })).toEqual(inactive);
 		expect(publish).toHaveBeenLastCalledWith({ name: settings.gitName, email: settings.gitEmail });
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));

@@ -68,12 +68,20 @@ Backend foundation configuration:
 
 ### Forge settings
 
-The top-level **Config** tab lets the owner set
-[default model and thinking for tickets and chats](agents.md#interactive-agents), edit multiline instructions for
+The top-level **Config** tab lets the owner choose the
+[inference provider for new agents](agents.md#codex-harness-and-lifecycle), set
+OpenAI model and thinking defaults, edit multiline instructions for
 [ticket planners and implementers](tickets.md#agentic-ticket-board) and the
 [container-wide Git identity](development.md#image-and-deployment). Forge stores
 these settings in SQLite. Unset agent defaults delegate to Codex. Each instruction field accepts
 up to 4,000 characters. Set both Git identity fields or clear both together.
+
+**Version control upstream** contains GitHub sign-in and Git identity.
+**Inference provider** contains ChatGPT sign-in and the provider selector.
+Older settings default to OpenAI. Ollama requires a model tag and a container-reachable
+HTTP or HTTPS Responses API base URL, such as `http://ollama.internal:11434/v1`.
+The URL cannot contain credentials, a query, or a fragment. Saving settings
+does not contact the Ollama endpoint. Switching providers retains both configurations.
 
 The owner-only `GET /api/settings` and `PUT /api/settings` routes use
 `@forge/contracts/settings`. PUT replaces the settings and requires the

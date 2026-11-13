@@ -124,6 +124,7 @@ try {
 	nested("volume", "create", "restart-disposable");
 	nested("run", "-d", "--name", "restart-workload", "busybox:1.37.0", "sleep", "300");
 	const settings = {
+		inferenceProvider: "openai",
 		localCurrency: "AUD",
 		monthlyPlanLocal: 30,
 		planningInstructions: "Include rollout steps.",

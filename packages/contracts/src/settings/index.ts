@@ -5,6 +5,29 @@ const instructions = z
 	.max(4000)
 	.refine((value) => !value.includes("\0"));
 
+const ollamaEndpoint = z
+	.string()
+	.trim()
+	.max(2048)
+	.refine((value) => {
+		const authority = /^https?:\/\/([^/\\?#]+)/i.exec(value)?.at(1);
+		if (!authority || authority.includes("@") || /[\s\p{Cc}\\?#]/u.test(value)) return false;
+		const url = URL.parse(value);
+		return !!url && !url.username && !url.password;
+	}, "Enter an absolute HTTP or HTTPS URL without credentials, a query, or a fragment.");
+const ollamaModel = z
+	.string()
+	.trim()
+	.min(1)
+	.max(256)
+	.regex(/^[^\s\p{Cc}]+$/u);
+
+export const inferenceProviderSchema = z.discriminatedUnion("kind", [
+	z.strictObject({ kind: z.literal("openai") }),
+	z.strictObject({ kind: z.literal("ollama"), endpoint: ollamaEndpoint, model: ollamaModel }),
+]);
+export type InferenceProvider = z.infer<typeof inferenceProviderSchema>;
+
 // Frankfurter fiat currencies supported by Forge's billing selector.
 export const billingCurrencies = [
 	"AUD",
@@ -47,6 +70,9 @@ export const forgeSettingsSchema = z
 		implementationInstructions: instructions,
 		defaultAgentModel: z.string().min(1).max(256).optional(),
 		defaultAgentReasoningEffort: z.string().min(1).max(256).optional(),
+		inferenceProvider: z.enum(["openai", "ollama"]).default("openai"),
+		ollamaEndpoint: ollamaEndpoint.optional(),
+		ollamaModel: ollamaModel.optional(),
 		gitName: z
 			.string()
 			.trim()
@@ -60,7 +86,15 @@ export const forgeSettingsSchema = z
 	})
 	.refine(({ gitName, gitEmail }) => Boolean(gitName) === Boolean(gitEmail), {
 		message: "Provide both a Git name and email, or leave both blank.",
-	});
+	})
+	.refine(
+		({ inferenceProvider, ollamaEndpoint, ollamaModel }) =>
+			inferenceProvider === "openai" || Boolean(ollamaEndpoint && ollamaModel),
+		{
+			path: ["inferenceProvider"],
+			message: "Provide an Ollama endpoint and model tag.",
+		},
+	);
 
 export type ForgeSettings = z.infer<typeof forgeSettingsSchema>;
 
@@ -74,6 +108,7 @@ export const defaultForgeSettings: Readonly<ForgeSettings> = {
 	monthlyPlanLocal: 30,
 	planningInstructions: "",
 	implementationInstructions: "",
+	inferenceProvider: "openai",
 	gitName: "",
 	gitEmail: "",
 };

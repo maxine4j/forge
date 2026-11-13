@@ -12,6 +12,7 @@ import {
 	type AgentView,
 	type AgentReply,
 } from "@forge/contracts/agents";
+import type { InferenceProvider } from "@forge/contracts/settings";
 import { z } from "zod";
 
 import type { IAccessService } from "../auth/access-service.ts";
@@ -45,7 +46,7 @@ export interface IAgentService {
 	shutdown(): Promise<void>;
 }
 export interface ITicketAgents {
-	catalogOptions(actor: Actor): Promise<AgentOptions>;
+	catalogOptions(actor: Actor, threadId?: string): Promise<AgentOptions>;
 	assertRepositoryReady(actor: Actor, id: string): Promise<void>;
 	steer(actor: Actor, id: string, turnId: string, text: string): Promise<AgentView>;
 	createTicketThread(
@@ -90,6 +91,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		private readonly now: () => Date,
 		private readonly pool: IAgentExecutionPool,
 		private readonly defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = () => ({}),
+		private readonly provider: () => InferenceProvider = () => ({ kind: "openai" }),
 	) {
 		this.unsubscribe = client.subscribe((codexId) => {
 			const id = this.identities.get(codexId);
@@ -127,11 +129,11 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		this.authorize(actor);
 		const record = await this.require(id);
 		const location = await this.workspaces.resolve(actor, record.workspaceId);
-		return { ...(await this.client.options(location.path)), ...this.defaults() };
+		return this.providerOptions(record.provider, location.path);
 	}
-	async catalogOptions(actor: Actor): Promise<AgentOptions> {
+	async catalogOptions(actor: Actor, threadId?: string): Promise<AgentOptions> {
 		this.authorize(actor);
-		return { ...(await this.client.options()), ...this.defaults() };
+		return this.providerOptions(threadId ? (await this.require(threadId)).provider : this.provider());
 	}
 	async assertRepositoryReady(actor: Actor, id: string): Promise<void> {
 		this.authorize(actor);
@@ -219,11 +221,11 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				},
 			);
 			if (!selection.success) throw new AgentError("invalid-request");
-			const catalog = await this.client.options().catch((cause: unknown) => {
+			const catalog = await this.providerOptions(record.provider).catch((cause: unknown) => {
 				this.pool.observe(id, previousStatus);
 				throw new AgentCatalogError(cause);
 			});
-			const resolved = resolveAgentSettings({ ...catalog, ...this.defaults() }, selection.data);
+			const resolved = resolveAgentSettings(catalog, selection.data);
 			if (!resolved.supported) {
 				this.pool.observe(id, previousStatus);
 				throw new AgentError("unsupported-settings");
@@ -241,7 +243,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				const location = await this.workspaces.resolve(actor, record.workspaceId);
 				contactedRuntime = true;
 				if (record.codexId) {
-					const runtime = await this.client.resume(record.codexId, location.path);
+					const runtime = await this.client.resume(record.codexId, location.path, record.provider);
 					this.identities.set(record.codexId, id);
 					if (["creating", "running", "waiting", "uncertain"].includes(runtime.status))
 						throw new AgentError("agent-conflict");
@@ -249,7 +251,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				if (!record.codexId) {
 					record.status = "creating";
 					await this.store.update(record);
-					record.codexId = await this.client.start(location.path);
+					record.codexId = await this.client.start(location.path, record.provider);
 					this.identities.set(record.codexId, id);
 				}
 				record.status = "running";
@@ -304,7 +306,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				return this.view(record);
 			}
 			const location = await this.workspaces.resolve(actor, record.workspaceId);
-			await this.client.resume(record.codexId, location.path);
+			await this.client.resume(record.codexId, location.path, record.provider);
 			this.identities.set(record.codexId, id);
 			return this.sync(record);
 		});
@@ -427,7 +429,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 	}
 	private async reconcile(actor: Actor, record: AgentThreadRecord) {
 		const path = record.codexId ? (await this.workspaces.resolve(actor, record.workspaceId)).path : undefined;
-		const result = await this.client.reconcile(record.codexId, path);
+		const result = await this.client.reconcile(record.codexId, path, record.provider);
 		if (result.state === "unavailable") throw new AgentError("agent-unavailable");
 		if (record.codexId) this.identities.set(record.codexId, record.id);
 		const updated: AgentThreadRecord =
@@ -467,6 +469,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				status: "idle",
 				requests: [],
 				managed,
+				provider: this.provider(),
 			};
 			await this.store.insert(record);
 			return this.view(record);
@@ -479,6 +482,10 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		this.access.assertOwner(actor);
 		if (this.closed) throw new AgentError("agent-unavailable");
 	}
+	private async providerOptions(provider?: InferenceProvider, path?: string): Promise<AgentOptions> {
+		if (provider?.kind === "ollama") return this.client.options(path, provider);
+		return { ...(await this.client.options(path)), ...this.defaults() };
+	}
 	private async require(id: string): Promise<AgentThreadRecord> {
 		const record = await this.store.get(id);
 		if (!record) throw new AgentError("agent-not-found");
@@ -489,7 +496,14 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		try {
 			if (record.codexId && this.identities.has(record.codexId)) runtime = this.client.read(record.codexId);
 		} catch {}
-		const { codexId: _codexId, managed: _managed, requests, contextWindow: savedContext, ...thread } = record;
+		const {
+			codexId: _codexId,
+			managed: _managed,
+			provider: _provider,
+			requests,
+			contextWindow: savedContext,
+			...thread
+		} = record;
 		const contextWindow = runtime?.contextWindow ?? savedContext;
 		return {
 			thread,

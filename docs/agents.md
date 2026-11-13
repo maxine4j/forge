@@ -41,7 +41,7 @@ skill discovery uses the active agent's verified worktree; internal skill paths
 never enter browser responses. Explicit skills are resolved again at submission
 and sent as structured inputs, including ticket steering.
 
-Model options come from the installed runtime's catalog, including supported
+OpenAI model options come from the installed runtime's catalog, including supported
 thinking levels and its default effort. Messages accept optional `reasoningEffort`,
 a nonempty catalog value. When a field is unset, each new turn inherits the
 [Forge Config](foundation.md#forge-settings) model and thinking defaults. An unavailable
@@ -52,6 +52,9 @@ persist in existing SQLite thread JSON records. Unsupported explicit
 model/effort combinations return `unsupported-settings` (400) and preserve drafts.
 `GET /api/projects/:projectId/model-options` reads the catalog without allocating a
 thread or worktree. Each endpoint rechecks owner access.
+
+Ollama exposes the saved model tag as its only model, with no selectable thinking
+levels. Worktree skills still come from app-server.
 
 The Agents tab and backend reuse the one private, pinned Codex `0.164.0` stdio
 process and existing persistent ChatGPT login.
@@ -120,6 +123,22 @@ are explicitly rejected. Approval callbacks belong to a particular live connecti
 thread and turn; disconnects invalidate them. Worktrees remain a trusted-owner
 boundary, not process isolation or protection from deliberately modifying shared
 Git metadata.
+
+Forge snapshots the [configured provider](foundation.md#forge-settings) when it
+creates each agent record, including chats whose Codex threads start on first
+message. Existing records without a provider use OpenAI. Ollama records retain
+their endpoint and model through follow-ups, process restarts and reconciliation.
+The shared app-server keeps OpenAI account access while Ollama threads use a
+thread-scoped Responses provider without OpenAI credentials. Ollama turns do not
+sample or contribute to OpenAI costs and quotas. Provider errors follow existing
+execution and recovery paths without provider fallback.
+
+Ollama accepts **Ask** and **Full access**. Codex 0.164.0 requests a separate
+`codex-auto-review` model for **Approve for me**, outside Forge's single-model
+Ollama configuration. Forge rejects that selection until the owner chooses
+another permission mode. The configured model and server must support streamed
+stateless Responses with function calls. Verify the chosen deployment and model
+with chat, tool execution, restart, and ticket planning and implementation.
 
 Codex's curated process environment explicitly supplies
 `DOCKER_HOST=unix:///run/forge/docker.sock`, as do workspace terminals. CLI,

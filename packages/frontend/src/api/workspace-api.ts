@@ -40,7 +40,7 @@ export class WorkspaceApi implements IWorkspaceApi {
 				"docker-busy": "Docker cleanup is already running. Refresh to follow its progress.",
 				"docker-unavailable": "Docker is unavailable. Refresh and retry.",
 				"unsupported-settings":
-					"The selected model or thinking level is unavailable. Choose a supported setting and retry. Your draft is preserved.",
+					"The selected model or thinking level is unavailable, or the provider does not support the permission mode. Use Default for the model or thinking level, or choose an available permission mode. Your draft is preserved.",
 				"agent-capacity":
 					"All agent slots are occupied. Retry when an agent finishes. Your draft is preserved.",
 				"agent-not-found": "Chat no longer exists. Refresh the chat list.",

@@ -1,5 +1,10 @@
 import type { AgentView } from "@forge/contracts/agents";
-import { agentOptionsSchema, type AgentOptions, type AgentSettings } from "@forge/contracts/agents";
+import {
+	agentOptionsSchema,
+	resolveAgentSettings,
+	type AgentOptions,
+	type AgentSettings,
+} from "@forge/contracts/agents";
 import { updateTicketSchema, ticketSchema } from "@forge/contracts/tickets";
 import {
 	ticketWorkflowSchema,
@@ -212,7 +217,7 @@ export const TicketDetails = ({
 		return () => {
 			current = false;
 		};
-	}, [api, ticket.id, optionsRevision]);
+	}, [api, ticket.id, job?.phase, job?.plannerId, job?.implementerId, optionsRevision]);
 	const changeSettings = (value: AgentSettings) => {
 		if (archived || savingSettings) return;
 		setSettingsError("");
@@ -565,7 +570,11 @@ export const TicketDetails = ({
 			)}
 			{job?.state === "setup-failed" && (
 				<div className='ticket-recovery'>
-					<span>Agent setup failed.</span>
+					<span>
+						{options && !resolveAgentSettings(options, settings).supported
+							? "Some agent settings are unavailable. Use Default for the model or thinking level, or choose an available permission mode, then retry."
+							: "Agent setup failed."}
+					</span>
 					<button type='button' disabled={archived || acting} onClick={() => act("reconcile", {})}>
 						Retry setup
 					</button>

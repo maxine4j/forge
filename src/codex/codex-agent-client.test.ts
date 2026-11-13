@@ -89,6 +89,59 @@ const setup = (tracker?: { track: ReturnType<typeof vi.fn> }) => {
 	};
 };
 
+test("routes Ollama start and resume overrides, rejects mismatched reconciliation, and keeps OpenAI requests compatible", async () => {
+	const { client, rpc } = setup();
+	const path = "/data/worktrees/one";
+	const model = "local:latest";
+	const provider = { kind: "ollama", endpoint: "http://ollama.internal/v1", model } as const;
+	const thread = {
+		id: "codex-1",
+		cwd: path,
+		historyMode: "paginated",
+		status: { type: "idle" },
+		turns: [],
+		modelProvider: "forge_ollama",
+	};
+	const result = { thread, model, modelProvider: "forge_ollama" };
+	const runtimeOptions = {
+		cwd: path,
+		sandbox: "danger-full-access",
+		approvalPolicy: "on-request",
+		config: { features: { multi_agent: false } },
+	};
+	rpc.mockResolvedValueOnce(result);
+	const id = await client.start(path, provider);
+	const ollamaOptions = {
+		...runtimeOptions,
+		model,
+		modelProvider: "forge_ollama",
+		config: {
+			...runtimeOptions.config,
+			web_search: "disabled",
+			model_providers: {
+				forge_ollama: {
+					name: "Ollama",
+					base_url: provider.endpoint,
+					wire_api: "responses",
+					requires_openai_auth: false,
+				},
+			},
+		},
+	};
+	expect(rpc).toHaveBeenLastCalledWith("thread/start", ollamaOptions);
+	const resumeOptions = { ...ollamaOptions, threadId: id, excludeTurns: true };
+	rpc.mockResolvedValueOnce(result);
+	await client.resume(id, path, provider);
+	expect(rpc).toHaveBeenCalledWith("thread/resume", resumeOptions);
+	rpc.mockResolvedValueOnce({ ...result, modelProvider: "openai" });
+	expect(await client.reconcile(id, path, provider)).toEqual({ state: "unavailable" });
+	expect(rpc).toHaveBeenLastCalledWith("thread/resume", resumeOptions);
+	rpc.mockResolvedValueOnce(result);
+	expect(await client.reconcile(id, path, provider)).toEqual({ state: "inactive" });
+	await client.start(path, { kind: "openai" });
+	expect(rpc).toHaveBeenLastCalledWith("thread/start", runtimeOptions);
+});
+
 test.each([
 	[new CodexRpcError(-32600, "no rollout found for thread id codex-1"), "missing"],
 	[new CodexRpcError(-32600, "thread not loaded: codex-1"), "unavailable"],

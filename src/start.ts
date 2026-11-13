@@ -272,6 +272,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			const { defaultAgentModel, defaultAgentReasoningEffort } = settings.current();
 			return { defaultModel: defaultAgentModel, defaultReasoningEffort: defaultAgentReasoningEffort };
 		},
+		() => settings.inferenceProvider(),
 	);
 	lifecycle.register(() => agents.shutdown());
 	const boardStore = new BoardSettingsStore(database);

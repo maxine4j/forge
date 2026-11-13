@@ -4,6 +4,7 @@ import {
 	forgeSettingsSchema,
 	type ForgeSettings,
 	type GitIdentity,
+	type InferenceProvider,
 } from "@forge/contracts/settings";
 
 import type { IAccessService } from "../auth/access-service.ts";
@@ -47,6 +48,13 @@ export class SettingsService implements ISettingsService {
 
 	current(): ForgeSettings {
 		return { ...this.settings };
+	}
+
+	inferenceProvider(): InferenceProvider {
+		const { inferenceProvider, ollamaEndpoint, ollamaModel } = this.settings;
+		return inferenceProvider === "ollama"
+			? { kind: "ollama", endpoint: ollamaEndpoint!, model: ollamaModel! }
+			: { kind: "openai" };
 	}
 
 	gitIdentity(): GitIdentity | undefined {
