@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { costFixture, phaseFixtures } from "../dev/cost-fixture.ts";
+import { chooseDropdown } from "./dropdown-helpers.ts";
 
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const since = "2026-11-03T00:00:00.000Z";
@@ -95,9 +96,17 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	unavailable = false;
 	await page.getByRole("button", { name: "Retry" }).click();
 	await expect(page.getByRole("img", { name: "Daily token usage" })).toBeVisible();
+	const period = page.getByRole("combobox", { name: "Usage period", exact: true });
+	await period.press("Enter");
+	await period.press("Home");
+	await expect(period).toHaveText("Last 30 days");
+	await period.press("Enter");
+	await expect(period).toHaveText("Last 7 days");
+	await expect(period).toBeFocused();
+	await chooseDropdown(period, "30");
 	await expect(page.getByRole("img", { name: "codex weekly remaining allowance from 100% to 0%" })).toBeVisible();
 	await expect(page.getByText(/Estimated additional tickets:.*≈ 8/)).toBeVisible();
-	await page.getByLabel("Weekly bucket", { exact: true }).selectOption("other");
+	await chooseDropdown(page.getByRole("combobox", { name: "Weekly bucket", exact: true }), "other");
 	await expect(page.getByRole("img", { name: "other weekly remaining allowance from 100% to 0%" })).toBeVisible();
 	await page.getByText("Recorded timestamp and remaining allowance").click();
 	cost.weeklyBudget.buckets[1]!.additionalTickets = undefined;
@@ -116,7 +125,7 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	await expect(ticket).toContainText("1 turn missing pricing or usage");
 	await expect(page.getByRole("row", { name: /TASK-1 Cleanup/ })).toContainText("Archived");
 	await expect(ticket).toContainText("0.123%");
-	await page.getByLabel("Sort tickets").selectOption("ticket");
+	await chooseDropdown(page.getByRole("combobox", { name: "Sort tickets", exact: true }), "ticket");
 	await expect(page.getByRole("row").nth(1)).toContainText("TASK-1");
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 	await expect(ticket.getByRole("link")).toHaveAttribute("href", `/tasks?ticket=TASK-2`);

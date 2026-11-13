@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { Dropdown, DropdownOption } from "../dropdown.tsx";
 import { ChangedFilesTree } from "./changed-files-tree.tsx";
 
 type Line = CommitPatch["hunks"][number]["lines"][number];
@@ -277,13 +278,14 @@ export const CommitView = ({ root, api }: { root: string; api: IWorkspaceApi }) 
 						</strong>
 						<label>
 							Diff view{" "}
-							<select
+							<Dropdown
+								aria-label='Diff view'
 								value={split ? "split" : "unified"}
-								onChange={(e) => change("diff", e.target.value)}
+								onChange={(value) => change("diff", value)}
 							>
-								<option value='unified'>Unified</option>
-								<option value='split'>Split</option>
-							</select>
+								<DropdownOption value='unified'>Unified</DropdownOption>
+								<DropdownOption value='split'>Split</DropdownOption>
+							</Dropdown>
 						</label>
 						<label>
 							<input

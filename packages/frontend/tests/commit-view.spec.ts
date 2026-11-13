@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import { MockApi } from "../dev/mock-api.ts";
+import { chooseDropdown, expectDropdownValue } from "./dropdown-helpers.ts";
 
 const id = "123e4567-e89b-42d3-a456-426614174000";
 const sha = "a".repeat(40),
@@ -38,7 +39,7 @@ for (const mobile of [false, true])
 		await expect(panel).not.toHaveAttribute("open", "");
 		await page.getByRole("navigation", { name: "Changed files" }).getByRole("link").first().click();
 		await expect(panel).toHaveAttribute("open", "");
-		await page.getByRole("combobox", { name: "Diff view" }).selectOption("split");
+		await chooseDropdown(page.getByRole("combobox", { name: "Diff view" }), "split");
 		await expect(page).toHaveURL(/diff=split/u);
 		const rows = panel.locator(".commit-patch tbody tr");
 		await expect(rows.nth(1).locator("td").nth(1)).toHaveText("export const greeting = 'Hello';");
@@ -49,7 +50,7 @@ for (const mobile of [false, true])
 		await expect(page).toHaveURL(/ignoreWhitespace=true/u);
 		await expect(page.locator(".commit-file").nth(1)).toContainText("No textual changes");
 		await page.reload();
-		await expect(page.getByRole("combobox", { name: "Diff view" })).toHaveValue("split");
+		await expectDropdownValue(page.getByRole("combobox", { name: "Diff view" }), "split");
 		await expect(page.getByRole("checkbox", { name: "Hide whitespace" })).toBeChecked();
 		await expect(page.locator(".commit-patch").first()).toBeVisible();
 		await page.locator(".commit-file").last().scrollIntoViewIfNeeded();

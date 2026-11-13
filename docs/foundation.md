@@ -17,6 +17,36 @@ currency and a finite, nonnegative amount. Changes affect future turns. Cost API
 project-independent. See [cost settings](development.md#cost-settings) and
 [ticket cost contracts](tickets.md#ticket-cost).
 
+## Shared selection dropdowns
+
+All selection dropdowns use the shared frontend `Dropdown` and `DropdownSurface`
+primitives, browser auto popovers and CSS anchor positioning. The dark surfaces
+appear above dialogs, flip around their triggers, stay within the viewport and
+scroll long lists. Form triggers fill their fields; composer and toolbar triggers
+remain compact. Composer autocomplete and disclosure controls are separate.
+
+Single selects are controlled labelled comboboxes with listboxes exposing selected
+and disabled options. Options carry a value, display label, plain-text matching
+label, optional decorative icon and disabled state; declarative `DropdownOption`
+children provide the same data contract. Enter, Space and arrows open the popup.
+Arrows and Home/End move the active option without saving; Enter/Space commits.
+Case-insensitive prefix typeahead resets after 700 ms and repeated characters
+cycle matches. Matching labels can include newline-separated aliases, including
+epic keys and titles; currency matching uses codes independently of flag icons.
+The active option stays visible. Disabled options are skipped, and disabling a
+single-select control or enclosing fieldset dismisses its open popup. Refreshing
+options never commits a value, including retained unavailable model values.
+
+Single selection closes and restores trigger focus. Escape dismisses only the
+popup, including inside ticket dialogs. Tab dismisses and continues focus traversal
+from the trigger. Outside clicks dismiss without moving focus back to the trigger.
+The [repository multiselect](tickets.md#ticket-execution-settings) shares the
+surface and dismissal contract, retains checkboxes and chips, supports keyboard
+navigation and repository-name typeahead, and keeps the popup open for toggles,
+including while immediate saves temporarily disable its controls and then restore
+checkbox focus when the user has not moved elsewhere.
+See [epic membership](tickets.md#epics-and-grouped-backlog) for icon and save behavior.
+
 ## Account login and application access
 
 Retain the account setup experience from `codex-runner`, without remote-device

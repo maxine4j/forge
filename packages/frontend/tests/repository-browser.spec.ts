@@ -1,5 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
 
+import { chooseDropdown, expectDropdownValue } from "./dropdown-helpers.ts";
+
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const id = "123e4567-e89b-42d3-a456-426614174001";
 const date = "2026-11-02T00:00:00.000Z";
@@ -14,12 +16,12 @@ const entries = [
 const selectBranch = async (page: Page, branch: string): Promise<void> => {
 	const picker = await page.getByRole("combobox", { name: "Branch" }).elementHandle();
 	if (!picker) throw new Error("Branch picker unavailable");
-	const previous = await picker.inputValue();
-	await picker.selectOption(branch);
+	const previous = (await picker.textContent())?.trim();
+	await chooseDropdown(page.getByRole("combobox", { name: "Branch" }), branch);
 	// Branch views stay mounted. Wait for this specific control to retire before
 	// resolving another action against the newly visible branch.
 	if (previous !== branch) await picker.waitForElementState("hidden");
-	await expect(page.getByRole("combobox", { name: "Branch" })).toHaveValue(branch);
+	await expectDropdownValue(page.getByRole("combobox", { name: "Branch" }), branch);
 };
 
 test.beforeEach(async ({ page }) => {
@@ -268,7 +270,7 @@ test("sync from another branch identifies and refreshes the resolved target", as
 	await expect(sync.getByLabel("Target branch")).toHaveText("feature/navigation");
 	await sync.click();
 	await expect(page.getByRole("status")).toContainText("feature/navigation synced with upstream.");
-	await expect(page.getByRole("combobox", { name: "Branch" })).toHaveValue("main");
+	await expectDropdownValue(page.getByRole("combobox", { name: "Branch" }), "main");
 	await selectBranch(page, "feature/navigation");
 	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("feature/navigation: updated");
 });
@@ -415,7 +417,7 @@ test("code URLs restore branches, directories, files and history through reload 
 	expect(new URL(fileUrl).searchParams.get("file")).toBe("src/index.ts");
 	await page.reload();
 	await expect(page.getByRole("textbox", { name: "File editor" })).toContainText("export const value = 1;");
-	await expect(page.getByRole("combobox", { name: "Branch" })).toHaveValue("feature/navigation");
+	await expectDropdownValue(page.getByRole("combobox", { name: "Branch" }), "feature/navigation");
 	await page.goBack();
 	await expect(page).toHaveURL(directoryUrl);
 	await expect(page.getByRole("table", { name: "Repository files" })).toBeVisible();

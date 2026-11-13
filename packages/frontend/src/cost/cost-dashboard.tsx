@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { Dropdown, DropdownOption } from "../dropdown.tsx";
 import { CostMetrics, Money, PhaseCosts, WeeklyUsage, formatPercent } from "./cost-metrics.tsx";
 import { WeeklyBudgetChart } from "./weekly-budget.tsx";
 
@@ -37,14 +38,10 @@ const UsageCharts = ({ cost }: { cost: Costs }) => {
 			<section className='cost-card'>
 				<header className='cost-heading'>
 					<h3>Token usage over time</h3>
-					<select
-						aria-label='Usage period'
-						value={range}
-						onChange={(event) => setRange(Number(event.target.value))}
-					>
-						<option value={7}>Last 7 days</option>
-						<option value={30}>Last 30 days</option>
-					</select>
+					<Dropdown aria-label='Usage period' value={range} onChange={(value) => setRange(Number(value))}>
+						<DropdownOption value={7}>Last 7 days</DropdownOption>
+						<DropdownOption value={30}>Last 30 days</DropdownOption>
+					</Dropdown>
 				</header>
 				{days.every((entry) => tokens(entry) === 0) ? (
 					<p className='cost-muted'>No tokens recorded in this period.</p>
@@ -197,13 +194,13 @@ const TicketCosts = ({ cost }: { cost: Costs }) => {
 			<h3>Usage and cost by ticket</h3>
 			<label>
 				Sort tickets
-				<select value={sort} onChange={(event) => setSort(event.target.value)}>
-					<option value='ticket'>Ticket</option>
-					<option value='tokens'>Tokens</option>
-					<option value='api'>Estimated API cost</option>
-					<option value='weekly'>Weekly limit spent</option>
-					<option value='effective'>Effective cost</option>
-				</select>
+				<Dropdown aria-label='Sort tickets' value={sort} onChange={(value) => setSort(value)}>
+					<DropdownOption value='ticket'>Ticket</DropdownOption>
+					<DropdownOption value='tokens'>Tokens</DropdownOption>
+					<DropdownOption value='api'>Estimated API cost</DropdownOption>
+					<DropdownOption value='weekly'>Weekly limit spent</DropdownOption>
+					<DropdownOption value='effective'>Effective cost</DropdownOption>
+				</Dropdown>
 			</label>
 			{!tickets.length ? (
 				<p>No tickets yet.</p>

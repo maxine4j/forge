@@ -5,6 +5,7 @@ import type { Locator, Page } from "@playwright/test";
 
 import { costFixture, phaseFixtures } from "../dev/cost-fixture.ts";
 import { historyFixture } from "../dev/history-fixture.ts";
+import { chooseDropdown, expectDropdownValue } from "./dropdown-helpers.ts";
 
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const createdAt = "2026-11-03T00:00:00.000Z";
@@ -642,7 +643,7 @@ for (const view of ["board", "backlog"]) {
 		await expect(dialog.getByRole("button", { name: /^Edit title:/ })).toHaveCount(0);
 		await confirmReturn(page);
 		await dialog.getByRole("button", { name: /^Edit title:/ }).click();
-		await expect(dialog.getByRole("button", { name: "Add epic" })).toBeEnabled();
+		await expect(dialog.getByRole("combobox", { name: "Add epic" })).toBeEnabled();
 		await dialog.getByLabel("Title", { exact: true }).fill("Returned scope");
 		await dialog.getByLabel("Title", { exact: true }).press("Enter");
 		await expect(dialog.getByRole("button", { name: /^Edit title:/ })).toHaveText("Returned scope");
@@ -866,7 +867,7 @@ test("epic details edit with retry, restore history, link Done children and pres
 	await expect(editDescription).toHaveText("Updated epic scope");
 	await dialog.getByRole("button", { name: "Create ticket", exact: true }).click();
 	const editor = page.getByRole("dialog", { name: "Create ticket", exact: true });
-	await expect(editor.getByLabel("Epic", { exact: true })).toHaveValue("EPIC-1");
+	await expectDropdownValue(editor.getByRole("combobox", { name: "Epic", exact: true }), "EPIC-1");
 	await editor.getByLabel("Title", { exact: true }).fill("Epic child");
 	await editor.getByRole("button", { name: "Create", exact: true }).click();
 	await expect(editor).toHaveCount(0);
@@ -913,18 +914,15 @@ test("epic breadcrumb assigns, changes and removes a draft parent and links to t
 	] as const) {
 		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
-		await dialog.getByRole("button", { name: action, exact: true }).click();
-		await dialog
-			.getByRole("group", { name: "Choose epic" })
-			.getByRole("button", { name: choice, exact: true })
-			.click();
+		await dialog.getByRole("combobox", { name: action, exact: true }).click();
+		await dialog.getByRole("listbox", { name: action }).getByRole("option", { name: choice, exact: true }).click();
 		await expect.poll(() => f.tickets()[0]!.epicId).toBe(epicId);
 		await dialog.getByRole("button", { name: "Close ticket" }).click();
 	}
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 	await dragToReady(page);
-	await expect(dialog.getByRole("button", { name: "Change epic" })).toHaveCount(0);
+	await expect(dialog.getByRole("combobox", { name: "Change epic" })).toHaveCount(0);
 	await expect(page.locator("body")).toHaveJSProperty("scrollWidth", 390);
 	await dialog.getByRole("button", { name: "EPIC-1", exact: true }).click();
 	await expect(page.getByRole("dialog", { name: "EPIC-1", exact: true })).toBeVisible();
@@ -952,7 +950,7 @@ test("epic disclosure works without browser storage and section creation presele
 	);
 	await header.getByRole("button", { name: "Create ticket", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
-	await expect(dialog.getByLabel("Epic", { exact: true })).toHaveValue("EPIC-1");
+	await expectDropdownValue(dialog.getByRole("combobox", { name: "Epic", exact: true }), "EPIC-1");
 	await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 	await expect(header.getByRole("button", { name: "Expand EPIC-1", exact: true })).toHaveAttribute(
 		"aria-expanded",
@@ -962,9 +960,140 @@ test("epic disclosure works without browser storage and section creation presele
 		.getByRole("region", { name: "No epic", exact: true })
 		.getByRole("button", { name: "Create ticket", exact: true });
 	await createUnassigned.click();
-	await expect(dialog.getByLabel("Epic", { exact: true })).toHaveValue("");
+	await expectDropdownValue(dialog.getByRole("combobox", { name: "Epic", exact: true }), "");
 	await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 	await expect(createUnassigned).toBeFocused();
+});
+
+for (const width of [1280, 390]) {
+	test(`epic dropdown icons, keyboard navigation and dismissal at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 844 });
+		const f = await setup(page);
+		f.epics.push(
+			...Array.from({ length: 24 }, (_, index) => ({
+				id: `EPIC-${index + 1}`,
+				title:
+					index === 0
+						? "Alpha"
+						: index === 1
+							? "Alpine"
+							: `Milestone ${index + 1} ${"long title ".repeat(8)}`,
+				description: "",
+				createdAt,
+			})),
+		);
+		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+		await page.getByRole("button", { name: "Create ticket", exact: true }).first().click();
+		const dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
+		const epic = dialog.getByRole("combobox", { name: "Epic", exact: true });
+		const list = dialog.getByRole("listbox", { name: "Epic", exact: true });
+		await expect(epic).toHaveText("No epic");
+		await expect(epic.locator("svg")).toHaveCount(0);
+		await epic.press("Enter");
+		await expect(list.getByRole("option")).toHaveCount(25);
+		await expect(
+			list.getByRole("option", { name: "EPIC-1 · Alpha", exact: true }).locator("svg[aria-hidden=true]"),
+		).toHaveCount(1);
+		await expect(list.getByRole("option", { name: "No epic", exact: true }).locator("svg")).toHaveCount(0);
+		const expectActive = async (name: string) => {
+			const option = list.getByRole("option", { name, exact: true });
+			await expect(epic).toHaveAttribute("aria-activedescendant", (await option.getAttribute("id"))!);
+			await expect(option).toBeInViewport();
+		};
+		await epic.press("a");
+		await expectActive("EPIC-1 · Alpha");
+		await epic.press("a");
+		await expectActive("EPIC-2 · Alpine");
+		await page.clock.install();
+		await page.clock.fastForward(701);
+		await epic.pressSequentially("ALP");
+		await expectActive("EPIC-1 · Alpha");
+		await page.clock.fastForward(701);
+		await epic.pressSequentially("EPIC-2");
+		await expectActive("EPIC-2 · Alpine");
+		await expect(epic).toHaveText("No epic");
+		await epic.press("Space");
+		await expect(list).toBeHidden();
+		await expect(epic).toBeFocused();
+		await expect(epic).toHaveText("EPIC-2 · Alpine");
+		await expect(epic.locator("svg")).toHaveCount(1);
+		await epic.click();
+		await epic.press("End");
+		await expect(list.getByRole("option").last()).toBeInViewport();
+		const box = (await list.boundingBox())!;
+		expect(box.x).toBeGreaterThanOrEqual(0);
+		expect(box.x + box.width).toBeLessThanOrEqual(width);
+		await page.screenshot({ path: `../../artifacts/forge-browser/dropdown-${width}.png` });
+		await epic.press("Home");
+		await expectActive("No epic");
+		await epic.press("Escape");
+		await expect(list).toBeHidden();
+		await expect(dialog).toBeVisible();
+		await expect(epic).toBeFocused();
+		await expect(epic).toHaveText("EPIC-2 · Alpine");
+		await epic.press("ArrowDown");
+		await dialog.getByRole("textbox", { name: "Title", exact: true }).click();
+		await expect(list).toBeHidden();
+		await expect(dialog.getByRole("textbox", { name: "Title", exact: true })).toBeFocused();
+		await epic.press("ArrowUp");
+		await epic.press("Tab");
+		await expect(list).toBeHidden();
+		await expect(epic).not.toBeFocused();
+		await chooseDropdown(epic, "");
+		await expect(epic).toHaveText("No epic");
+		await epic.click();
+		await epic.evaluate((element) => {
+			const fieldset = document.createElement("fieldset");
+			element.parentElement!.before(fieldset);
+			fieldset.append(element.parentElement!);
+			fieldset.disabled = true;
+		});
+		await expect(epic).toBeDisabled();
+		await expect(list).toBeHidden();
+		await expect(dialog).toBeVisible();
+	});
+}
+
+test("dropdowns retain unavailable models, skip disabled permissions and do not save on refresh or navigation", async ({
+	page,
+}) => {
+	const f = await setup(page);
+	f.tickets()[0]!.executionSettings = { model: "retired-model", permissions: "approve-for-me" };
+	await page.route("**/api/tickets/*/model-options", (route) =>
+		route.fulfill({ json: { models: [], skills: [], supportsAutoReview: false } }),
+	);
+	let updates = 0;
+	page.on("request", (request) => {
+		if (request.method() === "PATCH") updates++;
+	});
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	const model = dialog.getByRole("combobox", { name: "Model", exact: true });
+	await expect(model).toHaveText("retired-model");
+	const permissions = dialog.getByRole("combobox", { name: "Permissions", exact: true });
+	await permissions.press("Space");
+	const list = dialog.getByRole("listbox", { name: "Permissions", exact: true });
+	const unavailable = list.getByRole("option", { name: "Approve for me (unavailable on Ollama)", exact: true });
+	await expect(unavailable).toHaveAttribute("aria-disabled", "true");
+	await unavailable.dispatchEvent("click");
+	await expect(list).toBeVisible();
+	await permissions.press("Home");
+	await permissions.press("ArrowDown");
+	await expect(permissions).toHaveAttribute(
+		"aria-activedescendant",
+		(await list.getByRole("option", { name: "Full access", exact: true }).getAttribute("id"))!,
+	);
+	await page.waitForTimeout(1100);
+	expect(updates).toBe(0);
+	await permissions.press("Escape");
+	await expect(dialog).toBeVisible();
+	await expect(permissions).toBeFocused();
+	await permissions.press("Enter");
+	await permissions.press("End");
+	await permissions.press("Enter");
+	await expect.poll(() => f.tickets()[0]!.executionSettings?.permissions).toBe("full-access");
+	expect(updates).toBe(1);
+	await expect(permissions).toBeFocused();
 });
 
 test("inline ticket title saves independently and supports keyboard and button discard", async ({ page }) => {
@@ -978,7 +1107,7 @@ test("inline ticket title saves independently and supports keyboard and button d
 	const title = dialog.getByRole("textbox", { name: "Title", exact: true });
 	await expect(edit).toHaveText("First task");
 	await expect(title).toHaveCount(0);
-	const model = settings.getByLabel("Model", { exact: true });
+	const model = settings.getByRole("combobox", { name: "Model", exact: true });
 	const repositories = settings.getByRole("button", { name: "Repositories", exact: true });
 	await expect(model).toBeVisible();
 	await expect(repositories).toBeVisible();
@@ -1266,7 +1395,9 @@ for (const width of [1280, 390]) {
 	test(`global board repository multiselect layout and ordered references at ${width}px`, async ({ page }) => {
 		await page.setViewportSize({ width, height: 844 });
 		const assertRepositoryLayout = async (dialog: Locator) => {
-			const checkboxes = dialog.getByRole("checkbox");
+			const checkboxes = dialog
+				.getByRole("group", { name: "Select repositories", exact: true })
+				.getByRole("checkbox");
 			await expect(checkboxes).toHaveCount(2);
 			for (const checkbox of await checkboxes.all()) {
 				await expect(checkbox).toBeInViewport();
@@ -1302,7 +1433,17 @@ for (const width of [1280, 390]) {
 		const first = "123e4567-e89b-42d3-a456-426614174001";
 		await assertRepositoryLayout(dialog);
 		const forge = dialog.getByRole("checkbox", { name: "Forge", exact: true });
-		await forge.focus();
+		const repositories = dialog.getByRole("button", { name: "Repositories", exact: true });
+		await repositories.press("r");
+		await expect(dialog.getByRole("checkbox", { name: "Reference repo" })).toBeFocused();
+		await expect(dialog.getByRole("checkbox", { name: "Reference repo" })).not.toBeChecked();
+		await page.keyboard.press("Home");
+		await expect(forge).toBeFocused();
+		await page.keyboard.press("Escape");
+		await expect(repositories).toBeFocused();
+		await expect(dialog).toBeVisible();
+		await repositories.press("ArrowDown");
+		await expect(forge).toBeFocused();
 		await page.keyboard.press("Space");
 		await expect(forge).toBeChecked();
 		await dialog.getByRole("checkbox", { name: "Reference repo" }).check();
@@ -1328,9 +1469,11 @@ for (const width of [1280, 390]) {
 		await details.getByRole("button", { name: "Clear repositories" }).click();
 		await expect(details.getByRole("checkbox", { name: "Reference repo" })).not.toBeChecked();
 		const editForge = details.getByRole("checkbox", { name: "Forge", exact: true });
+		await expect(editForge).toBeEnabled();
 		await editForge.focus();
 		await editForge.press("Space");
 		await expect(editForge).toBeChecked();
+		await expect(editForge).toBeFocused();
 		await details.getByRole("checkbox", { name: "Reference repo" }).check();
 		await page.keyboard.press("Escape");
 		await expect
@@ -1380,14 +1523,14 @@ test("Backlog execution settings save before moving to Ready and survive reopeni
 	await expect(recommendations).toBeChecked();
 	await skip.check();
 	await expect(skip).toBeEnabled();
-	await panel.getByRole("combobox", { name: "Model", exact: true }).selectOption("test-model");
-	await panel.getByRole("combobox", { name: "Thinking level", exact: true }).selectOption("high");
-	await panel.getByRole("combobox", { name: "Permissions", exact: true }).selectOption("approve-for-me");
+	await chooseDropdown(panel.getByRole("combobox", { name: "Model", exact: true }), "test-model");
+	await chooseDropdown(panel.getByRole("combobox", { name: "Thinking level", exact: true }), "high");
+	await chooseDropdown(panel.getByRole("combobox", { name: "Permissions", exact: true }), "approve-for-me");
 	await dragToReady(page);
 	await panel.getByRole("button", { name: "Close ticket" }).click();
 	await open.click();
-	await expect(panel.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("test-model");
-	await expect(panel.getByRole("combobox", { name: "Thinking level", exact: true })).toHaveValue("high");
+	await expectDropdownValue(panel.getByRole("combobox", { name: "Model", exact: true }), "test-model");
+	await expectDropdownValue(panel.getByRole("combobox", { name: "Thinking level", exact: true }), "high");
 	await expect(skip).toBeChecked();
 	await expect(recommendations).toBeChecked();
 });
@@ -1397,17 +1540,17 @@ test("ticket Details and chat share settings and support skill and file completi
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const panel = page.getByRole("dialog");
 	await expect(panel.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
-	await panel.getByRole("combobox", { name: "Thinking level", exact: true }).selectOption("high");
+	await chooseDropdown(panel.getByRole("combobox", { name: "Thinking level", exact: true }), "high");
 	await panel.getByRole("tab", { name: "Details", exact: true }).click();
 	await panel.getByRole("checkbox", { name: "Skip planning", exact: true }).check();
 	await expect(panel.getByRole("checkbox", { name: "Skip planning", exact: true })).toBeEnabled();
 	await panel.getByRole("checkbox", { name: "Accept recommendations", exact: true }).check();
 	await expect(panel.getByRole("checkbox", { name: "Accept recommendations", exact: true })).toBeEnabled();
-	await expect(panel.getByRole("combobox", { name: "Thinking level", exact: true })).toHaveValue("high");
-	await panel.getByRole("combobox", { name: "Model", exact: true }).selectOption("other-model");
+	await expectDropdownValue(panel.getByRole("combobox", { name: "Thinking level", exact: true }), "high");
+	await chooseDropdown(panel.getByRole("combobox", { name: "Model", exact: true }), "other-model");
 	await panel.getByRole("tab", { name: "Chat", exact: true }).click();
-	await expect(panel.getByRole("combobox", { name: "Thinking level", exact: true })).toHaveValue("");
-	await panel.getByRole("combobox", { name: "Permissions", exact: true }).selectOption("full-access");
+	await expectDropdownValue(panel.getByRole("combobox", { name: "Thinking level", exact: true }), "");
+	await chooseDropdown(panel.getByRole("combobox", { name: "Permissions", exact: true }), "full-access");
 	await expect(panel.getByRole("combobox", { name: "Permissions", exact: true })).toBeEnabled();
 	const message = panel.getByRole("textbox", { name: "Message", exact: true });
 	await message.fill("Use $rev");
@@ -1425,7 +1568,7 @@ test("ticket Details and chat share settings and support skill and file completi
 		await pendingSave;
 		await route.fulfill({ status: 400, json: { error: "unsupported-settings" } });
 	});
-	await panel.getByRole("combobox", { name: "Model", exact: true }).selectOption("test-model");
+	await chooseDropdown(panel.getByRole("combobox", { name: "Model", exact: true }), "test-model");
 	await expect(panel.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
 	releaseSave();
 	await expect(panel.getByRole("alert")).toContainText("selected model or thinking level is unavailable");

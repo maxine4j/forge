@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { Dropdown, DropdownOption } from "../dropdown.tsx";
 
 const active = (run: PipelineRun) => ["pending", "running"].includes(run.state);
 const eventDefault = (events: string[]) =>
@@ -119,50 +120,50 @@ export function Pipelines({ projectId, api }: { projectId: string; api: IWorkspa
 			<div className='pipeline-controls'>
 				<label>
 					Branch{" "}
-					<select
+					<Dropdown
+						aria-label='Branch'
 						value={branch}
-						onChange={(e) => {
+						onChange={(value) => {
 							setDiscovery(undefined);
 							setPath("");
 							setEvent("");
 							setError("");
-							setBranch(e.target.value);
+							setBranch(value);
 						}}
 					>
-						<option value='main'>main</option>
+						<DropdownOption value='main'>main</DropdownOption>
 						{branches
 							.filter((b) => b !== "main")
 							.map((b) => (
-								<option key={b}>{b}</option>
+								<DropdownOption key={b}>{b}</DropdownOption>
 							))}
-					</select>
+					</Dropdown>
 				</label>
 				<label>
 					Pipeline{" "}
-					<select
+					<Dropdown
+						aria-label='Pipeline'
 						value={path}
-						onChange={(e) => {
-							setPath(e.target.value);
-							setEvent(
-								eventDefault(discovery?.workflows.find((w) => w.path === e.target.value)?.events ?? []),
-							);
+						onChange={(value) => {
+							setPath(value);
+							setEvent(eventDefault(discovery?.workflows.find((w) => w.path === value)?.events ?? []));
 						}}
 					>
-						<option value=''>Select pipeline</option>
+						<DropdownOption value=''>Select pipeline</DropdownOption>
 						{discovery?.workflows.map((w) => (
-							<option key={w.path} value={w.path}>
+							<DropdownOption key={w.path} value={w.path}>
 								{w.name} ({w.path.split("/").at(-1)})
-							</option>
+							</DropdownOption>
 						))}
-					</select>
+					</Dropdown>
 				</label>
 				<label>
 					Event{" "}
-					<select value={event} onChange={(e) => setEvent(e.target.value)}>
+					<Dropdown aria-label='Event' value={event} onChange={(value) => setEvent(value)}>
 						{workflow?.events.map((value) => (
-							<option key={value}>{value}</option>
+							<DropdownOption key={value}>{value}</DropdownOption>
 						))}
-					</select>
+					</Dropdown>
 				</label>
 				<button
 					disabled={

@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { chooseDropdown, expectDropdownValue } from "./dropdown-helpers.ts";
+
 test("Config persists agent defaults, instructions and Git identity and can clear defaults offline", async ({
 	page,
 }) => {
@@ -57,12 +59,19 @@ test("Config persists agent defaults, instructions and Git identity and can clea
 	await expect(page.getByRole("alert")).toHaveText("Provide both a Git name and email, or leave both blank.");
 	expect(updates).toEqual([]);
 	await page.getByLabel("Git email").fill("forge@example.com");
-	const currency = page.getByRole("group", { name: "Cost tracking" }).getByLabel("Local currency");
-	await expect(currency.locator('option[value="EUR"]')).toHaveText("🇪🇺 EUR");
-	await currency.selectOption("EUR");
+	const currency = page
+		.getByRole("group", { name: "Cost tracking" })
+		.getByRole("combobox", { name: "Local currency", exact: true });
+	await currency.click();
+	await expect(page.getByRole("option", { name: "EUR", exact: true }).locator(".dropdown-icon")).toHaveText("🇪🇺");
+	await currency.press("Escape");
+	await currency.pressSequentially("eur");
+	await expect(currency).toHaveText("🇦🇺AUD");
+	await currency.press("Enter");
+	await expect(currency).toHaveText("🇪🇺EUR");
 	await page.getByLabel("Monthly plan price").fill("45.5");
-	await page.getByLabel("Default model").selectOption("model-a");
-	await page.getByLabel("Default thinking").selectOption("high");
+	await chooseDropdown(page.getByRole("combobox", { name: "Default model", exact: true }), "model-a");
+	await chooseDropdown(page.getByRole("combobox", { name: "Default thinking", exact: true }), "high");
 	await page.getByRole("button", { name: "Save settings" }).click();
 	await expect(page.getByRole("status")).toHaveText("Settings saved.");
 	expect(updates).toEqual([
@@ -82,16 +91,16 @@ test("Config persists agent defaults, instructions and Git identity and can clea
 	await expect(page.getByLabel("Planning instructions")).toHaveValue(settings.planningInstructions);
 	await expect(page.getByLabel("Implementation instructions")).toHaveValue(settings.implementationInstructions);
 	await expect(page.getByLabel("Git name")).toHaveValue(settings.gitName);
-	await expect(page.getByLabel("Local currency")).toHaveValue("EUR");
+	await expectDropdownValue(page.getByRole("combobox", { name: "Local currency", exact: true }), "EUR");
 	await expect(page.getByLabel("Monthly plan price")).toHaveValue("45.5");
 	await expect(page.getByLabel("Git email")).toHaveValue(settings.gitEmail);
-	await expect(page.getByLabel("Default model")).toHaveValue("model-a");
-	await expect(page.getByLabel("Default thinking")).toHaveValue("high");
+	await expectDropdownValue(page.getByRole("combobox", { name: "Default model", exact: true }), "model-a");
+	await expectDropdownValue(page.getByRole("combobox", { name: "Default thinking", exact: true }), "high");
 	catalogAvailable = false;
 	await page.reload();
 	await expect(page.getByRole("button", { name: "Retry loading models" })).toBeVisible();
-	await page.getByLabel("Default thinking").selectOption("");
-	await page.getByLabel("Default model").selectOption("");
+	await chooseDropdown(page.getByRole("combobox", { name: "Default thinking", exact: true }), "");
+	await chooseDropdown(page.getByRole("combobox", { name: "Default model", exact: true }), "");
 	await page.getByRole("button", { name: "Save settings" }).click();
 	await expect(page.getByRole("status")).toHaveText("Settings saved.");
 	expect(updates.at(-1)).not.toHaveProperty("defaultAgentModel");
@@ -137,12 +146,12 @@ test("Config switches providers while preserving accounts and both providers' se
 	await page.goto("/config");
 	const upstream = page.getByRole("group", { name: "Version control upstream" });
 	const inference = page.getByRole("group", { name: "Inference provider" });
-	const provider = inference.getByLabel("Provider for new agents");
+	const provider = inference.getByRole("combobox", { name: "Provider for new agents", exact: true });
 	const save = page.getByRole("button", { name: "Save settings" });
 	await expect(
 		upstream.getByRole("region", { name: "GitHub" }).getByRole("button", { name: "Sign in" }),
 	).toBeVisible();
-	await provider.selectOption("ollama");
+	await chooseDropdown(provider, "ollama");
 	await save.click();
 	await expect(page.getByRole("alert")).toHaveText("Provide an Ollama endpoint and model tag.");
 	await inference.getByLabel("Ollama endpoint").fill("http://ollama.internal:11434/v1");
@@ -153,13 +162,13 @@ test("Config switches providers while preserving accounts and both providers' se
 	expect(updates).toHaveLength(0);
 	await save.click();
 	await expect(page.getByRole("status")).toHaveText("Settings saved.");
-	await provider.selectOption("openai");
+	await chooseDropdown(provider, "openai");
 	await save.click();
 	await expect(page.getByRole("status")).toHaveText("Settings saved.");
 	await page.reload();
-	await expect(provider).toHaveValue("openai");
+	await expectDropdownValue(provider, "openai");
 	await expect(inference.getByLabel("Ollama model")).toHaveValue("local-model:latest");
-	await provider.selectOption("ollama");
+	await chooseDropdown(provider, "ollama");
 	await save.click();
 	await expect(page.getByRole("status")).toHaveText("Settings saved.");
 	expect(updates).toHaveLength(3);

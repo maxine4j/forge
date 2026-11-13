@@ -2,6 +2,8 @@ import type { PipelineRun } from "@forge/contracts/pipelines";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
+import { chooseDropdown, expectDropdownValue } from "./dropdown-helpers.ts";
+
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const createdAt = "2026-11-12T00:00:00.000Z";
 async function setup(page: Page) {
@@ -44,7 +46,15 @@ async function setup(page: Page) {
 									? [{ ...source, messages: ["Unsupported runner"] }]
 									: branch === "feature"
 										? [{ ...source, name: "Feature", events: ["pull_request", "push"] }]
-										: [source],
+										: [
+												source,
+												{
+													...source,
+													path: ".github/workflows/review.yml",
+													name: "Review",
+													events: ["pull_request"],
+												},
+											],
 					},
 				});
 			}
@@ -115,10 +125,14 @@ test("branch-dependent workflows, default events, submission, live states, histo
 }) => {
 	const state = await setup(page);
 	await page.goto(`/repos/${projectId}/pipelines`);
-	await expect(page.getByRole("combobox", { name: "Event", exact: true })).toHaveValue("workflow_dispatch");
-	await page.getByRole("combobox", { name: "Branch", exact: true }).selectOption("feature");
-	await expect(page.getByRole("combobox", { name: "Event", exact: true })).toHaveValue("push");
-	await page.getByRole("combobox", { name: "Event", exact: true }).selectOption("pull_request");
+	await expectDropdownValue(page.getByRole("combobox", { name: "Event", exact: true }), "workflow_dispatch");
+	await chooseDropdown(page.getByRole("combobox", { name: "Pipeline", exact: true }), ".github/workflows/review.yml");
+	await expectDropdownValue(page.getByRole("combobox", { name: "Event", exact: true }), "pull_request");
+	await chooseDropdown(page.getByRole("combobox", { name: "Pipeline", exact: true }), ".github/workflows/ci.yml");
+	await expectDropdownValue(page.getByRole("combobox", { name: "Event", exact: true }), "workflow_dispatch");
+	await chooseDropdown(page.getByRole("combobox", { name: "Branch", exact: true }), "feature");
+	await expectDropdownValue(page.getByRole("combobox", { name: "Event", exact: true }), "push");
+	await chooseDropdown(page.getByRole("combobox", { name: "Event", exact: true }), "pull_request");
 	await page.getByRole("button", { name: "Run", exact: true }).click();
 	await expect(page.getByRole("region", { name: "Selected pipeline run" })).toContainText("Check source");
 	state.complete();
@@ -139,12 +153,12 @@ test("branch-dependent workflows, default events, submission, live states, histo
 test("empty, invalid and unavailable Docker states", async ({ page }) => {
 	const state = await setup(page);
 	await page.goto(`/repos/${projectId}/pipelines`);
-	await page.getByRole("combobox", { name: "Branch", exact: true }).selectOption("empty");
+	await chooseDropdown(page.getByRole("combobox", { name: "Branch", exact: true }), "empty");
 	await expect(page.getByText("No workflows found", { exact: false })).toBeVisible();
-	await page.getByRole("combobox", { name: "Branch", exact: true }).selectOption("invalid");
+	await chooseDropdown(page.getByRole("combobox", { name: "Branch", exact: true }), "invalid");
 	await expect(page.getByText("Unsupported runner")).toBeVisible();
 	await expect(page.getByRole("button", { name: "Run", exact: true })).toBeDisabled();
-	await page.getByRole("combobox", { name: "Branch", exact: true }).selectOption("main");
+	await chooseDropdown(page.getByRole("combobox", { name: "Branch", exact: true }), "main");
 	await expect(page.getByRole("button", { name: "Run", exact: true })).toBeEnabled();
 	state.fail();
 	await page.getByRole("button", { name: "Run", exact: true }).click();

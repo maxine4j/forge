@@ -1,7 +1,8 @@
 import { projectsSchema, type Project } from "@forge/contracts";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { DropdownSurface } from "../dropdown.tsx";
 
 export const RepositorySelection = ({
 	api,
@@ -17,7 +18,6 @@ export const RepositorySelection = ({
 	const [repositories, setRepositories] = useState<Project[]>();
 	const [error, setError] = useState("");
 	const [revision, retry] = useState(0);
-	const pickerId = useId();
 	useEffect(() => {
 		let active = true;
 		void api.read("projects", projectsSchema).then(
@@ -38,23 +38,6 @@ export const RepositorySelection = ({
 	return (
 		<fieldset disabled={disabled} className='ticket-repositories'>
 			<legend>Repositories</legend>
-			<button
-				type='button'
-				className='ticket-repositories-trigger'
-				aria-label='Repositories'
-				popoverTarget={pickerId}
-			>
-				<span className='ticket-repository-values'>
-					{value.length ? (
-						value.map((id) => (
-							<span key={id}>{repositories?.find((repo) => repo.id === id)?.name ?? id}</span>
-						))
-					) : (
-						<span className='ticket-repository-placeholder'>Select repositories</span>
-					)}
-				</span>
-				<span className='ticket-chevron' aria-hidden='true' />
-			</button>
 			{error && (
 				<p role='alert'>
 					{error}{" "}
@@ -64,37 +47,55 @@ export const RepositorySelection = ({
 				</p>
 			)}
 			{!repositories && !error && <p role='status'>Loading repositories…</p>}
-			<div
-				id={pickerId}
-				popover='auto'
-				className='ticket-picker ticket-repository-picker'
-				role='group'
-				aria-label='Select repositories'
+			<DropdownSurface
+				label='Repositories'
+				popupLabel='Select repositories'
+				dismissWhenDisabled={false}
+				disabled={disabled}
+				className='ticket-repositories-trigger'
+				trigger={
+					<span className='ticket-repository-values'>
+						{value.length ? (
+							value.map((id) => (
+								<span key={id}>{repositories?.find((repo) => repo.id === id)?.name ?? id}</span>
+							))
+						) : (
+							<span className='ticket-repository-placeholder'>Select repositories</span>
+						)}
+					</span>
+				}
 			>
-				{repositories?.map((repo) => (
-					<label key={repo.id} className='ticket-repository-option'>
-						<input
-							type='checkbox'
-							checked={value.includes(repo.id)}
-							onChange={(event) =>
-								change(
-									event.target.checked ? [...value, repo.id] : value.filter((id) => id !== repo.id),
-								)
-							}
-						/>
-						<span>
-							{repo.name}
-							{repo.status !== "ready" && <small> · {repo.status}</small>}
-						</span>
-					</label>
-				))}
-				{repositories?.length === 0 && <p>No repositories available.</p>}
-				{value.length > 0 && (
-					<button type='button' className='ticket-picker-clear' onClick={() => change([])}>
-						Clear repositories
-					</button>
+				{() => (
+					<>
+						{repositories?.map((repo) => (
+							<label key={repo.id} className='dropdown-option ticket-repository-option'>
+								<input
+									type='checkbox'
+									disabled={disabled}
+									checked={value.includes(repo.id)}
+									onChange={(event) =>
+										change(
+											event.target.checked
+												? [...value, repo.id]
+												: value.filter((id) => id !== repo.id),
+										)
+									}
+								/>
+								<span>
+									{repo.name}
+									{repo.status !== "ready" && <small> · {repo.status}</small>}
+								</span>
+							</label>
+						))}
+						{repositories?.length === 0 && <p>No repositories available.</p>}
+						{value.length > 0 && (
+							<button type='button' className='ticket-picker-clear' onClick={() => change([])}>
+								Clear repositories
+							</button>
+						)}
+					</>
 				)}
-			</div>
+			</DropdownSurface>
 		</fieldset>
 	);
 };

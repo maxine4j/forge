@@ -320,6 +320,12 @@ creation offers an optional Epic selector. In ticket details, the header shows a
 linked breadcrumb for an assigned epic. Backlog drafts can add, change or remove
 their parent there and save it immediately. Create ticket in an epic header or its details
 preselects that epic. Create ticket in No epic starts without an epic selected.
+Creation and details use the [shared dropdown interaction contract](foundation.md#shared-selection-dropdowns).
+Epic options show the existing decorative epic icon and key/title, and creation's
+selected epic retains its icon. No epic is text-only. Missing selected epic data
+falls back to its key. Details retains the linked breadcrumb, Add/Change trigger
+and Remove epic action; each membership selection saves immediately. Typeahead
+matches both keys and titles without adding a visible search field.
 See [persistence](architecture.md#persistence-and-recovery)
 and [database backup guidance](development.md#development-databases).
 
@@ -388,6 +394,11 @@ scope editing, with exact-origin checks. The title above the ticket tabs saves
 independently of other Backlog edits. Click the Backlog description to edit it.
 The floating controls save or discard the draft, and Escape discards it.
 Repository selection in Agent Settings saves immediately in selection order.
+The repository multiselect uses the [shared dropdown surface](foundation.md#shared-selection-dropdowns)
+with checkboxes, chips in selection order, Clear repositories, and loading and
+retryable error states. Toggling or clearing keeps the popup open; Escape, Tab or
+an outside click dismisses it. Keyboard navigation and typeahead match repository
+names. Busy controls and disabled fieldsets prevent changes.
 Model, thinking and permissions are shared with the chat composer. Changes save immediately and
 remain shared across polling, reopening and planner-to-implementer transitions.
 Two independent checkboxes beneath the repository picker save immediately:

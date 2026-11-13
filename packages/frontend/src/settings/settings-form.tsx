@@ -4,6 +4,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { ExecutionSettings } from "../agents/execution-settings.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { Dropdown, DropdownOption } from "../dropdown.tsx";
 
 const currencyFlags: Partial<Record<ForgeSettings["localCurrency"], string>> = {
 	AUD: "🇦🇺",
@@ -139,19 +140,23 @@ export const ForgeSettingsForm = ({
 						<div className='forge-settings-fields'>
 							<label>
 								Local currency
-								<select
+								<Dropdown
+									aria-label='Local currency'
 									className='forge-currency-select'
 									value={draft.localCurrency}
-									onChange={(event) => change("localCurrency", event.target.value)}
+									onChange={(value) => change("localCurrency", value)}
 								>
 									{billingCurrencies.map((currency) => (
-										<option key={currency} value={currency}>
-											{currencyFlags[currency]
-												? `${currencyFlags[currency]} ${currency}`
-												: currency}
-										</option>
+										<DropdownOption
+											key={currency}
+											value={currency}
+											matchingLabel={currency}
+											icon={currencyFlags[currency]}
+										>
+											{currency}
+										</DropdownOption>
 									))}
-								</select>
+								</Dropdown>
 							</label>
 							<label>
 								Monthly plan price
@@ -172,13 +177,14 @@ export const ForgeSettingsForm = ({
 						{chatgptAccount}
 						<label>
 							Provider for new agents
-							<select
+							<Dropdown
+								aria-label='Provider for new agents'
 								value={draft.inferenceProvider}
-								onChange={(event) => change("inferenceProvider", event.target.value)}
+								onChange={(value) => change("inferenceProvider", value)}
 							>
-								<option value='openai'>OpenAI</option>
-								<option value='ollama'>Ollama</option>
-							</select>
+								<DropdownOption value='openai'>OpenAI</DropdownOption>
+								<DropdownOption value='ollama'>Ollama</DropdownOption>
+							</Dropdown>
 						</label>
 						<div className='forge-settings-fields'>
 							<label>

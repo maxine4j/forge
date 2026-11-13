@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+import { chooseDropdown, expectDropdownValue } from "./dropdown-helpers.ts";
+
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const head = "a".repeat(40);
 test("cards open projects; branch drafts stay local until one atomic commit and survive failed commits", async ({
@@ -49,7 +51,7 @@ test("cards open projects; branch drafts stay local until one atomic commit and 
 	const card = page.getByRole("link", { name: "Open Forge", exact: true });
 	await expect(card).toContainText("Created");
 	await card.press("Enter");
-	await expect(page.getByRole("combobox", { name: "Branch" })).toHaveValue("main");
+	await expectDropdownValue(page.getByRole("combobox", { name: "Branch" }), "main");
 	await expect(page.getByRole("option", { name: "Working changes" })).toHaveCount(0);
 	await expect(page.getByText("Changes", { exact: true })).toHaveCount(0);
 	await expect(page.getByText("Pull requests", { exact: true })).toHaveCount(0);
@@ -67,10 +69,10 @@ test("cards open projects; branch drafts stay local until one atomic commit and 
 	await editor.fill("second draft");
 	await page.getByRole("tab", { name: "index.ts *", exact: true }).click();
 	await expect(editor).toContainText("first draft");
-	await page.getByRole("combobox", { name: "Branch" }).selectOption("feature");
+	await chooseDropdown(page.getByRole("combobox", { name: "Branch" }), "feature");
 	await page.getByRole("button", { name: "index.ts", exact: true }).click();
 	await expect(editor).toContainText("original");
-	await page.getByRole("combobox", { name: "Branch" }).selectOption("main");
+	await chooseDropdown(page.getByRole("combobox", { name: "Branch" }), "main");
 	await page.getByRole("tab", { name: "index.ts *", exact: true }).click();
 	await expect(editor).toContainText("first draft");
 	expect(mutations).toEqual([]);

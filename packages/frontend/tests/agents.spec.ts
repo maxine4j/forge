@@ -3,6 +3,8 @@ import { defaultForgeSettings, type ForgeSettings } from "@forge/contracts/setti
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
+import { chooseDropdown, expectDropdownValue } from "./dropdown-helpers.ts";
+
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const createdAt = "2026-11-03T00:00:00.000Z";
 const setup = async (page: Page, initialItems: AgentView["items"] = []) => {
@@ -175,7 +177,7 @@ test("untouched defaults send the first message and a follow-up after completion
 	const settings = { model: "test-model", reasoningEffort: "high", permissions: "full-access" as const };
 	Object.assign(fixture.views[0]!.thread, settings);
 	await fixture.event();
-	await expect(page.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("test-model");
+	await expectDropdownValue(page.getByRole("combobox", { name: "Model", exact: true }), "test-model");
 	await message.fill("After settings refresh");
 	const response = page.waitForResponse((response) => response.url().endsWith("/messages"));
 	await message.press("Enter");
@@ -194,9 +196,9 @@ test("saved settings survive reopening and a failed send preserves selections an
 	const model = page.getByRole("combobox", { name: "Model", exact: true });
 	const thinking = page.getByRole("combobox", { name: "Thinking level", exact: true });
 	const permissions = page.getByRole("combobox", { name: "Permissions", exact: true });
-	await model.selectOption("test-model");
-	await thinking.selectOption("high");
-	await permissions.selectOption("full-access");
+	await chooseDropdown(model, "test-model");
+	await chooseDropdown(thinking, "high");
+	await chooseDropdown(permissions, "full-access");
 	const settings = { model: "test-model", reasoningEffort: "high", permissions: "full-access" };
 	const send = async (text: string, status: number) => {
 		await message.fill(text);
@@ -210,17 +212,17 @@ test("saved settings survive reopening and a failed send preserves selections an
 	await send("Retry this", 503);
 	await expect(page.getByRole("alert")).toBeVisible();
 	await expect(message).toHaveValue("Retry this");
-	await expect(model).toHaveValue("test-model");
-	await expect(thinking).toHaveValue("high");
-	await expect(permissions).toHaveValue("full-access");
+	await expectDropdownValue(model, "test-model");
+	await expectDropdownValue(thinking, "high");
+	await expectDropdownValue(permissions, "full-access");
 	fixture.fail(false);
 	await send("Retry this", 200);
 	await expect(message).toHaveValue("");
 	fixture.views[0]!.thread.status = "completed";
 	await page.reload();
-	await expect(model).toHaveValue("test-model");
-	await expect(thinking).toHaveValue("high");
-	await expect(permissions).toHaveValue("full-access");
+	await expectDropdownValue(model, "test-model");
+	await expectDropdownValue(thinking, "high");
+	await expectDropdownValue(permissions, "full-access");
 	await send("After reopening", 200);
 	await expect(message).toHaveValue("");
 });
@@ -229,8 +231,8 @@ test("composer selects model and permissions, completes skills/files, and sends 
 	const fixture = await setup(page);
 	await fixture.create();
 	const message = page.getByRole("textbox", { name: "Message", exact: true });
-	await page.getByRole("combobox", { name: "Model", exact: true }).selectOption("other-model");
-	await page.getByRole("combobox", { name: "Permissions", exact: true }).selectOption("approve-for-me");
+	await chooseDropdown(page.getByRole("combobox", { name: "Model", exact: true }), "other-model");
+	await chooseDropdown(page.getByRole("combobox", { name: "Permissions", exact: true }), "approve-for-me");
 	await message.fill("Use $rev");
 	await expect(page.getByRole("option", { name: /review.*Review changes/ })).toBeVisible();
 	await message.press("Tab");
@@ -259,8 +261,8 @@ test("default model can replace an explicit model and completion dismisses witho
 	const fixture = await setup(page);
 	await fixture.create();
 	const message = page.getByRole("textbox", { name: "Message", exact: true });
-	await page.getByRole("combobox", { name: "Model", exact: true }).selectOption("other-model");
-	await page.getByRole("combobox", { name: "Model", exact: true }).selectOption({ label: "Test model" });
+	await chooseDropdown(page.getByRole("combobox", { name: "Model", exact: true }), "other-model");
+	await chooseDropdown(page.getByRole("combobox", { name: "Model", exact: true }), { label: "Test model" });
 	await message.fill("$rev");
 	await expect(page.getByRole("listbox", { name: "Skills" })).toBeVisible();
 	await message.press("Escape");
@@ -274,11 +276,11 @@ test("standalone thinking uses catalog levels and resets on incompatible model c
 	const fixture = await setup(page);
 	await fixture.create();
 	const thinking = page.getByRole("combobox", { name: "Thinking level", exact: true });
-	await thinking.selectOption("high");
-	await page.getByRole("combobox", { name: "Model", exact: true }).selectOption("other-model");
-	await expect(thinking).toHaveValue("");
-	await page.getByRole("combobox", { name: "Model", exact: true }).selectOption("");
-	await thinking.selectOption("high");
+	await chooseDropdown(thinking, "high");
+	await chooseDropdown(page.getByRole("combobox", { name: "Model", exact: true }), "other-model");
+	await expectDropdownValue(thinking, "");
+	await chooseDropdown(page.getByRole("combobox", { name: "Model", exact: true }), "");
+	await chooseDropdown(thinking, "high");
 	await page.getByRole("textbox", { name: "Message", exact: true }).fill("Think carefully");
 	const request = page.waitForRequest((request) => request.url().endsWith("/messages"));
 	await page.getByRole("button", { name: "Send message", exact: true }).click();
@@ -322,16 +324,16 @@ test("Config changes refresh the default labels in an open chat and preserve its
 	const model = page.getByRole("combobox", { name: "Model", exact: true });
 	const thinking = page.getByRole("combobox", { name: "Thinking level", exact: true });
 	const message = page.getByRole("textbox", { name: "Message", exact: true });
-	await expect(model.locator("option:checked")).toHaveText("Default model (Test model)");
+	await expect(model).toHaveText("Default model (Test model)");
 	await message.fill("Keep this draft");
 	await page.getByRole("link", { name: "Config", exact: true }).click();
-	await page.getByLabel("Default model", { exact: true }).selectOption("other-model");
-	await page.getByLabel("Default thinking", { exact: true }).selectOption("high");
+	await chooseDropdown(page.getByRole("combobox", { name: "Default model", exact: true }), "other-model");
+	await chooseDropdown(page.getByRole("combobox", { name: "Default thinking", exact: true }), "high");
 	await page.getByRole("button", { name: "Save settings" }).click();
 	await expect(page.getByRole("status")).toHaveText("Settings saved.");
 	await page.goBack();
-	await expect(model.locator("option:checked")).toHaveText("Default model (Other model)");
-	await expect(thinking.locator("option:checked")).toHaveText("Default thinking (high)");
+	await expect(model).toHaveText("Default model (Other model)");
+	await expect(thinking).toHaveText("Default thinking (high)");
 	await expect(message).toHaveValue("Keep this draft");
 });
 

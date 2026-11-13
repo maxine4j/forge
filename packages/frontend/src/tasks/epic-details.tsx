@@ -1,6 +1,7 @@
 import { editEpicSchema, type EditEpic, type EpicSummary, type Ticket } from "@forge/contracts/tickets";
 import { useEffect, useRef, useState } from "react";
 
+import { Dropdown, DropdownOption } from "../dropdown.tsx";
 import { EpicIcon } from "./epic-icon.tsx";
 import { InlineTicketDescription, InlineTicketTitle } from "./inline-ticket-fields.tsx";
 import { ticketLabels } from "./ticket-labels.ts";
@@ -19,20 +20,24 @@ export const EpicSelection = ({
 }) => (
 	<label>
 		Epic
-		<select
-			aria-label='Epic'
-			value={value ?? ""}
-			disabled={disabled}
-			onChange={(event) => change(event.target.value || null)}
-		>
-			<option value=''>No epic</option>
-			{value && !epics.some((epic) => epic.id === value) && <option value={value}>{value}</option>}
+		<Dropdown aria-label='Epic' value={value ?? ""} disabled={disabled} onChange={(value) => change(value || null)}>
+			<DropdownOption value=''>No epic</DropdownOption>
+			{value && !epics.some((epic) => epic.id === value) && (
+				<DropdownOption value={value} icon={<EpicIcon />}>
+					{value}
+				</DropdownOption>
+			)}
 			{epics.map((epic) => (
-				<option key={epic.id} value={epic.id}>
+				<DropdownOption
+					key={epic.id}
+					value={epic.id}
+					icon={<EpicIcon />}
+					matchingLabel={`${epic.id}\n${epic.title}`}
+				>
 					{epic.id} · {epic.title}
-				</option>
+				</DropdownOption>
 			))}
-		</select>
+		</Dropdown>
 	</label>
 );
 

@@ -16,6 +16,7 @@ import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from 
 import { Link, useLocation, useNavigate } from "react-router";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { Dropdown, DropdownOption } from "../dropdown.tsx";
 import { resolveRoute } from "../navigation/routes.ts";
 import { CommitView } from "./commit-view.tsx";
 import { Editor } from "./editor.tsx";
@@ -798,12 +799,11 @@ export const RepositoryBrowser = ({
 						branchControl={
 							<label className='branch-picker'>
 								<span aria-hidden='true'>⑂</span>
-								<select
+								<Dropdown
 									aria-label='Branch'
 									value={branch}
 									disabled={!branches.length}
-									onChange={(event) => {
-										const value = event.target.value;
+									onChange={(value) => {
 										void navigate(
 											branchLocations.current.get(value)
 												?? `/repos/${projectId}/code?${new URLSearchParams({ branch: value })}`,
@@ -811,11 +811,11 @@ export const RepositoryBrowser = ({
 									}}
 								>
 									{branches.map((value) => (
-										<option key={value.name} value={value.name}>
+										<DropdownOption key={value.name} value={value.name}>
 											{value.name}
-										</option>
+										</DropdownOption>
 									))}
-								</select>
+								</Dropdown>
 							</label>
 						}
 					/>

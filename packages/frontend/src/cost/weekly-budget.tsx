@@ -1,6 +1,8 @@
 import type { WeeklyBudget } from "@forge/contracts";
 import { useState } from "react";
 
+import { Dropdown, DropdownOption } from "../dropdown.tsx";
+
 const timestamp = (value: string) => new Date(value).toLocaleString();
 export function WeeklyBudgetChart({ budget }: { budget?: WeeklyBudget }) {
 	const [selected, setSelected] = useState<string>();
@@ -17,17 +19,17 @@ export function WeeklyBudgetChart({ budget }: { budget?: WeeklyBudget }) {
 			{(budget?.buckets.length ?? 0) > 1 && (
 				<label>
 					Weekly bucket{" "}
-					<select
+					<Dropdown
 						aria-label='Weekly bucket'
-						value={bucket?.bucketId}
-						onChange={(event) => setSelected(event.target.value)}
+						value={bucket?.bucketId ?? ""}
+						onChange={(value) => setSelected(value)}
 					>
 						{budget?.buckets.map((entry) => (
-							<option key={entry.bucketId} value={entry.bucketId}>
+							<DropdownOption key={entry.bucketId} value={entry.bucketId}>
 								{entry.bucket} ({entry.bucketId})
-							</option>
+							</DropdownOption>
 						))}
-					</select>
+					</Dropdown>
 				</label>
 			)}
 			{!bucket ? (

@@ -16,6 +16,7 @@ import { Conversation } from "../agents/agent-chat.tsx";
 import { AgentOptionsRevision, ExecutionSettings } from "../agents/execution-settings.tsx";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { Dropdown } from "../dropdown.tsx";
 import { EpicIcon } from "./epic-icon.tsx";
 import { InlineTicketDescription, InlineTicketTitle } from "./inline-ticket-fields.tsx";
 import { RepositorySelection } from "./repository-selection.tsx";
@@ -105,7 +106,6 @@ export const TicketDetails = ({
 	const editable = !archived && !resetting && ticket.status === "backlog";
 	const parentId = ticket.epicId ?? null;
 	const epic = epics.find(({ id }) => id === parentId);
-	const epicPicker = useRef<HTMLDivElement>(null);
 	const saveScope = async (changes: Partial<UpdateTicket>) => {
 		if (!editable || busy) return false;
 		setScopeError("");
@@ -125,7 +125,6 @@ export const TicketDetails = ({
 		}
 	};
 	const chooseEpic = (id: string | null) => {
-		epicPicker.current?.hidePopover();
 		if (id !== parentId) void saveScope({ epicId: id });
 	};
 	const changeRepositories = async (ids: string[]) => {
@@ -370,16 +369,26 @@ export const TicketDetails = ({
 							</>
 						)}
 						{editable && (
-							<button
-								type='button'
-								className='ticket-epic-trigger'
+							<Dropdown
 								aria-label={parentId ? "Change epic" : "Add epic"}
-								title={parentId ? "Change epic" : "Add epic"}
-								popoverTarget={`${fieldId}-epics`}
+								className='ticket-epic-trigger'
+								emptyLabel='No epics available.'
 								disabled={busy}
-							>
-								{parentId ? <span className='ticket-chevron' aria-hidden='true' /> : "+ Add"}
-							</button>
+								value={parentId ?? ""}
+								onChange={(id) => chooseEpic(id || null)}
+								trigger={parentId ? <span aria-hidden='true' /> : "+ Add"}
+								options={[
+									...epics.map(({ id, title }) => ({
+										value: id,
+										label: `${id} · ${title}`,
+										matchingLabel: `${id}\n${title}`,
+										icon: <EpicIcon />,
+									})),
+									...(parentId
+										? [{ value: "", label: "Remove epic", matchingLabel: "Remove epic" }]
+										: []),
+								]}
+							/>
 						)}
 						{(parentId || editable) && (
 							<span className='ticket-breadcrumb-divider' aria-hidden='true'>
@@ -396,36 +405,6 @@ export const TicketDetails = ({
 							{ticket.id}
 						</h2>
 					</div>
-					{editable && (
-						<div
-							ref={epicPicker}
-							id={`${fieldId}-epics`}
-							popover='auto'
-							className='ticket-picker ticket-epic-picker'
-							role='group'
-							aria-label='Choose epic'
-						>
-							{epics.map(({ id, title }) => (
-								<button
-									key={id}
-									type='button'
-									aria-pressed={id === parentId}
-									onClick={() => chooseEpic(id)}
-								>
-									<EpicIcon />
-									<span>
-										{id} · {title}
-									</span>
-								</button>
-							))}
-							{epics.length === 0 && <p>No epics available.</p>}
-							{parentId && (
-								<button type='button' className='ticket-picker-clear' onClick={() => chooseEpic(null)}>
-									Remove epic
-								</button>
-							)}
-						</div>
-					)}
 				</div>
 				<div className='ticket-details-actions'>
 					{!archived && ticket.canReturnToBacklog && (

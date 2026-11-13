@@ -1,6 +1,8 @@
 import { resolveAgentSettings, type AgentOptions, type AgentSettings } from "@forge/contracts/agents";
 import { createContext, Fragment } from "react";
 
+import { Dropdown, DropdownOption } from "../dropdown.tsx";
+
 export const AgentOptionsRevision = createContext(0);
 
 export const ExecutionSettings = ({
@@ -25,12 +27,12 @@ export const ExecutionSettings = ({
 		<div className='agent-composer-settings'>
 			<Field>
 				{configureDefaults && "Default model"}
-				<select
+				<Dropdown
 					aria-label={configureDefaults ? "Default model" : "Model"}
 					value={settings.model ?? ""}
 					disabled={disabled || (!options && !configureDefaults)}
-					onChange={(event) => {
-						const model = event.target.value || undefined;
+					onChange={(value) => {
+						const model = value || undefined;
 						const updated = { ...settings, model };
 						change({
 							...updated,
@@ -41,62 +43,62 @@ export const ExecutionSettings = ({
 						});
 					}}
 				>
-					<option value=''>
+					<DropdownOption value=''>
 						{configureDefaults ? "Codex default" : "Default model"}
 						{defaults?.model ? ` (${defaults.model.name})` : ""}
-					</option>
+					</DropdownOption>
 					{settings.model && !options?.models.some((value) => value.id === settings.model) && (
-						<option value={settings.model}>{settings.model}</option>
+						<DropdownOption value={settings.model}>{settings.model}</DropdownOption>
 					)}
 					{options?.models.map((value) => (
-						<option key={value.id} value={value.id}>
+						<DropdownOption key={value.id} value={value.id}>
 							{value.name}
-						</option>
+						</DropdownOption>
 					))}
-				</select>
+				</Dropdown>
 			</Field>
 			<Field>
 				{configureDefaults && "Default thinking"}
-				<select
+				<Dropdown
 					aria-label={configureDefaults ? "Default thinking" : "Thinking level"}
 					value={settings.reasoningEffort ?? ""}
 					disabled={disabled || (!options && !configureDefaults)}
-					onChange={(event) => change({ ...settings, reasoningEffort: event.target.value || undefined })}
+					onChange={(value) => change({ ...settings, reasoningEffort: value || undefined })}
 				>
-					<option value=''>
+					<DropdownOption value=''>
 						{configureDefaults ? "Codex default" : "Default thinking"}
 						{thinking ? ` (${thinking})` : ""}
-					</option>
+					</DropdownOption>
 					{settings.reasoningEffort
 						&& !model?.supportedReasoningEfforts?.some(
 							(value) => value.reasoningEffort === settings.reasoningEffort,
-						) && <option value={settings.reasoningEffort}>{settings.reasoningEffort}</option>}
+						) && (
+							<DropdownOption value={settings.reasoningEffort}>{settings.reasoningEffort}</DropdownOption>
+						)}
 					{model?.supportedReasoningEfforts?.map((value) => (
-						<option key={value.reasoningEffort} value={value.reasoningEffort}>
+						<DropdownOption key={value.reasoningEffort} value={value.reasoningEffort}>
 							{value.reasoningEffort}
-						</option>
+						</DropdownOption>
 					))}
-				</select>
+				</Dropdown>
 			</Field>
 			{!configureDefaults && (
-				<select
+				<Dropdown
 					aria-label='Permissions'
 					value={settings.permissions ?? "ask"}
 					disabled={disabled}
-					onChange={(event) =>
-						change({ ...settings, permissions: event.target.value as AgentSettings["permissions"] })
-					}
+					onChange={(value) => change({ ...settings, permissions: value as AgentSettings["permissions"] })}
 				>
-					<option value='ask'>Ask</option>
+					<DropdownOption value='ask'>Ask</DropdownOption>
 					{(options?.supportsAutoReview !== false || settings.permissions === "approve-for-me") && (
-						<option value='approve-for-me' disabled={options?.supportsAutoReview === false}>
+						<DropdownOption value='approve-for-me' disabled={options?.supportsAutoReview === false}>
 							{options?.supportsAutoReview === false
 								? "Approve for me (unavailable on Ollama)"
 								: "Approve for me"}
-						</option>
+						</DropdownOption>
 					)}
-					<option value='full-access'>Full access</option>
-				</select>
+					<DropdownOption value='full-access'>Full access</DropdownOption>
+				</Dropdown>
 			)}
 		</div>
 	);
