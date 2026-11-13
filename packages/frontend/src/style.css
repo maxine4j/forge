@@ -1018,8 +1018,12 @@
 .ticket-title {
 	display: block;
 	font-size: 14px;
+	font-weight: 650;
 	line-height: 1.45;
 	overflow-wrap: anywhere;
+}
+.ticket-open .ticket-key {
+	margin-top: auto;
 }
 .ticket-key {
 	display: flex;
@@ -1317,15 +1321,12 @@
 .ticket-details-heading h2 {
 	margin: 0;
 }
-.ticket-title,
+.ticket-details .ticket-title,
 .ticket-title-editor input {
 	margin: 0;
 	font-size: 20px;
 	font-weight: 650;
 	line-height: 1.35;
-}
-.ticket-title {
-	overflow-wrap: anywhere;
 }
 .ticket-title button {
 	padding: 4px 6px;
@@ -1411,16 +1412,6 @@
 .ticket-fields {
 	overflow: auto;
 }
-.ticket-details-plan {
-	margin-top: 12px;
-	padding: 12px;
-	border: 1px solid #30363d;
-	border-radius: 6px;
-}
-.ticket-details-plan > h3 {
-	margin: 0;
-	font-size: 14px;
-}
 .ticket-plan-markdown {
 	overflow-wrap: anywhere;
 	line-height: 1.55;
@@ -1459,26 +1450,62 @@
 	display: flex;
 	flex-direction: column;
 }
-.ticket-agent-settings {
+.ticket-detail-section {
 	min-width: 0;
-	margin: 12px 0;
+	margin: 0 0 12px;
 	padding: 6px 10px 10px;
 	border: 1px solid #30363d;
 	border-radius: 6px;
 }
-.ticket-agent-settings legend {
+.ticket-detail-section > legend {
 	padding-inline: 4px;
 	font-size: 13px;
 	font-weight: 600;
 }
-.ticket-agent-settings .agent-composer-settings {
-	flex-wrap: wrap;
+.ticket-details .ticket-agent-settings .agent-composer-settings {
+	display: grid;
+	grid-template-columns: repeat(3, minmax(0, 1fr));
+	gap: 8px;
+}
+.ticket-agent-settings .agent-composer-settings > select {
+	width: 100%;
+	max-width: none;
+}
+.ticket-agent-settings .ticket-repositories {
+	margin: 10px 0 0;
+}
+.ticket-description-edit {
+	position: relative;
+}
+.ticket-fields .ticket-description-text {
+	display: block;
+	width: 100%;
+	margin: 0;
+	padding: 4px 6px;
+	border: 1px solid transparent;
+	background: transparent;
+	color: inherit;
+	font: inherit;
+	text-align: start;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+}
+button.ticket-description-text:hover {
+	background: #21262d;
+}
+.ticket-fields textarea.ticket-description-text {
+	field-sizing: content;
+	min-height: calc(1lh + 10px);
+	resize: none;
 }
 .ticket-description-actions {
+	position: absolute;
+	z-index: 1;
+	inset-block-start: calc(100% + 4px);
+	inset-inline-end: 0;
 	display: flex;
-	justify-content: flex-end;
 	gap: 6px;
-	margin-top: 6px;
+	box-shadow: 0 4px 10px #0006;
 }
 .ticket-fields label {
 	margin: 0 0 8px;
@@ -1524,18 +1551,18 @@
 		padding: 4px 8px;
 		min-height: 28px;
 	}
-	.ticket-title,
+	.ticket-details .ticket-title,
 	.ticket-title-editor input {
 		font-size: 16px;
 	}
 	.ticket-details-tabs button {
 		padding: 5px 10px;
 	}
-	.ticket-details .agent-composer-settings {
+	.ticket-details .agent-composer .agent-composer-settings {
 		gap: 2px;
 		flex-wrap: wrap;
 	}
-	.ticket-details .agent-composer-settings select {
+	.ticket-details .agent-composer .agent-composer-settings select {
 		max-width: 120px;
 		font-size: 11px;
 		padding: 3px;

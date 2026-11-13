@@ -91,7 +91,9 @@ export const TicketDetails = ({
 	const [descriptionDraft, setDescriptionDraft] = useState(state.descriptionDraft);
 	const [pendingRepositories, setPendingRepositories] = useState<string[]>();
 	const [scopeError, setScopeError] = useState("");
+	const editDescription = useRef<HTMLButtonElement>(null);
 	const descriptionInput = useRef<HTMLTextAreaElement>(null);
+	const restoreDescriptionFocus = useRef(false);
 	const editable = !archived && ticket.status === "backlog";
 	const parentId = ticket.epicId ?? null;
 	const epic = epics.find(({ id }) => id === parentId);
@@ -123,12 +125,26 @@ export const TicketDetails = ({
 		await saveScope({ repositoryIds: ids });
 		setPendingRepositories(undefined);
 	};
-	const description = editable ? (descriptionDraft ?? ticket.description) : ticket.description;
-	const descriptionChanged = editable && description !== ticket.description;
-	const discardDescription = () => {
+	const editingDescription = editable && descriptionDraft !== undefined;
+	useEffect(() => {
+		if (editingDescription) descriptionInput.current?.focus();
+	}, [editingDescription]);
+	useEffect(() => {
+		if (!editingDescription && !busy && restoreDescriptionFocus.current) {
+			restoreDescriptionFocus.current = false;
+			editDescription.current?.focus();
+		}
+	}, [editingDescription, busy]);
+	const finishDescriptionEdit = () => {
+		restoreDescriptionFocus.current = true;
 		setDescriptionDraft(undefined);
 		setScopeError("");
-		descriptionInput.current?.focus();
+	};
+	const saveDescription = async () => {
+		if (!editingDescription || busy) return;
+		if (descriptionDraft === ticket.description || (await saveScope({ description: descriptionDraft }))) {
+			finishDescriptionEdit();
+		}
 	};
 	Object.assign(state, { descriptionDraft, tab: section });
 	const editingTitle = editable && titleDraft !== undefined;
@@ -605,57 +621,68 @@ export const TicketDetails = ({
 					className='ticket-description-editor'
 					onSubmit={(event) => {
 						event.preventDefault();
-						if (descriptionChanged) {
-							void saveScope({ description }).then((saved) => {
-								if (saved) setDescriptionDraft(undefined);
-							});
-						}
+						void saveDescription();
 					}}
 					onKeyDown={(event) => {
-						if (!descriptionChanged || event.key !== "Escape" || event.nativeEvent.isComposing) return;
+						if (!editingDescription || event.key !== "Escape" || event.nativeEvent.isComposing) return;
 						event.preventDefault();
-						if (!busy) discardDescription();
+						if (!busy) finishDescriptionEdit();
 					}}
 				>
-					<label htmlFor={`${fieldId}-description`}>Description</label>
-					<textarea
-						ref={descriptionInput}
-						id={`${fieldId}-description`}
-						rows={4}
-						maxLength={4000}
-						value={description}
-						disabled={!editable}
-						readOnly={busy}
-						onChange={(event) => {
-							const value = event.target.value;
-							setDescriptionDraft(value === ticket.description ? undefined : value);
-						}}
-					/>
-					{descriptionChanged && (
-						<div className='ticket-description-actions'>
+					<fieldset className='ticket-detail-section'>
+						<legend id={`${fieldId}-description-label`}>Description</legend>
+						{editingDescription ? (
+							<div className='ticket-description-edit'>
+								<textarea
+									ref={descriptionInput}
+									className='ticket-description-text'
+									aria-labelledby={`${fieldId}-description-label`}
+									rows={1}
+									maxLength={4000}
+									value={descriptionDraft}
+									readOnly={busy}
+									onChange={(event) => setDescriptionDraft(event.target.value)}
+								/>
+								<div className='ticket-description-actions'>
+									<button
+										type='submit'
+										aria-label='Save description'
+										title='Save description'
+										disabled={busy}
+									>
+										✓
+									</button>
+									<button
+										type='button'
+										aria-label='Discard description changes'
+										title='Discard description changes'
+										disabled={busy}
+										onClick={finishDescriptionEdit}
+									>
+										✕
+									</button>
+								</div>
+							</div>
+						) : editable ? (
 							<button
-								type='submit'
-								aria-label='Save description'
-								title='Save description'
-								disabled={busy}
-							>
-								✓
-							</button>
-							<button
+								ref={editDescription}
+								className='ticket-description-text'
 								type='button'
-								aria-label='Discard description changes'
-								title='Discard description changes'
+								aria-label='Edit description'
+								title='Edit description'
 								disabled={busy}
-								onClick={discardDescription}
+								onClick={() => setDescriptionDraft(ticket.description)}
 							>
-								✕
+								{ticket.description || "Add a description"}
 							</button>
-						</div>
-					)}
+						) : (
+							<p className='ticket-description-text'>{ticket.description || "No description"}</p>
+						)}
+					</fieldset>
 				</form>
 				{plan && (
-					<section className='ticket-details-plan' aria-labelledby={`${fieldId}-plan-title`}>
-						<h3 id={`${fieldId}-plan-title`}>Plan</h3>
+					<fieldset className='ticket-detail-section'>
+						<legend>Plan</legend>
 						<div className='ticket-plan-markdown'>
 							<PlanMarkdown text={plan.text} />
 						</div>
@@ -667,21 +694,21 @@ export const TicketDetails = ({
 								{approvePlan}
 							</div>
 						)}
-					</section>
+					</fieldset>
 				)}
-				<RepositorySelection
-					api={api}
-					value={pendingRepositories ?? ticket.repositoryIds}
-					change={(ids) => void changeRepositories(ids)}
-					disabled={!editable || busy}
-				/>
-				<fieldset className='ticket-agent-settings'>
+				<fieldset className='ticket-detail-section ticket-agent-settings'>
 					<legend>Agent Settings</legend>
 					<ExecutionSettings
 						settings={settings}
 						options={options}
 						change={changeSettings}
 						disabled={archived || savingSettings || ticket.status === "done"}
+					/>
+					<RepositorySelection
+						api={api}
+						value={pendingRepositories ?? ticket.repositoryIds}
+						change={(ids) => void changeRepositories(ids)}
+						disabled={!editable || busy}
 					/>
 				</fieldset>
 				{ticket.status !== "backlog" && <p>Scope is fixed after planning starts. Discuss changes in chat.</p>}

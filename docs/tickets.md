@@ -23,7 +23,9 @@ actions, sprints, priorities and assignees are deferred.
 See [epics and grouped backlog](#epics-and-grouped-backlog) for grouping and
 membership. The board has four columns: Backlog, Ready for development, In progress and
 Done. The corresponding API statuses are `backlog`, `todo`, `in-progress` and
-`done`. Cards support pointer and touch reordering, edge scrolling and
+`done`. The bottom-left corner of each card shows its ticket icon and key,
+prefixed by the epic icon and key followed by a slash when the ticket belongs
+to an epic. Cards support pointer and touch reordering, edge scrolling and
 cancellation. Moving from Backlog to Ready for development is available by
 dragging or through the ticket's status menu.
 An unclaimed Ready ticket can return to Backlog through the same status menu or
@@ -187,7 +189,8 @@ execution continues. The global board opens at `/tasks`; selection uses `/tasks?
 workflow, model options and cost load by ticket ID even outside active board
 membership. Removed repository ticket APIs return not-found. The ticket modal has keyboard-accessible Details, Chat and Cost
 tabs. Details shows the latest saved Markdown plan below Description, including
-after approval. While a plan awaits approval, Details offers Approve plan and
+after approval. Agent Settings places the repository picker below the model
+controls. While a plan awaits approval, Details offers Approve plan and
 Request changes, which opens Chat. Chat opens by default once planning starts.
 One scroll container shows the planner conversation and native Markdown plan
 revisions chronologically. Approve plan applies to the latest completed plan
@@ -319,10 +322,10 @@ Tickets accept optional `executionSettings: {model?, reasoningEffort?, permissio
 on creation and return the saved selection on reads. Owner-authorized
 `PATCH /api/tickets/:id/settings` replaces that selection independently of Backlog
 scope editing, with exact-origin checks. The title above the ticket tabs saves
-independently of other Backlog edits. Description edits save or discard using
-their own controls. Repository selection changes save immediately in selection
-order. Agent Settings appear below Repositories
-in Details and are shared with the chat composer. Changes save immediately and
+independently of other Backlog edits. Click the Backlog description to edit it.
+The floating controls save or discard the draft, and Escape discards it.
+Repository selection in Agent Settings saves immediately in selection order.
+Model, thinking and permissions are shared with the chat composer. Changes save immediately and
 remain shared across polling, reopening and planner-to-implementer transitions.
 Done and archived tickets retain their settings but cannot change them.
 

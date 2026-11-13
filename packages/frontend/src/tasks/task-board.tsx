@@ -1,6 +1,7 @@
 import { ticketStatuses, type Ticket, type TicketStatus, type MoveTicket } from "@forge/contracts/tickets";
 import { Fragment, useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
 
+import { EpicIcon } from "./epic-icon.tsx";
 import { ticketLabels as labels } from "./ticket-details.tsx";
 import { TicketIndicator } from "./ticket-indicator.tsx";
 type Drop = { status: TicketStatus; beforeId?: string };
@@ -15,6 +16,23 @@ export type TaskViewProps = {
 	create: () => void;
 	refresh: () => void;
 };
+
+const TicketCardKey = ({ ticket }: { ticket: Ticket }) => (
+	<span className='ticket-key'>
+		{ticket.epicId && (
+			<>
+				<EpicIcon />
+				{ticket.epicId}
+				<span aria-hidden='true'>/</span>
+			</>
+		)}
+		<span className={`ticket-type ${ticket.status === "done" ? "ticket-complete" : ""}`} aria-hidden='true'>
+			✓
+		</span>
+		{ticket.id}
+	</span>
+);
+
 export const TaskBoard = ({
 	tickets,
 	busy,
@@ -181,19 +199,12 @@ export const TaskBoard = ({
 											<button
 												className='ticket-open'
 												aria-label={`${ticket.id} ${ticket.title}`}
+												aria-description={ticket.epicId ?? undefined}
 												disabled={busy || !!drag}
 												onClick={() => open(ticket)}
 											>
 												<span className='ticket-title'>{ticket.title}</span>
-												<span className='ticket-key'>
-													<span
-														className={`ticket-type ${status === "done" ? "ticket-complete" : ""}`}
-														aria-hidden='true'
-													>
-														✓
-													</span>
-													{ticket.id}
-												</span>
+												<TicketCardKey ticket={ticket} />
 												<TicketIndicator ticket={ticket} />
 											</button>
 											<button
@@ -228,7 +239,7 @@ export const TaskBoard = ({
 					<style>{`.ticket-drag-preview { left: ${Math.round(drag.x + 14)}px; top: ${Math.round(drag.y + 14)}px; }`}</style>
 					<div className='ticket-drag-preview' aria-hidden='true'>
 						<span className='ticket-title'>{drag.ticket.title}</span>
-						<span className='ticket-key'>{drag.ticket.id}</span>
+						<TicketCardKey ticket={drag.ticket} />
 					</div>
 				</>
 			)}

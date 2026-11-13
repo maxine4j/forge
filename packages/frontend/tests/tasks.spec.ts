@@ -657,9 +657,12 @@ test("inline ticket title saves independently and supports keyboard and button d
 	const title = dialog.getByRole("textbox", { name: "Title", exact: true });
 	await expect(edit).toHaveText("First task");
 	await expect(title).toHaveCount(0);
-	await expect(settings.getByLabel("Model", { exact: true })).toBeVisible();
-	const repos = await details.getByRole("button", { name: "Repositories", exact: true }).boundingBox();
-	expect((await settings.boundingBox())!.y).toBeGreaterThan(repos!.y);
+	const model = settings.getByLabel("Model", { exact: true });
+	const repositories = settings.getByRole("button", { name: "Repositories", exact: true });
+	await expect(model).toBeVisible();
+	await expect(repositories).toBeVisible();
+	expect((await repositories.boundingBox())!.y).toBeGreaterThan((await model.boundingBox())!.y);
+	await details.getByRole("button", { name: "Edit description" }).click();
 	await description.fill("Unsaved scope");
 	await edit.click();
 	await expect(title).toBeFocused();
@@ -718,6 +721,12 @@ test("backlog creation and scope saves retain failed drafts and share changes wi
 	await dialog.getByLabel("Title", { exact: true }).fill("Updated task");
 	await dialog.getByLabel("Title", { exact: true }).press("Enter");
 	await expect(dialog.getByRole("button", { name: /^Edit title:/ })).toHaveText("Updated task");
+	const editDescription = dialog.getByRole("button", { name: "Edit description" });
+	const settings = dialog.getByRole("group", { name: "Agent Settings" });
+	const settingsTop = (await settings.boundingBox())!.y;
+	await editDescription.click();
+	await expect(dialog.getByLabel("Description", { exact: true })).toBeFocused();
+	expect((await settings.boundingBox())!.y).toBeCloseTo(settingsTop, 0);
 	await dialog.getByLabel("Description", { exact: true }).fill("Updated scope");
 	await expect(dialog.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
 	f.failSaves(true);
@@ -729,12 +738,16 @@ test("backlog creation and scope saves retain failed drafts and share changes wi
 	f.failSaves(false);
 	await dialog.getByRole("button", { name: "Save description", exact: true }).click();
 	await expect.poll(() => f.tickets().find(({ id }) => id === "TASK-3")?.description).toBe("Updated scope");
+	await expect(editDescription).toBeFocused();
+	await editDescription.click();
 	await dialog.getByLabel("Description", { exact: true }).fill("Discard this scope");
 	await dialog.getByRole("button", { name: "Discard description changes" }).click();
-	await expect(dialog.getByLabel("Description", { exact: true })).toHaveValue("Updated scope");
+	await expect(editDescription).toHaveText("Updated scope");
+	await editDescription.click();
 	await dialog.getByLabel("Description", { exact: true }).fill("Discard with Escape");
 	await dialog.getByLabel("Description", { exact: true }).press("Escape");
-	await expect(dialog.getByLabel("Description", { exact: true })).toHaveValue("Updated scope");
+	await expect(editDescription).toBeFocused();
+	await expect(editDescription).toHaveText("Updated scope");
 	await dialog.getByRole("button", { name: "Close ticket" }).click();
 	await expect(page.getByRole("button", { name: "TASK-3 Updated task", exact: true })).toBeFocused();
 	await page.getByRole("tab", { name: "Board", exact: true }).click();
@@ -1290,7 +1303,7 @@ for (const size of [
 		await panel.getByRole("button", { name: "Send message", exact: true }).click();
 		await expect.poll(fixture.messages).toBe(1);
 		await panel.getByRole("tab", { name: "Details", exact: true }).click();
-		await expect(panel.getByLabel("Description", { exact: true })).toHaveValue("Scope");
+		await expect(panel.getByRole("group", { name: "Description" })).toHaveText("DescriptionScope");
 		await panel.getByRole("tab", { name: "Chat", exact: true }).click();
 		await page.evaluate(() => {
 			Object.defineProperty(window.visualViewport!, "height", { configurable: true, value: 440 });
@@ -1736,7 +1749,7 @@ test("a plan needs attention on the four-column board and approval submits the d
 	const details = panel.getByRole("tab", { name: "Details", exact: true });
 	const chat = panel.getByRole("tab", { name: "Chat", exact: true });
 	await details.click();
-	const plan = panel.getByRole("region", { name: "Plan", exact: true });
+	const plan = panel.getByRole("group", { name: "Plan", exact: true });
 	await expect(plan.getByRole("heading", { name: "Search plan" })).toBeVisible();
 	await expect(plan.getByRole("listitem")).toHaveText("Add filtering.");
 	await expect(plan.getByText("unsafe")).toHaveCount(0);
@@ -1778,7 +1791,8 @@ for (const archived of [false, true]) {
 		if (archived) {
 			await expect(modal.getByText("Archived · Read only")).toBeVisible();
 			await expect(modal.getByRole("button", { name: /^Edit title:/ })).toHaveCount(0);
-			await expect(modal.getByLabel("Description", { exact: true })).toBeDisabled();
+			await expect(modal.getByRole("group", { name: "Description" }).getByText("Linked scope")).toBeVisible();
+			await expect(modal.getByRole("button", { name: "Edit description" })).toHaveCount(0);
 			await expect(modal.getByLabel("Status", { exact: true })).toBeDisabled();
 			await expect(modal.getByRole("button", { name: "Archive ticket" })).toBeDisabled();
 			await expect(modal.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);

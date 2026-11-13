@@ -47,6 +47,10 @@ const navigationPlan = {
 	revision: 1,
 	text: "## Repository navigation\n\n- Keep the active section visible on mobile.\n- Preserve links to each section when the layout changes.",
 };
+const searchPlan = {
+	revision: 1,
+	text: "## Search ranking\n\nRank exact title matches first, followed by title prefixes and description matches. Break ties by title and then ticket key.\n\n1. Normalize the query and searchable fields for case-insensitive matching.\n2. Preserve the existing filters and empty-query ordering.\n3. Verify match order, ties, and queries with no results.",
+};
 const dockerOverview: DockerOverview = {
 	available: true,
 	statisticsAt: date,
@@ -237,6 +241,7 @@ export class MockApi implements IMockApi {
 					id: `TASK-${project.id === projects.at(0)!.id ? 1 : 4}`,
 					repositoryIds: [],
 					title: "Define the next change",
+					epicId,
 					description: "Write a small, clear scope before starting work.",
 					status: "backlog",
 					createdAt: date,
@@ -385,7 +390,8 @@ export class MockApi implements IMockApi {
 								? "running"
 								: "idle",
 					mergeAttempts: 0,
-					...(plannerId ? { plannerId, plan: navigationPlan } : {}),
+					plannerId,
+					plan: plannerId ? navigationPlan : ticket.agentStatus === "working" ? searchPlan : undefined,
 				}));
 			}
 			const workspaceRoot = `/api/workspaces/${id}`;
