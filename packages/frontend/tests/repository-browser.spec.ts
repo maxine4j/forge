@@ -137,7 +137,7 @@ test("an eligible empty repository shows unavailable sync without fabricating a 
 	await page.route("**/repository/branches", (route) => route.fulfill({ json: [] }));
 	await page.reload();
 	await expect(page.getByText("No branches yet.")).toBeVisible();
-	const sync = page.getByRole("button", { name: "Sync with upstream", exact: true });
+	const sync = page.getByRole("button", { name: "Sync", exact: true });
 	await expect(sync).toBeDisabled();
 	await expect(sync).toHaveAttribute("title", "The upstream default branch must exist locally before syncing.");
 	await expect(page.getByRole("combobox", { name: "Branch" })).toHaveCount(0);
@@ -147,10 +147,12 @@ test("Code shows main drift, refreshes after sync, and reports merge conflicts",
 	let counts = { branch: "main", ahead: 2, behind: 1 };
 	let posts = 0;
 	let conflict = false;
-	await page.route("**/repository/upstream-sync", (route) => {
+	let pending = Promise.withResolvers<void>();
+	await page.route("**/repository/upstream-sync", async (route) => {
 		if (route.request().method() === "GET") return route.fulfill({ json: { state: "ready", ...counts } });
 		expect(route.request().method()).toBe("POST");
 		posts++;
+		await pending.promise;
 		if (conflict) return route.fulfill({ status: 409, json: { error: "upstream-sync-conflict" } });
 		counts = { branch: "main", ahead: 0, behind: 0 };
 		return route.fulfill({ json: { head: "b".repeat(40), branch: "main" } });
@@ -158,16 +160,39 @@ test("Code shows main drift, refreshes after sync, and reports merge conflicts",
 	await page.route(/\/repository\/file\?/, (route) => {
 		const path = new URL(route.request().url()).searchParams.get("path");
 		if (path !== "file-0.ts") return route.fallback();
-		return route.fulfill({ json: { path, content: posts ? "updated by GitHub" : "original file" } });
+		return route.fulfill({
+			json: {
+				path,
+				content: posts === 2 ? "updated after failed push" : posts ? "updated by GitHub" : "original file",
+			},
+		});
 	});
 	await page.reload();
-	const sync = page.getByRole("button", { name: /Sync with upstream/ });
-	await expect(sync).toHaveText("↑2 ↓1 Sync with upstream main");
+	const sync = page.getByRole("button", { name: /Sync/ });
+	const spinner = sync.locator(".repository-sync-spinner");
+	await expect(sync).toHaveText("↑2 ↓1 Sync main");
 	expect(posts).toBe(0);
 	await page.getByRole("button", { name: "file-0.ts", exact: true }).click();
 	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("original file");
 	await sync.click();
-	await expect(sync).toHaveText("Sync with upstream main");
+	try {
+		await expect(sync).toHaveText("↑2 ↓1 Syncing… main");
+		await expect(sync).toBeDisabled();
+		await expect(sync).toHaveAttribute("aria-busy", "true");
+		await expect(spinner).toBeVisible();
+		await expect(spinner).toHaveAttribute("aria-hidden", "true");
+		await expect(spinner).toHaveCSS("animation-name", "repository-sync-spin");
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		await expect(spinner).toBeVisible();
+		await expect(spinner).toHaveCSS("animation-name", "none");
+	} finally {
+		pending.resolve();
+	}
+	await expect(sync).toHaveText("Sync main");
+	await expect(sync).toBeEnabled();
+	await expect(sync).toHaveAttribute("aria-busy", "false");
+	await expect(spinner).toHaveCount(0);
+	await expect(page.getByRole("status")).toContainText("main synced with upstream.");
 	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("updated by GitHub");
 	expect(posts).toBe(1);
 
@@ -177,9 +202,22 @@ test("Code shows main drift, refreshes after sync, and reports merge conflicts",
 	counts = { branch: "main", ahead: 1, behind: 1 };
 	await selectBranch(page, "main");
 	await expect(sync).toContainText("↑1 ↓1");
+	pending = Promise.withResolvers<void>();
 	await sync.click();
+	try {
+		await expect(sync).toHaveText("↑1 ↓1 Syncing… main");
+		await expect(sync).toBeDisabled();
+		await expect(sync).toHaveAttribute("aria-busy", "true");
+		await expect(spinner).toBeVisible();
+	} finally {
+		pending.resolve();
+	}
 	await expect(page.getByRole("alert")).toContainText("cannot be merged automatically");
-	await expect(sync).toContainText("↑1 ↓1");
+	await expect(sync).toHaveText("↑1 ↓1 Sync main");
+	await expect(sync).toBeEnabled();
+	await expect(sync).toHaveAttribute("aria-busy", "false");
+	await expect(spinner).toHaveCount(0);
+	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("updated after failed push");
 });
 
 test("drafts on any branch block sync until committed or discarded", async ({ page }) => {
@@ -189,7 +227,7 @@ test("drafts on any branch block sync until committed or discarded", async ({ pa
 	await page.reload();
 	await page.getByRole("button", { name: "file-0.ts", exact: true }).click();
 	const editor = page.getByRole("textbox", { name: "File editor" });
-	const sync = page.getByRole("button", { name: /Sync with upstream/ });
+	const sync = page.getByRole("button", { name: /Sync/ });
 	await expect(sync).toBeEnabled();
 	await editor.fill("draft");
 	await expect(sync).toBeDisabled();
@@ -226,7 +264,7 @@ test("sync from another branch identifies and refreshes the resolved target", as
 	await page.getByRole("button", { name: "file-0.ts", exact: true }).click();
 	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("feature/navigation: original");
 	await selectBranch(page, "main");
-	const sync = page.getByRole("button", { name: /Sync with upstream/ });
+	const sync = page.getByRole("button", { name: /Sync/ });
 	await expect(sync.getByLabel("Target branch")).toHaveText("feature/navigation");
 	await sync.click();
 	await expect(page.getByRole("status")).toContainText("feature/navigation synced with upstream.");
@@ -253,14 +291,14 @@ test("unavailable status keeps an actionable sync control and ignores stale drif
 	await expect.poll(() => reads).toBeGreaterThanOrEqual(1);
 	navigated = true;
 	await selectBranch(page, "feature");
-	const sync = page.getByRole("button", { name: /Sync with upstream/ });
+	const sync = page.getByRole("button", { name: /Sync/ });
 	try {
 		await expect(page.getByRole("alert")).toContainText("Upstream drift unavailable.");
 		await expect(sync).toBeEnabled();
 	} finally {
 		pending.resolve();
 	}
-	await expect(sync).toHaveText("Sync with upstream");
+	await expect(sync).toHaveText("Sync");
 	await expect(sync).not.toContainText("99");
 });
 
@@ -272,11 +310,13 @@ test("visible main refreshes the drift counts without a click", async ({ page })
 		return route.fulfill({ json: { state: "ready", branch: "main", ahead: 0, behind } });
 	});
 	await page.reload();
-	const sync = page.getByRole("button", { name: /Sync with upstream/ });
-	await expect(sync).toHaveText("↓1 Sync with upstream main");
+	const sync = page.getByRole("button", { name: /Sync/ });
+	await expect(sync).toHaveText("↓1 Sync main");
 	behind = 3;
 	await page.clock.fastForward(31_000);
-	await expect(sync).toHaveText("↓3 Sync with upstream main");
+	await expect(sync).toHaveText("↓3 Sync main");
+	await expect(sync).toHaveAttribute("aria-busy", "false");
+	await expect(sync.locator(".repository-sync-spinner")).toHaveCount(0);
 });
 
 test("sync renders while drift is pending and shows only positive counts", async ({ page }) => {
@@ -289,15 +329,17 @@ test("sync renders while drift is pending and shows only positive counts", async
 		await route.fulfill({ json: { state: "ready", branch: "main", ahead: 2, behind: 0 } });
 	});
 	await page.reload();
-	const sync = page.getByRole("button", { name: /Sync with upstream/ });
+	const sync = page.getByRole("button", { name: /Sync/ });
 	let initialBounds;
 	try {
-		await expect(sync).toHaveText("Sync with upstream");
+		await expect(sync).toHaveText("Sync");
+		await expect(sync).toHaveAttribute("aria-busy", "false");
+		await expect(sync.locator(".repository-sync-spinner")).toHaveCount(0);
 		initialBounds = await sync.boundingBox();
 	} finally {
 		release();
 	}
-	await expect(sync).toHaveText("↑2 Sync with upstream main");
+	await expect(sync).toHaveText("↑2 Sync main");
 	expect((await sync.boundingBox())?.height).toEqual(initialBounds?.height);
 });
 
@@ -312,7 +354,7 @@ test("sync feedback floats at bottom left and can expire or be dismissed", async
 			: route.fulfill({ json: { head, branch: "main" } });
 	});
 	await page.reload();
-	const sync = page.getByRole("button", { name: /Sync with upstream/ });
+	const sync = page.getByRole("button", { name: /Sync/ });
 	const list = page.getByRole("table", { name: "Repository files" });
 	await expect(list).toBeVisible();
 	const before = await list.boundingBox();

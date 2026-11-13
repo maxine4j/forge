@@ -254,11 +254,17 @@ The branch dropdown lists all local branches and defaults to `main`, or the firs
 branch when `main` is absent. Every branch supports owner editing. There is no
 Working changes option. Listings read committed files and show each entry's latest
 commit subject and date. Browsing and committing never switch or reset a checkout.
-For any ready repository with an upstream remote, **Sync with upstream** appears
+For any ready repository with an upstream remote, **Sync** appears
 on every branch before counts load, identifies the resolved target branch when
 available, and shows each nonzero count for commits
 ahead (↑) or behind (↓) to the left of the button label. Code checks the counts when
 opened, every 30 seconds while visible, and after committing or syncing.
+While the user-triggered sync request is pending, the disabled button shows a
+decorative spinner beside **Syncing…** and exposes `aria-busy`. Success or failure
+removes the spinner and restores **Sync**. Background drift checks do not show
+this loading state, and the spinner respects reduced-motion preferences.
+An eligible empty repository shows a disabled **Sync** button until the upstream
+default branch exists locally.
 Commit or discard editor drafts before syncing; drafts on any branch disable the
 action with branch-neutral guidance. Code refreshes the affected branch's content
 after success, including when browsing another branch, and refreshes counts after

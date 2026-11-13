@@ -388,6 +388,7 @@ const BranchBrowser = ({
 						className='repository-sync-button'
 						type='button'
 						disabled={disabled || dirty || syncBlocked}
+						aria-busy={syncing}
 						title={dirty || syncBlocked ? "Commit or discard drafts before syncing." : undefined}
 						onClick={() => void syncUpstream()}
 					>
@@ -401,7 +402,8 @@ const BranchBrowser = ({
 								<span aria-label={`${readyDrift.behind} behind`}>↓{readyDrift.behind}</span>{" "}
 							</>
 						)}
-						{syncing ? "Syncing with upstream…" : "Sync with upstream"}
+						{syncing && <span className='repository-sync-spinner' aria-hidden='true' />}
+						{syncing ? "Syncing…" : "Sync"}
 						{readyDrift && <span aria-label='Target branch'> {readyDrift.branch}</span>}
 					</button>
 				)}
@@ -774,7 +776,7 @@ export const RepositoryBrowser = ({
 					disabled
 					title='The upstream default branch must exist locally before syncing.'
 				>
-					Sync with upstream
+					Sync
 				</button>
 			)}
 			{visited.map((value) => (

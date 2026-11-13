@@ -2642,6 +2642,27 @@ summary {
 	overflow-wrap: anywhere;
 	font-variant-numeric: tabular-nums;
 }
+.repository-sync-spinner {
+	display: inline-block;
+	width: 12px;
+	height: 12px;
+	margin-inline-end: 6px;
+	border: 2px solid currentColor;
+	border-inline-end-color: transparent;
+	border-radius: 50%;
+	vertical-align: -2px;
+	animation: repository-sync-spin 1s linear infinite;
+}
+@keyframes repository-sync-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.repository-sync-spinner {
+		animation: none;
+	}
+}
 .repository-toast {
 	position: fixed;
 	inset-inline-start: max(16px, env(safe-area-inset-left));
