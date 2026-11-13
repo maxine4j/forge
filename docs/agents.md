@@ -1,5 +1,16 @@
 # Codex and interactive agents
 
+## Ticket history recording
+
+The agent service injects a persistence interface at its normalized synchronization
+boundary to record waiting, resume, failure and interruption for managed tickets.
+Recording runs from runtime notifications and recovery without an open dialog;
+Codex adapters retain protocol translation only. Durable turn identities suppress
+duplicate snapshots and reject abandoned or superseded executions. Only normalized
+labels and safe reasons enter the [ticket History timeline](tickets.md#ticket-history),
+which is distinct from Codex's authoritative conversation history. See
+[SQLite persistence](architecture.md#persistence-and-recovery).
+
 ## Ticket cancellation
 
 Ticket-only [execution settings](tickets.md#ticket-execution-settings) can skip

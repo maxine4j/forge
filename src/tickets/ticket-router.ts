@@ -9,12 +9,15 @@ import {
 	ticketSchema,
 	ticketsSchema,
 	ticketWorkflowSchema,
+	ticketHistoryQuerySchema,
+	ticketHistorySchema,
 } from "@forge/contracts/tickets";
 import Router from "@koa/router";
 
 import type { Actor } from "../auth/types.ts";
 import type { IHttpRouter } from "../http/http-application.ts";
 import { TicketError } from "./errors.ts";
+import type { TicketHistoryStore } from "./ticket-history-store.ts";
 import type { ITicketService } from "./ticket-service.ts";
 import type { ITicketWorkflowService } from "./ticket-workflow-service.ts";
 
@@ -22,9 +25,16 @@ export class TicketRouter implements IHttpRouter {
 	constructor(
 		private readonly service: ITicketService,
 		private readonly workflow: ITicketWorkflowService,
+		private readonly history: Pick<TicketHistoryStore, "read">,
 	) {}
 	create(): Router<{ actor: Actor }> {
 		const router = new Router<{ actor: Actor }>();
+		router.get("/api/tickets/:id/history", async (ctx) => {
+			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);
+			const query = ticketHistoryQuerySchema.safeParse(ctx.query);
+			if (!query.success) throw new TicketError("invalid-request");
+			ctx.body = ticketHistorySchema.parse(await this.history.read(ticket.id, query.data.after));
+		});
 		router.post("/api/tickets/:id/clear-plan", async (ctx) => {
 			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);
 			ctx.body = ticketWorkflowSchema.parse(await this.workflow.clearPlan(ctx.state.actor, ticket));

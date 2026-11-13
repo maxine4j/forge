@@ -99,11 +99,10 @@ There is one persistent order per column, used by creation, moves, transitions,
 completion and queued dispatch. A `beforeId` must name an active ticket in the
 destination column. Scope edits and workflow transitions are serialized together.
 
-This is a fresh database contract: tickets have no repository-owner column.
+Tickets have no repository-owner column.
 `ticket_repositories` stores ordered references with foreign keys and unique
-repository/position constraints; the board index is global. No migration,
-conversion or fallback to repository-scoped tickets is supplied. See
-[development database recreation](development.md#development-databases).
+repository/position constraints; the board index is global. See
+[development database care](development.md#development-databases).
 The owner can archive a ticket from its details panel after confirming. Archived
 tickets leave the board and remain in [Costs](agents.md#cost-and-usage).
 Forge retains the key, scope, references, status, workflow history and related data. The
@@ -228,7 +227,7 @@ out of the standalone Agents list. Mutations require owner access and exact-orig
 checks. Transition conflicts return 409. Board and ticket details refresh while
 execution continues. The global board opens at `/tasks`; selection uses `/tasks?ticket=:id`. Details,
 workflow, model options and cost load by ticket ID even outside active board
-membership. Removed repository ticket APIs return not-found. The ticket modal has keyboard-accessible Details, Chat and Cost
+membership. Removed repository ticket APIs return not-found. The ticket modal has keyboard-accessible Details, Chat, History and Cost
 tabs. Details shows the latest saved Markdown plan below Description, including
 after approval. The tabs share a row with the live execution label on the right.
 The header epic link shows its icon and key, with the full title in its tooltip
@@ -322,7 +321,7 @@ linked breadcrumb for an assigned epic. Backlog drafts can add, change or remove
 their parent there and save it immediately. Create ticket in an epic header or its details
 preselects that epic. Create ticket in No epic starts without an epic selected.
 See [persistence](architecture.md#persistence-and-recovery)
-and the required [database backup and recreation](development.md#development-databases).
+and [database backup guidance](development.md#development-databases).
 
 ### Docker containers
 
@@ -444,7 +443,7 @@ Costs links to `/tasks?ticket=:ticketId`. The panel loads the
 ticket by ID independently of the active board, including archived tickets.
 Closing clears the query parameter; reload and Back/Forward restore selection.
 Missing tickets show errors. Archived panels retain
-Details, Chat history and Cost, with editing and execution controls read-only.
+Details, Chat, History and Cost, with editing and execution controls read-only.
 
 - **Estimated API cost** prices uncached input, cached input and output using the
   dispatch snapshot's USD model rates. Unknown pricing or usage stays unavailable.
@@ -462,3 +461,50 @@ cache-write and tool fees remain outside the base API token estimate.
 See [quota attribution](agents.md#quota-cost-attribution),
 [billing settings and FX caching](development.md#cost-settings), and
 [persistence boundaries](architecture.md#persistence-and-recovery).
+
+### Ticket History
+
+The read-only History tab uses the existing labelled panels, arrow/Home/End
+navigation and remembered selection, between Chat and Cost. It shows status visits
+oldest first as large connected nodes with bold headings. Returning to Backlog or
+Ready adds a visit. Smaller indented workflow milestones use nested semantic lists
+and muted timestamps. Completed steps stay green with a check, active work is blue
+with a spinner, failures are red with a safe reason, actions are orange with a solid
+dot and explicit label, queued work uses a muted clock, and cancellation a stopped
+indicator. Reduced motion disables rotation; text wraps on narrow screens.
+
+Milestones include planning, created/adjusted plan revisions, awaiting approval,
+approval, implementation, implemented candidates, merge queue, rebase, merge,
+failure, retry, action requests/resumption, recovery, cancellation and cleanup.
+Failures survive retries. Leaving In progress cancels unfinished work. Approval,
+feedback and recovery remain in the existing controls; history excludes scope and
+settings edits, conversation/tool contents, plan text and private runtime identities.
+
+`ticket_history` stores ordered event IDs, ticket ID, UTC timestamp, status visit,
+milestone, outcome, optional revision and normalized reason. Creation and actual
+status changes append events in the ticket transaction; reorder alone does not.
+Workflow persistence appends milestones in the state transaction. Serialized state
+comparisons and durable per-thread/turn observations suppress repeated polling and
+recovery observations, while preserving repeated waits and distinct retries.
+An injected persistence boundary records normalized agent activity during agent
+synchronization, independently of browser selection. Original workspace visits and
+execution identities associate cleanup/results with their attempt; abandoned or
+superseded turns cannot advance the current timeline. See
+[agent lifecycle](agents.md#ticket-history-recording) and
+[persistence](architecture.md#persistence-and-recovery).
+
+Storage initializes additively. Existing tickets, including archived tickets, get
+one idempotent snapshot of their known current status at initialization time.
+“History recorded from…” identifies this boundary; no earlier transition or date
+is invented. History remains after plans clear, abandonment, worktree removal,
+archive and application restart.
+
+Owner-authorized `GET /api/tickets/:id/history?after=<eventId>` returns
+`{recordedFrom,bootstrapped,events,nextCursor?}` using shared Zod contracts from
+`@forge/contracts/tickets`. Events are ascending by ID, with at most 100 per page;
+`nextCursor` identifies the last returned event when another page exists. Omitted
+`after` starts at zero; invalid cursors return 400, missing tickets 404. Archived
+tickets remain readable. Private attempt identities and runtime data are excluded.
+The tab loads on selection, refreshes once per second without overlapping requests,
+retains loaded pages and reading position, and offers Load more, loading, empty
+and retryable error states.

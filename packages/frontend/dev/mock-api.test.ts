@@ -29,6 +29,7 @@ import {
 	ticketsSchema,
 	ticketSchema,
 	ticketWorkflowSchema,
+	ticketHistorySchema,
 } from "@forge/contracts/tickets";
 import { createServer, resolveConfig } from "vite";
 import type { ViteDevServer } from "vite";
@@ -55,6 +56,16 @@ const read = async (path: string) => {
 	expect(response.headers.get("cache-control")).toBe("no-store");
 	return response.json();
 };
+
+test("mock history exposes safe ordered events and cursor reads", async () => {
+	const ticket = ticketsSchema.parse(await read("/api/tickets"))[0]!;
+	const history = ticketHistorySchema.parse(await read(`/api/tickets/${ticket.id}/history`));
+	expect(history.events.map((event) => event.id)).toEqual(
+		[...history.events.map((event) => event.id)].sort((a, b) => a - b),
+	);
+	const tail = ticketHistorySchema.parse(await read(`/api/tickets/${ticket.id}/history?after=10`));
+	expect(tail.events.every((event) => event.id > 10)).toBe(true);
+});
 
 test("mock commit pages expose validated parent links, structured patches and whitespace filtering", async () => {
 	const projects = projectsSchema.parse(await read("/api/projects"));

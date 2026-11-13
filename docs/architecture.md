@@ -81,8 +81,7 @@ HTTP / WebSocket / Git protocol adapters / background tasks
   model token pricing and historical FX context; USD costs persist with usage.
   SQLite also owns the four-hour exchange-rate cache, raw quota observations and
   idempotent interval allocations. Inject exchange client/cache interfaces and
-  serialize quota collection independently of dashboard reads. No migration or
-  compatibility path is provided; use a fresh database. See
+  serialize quota collection independently of dashboard reads. See
   [cost attribution](agents.md#quota-cost-attribution),
   [ticket costs](tickets.md#ticket-cost) and [billing](development.md#cost-settings).
 - Store larger attachments and execution artifacts outside SQLite.
@@ -91,7 +90,11 @@ HTTP / WebSocket / Git protocol adapters / background tasks
   non-archived children, never persisted. Epic store/service/router modules live
   under `src/epics`; membership updates use the ticket workflow serialization and
   scope transaction. See [epic contracts](tickets.md#epics-and-grouped-backlog) and
-  [fresh database setup](development.md#development-databases).
+  [development database care](development.md#development-databases).
+- Ticket history is append-only SQLite data, initialized additively. Status visits
+  and workflow milestones share the transactions that persist their state.
+  Existing tickets receive only their known status at recording start; historical
+  transitions are not inferred. See [ticket history](tickets.md#ticket-history).
 - Use SQLite WAL mode, foreign keys, bounded transactions, and serialized writes
   on a local filesystem. Expose an asynchronous database contract. Evaluate the
   pinned Node release's built-in SQLite support before selecting an adapter.

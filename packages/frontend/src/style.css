@@ -1541,6 +1541,7 @@
 }
 .ticket-fields,
 .ticket-chat,
+.ticket-history-panel,
 .ticket-cost {
 	flex: 1;
 	min-height: 0;
@@ -3250,4 +3251,123 @@ summary {
 }
 .state-succeeded {
 	color: #3fb950;
+}
+/* Ticket history uses list structure for both status visits and nested milestones. */
+.ticket-history-panel {
+	overflow: auto;
+	min-height: 0;
+}
+.ticket-history {
+	padding: 1rem;
+	overflow-wrap: anywhere;
+}
+.history-recorded,
+.history-entry time,
+.history-state {
+	color: var(--text-muted, #8c94a4);
+	font-size: 0.8rem;
+}
+.history-visits,
+.history-steps {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+.history-visits > li {
+	border-left: 2px solid #596274;
+	margin-left: 18px;
+	padding: 0 0 24px 28px;
+}
+.history-visits > li:last-child {
+	border-color: transparent;
+}
+.history-entry {
+	position: relative;
+	padding-bottom: 12px;
+}
+.history-entry h3 {
+	margin: 0;
+	font-size: 1.1rem;
+	font-weight: 750;
+}
+.history-node {
+	position: absolute;
+	left: -47px;
+	top: 0;
+	width: 36px;
+	height: 36px;
+	border-radius: 50%;
+	background: #192a24;
+	color: #79b998;
+	display: grid;
+	place-items: center;
+	border: 1px solid currentColor;
+}
+.history-node svg {
+	width: 20px;
+	height: 20px;
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 2;
+}
+.history-entry time,
+.history-state {
+	display: block;
+	margin-top: 3px;
+}
+.history-entry p {
+	margin: 6px 0;
+}
+.history-steps {
+	margin: 8px 0 0 10px;
+}
+.history-steps > li {
+	border-left: 1px solid #596274;
+	padding-left: 20px;
+}
+.history-steps > li:last-child {
+	border-color: transparent;
+}
+.history-steps .history-node {
+	width: 18px;
+	height: 18px;
+	left: -30px;
+}
+.history-steps .history-node svg {
+	width: 14px;
+	height: 14px;
+}
+.history-steps strong {
+	font-size: 0.9rem;
+}
+.history-working .history-node {
+	background: #192b42;
+	color: #7eb8ff;
+}
+.history-failed .history-node {
+	background: #3b2024;
+	color: #ff969c;
+}
+.history-action-required .history-node {
+	background: #392b1c;
+	color: #ffc076;
+}
+.history-queued .history-node,
+.history-canceled .history-node {
+	background: #262b35;
+	color: #a6afbf;
+}
+.history-spinner {
+	transform-origin: center;
+	animation: history-spin 1s linear infinite;
+}
+@keyframes history-spin {
+	to {
+		transform: rotate(360deg);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.history-spinner {
+		animation: none;
+	}
 }

@@ -10,6 +10,47 @@ export type TicketExecutionSettings = z.infer<typeof ticketExecutionSettingsSche
 
 export const ticketStatuses = ["backlog", "todo", "in-progress", "done"] as const;
 export const ticketStatusSchema = z.enum(ticketStatuses);
+export const ticketHistoryEventSchema = z.strictObject({
+	id: z.number().int().positive(),
+	ticketId: z.string().regex(/^TASK-[1-9]\d{0,14}$/u),
+	at: z.iso.datetime(),
+	visitId: z.number().int().positive(),
+	status: ticketStatusSchema,
+	type: z.enum([
+		"status",
+		"planning",
+		"plan-created",
+		"plan-adjusted",
+		"awaiting-approval",
+		"plan-approved",
+		"implementing",
+		"implemented",
+		"merge-queued",
+		"rebasing",
+		"merged",
+		"retry",
+		"action-required",
+		"resumed",
+		"failure",
+		"canceled",
+		"cleanup",
+		"recovery",
+	]),
+	outcome: z.enum(["completed", "working", "failed", "action-required", "queued", "canceled"]),
+	revision: z.number().int().positive().optional(),
+	reason: z.string().max(500).optional(),
+});
+export const ticketHistoryQuerySchema = z.strictObject({
+	after: z.coerce.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).default(0),
+});
+export const ticketHistorySchema = z.strictObject({
+	recordedFrom: z.iso.datetime(),
+	bootstrapped: z.boolean(),
+	events: z.array(ticketHistoryEventSchema).max(100),
+	nextCursor: z.number().int().positive().optional(),
+});
+export type TicketHistoryEvent = z.infer<typeof ticketHistoryEventSchema>;
+export type TicketHistory = z.infer<typeof ticketHistorySchema>;
 export const ticketIdSchema = z.string().regex(/^TASK-[1-9]\d{0,14}$/u);
 export const epicIdSchema = z.string().regex(/^EPIC-[1-9]\d{0,14}$/u);
 export const repositoryIdsSchema = z

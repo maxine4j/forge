@@ -12,6 +12,7 @@ import type { IDatabase } from "../database/sqlite-database.ts";
 import type { SqlStatement } from "../database/types.ts";
 import { epicTable } from "../epics/epic-store.ts";
 import { TicketError } from "./errors.ts";
+import { historyTables } from "./ticket-history-store.ts";
 
 const columns = `id, epicId, title, description, status, createdAt, archivedAt, executionSettings,
  (SELECT json_group_array(repositoryId) FROM (SELECT repositoryId FROM ticket_repositories WHERE ticketId=tickets.id ORDER BY position)) AS repositoryIds`;
@@ -29,7 +30,18 @@ const decode = (row: unknown): Ticket => {
 };
 
 /** Shared global column ordering for owner moves and workflow transitions. */
-export const boardMoveStatements = (id: string, input: MoveTicket): SqlStatement[] => [
+export const boardMoveStatements = (id: string, input: MoveTicket, at: string): SqlStatement[] => [
+	{
+		sql: `INSERT INTO ticket_history(ticketId,at,visitId,status,type,outcome)
+		 SELECT t.id,?,h.id,t.status,'canceled','canceled' FROM tickets t JOIN ticket_history h ON h.ticketId=t.id
+		 WHERE t.id=? AND ((t.status='in-progress' AND ? NOT IN ('in-progress','done')) OR (t.status='todo' AND ?='backlog'))
+		 AND h.id=(SELECT MAX(id) FROM ticket_history WHERE ticketId=t.id AND type='status')`,
+		parameters: [at, id, input.status, input.status],
+	},
+	{
+		sql: "INSERT INTO ticket_history(ticketId,at,status,type,outcome) SELECT id,?,?,'status','completed' FROM tickets WHERE id=? AND status<>?",
+		parameters: [at, input.status, id, input.status],
+	},
 	{
 		sql: "UPDATE tickets SET position=position+1 WHERE status=? AND archivedAt IS NULL AND position >= (SELECT position FROM tickets WHERE id=?)",
 		parameters: [input.status, input.beforeId ?? null],
@@ -58,7 +70,10 @@ export interface ITicketStore {
 }
 export class TicketStore implements ITicketStore {
 	private insertTail: Promise<unknown> = Promise.resolve();
-	constructor(private readonly database: IDatabase) {}
+	constructor(
+		private readonly database: IDatabase,
+		private readonly now: () => Date = () => new Date(),
+	) {}
 	async initialize(): Promise<void> {
 		await this.guard(() =>
 			this.database.transaction([
@@ -75,6 +90,11 @@ export class TicketStore implements ITicketStore {
 				{ sql: "CREATE INDEX IF NOT EXISTS tickets_epic ON tickets(epicId)" },
 				{
 					sql: "CREATE TRIGGER IF NOT EXISTS tickets_capacity BEFORE INSERT ON tickets WHEN (SELECT COUNT(*) FROM tickets WHERE archivedAt IS NULL)>=1000 BEGIN SELECT RAISE(ABORT,'Board capacity reached'); END",
+				},
+				...historyTables,
+				{
+					sql: "INSERT INTO ticket_history(ticketId,at,status,type,outcome,bootstrapped) SELECT id,?,status,'status','completed',1 FROM tickets WHERE NOT EXISTS (SELECT 1 FROM ticket_history WHERE ticketId=tickets.id)",
+					parameters: [this.now().toISOString()],
 				},
 			]),
 		);
@@ -180,7 +200,7 @@ export class TicketStore implements ITicketStore {
 		});
 	}
 	async move(id: string, input: MoveTicket): Promise<void> {
-		await this.guard(() => this.database.transaction(boardMoveStatements(id, input)));
+		await this.guard(() => this.database.transaction(boardMoveStatements(id, input, this.now().toISOString())));
 	}
 	private async guard<T>(operation: () => Promise<T>): Promise<T> {
 		try {

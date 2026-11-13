@@ -73,6 +73,7 @@ import { TerminalStore } from "./terminal/terminal-store.ts";
 import { BoardSettingsRouter } from "./tickets/board-settings-router.ts";
 import { BoardSettingsService } from "./tickets/board-settings-service.ts";
 import { BoardSettingsStore } from "./tickets/board-settings-store.ts";
+import { TicketHistoryStore } from "./tickets/ticket-history-store.ts";
 import { TicketPrompts } from "./tickets/ticket-prompts.ts";
 import { TicketRouter } from "./tickets/ticket-router.ts";
 import { TicketService } from "./tickets/ticket-service.ts";
@@ -157,6 +158,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const epicStore = new EpicStore(database);
 	await epicStore.initialize();
 	await ticketStore.initialize();
+	const ticketHistory = new TicketHistoryStore(database);
 	const identity = () => settings.gitIdentity();
 	const git = options.git ?? new GitTransport(sleep, { identity });
 	const githubGit = new GitTransport(sleep, {
@@ -274,6 +276,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			return { defaultModel: defaultAgentModel, defaultReasoningEffort: defaultAgentReasoningEffort };
 		},
 		() => settings.inferenceProvider(),
+		ticketHistory,
 	);
 	lifecycle.register(() => agents.shutdown());
 	const boardStore = new BoardSettingsStore(database);
@@ -339,7 +342,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			new BoardSettingsRouter(boardSettings),
 			new DockerRouter(docker),
 			new PipelineRouter(pipelines),
-			new TicketRouter(tickets, workflow),
+			new TicketRouter(tickets, workflow, ticketHistory),
 			new EpicRouter(epics),
 			new CostRouter(cost),
 			new WorkspaceRouter(workspaces),

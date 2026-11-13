@@ -20,14 +20,16 @@ import { EpicIcon } from "./epic-icon.tsx";
 import { InlineTicketDescription, InlineTicketTitle } from "./inline-ticket-fields.tsx";
 import { RepositorySelection } from "./repository-selection.tsx";
 import { TicketCost } from "./ticket-cost.tsx";
+import { TicketHistoryTimeline } from "./ticket-history.tsx";
 import { ticketLabels } from "./ticket-labels.ts";
 
 export { ticketLabels } from "./ticket-labels.ts";
 
-const tabLabels = { details: "Details", chat: "Chat", cost: "Cost" };
+const tabLabels = { details: "Details", chat: "Chat", history: "History", cost: "Cost" };
 type TicketTab = keyof typeof tabLabels;
 type UpdateTicket = ReturnType<typeof updateTicketSchema.parse>;
 const tabIcons: Record<TicketTab, string> = {
+	history: "M12 3a9 9 0 1 1-9 9M12 7v5l4 2M3 3v6h6",
 	details: "M6 3h8l4 4v14H6z M14 3v5h4 M9 12h6 M9 16h6",
 	chat: "M4 5h16v11H9l-5 4z",
 	cost: "M12 3v18 M16 7H9a2.5 2.5 0 0 0 0 5h6a2.5 2.5 0 0 1 0 5H8",
@@ -269,7 +271,7 @@ export const TicketDetails = ({
 		ticket.status === "in-progress" && job?.phase === "planning" && job.state === "idle" && !job.approvedRevision
 			? plan
 			: undefined;
-	const tabs: TicketTab[] = ["details", "chat", "cost"];
+	const tabs: TicketTab[] = ["details", "chat", "history", "cost"];
 	const tab = section ?? (currentId || job?.state === "queued" ? "chat" : "details");
 	const selectTab = (next: TicketTab) => {
 		setTab(next);
@@ -816,6 +818,9 @@ export const TicketDetails = ({
 							: "Waiting for a ticket agent to start."}
 					</p>
 				)}
+			</div>
+			<div className='ticket-history-panel' {...panel("history")}>
+				<TicketHistoryTimeline key={ticket.id} api={api} ticketId={ticket.id} selected={tab === "history"} />
 			</div>
 			<div className='ticket-cost' {...panel("cost")}>
 				{tab === "cost" && <TicketCost api={api} ticketId={ticket.id} />}

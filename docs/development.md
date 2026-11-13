@@ -65,18 +65,19 @@ even when invoked with `--mode mock`.
 
 ## Development databases
 
-FORGE-3, FORGE-4 and FORGE-6 require a fresh development database for cost
-snapshots, epics, nullable ticket membership and the independent `TASK-n` and
-`EPIC-n` sequences. There is no automatic reset,
-legacy schema migration, data conversion or fallback query. Stop Forge and
-explicitly move the old `forge.sqlite`, `forge.sqlite-wal` and `forge.sqlite-shm`
-files together to a backup outside the active data directory before restarting
-against a fresh database. Preserve repository/worktree directories and credential
-homes; resource removal never erases them. Use an isolated data directory for
-throwaway integration tests. See [architecture](architecture.md#persistence-and-recovery)
-and [the board schema](tickets.md#agentic-ticket-board).
-Legacy `FORGE-n` keys are not supported. Back up the database before recreation;
-never delete an active database or credential homes as part of an upgrade.
+SQLite stores cost snapshots, epics, nullable ticket membership and independent
+`TASK-n` and `EPIC-n` sequences. Ticket history initializes its tables additively
+and bootstraps existing tickets idempotently; see [history recording](tickets.md#ticket-history).
+This describes history initialization, without claiming migrations for unrelated
+older schemas.
+
+For an optional development reset, stop Forge and move `forge.sqlite`,
+`forge.sqlite-wal` and `forge.sqlite-shm` together to a backup outside the active
+data directory. Preserve repository/worktree directories and credential homes;
+resource removal never erases them. Never delete an active database or credential
+homes as part of an upgrade. Use an isolated data directory for throwaway tests.
+See [architecture](architecture.md#persistence-and-recovery) and
+[the board schema](tickets.md#agentic-ticket-board).
 
 ## Local pipeline verification
 

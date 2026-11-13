@@ -2,7 +2,9 @@ import type { MoveTicket } from "@forge/contracts/tickets";
 import { z } from "zod";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
+import type { SqlStatement } from "../database/types.ts";
 import { TicketError } from "./errors.ts";
+import { historyMilestoneStatements, workflowMilestones } from "./ticket-history-store.ts";
 import { boardMoveStatements } from "./ticket-store.ts";
 import { ticketWorkflowRecordSchema, type TicketWorkflowRecord } from "./types.ts";
 
@@ -17,6 +19,7 @@ export interface ITicketWorkflowStore {
 	save(record: TicketWorkflowRecord, move?: MoveTicket): Promise<void>;
 }
 export class TicketWorkflowStore implements ITicketWorkflowStore {
+	private saveTail: Promise<unknown> = Promise.resolve();
 	constructor(
 		private readonly database: IDatabase,
 		private readonly now: () => Date = () => new Date(),
@@ -67,9 +70,39 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 		}
 	}
 	async save(record: TicketWorkflowRecord, move?: MoveTicket): Promise<void> {
+		const operation = this.saveTail.then(() => this.persist(record, move));
+		this.saveTail = operation.catch(() => {});
+		return operation;
+	}
+	private async persist(record: TicketWorkflowRecord, move?: MoveTicket): Promise<void> {
 		try {
 			const value = ticketWorkflowRecordSchema.parse(record);
+			const previous = await this.get(value.ticketId);
+			const at = this.now().toISOString();
+			const threadId = value.phase === "planning" ? value.plannerId : value.implementerId;
+			const attempt = value.turnId && threadId ? `${threadId}:${value.turnId}` : undefined;
+			const workspaceId =
+				value.workspaceId ?? value.abandonment?.workspaceId ?? previous?.abandonment?.workspaceId;
+			const associateVisit: SqlStatement = {
+				sql: `INSERT INTO ticket_history_workspaces(workspaceId,visitId)
+				 SELECT ?,id FROM ticket_history WHERE ? IS NOT NULL AND status IN ('todo','in-progress') AND id=(SELECT MAX(id) FROM ticket_history WHERE ticketId=? AND type='status')
+				 ON CONFLICT(workspaceId) DO UPDATE SET visitId=excluded.visitId
+				 WHERE (SELECT status FROM ticket_history WHERE id=ticket_history_workspaces.visitId)='todo'
+				 AND (SELECT status FROM ticket_history WHERE id=excluded.visitId)='in-progress'`,
+				parameters: [workspaceId ?? null, workspaceId ?? null, value.ticketId],
+			};
 			await this.database.transaction([
+				// Capture the known execution visit before abandonment moves the ticket.
+				associateVisit,
+				...(move?.status === "done"
+					? historyMilestoneStatements(
+							value.ticketId,
+							[{ type: "merged", outcome: "completed" }],
+							at,
+							attempt,
+							workspaceId,
+						)
+					: []),
 				{
 					sql: "INSERT INTO ticket_workflows(ticketId,record) VALUES(?,?) ON CONFLICT(ticketId) DO UPDATE SET record=excluded.record",
 					parameters: [value.ticketId, JSON.stringify(value)],
@@ -80,7 +113,53 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 								sql: "INSERT OR IGNORE INTO ticket_completions(ticketId,completedAt) SELECT id,? FROM tickets WHERE id=? AND status<>'done' AND ?='done'",
 								parameters: [this.now().toISOString(), value.ticketId, move.status],
 							},
-							...boardMoveStatements(value.ticketId, move),
+							...boardMoveStatements(value.ticketId, move, at),
+						]
+					: []),
+				// A confirmed dispatch carries the workspace into its In progress visit.
+				associateVisit,
+				...historyMilestoneStatements(
+					value.ticketId,
+					[
+						...workflowMilestones(previous, value),
+						...(move?.status === "in-progress"
+						&& value.state === "running"
+						&& previous?.state === "dispatching"
+							? [
+									{
+										type:
+											value.phase === "planning"
+												? ("planning" as const)
+												: value.phase === "rebase"
+													? ("rebasing" as const)
+													: ("implementing" as const),
+										outcome: "working" as const,
+									},
+								]
+							: []),
+					],
+					at,
+					attempt,
+					workspaceId,
+				),
+				...(move?.status === "in-progress" && value.state === "running" && previous?.state === "dispatching"
+					? [
+							{
+								sql: `INSERT INTO ticket_history(ticketId,at,visitId,status,type,outcome,reason,attempt)
+						 SELECT h.ticketId,?,h.id,h.status,
+						 CASE s.status WHEN 'waiting' THEN 'action-required' WHEN 'failed' THEN 'failure' ELSE 'canceled' END,
+						 CASE s.status WHEN 'waiting' THEN 'action-required' WHEN 'failed' THEN 'failed' ELSE 'canceled' END,
+						 CASE s.status WHEN 'waiting' THEN 'Action required in Chat' WHEN 'failed' THEN 'Agent turn failed. Review Chat and retry.' ELSE NULL END,?
+						 FROM ticket_history h JOIN ticket_history_agent_states s ON s.threadId=? AND s.turnId=?
+						 WHERE h.id=(SELECT MAX(id) FROM ticket_history WHERE ticketId=? AND type='status') AND s.status IN ('waiting','failed','interrupted')`,
+								parameters: [
+									at,
+									attempt ?? null,
+									threadId ?? null,
+									value.turnId ?? null,
+									value.ticketId,
+								],
+							},
 						]
 					: []),
 			]);

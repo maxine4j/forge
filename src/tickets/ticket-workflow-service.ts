@@ -440,6 +440,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		previousTurnId: _previous,
 		turnId: _turn,
 		workspaceCleaned: _cleaned,
+		cleanupFailed: _cleanupFailed,
 		abandonment: _abandonment,
 		...workflow
 	}: TicketWorkflowRecord): TicketWorkflow {
@@ -595,10 +596,16 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	}
 	private async cleanup(actor: Actor, job: TicketWorkflowRecord): Promise<void> {
 		if (!job.workspaceId || !job.resultSha || job.workspaceCleaned) return;
+		const { workspaceId, resultSha } = job;
 		try {
-			await this.workspaceCleanup.cleanupMerged(actor, job.workspaceId, job.resultSha);
+			if (job.cleanupFailed) {
+				job = { ...job, cleanupFailed: undefined };
+				await this.store.save(job);
+			}
+			await this.workspaceCleanup.cleanupMerged(actor, workspaceId, resultSha);
 			await this.store.save({ ...job, workspaceCleaned: true });
 		} catch (err) {
+			await this.store.save({ ...job, cleanupFailed: true });
 			this.log.error({ err, ticketId: job.ticketId }, "Merged ticket workspace cleanup is pending");
 		}
 	}

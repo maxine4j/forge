@@ -6,6 +6,7 @@ import { defaultBoardSettings, type EpicDetail, type Ticket } from "@forge/contr
 import type { Plugin } from "vite";
 
 import { costFixture, phaseFixtures } from "./cost-fixture.ts";
+import { historyFixture } from "./history-fixture.ts";
 
 const date = "2026-11-02T00:00:00.000Z";
 const head = "a".repeat(40);
@@ -339,6 +340,13 @@ export class MockApi implements IMockApi {
 					ticket: row,
 				}));
 			for (const ticket of tickets) {
+				this.routes.set(`/api/tickets/${ticket.id}/history`, (url) => {
+					const history = historyFixture(ticket.id, ticket.status);
+					return {
+						...history,
+						events: history.events.filter((event) => event.id > Number(url.searchParams.get("after") ?? 0)),
+					};
+				});
 				const plannerId = ticket.needsAttention ? project.id.replace(/0$/, "7") : undefined;
 				if (plannerId) {
 					const conversation: AgentView = {

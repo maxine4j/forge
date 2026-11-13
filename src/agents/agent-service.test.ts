@@ -1,4 +1,4 @@
-import type { AgentOptions } from "@forge/contracts/agents";
+import type { AgentOptions, AgentTurnFailure } from "@forge/contracts/agents";
 import type { InferenceProvider } from "@forge/contracts/settings";
 import { expect, test, vi } from "vitest";
 
@@ -155,6 +155,9 @@ const setup = (
 		recover: async () => {},
 	};
 	const pool = new AgentExecutionPool();
+	const history = {
+		observe: vi.fn<(record: AgentThreadRecord, failure?: AgentTurnFailure) => Promise<void>>(async () => {}),
+	};
 	const service = new AgentService(
 		store,
 		client,
@@ -166,9 +169,43 @@ const setup = (
 		pool,
 		defaults,
 		provider,
+		history,
 	);
-	return { service, client, store, workspaces, records, views, pool, changed: (key: string) => changed(key) };
+	return {
+		service,
+		client,
+		store,
+		workspaces,
+		records,
+		views,
+		pool,
+		history,
+		changed: (key: string) => changed(key),
+	};
 };
+
+test("managed runtime notifications persist normalized history without a selected conversation", async () => {
+	const f = setup();
+	const { thread } = await f.service.createTicketThread(owner, projectId, "Planner");
+	await f.service.dispatch(owner, thread.id, "Plan", { ticketId: "TASK-1", phase: "planning" });
+	const key = f.records.get(thread.id)!.codexId!;
+	Object.assign(f.views.get(key)!, { status: "waiting" });
+	f.changed(key);
+	await expect
+		.poll(() =>
+			f.history.observe.mock.calls.some(
+				(call) => (call[0] as AgentThreadRecord | undefined)?.status === "waiting",
+			),
+		)
+		.toBe(true);
+	f.changed(key);
+	await f.service.get(owner, thread.id);
+	expect(f.history.observe.mock.calls.filter(([record]) => record.status === "waiting")).toHaveLength(1);
+	Object.assign(f.views.get(key)!, { status: "failed", turnFailure: "context-window" });
+	f.changed(key);
+	await expect.poll(() => f.history.observe.mock.calls.some((call) => call[1] === "context-window")).toBe(true);
+	await f.service.shutdown();
+});
 
 test("pins providers before lazy creation, through active work and when recovering legacy records", async () => {
 	const local: InferenceProvider = { kind: "ollama", endpoint: "http://ollama.internal/v1", model: "local:latest" };

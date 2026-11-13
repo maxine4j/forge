@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { mkdtemp, rm } from "@forge/backend-infrastructure/file";
+import { ticketHistorySchema } from "@forge/contracts/tickets";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { AgentExecutionPool } from "../../src/agents/agent-execution-pool.ts";
@@ -16,6 +17,7 @@ import { HttpApplication } from "../../src/http/http-application.ts";
 import { ProjectRouter } from "../../src/projects/project-router.ts";
 import { ProjectService } from "../../src/projects/project-service.ts";
 import { ProjectStore } from "../../src/projects/project-store.ts";
+import { TicketHistoryStore } from "../../src/tickets/ticket-history-store.ts";
 import { TicketPrompts } from "../../src/tickets/ticket-prompts.ts";
 import { TicketRouter } from "../../src/tickets/ticket-router.ts";
 import { TicketService } from "../../src/tickets/ticket-service.ts";
@@ -93,7 +95,7 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	);
 	const server = createServer(
 		new HttpApplication(new ProjectRouter(projectService), access)
-			.create([new TicketRouter(service, workflow), new EpicRouter(epicService)])
+			.create([new TicketRouter(service, workflow, new TicketHistoryStore(db)), new EpicRouter(epicService)])
 			.callback(),
 	);
 	cleanups.push(
@@ -146,6 +148,23 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	});
 	expect(created.status).toBe(201);
 	const ticket = await created.json();
+	const historyResponse = await request(`tickets/${ticket.id}/history`);
+	expect(historyResponse.status).toBe(200);
+	expect(ticketHistorySchema.parse(await historyResponse.json()).events).toEqual([
+		expect.objectContaining({ type: "status", status: "backlog" }),
+	]);
+	for (const query of ["after=-1", "after=abc", "after=1.5", "after=1&after=2", "other=1"])
+		expect((await request(`tickets/${ticket.id}/history?${query}`)).status).toBe(400);
+	expect((await request("tickets/TASK-9999/history")).status).toBe(404);
+	expect(
+		(
+			await fetch(`http://127.0.0.1:${address.port}/api/tickets/${ticket.id}/history`, {
+				headers: { "x-webauth-user": "someone-else" },
+			})
+		).status,
+	).toBe(403);
+	const archivedHistory = ticketHistorySchema.parse(await (await request(`tickets/${unassigned.id}/history`)).json());
+	expect(archivedHistory.events[0]?.type).toBe("status");
 	expect(ticket).toMatchObject({ id: "TASK-2", status: "backlog" });
 	expect(await (await request(`tickets/${ticket.id}`)).json()).toEqual(ticket);
 	expect(
@@ -470,4 +489,16 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		});
 		expect(deniedOrigin.status).toBe(403);
 	}
+	for (let index = 0; index < 100; index++) await store.move(raced.id, { status: index % 2 ? "todo" : "backlog" });
+	await store.archive(raced.id, "2026-11-03T00:00:00.000Z");
+	const firstPage = ticketHistorySchema.parse(await (await request(`tickets/${raced.id}/history`)).json());
+	expect(firstPage.events).toHaveLength(100);
+	expect(firstPage.nextCursor).toBe(firstPage.events.at(-1)?.id);
+	const lastPage = ticketHistorySchema.parse(
+		await (await request(`tickets/${raced.id}/history?after=${firstPage.nextCursor}`)).json(),
+	);
+	expect(lastPage.events.length).toBeGreaterThan(0);
+	expect(lastPage.events[0]!.id).toBeGreaterThan(firstPage.nextCursor!);
+	expect(lastPage.nextCursor).toBeUndefined();
+	expect(lastPage.recordedFrom).toBe(firstPage.recordedFrom);
 });

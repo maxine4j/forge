@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
 import { costFixture, phaseFixtures } from "../dev/cost-fixture.ts";
+import { historyFixture } from "../dev/history-fixture.ts";
 
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const createdAt = "2026-11-03T00:00:00.000Z";
@@ -146,6 +147,13 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 			if (path.endsWith("/model-options") || path.endsWith("/options"))
 				return route.fulfill({ json: modelOptions });
 			if (path.endsWith("/files")) return route.fulfill({ json: ["src/main.ts", "README.md"] });
+			if (path.startsWith("/api/tickets/") && path.endsWith("/history")) {
+				const history = historyFixture(path.split("/")[3]!);
+				const after = Number(new URL(route.request().url()).searchParams.get("after") ?? 0);
+				return route.fulfill({
+					json: { ...history, events: history.events.filter((event) => event.id > after) },
+				});
+			}
 			if (path.startsWith("/api/tickets/") && path.endsWith("/settings")) {
 				const ticket = tickets.find((value) => value.id === path.split("/")[3])!;
 				ticket.executionSettings = route.request().postDataJSON();
@@ -1765,7 +1773,8 @@ test("ticket sections are keyboard navigable tabs with a labelled active panel",
 	const chat = tablist.getByRole("tab", { name: "Chat" });
 	const details = tablist.getByRole("tab", { name: "Details" });
 	const cost = tablist.getByRole("tab", { name: "Cost" });
-	await expect(tablist.getByRole("tab")).toHaveCount(3);
+	const history = tablist.getByRole("tab", { name: "History" });
+	await expect(tablist.getByRole("tab")).toHaveCount(4);
 	await expect(chat).toHaveAttribute("aria-selected", "true");
 	await details.focus();
 	await details.press("ArrowRight");
@@ -1773,6 +1782,9 @@ test("ticket sections are keyboard navigable tabs with a labelled active panel",
 	await expect(modal.getByRole("tabpanel", { name: "Chat" })).toBeVisible();
 	await expect(modal.getByRole("tabpanel")).toHaveCount(1);
 	await chat.press("ArrowRight");
+	await expect(history).toBeFocused();
+	await expect(modal.getByRole("tabpanel", { name: "History" })).toBeVisible();
+	await history.press("ArrowRight");
 	await expect(cost).toBeFocused();
 	await cost.press("ArrowRight");
 	await expect(details).toBeFocused();
@@ -1781,6 +1793,99 @@ test("ticket sections are keyboard navigable tabs with a labelled active panel",
 	await expect(cost).toBeFocused();
 	await cost.press("Home");
 	await expect(modal.getByRole("tabpanel", { name: "Details" })).toBeVisible();
+});
+
+test("History retains nested visits, failed attempts, live state and reading position", async ({ page }) => {
+	await setup(page, false, true);
+	const history = historyFixture("TASK-1");
+	let reads = 0;
+	await page.route("**/api/tickets/TASK-1/history?*", (route) => {
+		reads++;
+		const after = Number(new URL(route.request().url()).searchParams.get("after"));
+		return route.fulfill({ json: { ...history, events: history.events.filter((event) => event.id > after) } });
+	});
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const modal = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await modal.getByRole("tab", { name: "History", exact: true }).click();
+	const panel = modal.getByRole("tabpanel", { name: "History", exact: true });
+	await expect(panel.getByText(/History recorded from/u)).toBeVisible();
+	await expect(panel.locator(".history-visits > li")).toHaveCount(6);
+	await expect(panel.getByRole("list", { name: "In progress milestones" })).toHaveCount(2);
+	for (const state of ["completed", "failed", "queued", "canceled"])
+		await expect(panel.locator(`.history-${state}`).first()).toBeAttached();
+	await expect(panel.getByText("Plan adjusted · Revision 2")).toHaveCount(1);
+	await page.screenshot({ path: "../../artifacts/forge-browser/ticket-history-desktop.png" });
+	await expect(panel.locator(".history-spinner")).toHaveCount(0);
+	const last = history.events.at(-1)!;
+	history.events.push({ ...last, id: last.id + 1, outcome: "working" });
+	await expect(panel.locator(".history-steps .history-spinner")).toHaveCount(1);
+	await page.emulateMedia({ reducedMotion: "reduce" });
+	await expect(panel.locator(".history-steps .history-spinner")).toHaveCSS("animation-name", "none");
+	await panel.evaluate((element) => {
+		element.scrollTop = 180;
+	});
+	const scroll = await panel.evaluate((element) => element.scrollTop);
+	const count = await panel.locator("li").count();
+	const previousReads = reads;
+	await expect.poll(() => reads).toBeGreaterThan(previousReads);
+	await expect(panel.locator("li")).toHaveCount(count);
+	expect(await panel.evaluate((element) => element.scrollTop)).toBe(scroll);
+	history.events.push({
+		...last,
+		id: last.id + 2,
+		type: "action-required",
+		outcome: "action-required",
+		reason: "Action required in Chat",
+	});
+	await expect(panel.locator(".history-action-required").first()).toBeAttached();
+	await expect(panel.locator(".history-spinner")).toHaveCount(0);
+	await expect(panel.getByText("Agent turn failed. Review Chat and retry.")).toHaveCount(1);
+	await modal.getByRole("tab", { name: "Details", exact: true }).click();
+	await modal.getByRole("tab", { name: "History", exact: true }).click();
+	expect(await panel.evaluate((element) => element.scrollTop)).toBe(scroll);
+	await modal.getByRole("button", { name: "Close ticket" }).click();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	await expect(modal.getByRole("tab", { name: "History", exact: true })).toHaveAttribute("aria-selected", "true");
+	await expect(panel.getByRole("list", { name: "Ticket history", exact: true })).toBeVisible();
+	await page.setViewportSize({ width: 390, height: 844 });
+	await expect(panel).toBeVisible();
+	expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(true);
+	await page.screenshot({ path: "../../artifacts/forge-browser/ticket-history-mobile.png" });
+});
+
+test("History exposes loading, retryable errors, empty data and cursor pages", async ({ page }) => {
+	await setup(page);
+	let fail = true;
+	let release: () => void = () => {};
+	const hold = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	const history = historyFixture("TASK-1");
+	let empty = true;
+	await page.route("**/api/tickets/TASK-1/history?*", async (route) => {
+		await hold;
+		if (fail) return route.fulfill({ status: 503, json: { error: "ticket-unavailable" } });
+		const after = Number(new URL(route.request().url()).searchParams.get("after"));
+		const events = empty ? [] : history.events.filter((event) => event.id > after);
+		return route.fulfill({
+			json: { ...history, events: events.slice(0, 10), ...(events.length > 10 && { nextCursor: events[9]!.id }) },
+		});
+	});
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	await page.getByRole("tab", { name: "History", exact: true }).click();
+	const panel = page.getByRole("tabpanel", { name: "History", exact: true });
+	await expect(panel.getByRole("status")).toHaveText("Loading history…");
+	release();
+	await expect(panel.getByRole("alert")).toContainText("History is unavailable");
+	fail = false;
+	await panel.getByRole("button", { name: "Retry", exact: true }).click();
+	await expect(panel.getByText("No history recorded.")).toBeVisible();
+	empty = false;
+	await expect(panel.getByRole("button", { name: "Load more history" })).toBeAttached();
+	await panel.getByRole("button", { name: "Load more history" }).click();
+	await expect(panel.locator(".history-visits > li")).toHaveCount(6);
+	await expect(panel.getByRole("button", { name: "Load more history" })).toHaveCount(0);
+	await expect(panel.getByText("Plan adjusted · Revision 2")).toHaveCount(1);
 });
 
 test("ticket chat shows the current context window", async ({ page }) => {
@@ -2008,7 +2113,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	const message = modal.getByLabel("Message", { exact: true });
 	const send = modal.getByRole("button", { name: "Send message", exact: true });
 	const interrupt = modal.getByRole("button", { name: "Interrupt", exact: true });
-	await expect(modal.getByRole("tab")).toHaveCount(3);
+	await expect(modal.getByRole("tab")).toHaveCount(4);
 	await expect(modal.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
 	await expect(modal.getByRole("heading", { name: "Initial plan" })).toBeVisible();
 	await message.fill("Include filtering");

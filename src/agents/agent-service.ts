@@ -11,6 +11,7 @@ import {
 	type AgentThread,
 	type AgentView,
 	type AgentReply,
+	type AgentTurnFailure,
 } from "@forge/contracts/agents";
 import type { InferenceProvider } from "@forge/contracts/settings";
 import { z } from "zod";
@@ -20,6 +21,7 @@ import type { Actor } from "../auth/types.ts";
 import type { ICodexAgentClient } from "../codex/codex-agent-client.ts";
 import type { TicketUsageScope } from "../cost/types.ts";
 import type { IProjectService } from "../projects/project-service.ts";
+import type { ITicketAgentHistory } from "../tickets/ticket-history-store.ts";
 import type { WorkspaceLocation } from "../workspaces/types.ts";
 import type { IAgentExecutionPool } from "./agent-execution-pool.ts";
 import type { IAgentThreadStore } from "./agent-thread-store.ts";
@@ -88,6 +90,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 	private readonly abandoning = new Set<string>();
 	private readonly ticketThreads = new Set<string>();
 	private readonly listeners = new Map<string, Set<() => void>>();
+	private readonly historyStates = new Map<string, string>();
 	private readonly unsubscribe: () => void;
 	private closed = false;
 	private stopping = 0;
@@ -103,6 +106,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		private readonly pool: IAgentExecutionPool,
 		private readonly defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = () => ({}),
 		private readonly provider: () => InferenceProvider = () => ({ kind: "openai" }),
+		private readonly history?: ITicketAgentHistory,
 	) {
 		this.unsubscribe = client.subscribe((codexId) => {
 			const id = this.identities.get(codexId);
@@ -582,8 +586,10 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		if (record.codexId) {
 			const runtime = this.client.read(record.codexId);
 			// A persisted terminal outcome survives an unloaded runtime/history snapshot.
-			if (["completed", "failed", "interrupted"].includes(record.status) && runtime.status === "uncertain")
+			if (["completed", "failed", "interrupted"].includes(record.status) && runtime.status === "uncertain") {
+				await this.recordHistory(record);
 				return this.view(record);
+			}
 			const updated = {
 				...record,
 				status: runtime.status,
@@ -591,11 +597,19 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				requests: runtime.requests,
 				contextWindow: runtime.contextWindow ?? record.contextWindow,
 			};
+			await this.recordHistory(updated, runtime.turnFailure);
 			if (JSON.stringify(updated) !== JSON.stringify(record)) await this.store.update(updated);
 			this.pool.observe(record.id, runtime.status);
 			return this.view(updated);
 		}
 		return this.view(record);
+	}
+	private async recordHistory(record: AgentThreadRecord, failure?: AgentTurnFailure): Promise<void> {
+		if (!this.history || !record.managed || record.abandoned) return;
+		const state = JSON.stringify([record.turnId, record.status, failure]);
+		if (this.historyStates.get(record.id) === state) return;
+		await this.history.observe(record, failure);
+		this.historyStates.set(record.id, state);
 	}
 	private serialize<T>(id: string, operation: () => Promise<T>): Promise<T> {
 		const result = (this.queues.get(id) ?? Promise.resolve()).catch(() => {}).then(operation);
