@@ -10,6 +10,190 @@ import { expectToastPlacement } from "./toast-placement.ts";
 
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const createdAt = "2026-11-03T00:00:00.000Z";
+
+for (const width of [1280, 390]) {
+	test(`modal history retraces tabs, dismisses to parent and restores explicit sections at ${width}px`, async ({
+		page,
+	}) => {
+		await page.setViewportSize({ width, height: 900 });
+		await setup(page);
+		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+		await expect(page).toHaveURL(/tab=details/);
+		for (const name of ["Chat", "History", "Cost"]) await dialog.getByRole("tab", { name, exact: true }).click();
+		for (const name of ["History", "Chat", "Details"]) {
+			if (name === "History") {
+				// Exercise the native dialog cancellation path separately from a
+				// browser POP. A real Android gesture still needs device verification.
+				expect(
+					await dialog.evaluate((element) =>
+						element.dispatchEvent(new Event("cancel", { cancelable: true })),
+					),
+				).toBe(false);
+			} else await page.goBack();
+			await expect(dialog.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true");
+		}
+		await page.goBack();
+		await expect(dialog).toHaveCount(0);
+		for (const name of ["Details", "Chat", "History", "Cost"]) {
+			await page.goForward();
+			await expect(dialog.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true");
+		}
+		await page.reload();
+		await expect(dialog.getByRole("tab", { name: "Cost", exact: true })).toHaveAttribute("aria-selected", "true");
+		await dialog.getByRole("button", { name: "Close ticket", exact: true }).click();
+		await expect(page).toHaveURL("/tasks?view=backlog");
+		await page.goBack();
+		await expect(page).toHaveURL("/tasks");
+		await expect(dialog).toHaveCount(0);
+	});
+
+	test(`draft guards retain tab edits and protect X, Escape and failed saves at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 900 });
+		const f = await setup(page);
+		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+		await dialog.getByRole("button", { name: "Edit description", exact: true }).click();
+		await dialog.getByLabel("Description", { exact: true }).fill("Unsaved description");
+		await page.keyboard.press("Escape");
+		await page
+			.getByRole("dialog", { name: "Unsaved changes" })
+			.getByRole("button", { name: "Keep editing" })
+			.click();
+		await dialog.getByRole("tab", { name: "History", exact: true }).click();
+		await page.goBack();
+		await expect(dialog.getByLabel("Description", { exact: true })).toHaveValue("Unsaved description");
+		await dialog.getByRole("button", { name: "Close ticket", exact: true }).click();
+		const guard = page.getByRole("dialog", { name: "Unsaved changes" });
+		await guard.getByRole("button", { name: "Keep editing" }).click();
+		f.failSaves(true);
+		await dialog.getByRole("button", { name: "Save description", exact: true }).click();
+		await expect(page.getByRole("alert")).toContainText("Tickets are unavailable");
+		await dialog.getByRole("tab", { name: "History", exact: true }).click();
+		await page.keyboard.press("Escape");
+		await guard.getByRole("button", { name: "Discard changes" }).click();
+		await expect(dialog).toHaveCount(0);
+		await page.goForward();
+		await expect(dialog.getByLabel("Description", { exact: true })).toHaveCount(0);
+		await dialog.getByRole("tab", { name: "Details", exact: true }).click();
+		await expect(dialog.getByRole("button", { name: "Edit description", exact: true })).toHaveText("Scope");
+	});
+
+	test(`settings and confirmations consume one Back step without replay at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 900 });
+		const f = await setup(page);
+		await page.getByRole("button", { name: "Board settings", exact: true }).click();
+		const settings = page.getByRole("dialog", { name: "Board settings", exact: true });
+		await settings.getByLabel("Max concurrent agents", { exact: true }).fill("5");
+		await page.goBack();
+		const guard = page.getByRole("dialog", { name: "Unsaved changes" });
+		await guard.getByRole("button", { name: "Keep editing" }).click();
+		await expect(settings.getByLabel("Max concurrent agents", { exact: true })).toHaveValue("5");
+		await settings.getByRole("button", { name: "Close board settings" }).click();
+		await guard.getByRole("button", { name: "Discard changes" }).click();
+		await expect(settings).toHaveCount(0);
+		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+		await dialog.getByRole("button", { name: "Archive ticket", exact: true }).click();
+		const confirmation = page.getByRole("dialog", { name: "Archive TASK-1?", exact: true });
+		await expect(confirmation).toBeVisible();
+		await page.goBack();
+		await expect(confirmation).toBeHidden();
+		await expect(dialog).toBeVisible();
+		await page.goForward();
+		await confirmation.getByRole("button", { name: "Archive", exact: true }).click();
+		await expect(dialog).toHaveCount(0);
+		expect(f.operations).toEqual(["archive"]);
+		await page.goForward();
+		await expect(dialog).toBeVisible();
+		await page.goForward();
+		await expect(confirmation).toBeHidden();
+		expect(f.operations).toEqual(["archive"]);
+	});
+
+	test(`epic creation and inline drafts protect nested navigation at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 900 });
+		const f = await setup(page);
+		f.epics.push({ id: "EPIC-1", title: "Milestone", description: "Epic scope", createdAt });
+		f.tickets()[0]!.epicId = "EPIC-1";
+		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+		await page.getByRole("button", { name: "Create epic", exact: true }).click();
+		const creation = page.getByRole("dialog", { name: "Create epic", exact: true });
+		await creation.getByLabel("Title", { exact: true }).fill("Unsaved epic");
+		await page.goBack();
+		const guard = page.getByRole("dialog", { name: "Unsaved changes" });
+		await guard.getByRole("button", { name: "Keep editing" }).click();
+		await expect(creation.getByLabel("Title", { exact: true })).toHaveValue("Unsaved epic");
+		await page.keyboard.press("Escape");
+		await guard.getByRole("button", { name: "Discard changes" }).click();
+		await expect(creation).toHaveCount(0);
+		await page.goForward();
+		await expect(creation.getByLabel("Title", { exact: true })).toHaveValue("");
+		await creation.getByRole("button", { name: "Close epic", exact: true }).click();
+		await page.getByRole("button", { name: "EPIC-1 · Milestone", exact: true }).click();
+		const epic = page.getByRole("dialog", { name: "EPIC-1", exact: true });
+		await epic.getByRole("button", { name: "Edit title: Milestone", exact: true }).click();
+		await epic.getByLabel("Title", { exact: true }).fill("Edited epic");
+		await epic.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+		await guard.getByRole("button", { name: "Keep editing" }).click();
+		await expect(epic.getByLabel("Title", { exact: true })).toHaveValue("Edited epic");
+		await epic.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+		await guard.getByRole("button", { name: "Discard changes" }).click();
+		const ticket = page.getByRole("dialog", { name: "TASK-1", exact: true });
+		await expect(ticket).toBeVisible();
+		await page.goBack();
+		await expect(epic.getByRole("button", { name: "Edit title: Milestone", exact: true })).toBeVisible();
+		await epic.getByRole("button", { name: "Edit title: Milestone", exact: true }).click();
+		await epic.getByLabel("Title", { exact: true }).fill("Forward draft");
+		await page.goForward();
+		await guard.getByRole("button", { name: "Keep editing" }).click();
+		await expect(epic.getByLabel("Title", { exact: true })).toHaveValue("Forward draft");
+		await page.goForward();
+		await guard.getByRole("button", { name: "Discard changes" }).click();
+		await expect(ticket).toBeVisible();
+		await ticket.getByRole("button", { name: "Close ticket", exact: true }).click();
+		await epic.getByRole("button", { name: "Create ticket", exact: true }).click();
+		const editor = page.getByRole("dialog", { name: "Create ticket", exact: true });
+		await expectDropdownValue(editor.getByRole("combobox", { name: "Epic", exact: true }), "EPIC-1");
+		await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+		await expect(epic).toBeVisible();
+	});
+}
+
+test("busy creation blocks Back and rapid Back unwinds ticket entries", async ({ page }) => {
+	await setup(page);
+	let release = () => {};
+	const pending = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	await page.route("**/api/tickets", async (route) => {
+		if (route.request().method() === "POST") await pending;
+		await route.fallback();
+	});
+	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
+	const editor = page.getByRole("dialog", { name: "Create ticket", exact: true });
+	await editor.getByLabel("Title", { exact: true }).fill("Pending ticket");
+	await editor.getByRole("button", { name: "Create", exact: true }).click();
+	await expect(editor.getByRole("button", { name: "Saving…", exact: true })).toBeDisabled();
+	await page.goBack();
+	await expect(editor).toBeVisible();
+	await expect(page.getByRole("dialog", { name: "Unsaved changes" })).toHaveCount(0);
+	release();
+	await expect(editor).toHaveCount(0);
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await dialog.getByRole("tab", { name: "History", exact: true }).click();
+	await dialog.getByRole("tab", { name: "Cost", exact: true }).click();
+	await page.evaluate(() => {
+		history.back();
+		setTimeout(() => history.back(), 0);
+	});
+	await expect(dialog.getByRole("tab", { name: "Details", exact: true })).toHaveAttribute("aria-selected", "true");
+	await page.goBack();
+	await expect(dialog).toHaveCount(0);
+});
+
 const setup = async (page: Page, crowded = false, agentic = false, review = false, conversationPlan = false) => {
 	const threadId = "123e4567-e89b-42d3-a456-426614174010";
 	let messages = 0;
@@ -540,7 +724,7 @@ for (const width of [1280, 390]) {
 			(el) => el.getBoundingClientRect().left + parseFloat(getComputedStyle(el).paddingLeft) + el.clientLeft,
 		);
 		expect(inputLeft).toBeCloseTo(contentLeft, 0);
-		await input.press("Escape");
+		await details.getByRole("button", { name: "Discard title changes" }).click();
 		await expect(details.getByRole("button", { name: "EPIC-1", exact: true })).toHaveAttribute(
 			"title",
 			"EPIC-1 · Full epic title",
@@ -714,7 +898,7 @@ test("task views persist URL selection, history and ticket deep links with keybo
 	await page.setViewportSize({ width: 1280, height: 900 });
 	await expect(page.getByRole("tabpanel", { name: "Backlog", exact: true })).toBeVisible();
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
-	await expect(page).toHaveURL("/tasks?view=backlog&ticket=TASK-1");
+	await expect(page).toHaveURL(/\/tasks\?view=backlog&ticket=TASK-1(?:&tab=details)?$/);
 	await page.reload();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 	await expect(dialog).toBeVisible();
@@ -722,7 +906,8 @@ test("task views persist URL selection, history and ticket deep links with keybo
 	await expect(page).toHaveURL("/tasks?view=backlog");
 	await expect(backlog).toBeFocused();
 	await page.goBack();
-	await expect(dialog).toBeVisible();
+	await expect(dialog).toHaveCount(0);
+	await expect(board).toHaveAttribute("aria-selected", "true");
 	await page.goForward();
 	await expect(dialog).toHaveCount(0);
 	await backlog.focus();
@@ -859,7 +1044,7 @@ test("epic details edit with retry, restore history, link Done children and pres
 	await editDescription.click();
 	const description = dialog.getByLabel("Description", { exact: true });
 	await description.fill("Discard this draft");
-	await description.press("Escape");
+	await dialog.getByRole("button", { name: "Discard description changes" }).click();
 	await expect(editDescription).toBeFocused();
 	await expect(editDescription).toHaveText("Epic scope");
 	await editDescription.click();
@@ -873,7 +1058,7 @@ test("epic details edit with retry, restore history, link Done children and pres
 	await editor.getByRole("button", { name: "Create", exact: true }).click();
 	await expect(editor).toHaveCount(0);
 	expect(f.tickets().at(-1)?.epicId).toBe("EPIC-1");
-	await page.getByRole("button", { name: "EPIC-1 · Edited milestone", exact: true }).click();
+	await expect(dialog).toBeVisible();
 	const child = f.tickets().at(-1)!;
 	child.status = "todo";
 	await expect(dialog.locator(".epic-status")).toHaveText("Ready for development");
@@ -892,7 +1077,7 @@ test("epic details edit with retry, restore history, link Done children and pres
 	await expect(dialog.getByRole("button", { name: "Edit title: Edited milestone", exact: true })).toBeVisible();
 	await dialog.getByRole("button", { name: "Close epic", exact: true }).click();
 	await page.goBack();
-	await expect(dialog).toBeVisible();
+	await expect(dialog).toHaveCount(0);
 });
 
 test("epic breadcrumb assigns, changes and removes a draft parent and links to the epic at Ready", async ({ page }) => {
@@ -1097,7 +1282,7 @@ test("dropdowns retain unavailable models, skip disabled permissions and do not 
 	await expect(permissions).toBeFocused();
 });
 
-test("inline ticket title saves independently and supports keyboard and button discard", async ({ page }) => {
+test("inline ticket title saves independently and supports keyboard save and button discard", async ({ page }) => {
 	const f = await setup(page);
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
@@ -1118,7 +1303,7 @@ test("inline ticket title saves independently and supports keyboard and button d
 	await edit.click();
 	await expect(title).toBeFocused();
 	await title.fill("Discard via keyboard");
-	await title.press("Escape");
+	await dialog.getByRole("button", { name: "Discard title changes" }).click();
 	await expect(edit).toBeFocused();
 	await expect(edit).toHaveText("First task");
 	await edit.press("Enter");
@@ -1198,7 +1383,7 @@ test("backlog creation and scope saves retain failed drafts and share changes wi
 	await expect(editDescription).toHaveText("Updated scope");
 	await editDescription.click();
 	await dialog.getByLabel("Description", { exact: true }).fill("Discard with Escape");
-	await dialog.getByLabel("Description", { exact: true }).press("Escape");
+	await dialog.getByRole("button", { name: "Discard description changes" }).click();
 	await expect(editDescription).toBeFocused();
 	await expect(editDescription).toHaveText("Updated scope");
 	await dialog.getByRole("button", { name: "Close ticket" }).click();
@@ -1487,7 +1672,7 @@ for (const width of [1280, 390]) {
 	});
 }
 
-test("board creation drafts survive visits to Repos and removed browser routes show not-found", async ({ page }) => {
+test("Back protects creation drafts and discarded forms restore empty through Forward", async ({ page }) => {
 	await setup(page);
 	await page.getByRole("link", { name: "Repos", exact: true }).click();
 	await expect(page.locator("main")).not.toContainText(/\bProjects?\b/u);
@@ -1496,10 +1681,15 @@ test("board creation drafts survive visits to Repos and removed browser routes s
 	const dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
 	await dialog.getByLabel("Title", { exact: true }).fill("Keep this board draft");
 	await page.goBack();
-	await expect(page).toHaveURL("/repos");
-	await expect(dialog).toBeHidden();
-	await page.goForward();
+	const guard = page.getByRole("dialog", { name: "Unsaved changes" });
+	await guard.getByRole("button", { name: "Keep editing" }).click();
 	await expect(dialog.getByLabel("Title", { exact: true })).toHaveValue("Keep this board draft");
+	await page.goBack();
+	await guard.getByRole("button", { name: "Discard changes" }).click();
+	await expect(page).toHaveURL("/tasks");
+	await expect(dialog).toHaveCount(0);
+	await page.goForward();
+	await expect(dialog.getByLabel("Title", { exact: true })).toHaveValue("");
 	await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
 	for (const path of ["/projects", `/projects/${projectId}/code`, `/repos/${projectId}/tasks`]) {
 		await page.goto(path);
@@ -2443,7 +2633,7 @@ test("create and edit tickets; board dragging queues planning and survives reope
 	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
 	const dialog = page.getByRole("dialog");
 	await expect(page).toHaveURL(boardUrl);
-	expect(await page.evaluate(() => history.length)).toBe(historyLength);
+	expect(await page.evaluate(() => history.length)).toBe(historyLength + 1);
 	await dialog.getByLabel("Title", { exact: true }).fill("New task");
 	await dialog.getByLabel("Description", { exact: true }).fill("Simple scope");
 	await dialog.getByRole("button", { name: "Create", exact: true }).click();
@@ -2628,9 +2818,9 @@ for (const archived of [false, true]) {
 		await modal.getByRole("button", { name: "Close ticket" }).click();
 		await expect(page).toHaveURL(`/tasks`);
 		await expect(modal).toHaveCount(0);
-		await page.goBack();
-		await expect(modal).toBeVisible();
 		await page.goForward();
+		await expect(modal).toBeVisible();
+		await page.goBack();
 		await expect(modal).toHaveCount(0);
 		await page.goto(`/tasks?ticket=TASK-9`);
 		await expect(modal).toBeVisible();

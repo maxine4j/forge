@@ -5,6 +5,25 @@
 Forge opens the global [Tasks board](tickets.md#agentic-ticket-board) at `/tasks`.
 Global destinations are Tasks, Repos (`/repos`), Costs (`/costs`) and Config
 (`/config`). Repository creation, import, retry and browsing live under Repos.
+React Router owns navigation and modal history. Deliberate opens and section
+changes add entries; selecting the displayed section does not. Back and Forward
+traverse one entry. X/Cancel and Escape dismiss the top modal to its parent,
+skipping its section history without pushing a closing entry. After Forge entries
+are exhausted, Back follows normal browser history. Native dialog cancellation
+is prevented and routed through this same controller; native pickers and popovers
+retain their dismissal priority. Hidden retained views have no active dialogs.
+
+One application guard protects unsaved ticket, epic, repository-creation and
+Board-settings edits. Navigation that would lose edits offers **Keep editing**
+and **Discard changes**, including Back, Forward, links and modal dismissal.
+Keeping preserves the location and draft; discarding clears only affected edits
+and completes the original navigation once. Tab changes retain drafts without a
+prompt. Busy dialogs cannot be escaped by Back. Draft contents stay in browser
+memory, outside URLs and history state; Forward never restores discarded edits.
+The editor retains its commit/discard exit restriction. See
+[task modal ancestry](tickets.md#task-navigation) and
+[workspace navigation](workspaces.md#navigation-history).
+
 Browser routes under `/projects` are removed without redirects. Internal
 repository management APIs keep their `/api/projects` namespace; tickets use
 owner-authorized `GET/POST /api/tickets` and ticket-ID routes instead. See the

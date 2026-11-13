@@ -2,13 +2,20 @@ import type { AccountProvider, AccountStatus, AccountsStatus, Project } from "@f
 import { createProjectSchema } from "@forge/contracts";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { Link, Navigate, useBlocker, useLocation } from "react-router";
+import { Link, Navigate, useLocation } from "react-router";
 
 import { AgentOptionsRevision } from "./agents/execution-settings.tsx";
 import type { IApiClient } from "./api/api-client.ts";
 import { ResourcePoller } from "./api/resource-poller.ts";
 import type { IWorkspaceApi } from "./api/workspace-api.ts";
 import { CostDashboard } from "./cost/cost-dashboard.tsx";
+import {
+	NavigationProvider,
+	useDialogDismissal,
+	useNavigationGuard,
+	useModalDraft,
+	useModalNavigation,
+} from "./navigation/controller.tsx";
 import { InterfaceIcon } from "./navigation/interface-icon.tsx";
 import { resolveRoute } from "./navigation/routes.ts";
 import { ForgeSettingsForm } from "./settings/settings-form.tsx";
@@ -111,8 +118,15 @@ const AccountCard = ({
 	);
 };
 
-export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWorkspaceApi }) => {
+export const App = (props: { api: IApiClient; workspaceApi: IWorkspaceApi }) => (
+	<NavigationProvider>
+		<Application {...props} />
+	</NavigationProvider>
+);
+
+const Application = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWorkspaceApi }) => {
 	const location = useLocation();
+	const navigation = useModalNavigation();
 	const route = resolveRoute(location.pathname);
 	const constrained = route.page === "tasks" || (route.page === "repo" && route.section === "agents");
 	const [viewport, setViewport] = useState({ height: window.visualViewport?.height ?? window.innerHeight, top: 0 });
@@ -146,22 +160,20 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 	const [dirty, setDirty] = useState(false);
 	const dirtyChange = useCallback((value: boolean) => setDirty(value), []);
 	const [, setNavigationError] = useErrorState();
-	const blocker = useBlocker(({ nextLocation }) => {
-		const next = resolveRoute(nextLocation.pathname);
-		const blocked =
-			dirty
-			&& next.page !== "config"
-			&& next.page !== "costs"
-			&& next.page !== "tasks"
-			&& !(next.page === "repo" && next.repositoryId === selected?.id);
-		if (blocked) setNavigationError("Uncommitted drafts remain. Commit or discard them before leaving.");
-		return blocked;
+	useNavigationGuard({
+		hard: true,
+		blocks: (nextLocation) => {
+			const next = resolveRoute(nextLocation.pathname);
+			const blocked =
+				dirty
+				&& next.page !== "config"
+				&& next.page !== "costs"
+				&& next.page !== "tasks"
+				&& !(next.page === "repo" && next.repositoryId === selected?.id);
+			if (blocked) setNavigationError("Uncommitted drafts remain. Commit or discard them before leaving.");
+			return blocked;
+		},
 	});
-	useEffect(() => {
-		if (blocker.state === "blocked") {
-			blocker.reset();
-		}
-	}, [blocker]);
 	const [accounts, setAccounts] = useState<AccountsStatus>();
 	const [projectError, setProjectError] = useErrorState();
 	const [, setAccountError] = useErrorState();
@@ -169,12 +181,24 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 	const [source, setSource] = useState("");
 	const [, setCreateError] = useErrorState();
 	const [projectBusy, setProjectBusy] = useState(false);
+	const creatingRepo = route.page === "repos" && navigation.modal?.owner === "create-repo";
+	const repoDismissal = useDialogDismissal(projectBusy);
+	const releaseRepo = useModalDraft(creatingRepo && !!(name || source), creatingRepo && projectBusy, () => {
+		setName("");
+		setSource("");
+	});
 	const [accountBusy, setAccountBusy] = useState(false);
 	const [agentOptionsRevision, setAgentOptionsRevision] = useState(0);
 	const projectPoller = useRef<ResourcePoller<Project[]> | undefined>(undefined);
 	const createDialog = useRef<HTMLDialogElement>(null);
 	const projectName = useRef<HTMLInputElement>(null);
 	const accountPoller = useRef<ResourcePoller<AccountsStatus> | undefined>(undefined);
+	useEffect(() => {
+		if (creatingRepo) {
+			createDialog.current?.showModal();
+			projectName.current?.focus();
+		} else createDialog.current?.close();
+	}, [creatingRepo]);
 	useEffect(() => {
 		const project = new ResourcePoller(
 			(signal) => api.projects(signal),
@@ -205,8 +229,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 		setName("");
 		setSource("");
 		setCreateError("");
-		createDialog.current?.showModal();
-		projectName.current?.focus();
+		navigation.open("create-repo");
 	};
 	const create = async (event: FormEvent) => {
 		event.preventDefault();
@@ -216,7 +239,6 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 			setCreateError("Enter a repository name (up to 120 characters) and a credential-free HTTPS import URL.");
 			return;
 		}
-		const dialog = createDialog.current;
 		let created = false;
 		setCreateError("");
 		setProjectBusy(true);
@@ -232,7 +254,12 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 			}
 		});
 		setProjectBusy(false);
-		if (created && dialog?.open) dialog.close();
+		if (created) {
+			releaseRepo();
+			setName("");
+			setSource("");
+			navigation.dismiss();
+		}
 	};
 	const retry = async (id: string) => {
 		setProjectBusy(true);
@@ -400,9 +427,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 							ref={createDialog}
 							className='ticket-dialog'
 							aria-labelledby='create-heading'
-							onCancel={(event) => {
-								if (projectBusy) event.preventDefault();
-							}}
+							{...repoDismissal}
 						>
 							<div className='ticket-dialog-heading'>
 								<h2 id='create-heading'>New repository</h2>
@@ -410,7 +435,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 									type='button'
 									aria-label='Close repository form'
 									disabled={projectBusy}
-									onClick={() => createDialog.current?.close()}
+									onClick={navigation.dismiss}
 								>
 									✕
 								</button>

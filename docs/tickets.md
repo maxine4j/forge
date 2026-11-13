@@ -1,5 +1,25 @@
 # Forge ticket and PR workflow
 
+## Task navigation
+
+Tasks retains `view=backlog`, `ticket=TASK-n` and `epic=EPIC-n` links. Tickets
+also accept `tab=details|chat|history|cost`. The opening entry resolves the
+remembered/default section in place, without another Back step; subsequent
+polling cannot override an explicit section. Back/Forward and reload restore
+that section. Modal ownership, parent location and section depth live in typed
+router state; form contents remain in memory.
+
+Ticket/epic creation, Board settings, archive and return confirmations use the
+same modal history as ticket and epic details. Back from a confirmation dismisses
+only that confirmation. X/Cancel skips all sections of the current modal and
+returns to its parent. Epic → child ticket, ticket → epic and epic → create
+ticket preserve their parent location and reading state. Navigation that would
+unmount unsaved edits requires the [application draft guard](foundation.md#navigation).
+Successful actions retire their confirmation entry; Forward restores a view
+without replaying a mutation. Direct ticket and epic links first establish a
+Board/Backlog parent, once; reload preserves this ancestry without adding entries.
+See [browser and gesture verification](development.md#android-back-verification).
+
 ## Agentic ticket board
 
 Board, backlog, editing, validation, execution settings, recovery, history, Docker
@@ -399,7 +419,8 @@ on creation and return the saved selection on reads. Owner-authorized
 `PATCH /api/tickets/:id/settings` replaces that selection independently of Backlog
 scope editing, with exact-origin checks. The title above the ticket tabs saves
 independently of other Backlog edits. Click the Backlog description to edit it.
-The floating controls save or discard the draft, and Escape discards it.
+The floating controls save or discard the draft. Escape dismisses the dialog,
+subject to [draft protection](foundation.md#navigation).
 Repository selection in Agent Settings saves immediately in selection order.
 The repository multiselect uses the [shared dropdown surface](foundation.md#shared-selection-dropdowns)
 with checkboxes, chips in selection order, Clear repositories, and loading and

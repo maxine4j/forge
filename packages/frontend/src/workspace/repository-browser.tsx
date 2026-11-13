@@ -105,6 +105,7 @@ const BranchBrowser = ({
 		if (directory) query.set("path", directory);
 		if (file) query.set("file", file);
 		if (history) query.set("view", "history");
+		if (`?${query}` === search) return;
 		void navigate(`${codePath}?${query}`);
 	};
 	const editorId = useId();

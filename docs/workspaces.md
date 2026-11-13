@@ -1,5 +1,17 @@
 # Forge workspaces and PR review
 
+## Navigation history
+
+Global destinations, repository sections, editor file tabs, commit details and
+history use React Router URLs. Selecting the displayed section or file does not
+add a duplicate history step. Back/Forward retraces deliberate selections.
+Mobile **Back to chats** returns to its known list ancestor, skipping intervening
+chat selections; direct chat links fall back to the list route with replacement.
+Chat drafts remain retained while browsing. Editor drafts still require commit
+or discard before leaving their retained repository; the shared
+[application guard](foundation.md#navigation) preserves this restriction.
+Task modal ancestry follows the [task navigation contract](tickets.md#task-navigation).
+
 ## Slice 2 terminal contract
 
 The supported terminal runtime is the Node 24 Linux container. Native

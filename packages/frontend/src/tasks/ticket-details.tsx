@@ -10,6 +10,7 @@ import {
 	type TicketExecutionSettings,
 } from "@forge/contracts/tickets";
 import { useContext, useEffect, useRef, useState, useId } from "react";
+import { useLocation } from "react-router";
 
 import { PlanMarkdown } from "../agents/agent-activity.tsx";
 import { Conversation } from "../agents/agent-chat.tsx";
@@ -17,6 +18,7 @@ import { AgentOptionsRevision, ExecutionSettings } from "../agents/execution-set
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown } from "../dropdown.tsx";
+import { useDialogDismissal, useModalDialog, useModalDraft, useModalNavigation } from "../navigation/controller.tsx";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { EpicIcon } from "./epic-icon.tsx";
 import { InlineTicketDescription, InlineTicketTitle } from "./inline-ticket-fields.tsx";
@@ -70,6 +72,10 @@ export const TicketDetails = ({
 	epics: EpicSummary[];
 	openEpic: (id: string) => void;
 }) => {
+	const navigation = useModalNavigation();
+	const location = useLocation();
+	const query = new URLSearchParams(location.search);
+	const explicitTab = query.get("tab");
 	const archived = !!ticket.archivedAt;
 	const dialog = useRef<HTMLDialogElement>(null);
 	const [state] = useState<TicketReadingState>(() => {
@@ -89,8 +95,19 @@ export const TicketDetails = ({
 	const fieldId = useId();
 	const poller = useRef<ResourcePoller<TicketWorkflow> | undefined>(undefined);
 	const [job, setJob] = useState<TicketWorkflow>();
-	const [section, setTab] = useState<TicketTab | undefined>(state.tab);
+	const section = ["details", "chat", "history", "cost"].includes(explicitTab ?? "")
+		? (explicitTab as TicketTab)
+		: undefined;
+	const setTab = (nextTab: TicketTab) => {
+		if (tab === nextTab) return;
+		const next = new URLSearchParams(location.search);
+		next.set("tab", nextTab);
+		navigation.select(`${location.pathname}?${next}`);
+	};
 	const [acting, setActing] = useState(false);
+	const dismissal = useDialogDismissal(busy || acting || returnPending);
+	const archiveDismissal = useDialogDismissal(busy);
+	const returnDismissal = useDialogDismissal(returnPending || busy);
 	const actionPending = useRef(false);
 	const [titleDraft, setTitleDraft] = useState<string>();
 	const [titleError, setTitleError] = useErrorState();
@@ -98,6 +115,22 @@ export const TicketDetails = ({
 	const titleInput = useRef<HTMLInputElement>(null);
 	const restoreTitleFocus = useRef(false);
 	const [descriptionDraft, setDescriptionDraft] = useState(state.descriptionDraft);
+	const release = useModalDraft(
+		(titleDraft !== undefined && titleDraft !== ticket.title)
+			|| (descriptionDraft !== undefined && descriptionDraft !== ticket.description),
+		busy || acting || returnPending,
+		() => {
+			setTitleDraft(undefined);
+			setDescriptionDraft(undefined);
+			Object.assign(state, { descriptionDraft: undefined });
+		},
+	);
+	useEffect(() => {
+		if (navigation.modal?.owner === "archive") archiveDialog.current?.showModal();
+		else archiveDialog.current?.close();
+		if (navigation.modal?.owner === "return") returnDialog.current?.showModal();
+		else returnDialog.current?.close();
+	}, [navigation.modal?.owner]);
 	const [pendingRepositories, setPendingRepositories] = useState<string[]>();
 	const [, setScopeError] = useErrorState();
 	const editDescription = useRef<HTMLButtonElement>(null);
@@ -154,7 +187,7 @@ export const TicketDetails = ({
 			finishDescriptionEdit();
 		}
 	};
-	Object.assign(state, { descriptionDraft, tab: section });
+	Object.assign(state, { descriptionDraft, ...(section ? { tab: section } : {}) });
 	const editingTitle = editable && titleDraft !== undefined;
 	useEffect(() => {
 		if (editingTitle) titleInput.current?.focus();
@@ -245,9 +278,7 @@ export const TicketDetails = ({
 	const [, setArchiveError] = useErrorState();
 	const [refresh] = useState(() => () => poller.current?.refresh());
 	useEffect(refresh, [refresh, ticket.status, ticket.canReturnToBacklog]);
-	useEffect(() => {
-		dialog.current?.showModal();
-	}, []);
+	useModalDialog(dialog);
 	useEffect(() => {
 		const resource = new ResourcePoller(
 			() => api.read(`tickets/${ticket.id}/workflow`, ticketWorkflowSchema),
@@ -272,7 +303,13 @@ export const TicketDetails = ({
 			? plan
 			: undefined;
 	const tabs: TicketTab[] = ["details", "chat", "history", "cost"];
-	const tab = section ?? (currentId || job?.state === "queued" ? "chat" : "details");
+	const tab = section ?? state.tab ?? (currentId || job?.state === "queued" ? "chat" : "details");
+	useEffect(() => {
+		if (section || !job || navigation.modal?.owner !== "ticket") return;
+		const next = new URLSearchParams(location.search);
+		next.set("tab", tab);
+		navigation.select(`${location.pathname}?${next}`, true, location.key);
+	}, [section, job, tab, location.pathname, location.search, location.key, navigation]);
 	const selectTab = (next: TicketTab) => {
 		setTab(next);
 		document.getElementById(`${fieldId}-tab-${next}`)?.focus();
@@ -310,7 +347,8 @@ export const TicketDetails = ({
 		setMoveError("");
 		try {
 			await move(ticket.id, { status: "backlog" });
-			returnDialog.current?.close();
+			release(true);
+			await navigation.completeConfirmation();
 		} catch (err) {
 			setMoveError(err instanceof Error ? err.message : "Cannot move ticket.");
 		} finally {
@@ -355,10 +393,7 @@ export const TicketDetails = ({
 			ref={dialog}
 			className='ticket-details ticket-dialog'
 			aria-labelledby='ticket-details-title'
-			onCancel={(event) => {
-				event.preventDefault();
-				if (!busy) close();
-			}}
+			{...dismissal}
 		>
 			<div className='ticket-details-heading'>
 				<div>
@@ -425,7 +460,7 @@ export const TicketDetails = ({
 							disabled={busy || acting || !!resetting}
 							onClick={() => {
 								setMoveError("");
-								returnDialog.current?.showModal();
+								navigation.open("return");
 							}}
 						>
 							<svg
@@ -451,7 +486,7 @@ export const TicketDetails = ({
 						disabled={archived || busy || acting || !!resetting}
 						onClick={() => {
 							setArchiveError("");
-							archiveDialog.current?.showModal();
+							navigation.open("archive");
 						}}
 					>
 						<svg
@@ -493,11 +528,7 @@ export const TicketDetails = ({
 				className='ticket-dialog ticket-archive-dialog'
 				aria-labelledby={`${fieldId}-archive-title`}
 				aria-describedby={`${fieldId}-archive-description`}
-				onCancel={(event) => {
-					event.stopPropagation();
-					event.preventDefault();
-					if (!busy) archiveDialog.current?.close();
-				}}
+				{...archiveDismissal}
 			>
 				<h2 id={`${fieldId}-archive-title`}>Archive {ticket.id}?</h2>
 				<p id={`${fieldId}-archive-description`}>
@@ -505,7 +536,7 @@ export const TicketDetails = ({
 				</p>
 
 				<div className='ticket-dialog-actions'>
-					<button type='button' disabled={busy} onClick={() => archiveDialog.current?.close()}>
+					<button type='button' disabled={busy} onClick={navigation.dismiss}>
 						Cancel
 					</button>
 					<button
@@ -514,9 +545,14 @@ export const TicketDetails = ({
 						disabled={busy}
 						onClick={() => {
 							setArchiveError("");
-							void archive().catch((err: unknown) =>
-								setArchiveError(err instanceof Error ? err.message : "Cannot archive ticket."),
-							);
+							void archive()
+								.then(async () => {
+									release();
+									await navigation.completeConfirmation("ticket");
+								})
+								.catch((err: unknown) =>
+									setArchiveError(err instanceof Error ? err.message : "Cannot archive ticket."),
+								);
 						}}
 					>
 						{busy ? "Archiving…" : "Archive"}
@@ -528,11 +564,7 @@ export const TicketDetails = ({
 				className='ticket-dialog ticket-archive-dialog'
 				aria-labelledby={`${fieldId}-return-title`}
 				aria-describedby={`${fieldId}-return-description`}
-				onCancel={(event) => {
-					event.stopPropagation();
-					event.preventDefault();
-					if (!returnPending) returnDialog.current?.close();
-				}}
+				{...returnDismissal}
 			>
 				<h2 id={`${fieldId}-return-title`}>Return {ticket.id} to backlog?</h2>
 				<p id={`${fieldId}-return-description`}>
@@ -541,7 +573,7 @@ export const TicketDetails = ({
 				</p>
 
 				<div className='ticket-dialog-actions'>
-					<button type='button' disabled={returnPending} onClick={() => returnDialog.current?.close()}>
+					<button type='button' disabled={returnPending} onClick={navigation.dismiss}>
 						Cancel
 					</button>
 					<button

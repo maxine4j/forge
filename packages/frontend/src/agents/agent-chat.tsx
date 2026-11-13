@@ -12,6 +12,7 @@ import { useLocation, useNavigate } from "react-router";
 
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { navigationState } from "../navigation/controller.tsx";
 import { resolveRoute } from "../navigation/routes.ts";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { AgentActivity } from "./agent-activity.tsx";
@@ -615,10 +616,27 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 		}
 	}, [mobile, selectFirst, firstId, projectId, navigate]);
 	const open = (id: string) => {
-		void navigate(`/repos/${projectId}/agents/${id}`);
+		if (id === selected) return;
+		const url = `/repos/${projectId}/agents`;
+		const ancestor = navigationState(location).chatList;
+		const chatList = selectFirst
+			? { url, depth: 1 }
+			: ancestor?.url === url
+				? { url, depth: ancestor.depth + 1 }
+				: undefined;
+		void navigate(`${url}/${id}`, { state: { chatList } });
 	};
 	const back = (
-		<button className='agent-back' type='button' onClick={() => void navigate(`/repos/${projectId}/agents`)}>
+		<button
+			className='agent-back'
+			type='button'
+			onClick={() => {
+				const url = `/repos/${projectId}/agents`;
+				const ancestor = navigationState(location).chatList;
+				if (ancestor?.url === url) void navigate(-ancestor.depth);
+				else void navigate(url, { replace: true });
+			}}
+		>
 			Back to chats
 		</button>
 	);

@@ -113,5 +113,32 @@ test("a failed create refreshes durable failed intent for explicit retry", async
 	await expect(dialog.getByRole("alert")).toContainText("Repository operation failed");
 	await expect(dialog.getByLabel("Repository name")).toHaveValue("Documentation");
 	await dialog.getByRole("button", { name: "Close repository form" }).click();
+	await page
+		.getByRole("dialog", { name: "Unsaved changes" })
+		.getByRole("button", { name: "Discard changes" })
+		.click();
 	await expect(page.getByRole("button", { name: "Retry Documentation" })).toBeVisible({ timeout: 1000 });
 });
+
+for (const width of [1280, 390]) {
+	test(`repository creation protects Back and discards only its form at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 900 });
+		await page.route("**/api/projects", (route) => route.fulfill({ json: [] }));
+		await page.route("**/api/accounts", (route) => route.fulfill({ json: { codex: idle, github: idle } }));
+		await page.goto("/repos");
+		const open = page.getByRole("button", { name: "Create repo", exact: true });
+		await open.click();
+		const dialog = page.getByRole("dialog", { name: "New repository" });
+		await dialog.getByLabel("Repository name").fill("Draft repo");
+		await page.goBack();
+		const guard = page.getByRole("dialog", { name: "Unsaved changes" });
+		await guard.getByRole("button", { name: "Keep editing" }).click();
+		await expect(dialog.getByLabel("Repository name")).toHaveValue("Draft repo");
+		await page.keyboard.press("Escape");
+		await guard.getByRole("button", { name: "Discard changes" }).click();
+		await expect(dialog).toBeHidden();
+		await expect(open).toBeFocused();
+		await page.goForward();
+		await expect(dialog.getByLabel("Repository name")).toHaveValue("");
+	});
+}

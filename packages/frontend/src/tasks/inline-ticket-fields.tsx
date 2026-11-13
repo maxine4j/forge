@@ -48,11 +48,6 @@ export const InlineTicketTitle = ({
 				event.preventDefault();
 				save();
 			}}
-			onKeyDown={(event) => {
-				if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
-				event.preventDefault();
-				if (!busy) discard();
-			}}
 		>
 			<input
 				ref={input}
@@ -103,11 +98,6 @@ export const InlineTicketDescription = ({
 			onSubmit={(event) => {
 				event.preventDefault();
 				save();
-			}}
-			onKeyDown={(event) => {
-				if (!editing || event.key !== "Escape" || event.nativeEvent.isComposing) return;
-				event.preventDefault();
-				if (!busy) discard();
 			}}
 		>
 			<fieldset className='ticket-detail-section'>

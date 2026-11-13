@@ -9,6 +9,7 @@ import {
 import { useEffect, useId, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { useDialogDismissal, useModalDialog, useModalDraft } from "../navigation/controller.tsx";
 import { useErrorState } from "../toasts/toasts.tsx";
 import { DockerSettings } from "./docker-settings.tsx";
 
@@ -94,28 +95,14 @@ export const BoardSettingsDialog = ({
 	const { settings, busy, error, notice, update, stop, dispatchLabel, toggleDispatch, retry } = board;
 	const [limitDraft, setLimitDraft] = useState<number>();
 	const limit = limitDraft ?? settings?.maxAgents;
-	useEffect(() => {
-		dialog.current?.showModal();
-	}, []);
+	useModalDraft(limit !== settings?.maxAgents, busy);
+	const dismissal = useDialogDismissal(busy);
+	useModalDialog(dialog);
 	return (
-		<dialog
-			ref={dialog}
-			className='ticket-dialog board-settings'
-			aria-labelledby={titleId}
-			onCancel={(event) => {
-				event.preventDefault();
-				if (!busy) dialog.current?.close();
-			}}
-			onClose={close}
-		>
+		<dialog ref={dialog} className='ticket-dialog board-settings' aria-labelledby={titleId} {...dismissal}>
 			<div className='ticket-dialog-heading'>
 				<h2 id={titleId}>Board settings</h2>
-				<button
-					type='button'
-					aria-label='Close board settings'
-					disabled={busy}
-					onClick={() => dialog.current?.close()}
-				>
+				<button type='button' aria-label='Close board settings' disabled={busy} onClick={close}>
 					✕
 				</button>
 			</div>

@@ -10,10 +10,18 @@ import {
 	type Ticket,
 } from "@forge/contracts/tickets";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { useLocation, useSearchParams } from "react-router";
+import { useLocation, useSearchParams, useNavigate } from "react-router";
 
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import {
+	directModalParent,
+	nextModal,
+	useModalDialog,
+	useModalDraft,
+	useModalNavigation,
+	useDialogDismissal,
+} from "../navigation/controller.tsx";
 import { InterfaceIcon } from "../navigation/interface-icon.tsx";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { BoardSettingsDialog, useBoardSettings } from "./board-settings-dialog.tsx";
@@ -45,10 +53,9 @@ const TicketEditor = ({
 	const [repositoryIds, setRepositoryIds] = useState<string[]>([]);
 	const [epicId, setEpicId] = useState(initialEpic);
 	const [, setError] = useErrorState();
-	useEffect(() => {
-		if (visible) dialog.current?.showModal();
-		else dialog.current?.close();
-	}, [visible]);
+	const release = useModalDraft(!!(title || description || repositoryIds.length || epicId !== initialEpic), busy);
+	const dismissal = useDialogDismissal(busy);
+	useModalDialog(dialog, visible);
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
 		const input = createTicketSchema.safeParse({ title, description, repositoryIds, epicId });
@@ -59,21 +66,14 @@ const TicketEditor = ({
 		setError("");
 		try {
 			await save(input.data);
+			release();
 			close();
 		} catch (failure) {
 			setError(failure instanceof Error ? failure.message : "Cannot save ticket. Retry.");
 		}
 	};
 	return (
-		<dialog
-			ref={dialog}
-			className='ticket-dialog'
-			aria-labelledby='ticket-dialog-title'
-			onCancel={(event) => {
-				event.preventDefault();
-				if (!busy) close();
-			}}
-		>
+		<dialog ref={dialog} className='ticket-dialog' aria-labelledby='ticket-dialog-title' {...dismissal}>
 			<div className='ticket-dialog-heading'>
 				<h2 id='ticket-dialog-title'>Create ticket</h2>
 				<button type='button' aria-label='Close ticket' disabled={busy} onClick={close}>
@@ -120,12 +120,32 @@ const TicketEditor = ({
 
 export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }) => {
 	const location = useLocation();
-	const [search, setSearch] = useSearchParams();
+	const [search] = useSearchParams();
+	const navigation = useModalNavigation();
+	const navigate = useNavigate();
+	const initializing = useRef(false);
 	const linkedId = location.pathname === "/tasks" ? search.get("ticket") : null;
 	const epicLink = location.pathname === "/tasks" ? search.get("epic") : null;
 	const [epics, setEpics] = useState<EpicSummary[]>([]);
-	const [creatingEpic, setCreatingEpic] = useState(false);
-	const [initialEpic, setInitialEpic] = useState<string | null>(null);
+	const creatingEpic = visible && navigation.modal?.owner === "create-epic";
+	const creating = visible && navigation.modal?.owner === "create-ticket";
+	const initialEpic = navigation.modal?.selection ?? null;
+	useEffect(() => {
+		if (!visible || (!linkedId && !epicLink) || navigation.modal || initializing.current) return;
+		initializing.current = true;
+		const base = directModalParent(location);
+		if (!base) {
+			initializing.current = false;
+			return;
+		}
+		void (async () => {
+			await navigate(base.pathname + base.search, { replace: true, state: null });
+			await navigate(location.pathname + location.search, {
+				state: nextModal(base, linkedId ? "ticket" : "epic"),
+			});
+			initializing.current = false;
+		})();
+	}, [visible, linkedId, epicLink, navigation.modal, location, navigate, search]);
 	const [collapsed, setCollapsed] = useState<string[]>(() => {
 		try {
 			const value: unknown = JSON.parse(localStorage.getItem("forge.epics.collapsed.v1") ?? "[]");
@@ -148,26 +168,21 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		});
 	};
 	const closeEpic = () => {
-		setCreatingEpic(false);
-		const next = new URLSearchParams(search);
-		next.delete("epic");
-		setSearch(next);
+		navigation.dismiss();
 	};
 	const openEpic = (id: string) => {
 		rememberFocus();
 		const next = new URLSearchParams(search);
 		next.set("view", "backlog");
 		next.delete("ticket");
+		next.delete("tab");
 		next.set("epic", id);
-		setSearch(next);
+		navigation.open("epic", `/tasks?${next}`);
 	};
 	const [linked, setLinked] = useState<{ id: string; ticket?: Ticket; error?: string }>();
 	const closeTicket = () => {
-		setCreating(false);
-		if (!search.has("ticket")) return;
-		const next = new URLSearchParams(search);
-		next.delete("ticket");
-		setSearch(next);
+		if (creating) navigation.dismiss();
+		else navigation.dismissOwner("ticket");
 	};
 	const [tickets, setTickets] = useState<Ticket[]>([]);
 	useEffect(() => {
@@ -196,7 +211,6 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		epicLink ?? undefined,
 	);
 	const [notice, setNotice] = useState("");
-	const [creating, setCreating] = useState(false);
 	const selectedTicket = linkedId && linked?.id === linkedId ? linked.ticket : undefined;
 	useEffect(() => {
 		if (!linkedId || tickets.some((ticket) => ticket.id === linkedId)) return;
@@ -218,7 +232,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 			current = false;
 		};
 	}, [api, linkedId, tickets]);
-	const [showSettings, setShowSettings] = useState(false);
+	const showSettings = visible && navigation.modal?.owner === "board-settings";
 	const board = useBoardSettings(api, visible);
 	const active = useRef(true);
 	const locked = useRef(false);
@@ -322,18 +336,20 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		const next = new URLSearchParams(search);
 		next.set("ticket", ticket.id);
 		next.delete("epic");
-		setSearch(next);
+		next.delete("tab");
+		navigation.open("ticket", `/tasks?${next}`);
 	};
 	const create = () => {
 		rememberFocus();
-		setInitialEpic(null);
-		setCreating(true);
+		navigation.open("create-ticket");
 	};
 	const createInEpic = (id: string) => {
 		rememberFocus();
-		setInitialEpic(id);
-		setCreating(true);
-		closeEpic();
+		const next = new URLSearchParams(search);
+		next.delete("epic");
+		next.delete("ticket");
+		next.delete("tab");
+		navigation.open("create-ticket", `/tasks?${next}`, id);
 	};
 	const refresh = () => {
 		setLoading(true);
@@ -344,7 +360,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		const next = new URLSearchParams(search);
 		if (name === "backlog") next.set("view", name);
 		else next.delete("view");
-		setSearch(next);
+		if (name !== view) navigation.select(`/tasks${next.size ? `?${next}` : ""}`);
 		if (focus) document.getElementById(`tasks-tab-${name}`)?.focus();
 	};
 	return (
@@ -388,7 +404,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 								aria-label='Board settings'
 								title='Board settings'
 								disabled={dragging}
-								onClick={() => setShowSettings(true)}
+								onClick={() => navigation.open("board-settings")}
 							>
 								<InterfaceIcon name='settings' />
 							</button>
@@ -410,7 +426,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 								disabled={actionsBusy}
 								onClick={() => {
 									rememberFocus();
-									setCreatingEpic(true);
+									navigation.open("create-epic");
 								}}
 							>
 								Create epic
@@ -463,14 +479,14 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 						))}
 				</div>
 			))}
-			{showSettings && <BoardSettingsDialog api={api} board={board} close={() => setShowSettings(false)} />}
+			{showSettings && <BoardSettingsDialog api={api} board={board} close={navigation.dismiss} />}
 			{linkedId && linked?.id !== linkedId && <p role='status'>Loading ticket…</p>}
 			{linkedId && linked?.id === linkedId && linked.error && (
 				<p>
 					<button onClick={closeTicket}>Close ticket</button>
 				</p>
 			)}
-			{visible && selectedTicket && (
+			{visible && selectedTicket && navigation.modal && (
 				<TicketDetails
 					epics={epics}
 					openEpic={openEpic}
@@ -490,7 +506,6 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 							await api.read(`tickets/${selectedTicket.id}/archive`, ticketSchema, "POST");
 							if (!active.current) return;
 							setTickets((current) => current.filter((ticket) => ticket.id !== selectedTicket.id));
-							closeTicket();
 							setNotice(`${selectedTicket.id} archived.`);
 						})
 					}
@@ -533,6 +548,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 			)}
 			{visible
 				&& (creatingEpic || epicLink)
+				&& navigation.modal
 				&& !creating
 				&& !linkedId
 				&& (() => {
@@ -570,8 +586,9 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 											: [...current, saved],
 									);
 									if (!epic) {
-										setCreatingEpic(false);
-										openEpic(saved.id);
+										const next = new URLSearchParams(search);
+										next.set("epic", saved.id);
+										navigation.replace("epic", `/tasks?${next}`);
 									}
 								})
 							}

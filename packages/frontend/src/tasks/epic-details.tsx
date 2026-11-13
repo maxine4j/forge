@@ -2,6 +2,7 @@ import { editEpicSchema, type EditEpic, type EpicSummary, type Ticket } from "@f
 import { useEffect, useRef, useState } from "react";
 
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
+import { useDialogDismissal, useModalDialog, useModalDraft } from "../navigation/controller.tsx";
 import { useErrorState } from "../toasts/toasts.tsx";
 import { EpicIcon } from "./epic-icon.tsx";
 import { InlineTicketDescription, InlineTicketTitle } from "./inline-ticket-fields.tsx";
@@ -53,6 +54,7 @@ const useEpicField = <Element extends HTMLElement>(
 	const input = useRef<Element>(null);
 	const restoreFocus = useRef(false);
 	const editing = draft !== undefined;
+	useModalDraft(draft !== undefined && draft !== value, busy, () => change(undefined));
 	useEffect(() => {
 		if (editing) input.current?.focus();
 		else if (!busy && restoreFocus.current) {
@@ -132,6 +134,8 @@ export const EpicDetails = ({
 	const [title, setTitle] = useState("");
 	const [description, setDescription] = useState("");
 	const [failure, setFailure] = useErrorState();
+	const release = useModalDraft(!epic && !!(title || description), busy);
+	const dismissal = useDialogDismissal(busy);
 	const status = epic?.complete
 		? "done"
 		: epic?.counts["in-progress"] || epic?.done
@@ -139,18 +143,13 @@ export const EpicDetails = ({
 			: epic?.counts.todo
 				? "todo"
 				: "backlog";
-	useEffect(() => {
-		dialog.current?.showModal();
-	}, []);
+	useModalDialog(dialog);
 	return (
 		<dialog
 			ref={dialog}
 			className={epic ? "ticket-dialog epic-details" : "ticket-dialog"}
 			aria-labelledby='epic-dialog-title'
-			onCancel={(event) => {
-				event.preventDefault();
-				if (!busy) close();
-			}}
+			{...dismissal}
 		>
 			<div className={epic ? "ticket-details-heading" : "ticket-dialog-heading"}>
 				{epic ? (
@@ -189,9 +188,11 @@ export const EpicDetails = ({
 							return;
 						}
 						setFailure("");
-						void save(parsed.data).catch((err: unknown) =>
-							setFailure(err instanceof Error ? err.message : "Cannot save epic. Retry."),
-						);
+						void save(parsed.data)
+							.then(() => release())
+							.catch((err: unknown) =>
+								setFailure(err instanceof Error ? err.message : "Cannot save epic. Retry."),
+							);
 					}}
 				>
 					<label>

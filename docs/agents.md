@@ -250,8 +250,10 @@ repository workbench; changing repositories or reloading the page discards them.
 Execution continues independently of the selected chat or browser connection.
 At widths up to 700 CSS pixels, the base Agents URL shows only the full-height
 chat list; a chat URL shows only its conversation. Creating a chat opens it after
-success; failures leave the list and error visible. **Back to chats** navigates
-explicitly to the base URL, including during loading and for unavailable chats.
+success; failures leave the list and error visible. **Back to chats** returns to
+the known list ancestor, skipping intervening chat selections. Direct links fall
+back to the base URL with replacement, including during loading and for
+unavailable chats. See [navigation history](workspaces.md#navigation-history).
 It shares the status/action row without repeating the title. Wider screens show
 the sidebar and conversation together and select the first listed chat when
 entering without a chat URL. Resizing keeps an open chat selected; widening from

@@ -63,6 +63,18 @@ files return JSON 404 responses. Fixtures are not persisted. Normal Vite mode
 does not install the mock routes, and production builds exclude the mock API
 even when invoked with `--mode mock`.
 
+## Android Back verification
+
+TASK-19 automated coverage uses Chromium at desktop and Android-sized layouts
+for router history, tab restoration, modal ancestry and draft guards. Browser
+history automation does not establish native Android gesture or dialog behavior.
+Real Android Chrome verification is pending: no Android device is attached to
+the implementation environment. Before release, record device and Chrome version
+and verify Back with the keyboard open and closed, including nested confirmations,
+repository/epic pickers, repeated gestures and dirty-form keep/discard. One gesture
+must dismiss only the top native surface or traverse one router entry, without
+also closing its surrounding modal. See [navigation](foundation.md#navigation).
+
 ## Development databases
 
 SQLite stores cost snapshots, epics, nullable ticket membership and independent

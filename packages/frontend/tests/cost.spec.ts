@@ -189,13 +189,17 @@ test("Costs links open archived tickets outside the active board", async ({ page
 		.getByRole("row", { name: /TASK-1 Cleanup/ })
 		.getByRole("link")
 		.click();
-	await expect(page).toHaveURL(`/tasks?ticket=TASK-1`);
+	await expect(page).toHaveURL(/\/tasks\?ticket=TASK-1(?:&tab=details)?$/);
 	const panel = page.getByRole("dialog", { name: "TASK-1" });
 	await expect(panel).toBeVisible();
 	await expect(panel.getByText("Archived scope", { exact: true })).toBeVisible();
 	await panel.getByRole("button", { name: "Close ticket" }).click();
-	await page.goBack();
-	await expect(panel).toBeVisible();
+	await expect(panel).toHaveCount(0);
 	await page.goBack();
 	await expect(page.getByRole("heading", { name: "Costs", exact: true })).toBeVisible();
+	await page.goForward();
+	await expect(page).toHaveURL("/tasks");
+	await expect(panel).toHaveCount(0);
+	await page.goForward();
+	await expect(panel).toBeVisible();
 });

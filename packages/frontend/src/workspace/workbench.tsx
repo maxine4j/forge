@@ -131,6 +131,10 @@ export const Workbench = ({
 						id={`tab-${name}`}
 						role='tab'
 						aria-selected={tab === name}
+						onClick={(event) => {
+							if (event.currentTarget.getAttribute("href") === location.pathname + location.search)
+								event.preventDefault();
+						}}
 						aria-controls={`panel-${name}`}
 						to={
 							name === "Code"

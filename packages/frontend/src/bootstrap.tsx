@@ -6,6 +6,7 @@ import { RouterProvider } from "react-router/dom";
 import { ApiClient } from "./api/api-client.ts";
 import { WorkspaceApi } from "./api/workspace-api.ts";
 import { App } from "./app.tsx";
+import { NavigationRouter } from "./navigation/controller.tsx";
 import { ToastProvider } from "./toasts/toasts.tsx";
 
 import "./style.css";
@@ -18,7 +19,9 @@ const router = createBrowserRouter([{ path: "*", element: <App api={api} workspa
 createRoot(root).render(
 	<StrictMode>
 		<ToastProvider>
-			<RouterProvider router={router} />
+			<NavigationRouter.Provider value={router}>
+				<RouterProvider router={router} />
+			</NavigationRouter.Provider>
 		</ToastProvider>
 	</StrictMode>,
 );
