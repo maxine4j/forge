@@ -47,6 +47,47 @@ including while immediate saves temporarily disable its controls and then restor
 checkbox focus when the user has not moved elsewhere.
 See [epic membership](tickets.md#epics-and-grouped-backlog) for icon and save behavior.
 
+## Shared notifications
+
+The application-level React `ToastProvider` exposes `useToast().notify(message,
+variant?)`, with `error` as the default variant and `success` for existing repository
+success notifications. Queue state lives in memory across route changes. API clients
+do not notify. Views report browser-safe errors at the failed request or validation
+attempt, suppress aborted and stale responses, and retain local state for loading,
+validation styling and retry controls. Native form validation also uses the shared
+notification. Saved failure explanations announce once on display or a meaningful
+change; unchanged polling snapshots and rerenders do not repeat them. Failed status
+indicators, historical conversation and log content remain in their relevant views.
+Retained hidden views use `ToastVisibility` to suppress background notifications;
+saved failures announce when their view becomes visible.
+
+One toast is visible at a time. Distinct messages queue in arrival order and each
+receives three seconds starting when visible. Exact message matches merge across
+the active entry and queue: the first shows its original text, then `2x message`,
+`3x message`, and so on. An active repeat restarts its full timeout and subtle
+background sweep; a queued repeat keeps its position. Click, tap, Enter or Space
+dismisses the focused toast and advances the queue. Removed messages start fresh
+at count one. Retry controls and drafts survive expiry. Teardown clears timers,
+listeners and queue state.
+
+The clipped viewport slides the next toast upward over 180ms. Queued messages are
+absent from the accessibility tree; active errors use an atomic alert live region.
+The focusable dismissal button never takes focus automatically or submits/closes
+the surrounding dialog. Reduced motion removes entry and sweep animation while
+keeping the timeout. Default placement is bottom-left with 16px spacing, safe-area
+insets and a 420px maximum width constrained to the visual viewport. At widths up
+to 600 CSS pixels, visible chat composers register an anchor: the toast sits 8px
+above the entire composer, including controls. Resize, scroll, visual viewport,
+keyboard and chat visibility changes recalculate placement; hidden chats cannot
+anchor. Tablets and laptops retain bottom-left placement.
+
+Native modal open/close lifecycle registers the topmost active dialog as the toast
+host. The single viewport uses a manual popover to escape clipping and remain
+interactive above nested dialogs. Rehosting preserves the queue and deadline.
+See [workspace notifications](workspaces.md#slice-2-integrated-manual-workspace-and-pr-review),
+[agent chats](agents.md#interactive-agents), [ticket workflow](tickets.md#agentic-ticket-board)
+and [pipelines](git-and-ci.md#manual-local-pipelines).
+
 ## Account login and application access
 
 Retain the account setup experience from `codex-runner`, without remote-device

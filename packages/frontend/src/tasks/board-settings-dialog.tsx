@@ -9,12 +9,13 @@ import {
 import { useEffect, useId, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { useErrorState } from "../toasts/toasts.tsx";
 import { DockerSettings } from "./docker-settings.tsx";
 
 export const useBoardSettings = (api: IWorkspaceApi, visible: boolean) => {
 	const [settings, setSettings] = useState<BoardSettings>();
 	const [busy, setBusy] = useState(false);
-	const [error, setError] = useState("");
+	const [error, setError] = useErrorState();
 	const [notice, setNotice] = useState("");
 	const [loadAttempt, setLoadAttempt] = useState(0);
 	const updating = useRef(false);
@@ -33,7 +34,7 @@ export const useBoardSettings = (api: IWorkspaceApi, visible: boolean) => {
 		return () => {
 			current = false;
 		};
-	}, [api, loadAttempt, settings, visible]);
+	}, [api, loadAttempt, settings, visible, setError]);
 	const act = async (operation: () => Promise<void>) => {
 		if (updating.current) return;
 		updating.current = true;
@@ -169,11 +170,6 @@ export const BoardSettingsDialog = ({
 			)}
 			<DockerSettings api={api} />
 			{notice && <p role='status'>{notice}</p>}
-			{error && (
-				<p role='alert' className='error'>
-					{error}
-				</p>
-			)}
 		</dialog>
 	);
 };

@@ -7,11 +7,12 @@ import {
 import { useEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 
 export const DockerSettings = ({ api }: { api: IWorkspaceApi }) => {
 	const [overview, setOverview] = useState<DockerOverview>();
 	const [operation, setOperation] = useState<DockerOperation | null>(null);
-	const [error, setError] = useState("");
+	const [error, setError] = useErrorState();
 	const [busy, setBusy] = useState(false);
 	const [refreshing, setRefreshing] = useState(false);
 	const refresh = useRef<() => void>(() => {});
@@ -60,7 +61,7 @@ export const DockerSettings = ({ api }: { api: IWorkspaceApi }) => {
 			mutation.current?.abort();
 			document.removeEventListener("visibilitychange", visibility);
 		};
-	}, [api]);
+	}, [api, setError]);
 	const cleanup = async (target: string) => {
 		revision.current++;
 		setBusy(true);
@@ -78,6 +79,10 @@ export const DockerSettings = ({ api }: { api: IWorkspaceApi }) => {
 			if (!controller.signal.aborted) setBusy(false);
 		}
 	};
+	useFailureToast(
+		overview && !overview.available ? "Docker unavailable. Board and agent controls remain available." : undefined,
+	);
+	useFailureToast(operation?.failures.join(" "), operation?.id);
 	const cleaning = busy || operation?.status === "running";
 	return (
 		<section className='docker-settings' aria-label='Docker containers'>
@@ -94,9 +99,7 @@ export const DockerSettings = ({ api }: { api: IWorkspaceApi }) => {
 				</button>
 			</div>
 			{!overview && !error && <p role='status'>Loading Docker…</p>}
-			{overview && !overview.available && (
-				<p role='status'>Docker unavailable. Board and agent controls remain available.</p>
-			)}
+
 			{overview?.available && (
 				<>
 					{overview.statisticsStale && <p role='status'>Statistics are stale or unavailable.</p>}
@@ -142,16 +145,6 @@ export const DockerSettings = ({ api }: { api: IWorkspaceApi }) => {
 					<p>
 						Cleanup {operation.status}: {operation.progress}
 					</p>
-					{operation.failures.length > 0 && (
-						<>
-							<p>Some cleanup steps failed:</p>
-							<ul>
-								{operation.failures.map((failure, index) => (
-									<li key={index}>{failure}</li>
-								))}
-							</ul>
-						</>
-					)}
 					{operation.retained.length > 0 && (
 						<>
 							<p>Retained shared resources:</p>
@@ -181,7 +174,6 @@ export const DockerSettings = ({ api }: { api: IWorkspaceApi }) => {
 					)}
 				</div>
 			)}
-			{error && <p role='alert'>{error}</p>}
 		</section>
 	);
 };

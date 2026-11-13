@@ -31,6 +31,11 @@ test.beforeEach(async ({ page }) => {
 			const url = new URL(route.request().url());
 			const path = url.pathname;
 			const json = (value: unknown) => route.fulfill({ json: value });
+			if (path === "/api/accounts")
+				return json({
+					codex: { connection: "available", login: { state: "idle" } },
+					github: { connection: "available", login: { state: "idle" } },
+				});
 			if (path === "/api/projects")
 				return json([
 					{ id: projectId, name: "Forge", status: "ready", createdAt: date, upstreamSyncAvailable: true },
@@ -194,7 +199,7 @@ test("Code shows main drift, refreshes after sync, and reports merge conflicts",
 	await expect(sync).toBeEnabled();
 	await expect(sync).toHaveAttribute("aria-busy", "false");
 	await expect(spinner).toHaveCount(0);
-	await expect(page.getByRole("status")).toContainText("main synced with upstream.");
+	await expect(page.getByRole("status").filter({ hasText: "main synced with upstream." })).toBeVisible();
 	await expect(page.getByRole("textbox", { name: "File editor" })).toHaveText("updated by GitHub");
 	expect(posts).toBe(1);
 
@@ -363,12 +368,12 @@ test("sync feedback floats at bottom left and can expire or be dismissed", async
 	await sync.click();
 	const toast = page.getByRole("status").filter({ hasText: "main synced with upstream." });
 	await expect(toast).toBeVisible();
-	await expect(toast).toHaveCSS("position", "fixed");
-	const box = (await toast.boundingBox())!;
+	await expect(page.locator(".forge-toast-viewport")).toHaveCSS("position", "fixed");
+	const box = (await page.locator(".forge-toast-viewport").boundingBox())!;
 	expect(box.x).toBeLessThan(32);
 	expect(page.viewportSize()!.height - box.y - box.height).toBeLessThan(32);
 	expect((await list.boundingBox())?.y).toBe(before?.y);
-	await page.clock.fastForward(5_000);
+	await page.clock.fastForward(3_000);
 	await expect(toast).toBeHidden();
 	conflict = true;
 	await sync.click();

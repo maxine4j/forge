@@ -164,3 +164,39 @@ test("empty, invalid and unavailable Docker states", async ({ page }) => {
 	await page.getByRole("button", { name: "Run", exact: true }).click();
 	await expect(page.getByRole("alert")).toContainText("Docker is unavailable");
 });
+
+test("a newer history selection cancels an older failed read without a toast", async ({ page }) => {
+	const state = await setup(page);
+	await page.goto(`/repos/${projectId}/pipelines`);
+	await page.getByRole("button", { name: "Run", exact: true }).click();
+	await expect(page.getByRole("region", { name: "Selected pipeline run" })).toBeVisible();
+	state.complete();
+	await expect(page.getByRole("region", { name: "Selected pipeline run" })).toContainText("succeeded", {
+		timeout: 6000,
+	});
+	const pending = Promise.withResolvers<void>();
+	let reads = 0;
+	await page.route("**/pipeline-runs/*", async (route) => {
+		if (++reads !== 1) return route.fallback();
+		await pending.promise;
+		await route.fulfill({ status: 503, json: { error: "pipeline-unavailable" } });
+	});
+	const cancelled = page.waitForEvent("requestfailed", {
+		predicate: (request) => request.url().includes("/pipeline-runs/"),
+	});
+	const history = page.getByRole("button", { name: /CI · main/ });
+	await history.click();
+	await expect.poll(() => reads).toBe(1);
+	const loaded = page.waitForResponse(
+		(response) => response.url().includes("/pipeline-runs/") && response.status() === 200,
+	);
+	try {
+		await history.click();
+		await loaded;
+	} finally {
+		pending.resolve();
+	}
+	await cancelled;
+	await expect(page.getByRole("alert")).toHaveCount(0);
+	await expect(page.getByRole("region", { name: "Selected pipeline run" })).toContainText("succeeded");
+});

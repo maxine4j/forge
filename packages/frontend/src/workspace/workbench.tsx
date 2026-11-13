@@ -7,12 +7,13 @@ import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { InterfaceIcon } from "../navigation/interface-icon.tsx";
 import { resolveRoute } from "../navigation/routes.ts";
 import { Pipelines } from "../pipelines/pipelines.tsx";
+import { useErrorState } from "../toasts/toasts.tsx";
 import { RepositoryBrowser } from "./repository-browser.tsx";
 import { WorkspaceTerminal } from "./terminal.tsx";
 
 const ProjectTerminal = ({ projectId, api }: { projectId: string; api: IWorkspaceApi }) => {
 	const [workspace, setWorkspace] = useState<Workspace>();
-	const [error, setError] = useState("");
+	const [error, setError] = useErrorState();
 	const [busy, setBusy] = useState(false);
 	const preparing = useRef<Promise<Workspace> | undefined>(undefined);
 	const prepare = useCallback(async () => {
@@ -36,11 +37,10 @@ const ProjectTerminal = ({ projectId, api }: { projectId: string; api: IWorkspac
 		return () => {
 			cancelled = true;
 		};
-	}, [prepare]);
+	}, [prepare, setError]);
 	if (workspace?.status === "ready") return <WorkspaceTerminal id={workspace.id} api={api} />;
 	return (
 		<section>
-			{error && <p role='alert'>{error}</p>}
 			{workspace?.status === "failed" || error ? (
 				<button
 					disabled={busy}

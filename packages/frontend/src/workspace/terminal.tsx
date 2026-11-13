@@ -4,13 +4,14 @@ import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { useErrorState } from "../toasts/toasts.tsx";
 import { TerminalStream } from "./terminal-stream.ts";
 
 import "@xterm/xterm/css/xterm.css";
 
 export const WorkspaceTerminal = ({ id, api }: { id: string; api: IWorkspaceApi }) => {
 	const [connection, setConnection] = useState("Connecting…");
-	const [error, setError] = useState("");
+	const [, setError] = useErrorState();
 	const [gap, setGap] = useState<number>();
 	const element = useRef<HTMLDivElement>(null);
 	useEffect(() => {
@@ -117,15 +118,11 @@ export const WorkspaceTerminal = ({ id, api }: { id: string; api: IWorkspaceApi 
 			socket?.close();
 			view.dispose();
 		};
-	}, [id, api]);
+	}, [id, api, setError]);
 	return (
 		<section aria-label='Terminal'>
 			<p role='status'>{connection}</p>
-			{error && (
-				<p role='alert' className='error'>
-					{error}
-				</p>
-			)}
+
 			{gap !== undefined && (
 				<p className='notice'>Output gap through {gap}. Some terminal output is unavailable.</p>
 			)}

@@ -4,6 +4,7 @@ import { Link } from "react-router";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
+import { useToast } from "../toasts/toasts.tsx";
 import { CostMetrics, Money, PhaseCosts, WeeklyUsage, formatPercent } from "./cost-metrics.tsx";
 import { WeeklyBudgetChart } from "./weekly-budget.tsx";
 
@@ -250,6 +251,7 @@ const TicketCosts = ({ cost }: { cost: Costs }) => {
 };
 
 export const CostDashboard = ({ api }: { api: IWorkspaceApi }) => {
+	const { notify } = useToast();
 	const [attempt, setAttempt] = useState(0);
 	useEffect(() => {
 		const timer = window.setInterval(() => setAttempt((value) => value + 1), 300_000);
@@ -263,13 +265,16 @@ export const CostDashboard = ({ api }: { api: IWorkspaceApi }) => {
 				if (current) setResult({ attempt, value });
 			},
 			() => {
-				if (current) setResult({ attempt });
+				if (current) {
+					setResult({ attempt });
+					notify("Cost data is unavailable.");
+				}
 			},
 		);
 		return () => {
 			current = false;
 		};
-	}, [api, attempt]);
+	}, [api, attempt, notify]);
 	const cost = result?.value;
 	const pending = result?.attempt !== attempt;
 	return (
@@ -288,7 +293,6 @@ export const CostDashboard = ({ api }: { api: IWorkspaceApi }) => {
 			{pending && !cost && <p role='status'>Loading cost data…</p>}
 			{!pending && !cost && (
 				<div className='cost-card'>
-					<p role='alert'>Cost data is unavailable.</p>
 					<button onClick={() => setAttempt((value) => value + 1)}>Retry</button>
 				</div>
 			)}

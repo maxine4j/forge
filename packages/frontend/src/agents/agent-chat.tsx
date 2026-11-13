@@ -13,6 +13,7 @@ import { useLocation, useNavigate } from "react-router";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { resolveRoute } from "../navigation/routes.ts";
+import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { AgentActivity } from "./agent-activity.tsx";
 import { AgentComposer } from "./agent-composer.tsx";
 
@@ -226,7 +227,7 @@ export const Conversation = ({
 		if (messages.current) observer.observe(messages.current);
 		return () => observer.disconnect();
 	}, []);
-	const [error, setError] = useState("");
+	const [, setError] = useErrorState();
 	const [busy, setBusy] = useState(false);
 	const [connected, setConnected] = useState(false);
 	const poller = useRef<ResourcePoller<AgentView> | undefined>(undefined);
@@ -296,7 +297,7 @@ export const Conversation = ({
 			events.close();
 			poller.current = undefined;
 		};
-	}, [api, id, changed, snapshots]);
+	}, [api, id, changed, snapshots, setError]);
 	useEffect(() => {
 		selection.current = selected;
 		if (!selected) return;
@@ -353,14 +354,10 @@ export const Conversation = ({
 			: view?.turnFailure === "context-window"
 				? "This turn exceeded the model's context window. Try a shorter prompt or start a new chat."
 				: "Codex could not complete this turn.";
+	useFailureToast(selected && status === "failed" ? failureNotice : undefined, view?.thread.turnId);
 	if (historyOnly)
 		return (
 			<>
-				{error && (
-					<p role='alert' className='error'>
-						{error}
-					</p>
-				)}
 				{historyFailed && (
 					<button
 						disabled={loadingHistory}
@@ -417,11 +414,7 @@ export const Conversation = ({
 					Reconnecting to live updates…
 				</p>
 			)}
-			{error && (
-				<p className='error' role='alert'>
-					{error}
-				</p>
-			)}
+
 			{loadingHistory && (
 				<p className='agent-notice' role='status'>
 					Loading history…
@@ -478,11 +471,7 @@ export const Conversation = ({
 									/>
 								)}
 							{suffix}
-							{status === "failed" && (
-								<p className='error' role='alert'>
-									{failureNotice}
-								</p>
-							)}
+
 							{!ticketChat && active && (
 								<p
 									className={`agent-notice ${status === "running" ? "agent-working-highlight" : ""}`}
@@ -597,7 +586,7 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 	}, [selected, mobile, visible]);
 	if (retained !== selected) setRetained(selected);
 	if (selected && !opened.includes(selected)) setOpened([...opened, selected]);
-	const [error, setError] = useState("");
+	const [error, setError] = useErrorState();
 	const [creating, setCreating] = useState(false);
 	const acting = useRef(false);
 	const poller = useRef<ResourcePoller<AgentThread[]> | undefined>(undefined);
@@ -618,7 +607,7 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 			resource.stop();
 			poller.current = undefined;
 		};
-	}, [api, projectId]);
+	}, [api, projectId, setError]);
 	const firstId = threads.at(0)?.id;
 	useEffect(() => {
 		if (!mobile && selectFirst && firstId) {
@@ -664,11 +653,7 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 				>
 					{creating ? "Creating…" : "Create chat"}
 				</button>
-				{error && (
-					<p className='error' role='alert'>
-						{error}
-					</p>
-				)}
+
 				<nav aria-label='Chat threads'>
 					{threads.map((thread) => (
 						<button

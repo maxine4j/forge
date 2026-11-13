@@ -27,11 +27,6 @@ export const TaskBacklog = ({
 	const unfinished = tickets.filter((ticket) => !ticket.archivedAt && ticket.status !== "done");
 	return (
 		<div className='task-backlog'>
-			{error && (
-				<p role='alert' className='error'>
-					{error}
-				</p>
-			)}
 			<p role='status'>
 				{loading ? "Loading tickets…" : `${unfinished.length} unfinished tickets`}
 				{notice && ` · ${notice}`}

@@ -1,3 +1,4 @@
+import { defaultForgeSettings } from "@forge/contracts/settings";
 import { expect, test } from "@playwright/test";
 const id = "123e4567-e89b-42d3-a456-426614174000";
 const project = { id, name: "Documentation", status: "ready", createdAt: "2026-11-02T00:00:00.000Z" };
@@ -16,7 +17,7 @@ test("create/import and retry projects while account infrastructure is unavailab
 	});
 	await page.goto("/repos");
 	await expect(page.getByText("No repos yet")).toBeVisible();
-	await expect(page.getByRole("alert")).toHaveCount(0);
+	await expect(page.getByRole("alert")).toContainText("Request failed");
 	const open = page.getByRole("button", { name: "Create repo", exact: true });
 	const dialog = page.getByRole("dialog", { name: "New repository" });
 	await expect(dialog).toBeHidden();
@@ -45,6 +46,8 @@ test("create/import and retry projects while account infrastructure is unavailab
 
 test("account verification code/link, completion, cancellation, uncertainty and explicit retry", async ({ page }) => {
 	let codex: unknown = idle;
+	await page.route("**/api/settings", (route) => route.fulfill({ json: defaultForgeSettings }));
+	await page.route("**/api/settings/model-options", (route) => route.fulfill({ json: { models: [], skills: [] } }));
 	await page.route("**/api/projects", (route) =>
 		route.fulfill({
 			json: [project, { ...project, id: "123e4567-e89b-42d3-a456-426614174001", name: "Homelab dashboard" }],
@@ -83,7 +86,7 @@ test("account verification code/link, completion, cancellation, uncertainty and 
 	await expect(card.getByText("Sign-in cancelled.")).toBeVisible();
 	codex = { connection: "available", login: { state: "uncertain", failure: "connection-lost" } };
 	await page.getByRole("button", { name: "Refresh accounts" }).click();
-	await expect(card.getByText(/Previous sign-in outcome is unknown/)).toBeVisible();
+	await expect(page.getByRole("alert")).toContainText("Previous sign-in outcome is unknown");
 	await card.getByRole("button", { name: "Retry sign-in" }).click();
 	await expect(card.getByText("ABCD-EFGH")).toBeVisible();
 	codex = { connection: "available", account: { name: "owner@example.com" }, login: { state: "completed" } };

@@ -6,6 +6,7 @@ import { RouterProvider } from "react-router/dom";
 import { ApiClient } from "./api/api-client.ts";
 import { WorkspaceApi } from "./api/workspace-api.ts";
 import { App } from "./app.tsx";
+import { ToastProvider } from "./toasts/toasts.tsx";
 
 import "./style.css";
 
@@ -16,6 +17,8 @@ const workspaceApi = new WorkspaceApi(window.fetch.bind(window));
 const router = createBrowserRouter([{ path: "*", element: <App api={api} workspaceApi={workspaceApi} /> }]);
 createRoot(root).render(
 	<StrictMode>
-		<RouterProvider router={router} />
+		<ToastProvider>
+			<RouterProvider router={router} />
+		</ToastProvider>
 	</StrictMode>,
 );

@@ -1,11 +1,14 @@
 import { expect, test } from "@playwright/test";
 
+import { MockApi } from "../dev/mock-api.ts";
+
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const head = "a".repeat(40);
 test("existing file edits remain local, navigation guards drafts, and typing during Commit remains dirty", async ({
 	page,
 }) => {
 	const mutations: unknown[] = [];
+	const fixtures = new MockApi();
 	let release: (() => void) | undefined;
 	let committing = false;
 	await page.route(
@@ -40,7 +43,10 @@ test("existing file edits remain local, navigation guards drafts, and typing dur
 			}
 			if (url.pathname.endsWith("/file"))
 				return route.fulfill({ json: { path: "index.ts", content: "original" } });
-			return route.fulfill({ status: 404, json: {} });
+			if (url.pathname === "/api/settings/model-options")
+				return route.fulfill({ json: { models: [], skills: [] } });
+			const value = fixtures.read(url);
+			return route.fulfill({ status: value === undefined ? 404 : 200, json: value ?? {} });
 		},
 	);
 	await page.goto("/repos");

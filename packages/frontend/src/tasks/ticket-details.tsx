@@ -17,6 +17,7 @@ import { AgentOptionsRevision, ExecutionSettings } from "../agents/execution-set
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown } from "../dropdown.tsx";
+import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { EpicIcon } from "./epic-icon.tsx";
 import { InlineTicketDescription, InlineTicketTitle } from "./inline-ticket-fields.tsx";
 import { RepositorySelection } from "./repository-selection.tsx";
@@ -92,13 +93,13 @@ export const TicketDetails = ({
 	const [acting, setActing] = useState(false);
 	const actionPending = useRef(false);
 	const [titleDraft, setTitleDraft] = useState<string>();
-	const [titleError, setTitleError] = useState("");
+	const [titleError, setTitleError] = useErrorState();
 	const editTitle = useRef<HTMLButtonElement>(null);
 	const titleInput = useRef<HTMLInputElement>(null);
 	const restoreTitleFocus = useRef(false);
 	const [descriptionDraft, setDescriptionDraft] = useState(state.descriptionDraft);
 	const [pendingRepositories, setPendingRepositories] = useState<string[]>();
-	const [scopeError, setScopeError] = useState("");
+	const [, setScopeError] = useErrorState();
 	const editDescription = useRef<HTMLButtonElement>(null);
 	const descriptionInput = useRef<HTMLTextAreaElement>(null);
 	const restoreDescriptionFocus = useRef(false);
@@ -200,12 +201,12 @@ export const TicketDetails = ({
 		setSavedSettings(undefined);
 	}
 	const settings = pendingSettings ?? savedSettings ?? ticket.executionSettings ?? {};
-	const [error, setError] = useState("");
-	const [moveError, setMoveError] = useState("");
+	const [, setError] = useErrorState();
+	const [, setMoveError] = useErrorState();
 	const [options, setOptions] = useState<AgentOptions>();
 	const optionsRevision = useContext(AgentOptionsRevision);
 	const [savingSettings, setSavingSettings] = useState(false);
-	const [settingsError, setSettingsError] = useState("");
+	const [, setSettingsError] = useErrorState();
 	useEffect(() => {
 		let current = true;
 		void api
@@ -219,7 +220,7 @@ export const TicketDetails = ({
 		return () => {
 			current = false;
 		};
-	}, [api, ticket.id, job?.phase, job?.plannerId, job?.implementerId, optionsRevision]);
+	}, [api, ticket.id, job?.phase, job?.plannerId, job?.implementerId, optionsRevision, setError]);
 	const settingsDisabled = archived || savingSettings || !!resetting || ticket.status === "done";
 	const changeSettings = (value: TicketExecutionSettings) => {
 		if (settingsDisabled) return;
@@ -241,7 +242,7 @@ export const TicketDetails = ({
 				setSavingSettings(false);
 			});
 	};
-	const [archiveError, setArchiveError] = useState("");
+	const [, setArchiveError] = useErrorState();
 	const [refresh] = useState(() => () => poller.current?.refresh());
 	useEffect(refresh, [refresh, ticket.status, ticket.canReturnToBacklog]);
 	useEffect(() => {
@@ -263,7 +264,7 @@ export const TicketDetails = ({
 			resource.stop();
 			poller.current = undefined;
 		};
-	}, [api, ticket.id]);
+	}, [api, ticket.id, setError]);
 	const currentId = job?.implementerId ?? job?.plannerId;
 	const plan = job?.plan;
 	const reviewPlan =
@@ -284,6 +285,14 @@ export const TicketDetails = ({
 		tabIndex: 0,
 	});
 	const steering = !!job && ["implementation", "rebase"].includes(job.phase) && job.state === "running";
+	useFailureToast(job?.resetError);
+	useFailureToast(
+		job?.state === "setup-failed"
+			? options && !resolveAgentSettings(options, settings).supported
+				? "Some agent settings are unavailable. Use Default for the model or thinking level, or choose an available permission mode, then retry."
+				: "Agent setup failed."
+			: undefined,
+	);
 	const blocked = !job || (!steering && !["idle", "failed"].includes(job.state)) || ticket.status !== "in-progress";
 	const implementation = job?.approvedRevision ? (
 		<div className='ticket-implementation-divider' role='separator' aria-label='Plan approved · Implementation'>
@@ -478,11 +487,7 @@ export const TicketDetails = ({
 				invalid={!!titleError}
 			/>
 			{archived && <small>Archived · Read only</small>}
-			{editingTitle && titleError && (
-				<p role='alert' className='error'>
-					{titleError}
-				</p>
-			)}
+
 			<dialog
 				ref={archiveDialog}
 				className='ticket-dialog ticket-archive-dialog'
@@ -498,11 +503,7 @@ export const TicketDetails = ({
 				<p id={`${fieldId}-archive-description`}>
 					This removes the ticket from the task board and keeps its details and history.
 				</p>
-				{archiveError && (
-					<p role='alert' className='error'>
-						{archiveError}
-					</p>
-				)}
+
 				<div className='ticket-dialog-actions'>
 					<button type='button' disabled={busy} onClick={() => archiveDialog.current?.close()}>
 						Cancel
@@ -538,11 +539,7 @@ export const TicketDetails = ({
 					This stops ticket execution and removes its execution worktree and unmerged branch. Scope, settings
 					and the latest saved plan are preserved.
 				</p>
-				{moveError && (
-					<p role='alert' className='error'>
-						{moveError}
-					</p>
-				)}
+
 				<div className='ticket-dialog-actions'>
 					<button type='button' disabled={returnPending} onClick={() => returnDialog.current?.close()}>
 						Cancel
@@ -613,18 +610,13 @@ export const TicketDetails = ({
 				</div>
 			</div>
 			{job?.resetError && (
-				<div className='ticket-recovery' role='alert'>
-					<span>{job.resetError}</span>
+				<div className='ticket-recovery'>
 					<button type='button' disabled={acting} onClick={() => act("reconcile", {})}>
 						Retry cleanup
 					</button>
 				</div>
 			)}
-			{(scopeError || error || settingsError) && (
-				<p role='alert' className='error'>
-					{scopeError || settingsError || error}
-				</p>
-			)}
+
 			{job?.state === "uncertain" && (
 				<div className='ticket-recovery'>
 					<button type='button' disabled={archived || acting} onClick={() => act("reconcile", {})}>
@@ -634,11 +626,6 @@ export const TicketDetails = ({
 			)}
 			{job?.state === "setup-failed" && (
 				<div className='ticket-recovery'>
-					<span>
-						{options && !resolveAgentSettings(options, settings).supported
-							? "Some agent settings are unavailable. Use Default for the model or thinking level, or choose an available permission mode, then retry."
-							: "Agent setup failed."}
-					</span>
 					<button type='button' disabled={archived || acting} onClick={() => act("reconcile", {})}>
 						Retry setup
 					</button>

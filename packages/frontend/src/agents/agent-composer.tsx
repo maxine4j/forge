@@ -8,6 +8,7 @@ import {
 import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { useErrorState, useToastAnchor, useToast } from "../toasts/toasts.tsx";
 import { AgentOptionsRevision, ExecutionSettings } from "./execution-settings.tsx";
 
 const number = new Intl.NumberFormat("en-AU");
@@ -94,7 +95,7 @@ export const AgentComposer = ({
 	}, [draft]);
 	const [options, setOptions] = useState<AgentOptions>();
 	const optionsRevision = useContext(AgentOptionsRevision);
-	const [error, setError] = useState("");
+	const [error, setError] = useErrorState();
 	const [attempt, setAttempt] = useState(0);
 	const settingsKey = JSON.stringify([settings.model, settings.reasoningEffort, settings.permissions]);
 	const [localSelection, setSelection] = useState<{ source: string; value: AgentSettings }>({
@@ -112,6 +113,7 @@ export const AgentComposer = ({
 	const [dismissed, setDismissed] = useState(false);
 	const [selected, setSelected] = useState(0);
 	const [fileResult, setFileResult] = useState<{ query: string; files: string[]; error: string }>();
+	const { notify } = useToast();
 	useEffect(() => {
 		if (!configurable && !completions) return;
 		let current = true;
@@ -129,7 +131,7 @@ export const AgentComposer = ({
 		return () => {
 			current = false;
 		};
-	}, [api, id, attempt, configurable, completions, optionsRevision]);
+	}, [api, id, attempt, configurable, completions, optionsRevision, setError]);
 	const match = /(?:^|\s)([$@])([^\s$@]*)$/.exec(draft.slice(0, cursor));
 	const trigger = !dismissed && completions ? match?.[1] : undefined;
 	const query = match?.[2] ?? "";
@@ -147,6 +149,7 @@ export const AgentComposer = ({
 				.catch(() => {
 					if (current) {
 						setFileResult({ query, files: [], error: "Could not search files. Type again to retry." });
+						notify("Could not search files. Type again to retry.");
 					}
 				});
 		}, 120);
@@ -154,9 +157,9 @@ export const AgentComposer = ({
 			current = false;
 			clearTimeout(timeout);
 		};
-	}, [api, id, trigger, query]);
+	}, [api, id, trigger, query, notify]);
 	const files = fileResult?.query === query ? fileResult.files : [];
-	const fileError = fileResult?.query === query ? fileResult.error : "";
+
 	const searching = trigger === "@" && fileResult?.query !== query;
 	const choices =
 		trigger === "$"
@@ -166,6 +169,7 @@ export const AgentComposer = ({
 			: files.map((name) => ({ name, description: "" }));
 	const visible = Boolean(trigger);
 	const form = useRef<HTMLFormElement>(null);
+	useToastAnchor(form);
 	useLayoutEffect(() => {
 		if (!visible) return;
 		const measure = () => {
@@ -243,14 +247,13 @@ export const AgentComposer = ({
 							</div>
 						))}
 					</div>
-					{!choices.length && (
+					{!choices.length && !(fileResult?.query === query && fileResult.error) && !error && (
 						<p role='status'>
-							{fileError
-								|| (searching
-									? "Searching files…"
-									: trigger === "$" && !options
-										? error || "Loading skills…"
-										: "No matches")}
+							{searching
+								? "Searching files…"
+								: trigger === "$" && !options
+									? "Loading skills…"
+									: "No matches"}
 						</p>
 					)}
 				</div>
@@ -343,7 +346,6 @@ export const AgentComposer = ({
 			</div>
 			{error && (
 				<div className='agent-composer-error' role='status'>
-					{error}{" "}
 					<button type='button' onClick={() => setAttempt((value) => value + 1)}>
 						Retry
 					</button>

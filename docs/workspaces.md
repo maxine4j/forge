@@ -268,8 +268,11 @@ default branch exists locally.
 Commit or discard editor drafts before syncing; drafts on any branch disable the
 action with branch-neutral guidance. Code refreshes the affected branch's content
 after success, including when browsing another branch, and refreshes counts after
-an attempt. Sync results and repository operation errors appear in a
-bottom-left toast for five seconds or until dismissed with its close button.
+an attempt. Sync results and repository operation errors use the application-wide
+[shared notification queue](foundation.md#shared-notifications), with three seconds
+per visible toast, repeat counts and click, tap or keyboard dismissal. Existing
+sync and commit success notifications use this same queue. File, diff, clipboard,
+terminal and commit failures retain their retry controls and local drafts after expiry.
 See [upstream sync](git-and-ci.md#sync-with-upstream) for failure outcomes and
 [imports](foundation.md#repositories-and-imports) for upstream configuration/recovery.
 Directory tables, including the root, use Name, Last commit message and Last commit

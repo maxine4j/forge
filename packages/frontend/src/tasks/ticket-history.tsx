@@ -2,6 +2,7 @@ import { ticketHistorySchema, type TicketHistoryEvent, type TicketHistory } from
 import { useEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { useToast } from "../toasts/toasts.tsx";
 
 const labels: Record<TicketHistoryEvent["type"], string> = {
 	status: "Status",
@@ -159,6 +160,7 @@ export const TicketHistoryTimeline = ({
 	const [data, setData] = useState<TicketHistory>();
 	const [events, setEvents] = useState<TicketHistoryEvent[]>([]);
 	const [error, setError] = useState(false);
+	const { notify } = useToast();
 	const [retry, setRetry] = useState(0);
 	const [loadingMore, setLoadingMore] = useState(false);
 	const cursor = useRef(0);
@@ -186,7 +188,10 @@ export const TicketHistoryTimeline = ({
 				// Stop at page boundaries until the reader explicitly loads more.
 				if (!result.nextCursor) cursor.current = result.events.at(-1)?.id ?? cursor.current;
 			} catch {
-				if (active) setError(true);
+				if (active) {
+					setError(true);
+					notify("History is unavailable.");
+				}
 			} finally {
 				busy.current = false;
 				if (active) {
@@ -200,13 +205,13 @@ export const TicketHistoryTimeline = ({
 			active = false;
 			clearTimeout(timer);
 		};
-	}, [api, ticketId, selected, retry, page]);
+	}, [api, ticketId, selected, retry, page, notify]);
 	return (
 		<div className='ticket-history'>
 			{!data && !error && <p role='status'>Loading history…</p>}
 			{error && (
-				<div role='alert'>
-					History is unavailable. <button onClick={() => setRetry((value) => value + 1)}>Retry</button>
+				<div>
+					<button onClick={() => setRetry((value) => value + 1)}>Retry</button>
 				</div>
 			)}
 			{data && (

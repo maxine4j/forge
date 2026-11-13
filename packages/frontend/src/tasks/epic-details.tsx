@@ -2,6 +2,7 @@ import { editEpicSchema, type EditEpic, type EpicSummary, type Ticket } from "@f
 import { useEffect, useRef, useState } from "react";
 
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
+import { useErrorState } from "../toasts/toasts.tsx";
 import { EpicIcon } from "./epic-icon.tsx";
 import { InlineTicketDescription, InlineTicketTitle } from "./inline-ticket-fields.tsx";
 import { ticketLabels } from "./ticket-labels.ts";
@@ -47,7 +48,7 @@ const useEpicField = <Element extends HTMLElement>(
 	persist: (value: string) => Promise<void>,
 ) => {
 	const [draft, change] = useState<string>();
-	const [error, setError] = useState("");
+	const [error, setError] = useErrorState();
 	const trigger = useRef<HTMLButtonElement>(null);
 	const input = useRef<Element>(null);
 	const restoreFocus = useRef(false);
@@ -100,17 +101,8 @@ const EpicFields = ({
 	return (
 		<>
 			<InlineTicketTitle {...title.props} invalid={!!title.error} />
-			{title.error && (
-				<p role='alert' className='error'>
-					{title.error}
-				</p>
-			)}
+
 			<InlineTicketDescription {...description.props} />
-			{description.error && (
-				<p role='alert' className='error'>
-					{description.error}
-				</p>
-			)}
 		</>
 	);
 };
@@ -139,7 +131,7 @@ export const EpicDetails = ({
 	const dialog = useRef<HTMLDialogElement>(null);
 	const [title, setTitle] = useState("");
 	const [description, setDescription] = useState("");
-	const [failure, setFailure] = useState("");
+	const [failure, setFailure] = useErrorState();
 	const status = epic?.complete
 		? "done"
 		: epic?.counts["in-progress"] || epic?.done
@@ -179,8 +171,7 @@ export const EpicDetails = ({
 				</button>
 			</div>
 			{(error || failure) && (
-				<p role='alert'>
-					{failure || error}{" "}
+				<p>
 					<button disabled={busy} onClick={refresh}>
 						Refresh
 					</button>

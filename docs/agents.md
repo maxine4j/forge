@@ -65,6 +65,12 @@ a reference, not the required transport lifecycle for Forge's continuous agent U
 
 ### Interactive agents
 
+Request, history recovery, composer discovery and failed-turn explanations use
+[shared notifications](foundation.md#shared-notifications). Saved failures announce
+on display or change, while historical conversation/tool output stays in chat.
+Retry controls and composer drafts survive notification expiry. Visible repository
+and ticket composers anchor notifications on slab phones, including their controls.
+
 Composers share the Codex theme and `$` skill / `@` file completion, including
 [ticket chats](tickets.md#agentic-ticket-board). Completion choices scroll within
 the space above the composer and support keyboard and touch selection. File and

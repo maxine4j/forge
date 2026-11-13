@@ -4,6 +4,7 @@ import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
 import { chooseDropdown, expectDropdownValue } from "./dropdown-helpers.ts";
+import { expectToastPlacement } from "./toast-placement.ts";
 
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const createdAt = "2026-11-03T00:00:00.000Z";
@@ -547,6 +548,7 @@ test("one-time command and file approvals, clarification and truncation are visi
 	view.thread.status = "waiting";
 	await fixture.event();
 	await page.getByRole("button", { name: "Decline", exact: true }).click();
+	await expect(page.getByRole("button", { name: "Decline", exact: true })).toHaveCount(0);
 	view.requests = [
 		{
 			id: "input",
@@ -905,3 +907,63 @@ test("mobile chat keeps composer and long tool output within the viewport", asyn
 	await page.screenshot({ path: "../../artifacts/forge-browser/agents-mobile.png", fullPage: true });
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
+
+test("composer discovery retries remain available after expiry and file search failures count each attempt", async ({
+	page,
+}) => {
+	const fixture = await setup(page);
+	await page.route("**/options", (route) => route.fulfill({ status: 503, json: { error: "agent-unavailable" } }));
+	await page.clock.install({ time: new Date("2026-11-13T12:00:00Z") });
+	await page.clock.pauseAt(new Date("2026-11-13T12:00:01Z"));
+	await fixture.create();
+	const alert = page.getByRole("alert");
+	await expect(alert).toHaveText("Models and skills unavailable.");
+	const retry = page.locator(".agent-composer").getByRole("button", { name: "Retry", exact: true });
+	await retry.focus();
+	await retry.press("Enter");
+	await expect(alert).toHaveText("2x Models and skills unavailable.");
+	await page.clock.runFor(3000);
+	await expect(alert).toHaveCount(0);
+	await expect(retry).toBeVisible();
+	await page.unroute("**/options");
+	await retry.click();
+	await expect(retry).toHaveCount(0);
+	await page.route(/\/files\?query=/, (route) =>
+		route.fulfill({ status: 503, json: { error: "agent-unavailable" } }),
+	);
+	const message = page.getByLabel("Message", { exact: true });
+	await message.fill("@one");
+	await page.clock.runFor(120);
+	await expect(alert).toHaveText("Could not search files. Type again to retry.");
+	await message.fill("@two");
+	await page.clock.runFor(120);
+	await expect(alert).toHaveText("2x Could not search files. Type again to retry.");
+	await expect(message).toHaveValue("@two");
+});
+
+for (const width of [390, 820, 1280]) {
+	test(`repository chat toasts follow the complete composer at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 900 });
+		const fixture = await setup(page);
+		await fixture.create();
+		await page.route("**/messages", (route) =>
+			route.fulfill({ status: 503, json: { error: "agent-unavailable" } }),
+		);
+		await page.getByLabel("Message", { exact: true }).fill("Retain this draft");
+		await page.getByRole("button", { name: "Send message", exact: true }).click();
+		await expect(page.getByRole("alert")).toBeVisible();
+		await expectToastPlacement(page, width, 900);
+		await page.locator(".agent-composer:visible textarea").evaluate((node) => {
+			node.style.height = "160px";
+		});
+		await expectToastPlacement(page, width, 900);
+		await page.evaluate(() => {
+			Object.defineProperty(window.visualViewport!, "height", { configurable: true, value: 480 });
+			window.visualViewport!.dispatchEvent(new Event("resize"));
+		});
+		await expectToastPlacement(page, width, 480);
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		await expect(page.locator(".forge-toast-sweep")).toHaveCSS("animation-name", "none");
+		await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Retain this draft");
+	});
+}

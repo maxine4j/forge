@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { DropdownSurface } from "../dropdown.tsx";
+import { useErrorState } from "../toasts/toasts.tsx";
 
 export const RepositorySelection = ({
 	api,
@@ -16,7 +17,7 @@ export const RepositorySelection = ({
 	disabled?: boolean;
 }) => {
 	const [repositories, setRepositories] = useState<Project[]>();
-	const [error, setError] = useState("");
+	const [error, setError] = useErrorState();
 	const [revision, retry] = useState(0);
 	useEffect(() => {
 		let active = true;
@@ -34,13 +35,12 @@ export const RepositorySelection = ({
 		return () => {
 			active = false;
 		};
-	}, [api, revision]);
+	}, [api, revision, setError]);
 	return (
 		<fieldset disabled={disabled} className='ticket-repositories'>
 			<legend>Repositories</legend>
 			{error && (
-				<p role='alert'>
-					{error}{" "}
+				<p>
 					<button type='button' onClick={() => retry(revision + 1)}>
 						Retry repositories
 					</button>

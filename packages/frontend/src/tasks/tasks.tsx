@@ -15,6 +15,7 @@ import { useLocation, useSearchParams } from "react-router";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { InterfaceIcon } from "../navigation/interface-icon.tsx";
+import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { BoardSettingsDialog, useBoardSettings } from "./board-settings-dialog.tsx";
 import { EpicDetails, EpicSelection } from "./epic-details.tsx";
 import { RepositorySelection } from "./repository-selection.tsx";
@@ -43,7 +44,7 @@ const TicketEditor = ({
 	const [description, setDescription] = useState("");
 	const [repositoryIds, setRepositoryIds] = useState<string[]>([]);
 	const [epicId, setEpicId] = useState(initialEpic);
-	const [error, setError] = useState("");
+	const [, setError] = useErrorState();
 	useEffect(() => {
 		if (visible) dialog.current?.showModal();
 		else dialog.current?.close();
@@ -103,11 +104,7 @@ const TicketEditor = ({
 				</label>
 				<RepositorySelection api={api} value={repositoryIds} change={setRepositoryIds} disabled={busy} />
 				<EpicSelection epics={epics} value={epicId} change={setEpicId} disabled={busy} />
-				{error && (
-					<p role='alert' className='error'>
-						{error}
-					</p>
-				)}
+
 				<div className='ticket-dialog-actions'>
 					<button type='button' disabled={busy} onClick={close}>
 						Cancel
@@ -190,7 +187,14 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 	}, [api, linkedId]);
 	const [loading, setLoading] = useState(true);
 	const [busy, setBusy] = useState(false);
-	const [error, setError] = useState("");
+	useFailureToast(linked?.id === linkedId ? linked.error : undefined, linkedId ?? undefined);
+	const [error, setError] = useErrorState();
+	useFailureToast(
+		epicLink && !creatingEpic && !loading && !error && !epics.some((epic) => epic.id === epicLink)
+			? "Epic unavailable."
+			: undefined,
+		epicLink ?? undefined,
+	);
 	const [notice, setNotice] = useState("");
 	const [creating, setCreating] = useState(false);
 	const selectedTicket = linkedId && linked?.id === linkedId ? linked.ticket : undefined;
@@ -257,7 +261,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 			poller.current = undefined;
 			active.current = false;
 		};
-	}, [api, readCollection]);
+	}, [api, readCollection, setError]);
 	const mutate = async (operation: () => Promise<void>) => {
 		if (locked.current) throw new Error("A ticket change is still saving.");
 		locked.current = true;
@@ -462,8 +466,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 			{showSettings && <BoardSettingsDialog api={api} board={board} close={() => setShowSettings(false)} />}
 			{linkedId && linked?.id !== linkedId && <p role='status'>Loading ticket…</p>}
 			{linkedId && linked?.id === linkedId && linked.error && (
-				<p role='alert'>
-					{linked.error}
+				<p>
 					<button onClick={closeTicket}>Close ticket</button>
 				</p>
 			)}
@@ -536,8 +539,8 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 					const epic = epics.find((value) => value.id === epicLink);
 					if (!creatingEpic && !epic)
 						return (
-							<p role='alert'>
-								{error || (loading ? "Loading epic…" : "Epic unavailable.")}{" "}
+							<p>
+								{loading ? "Loading epic…" : ""}
 								<button onClick={refresh}>Retry</button>
 								<button onClick={closeEpic}>Close epic</button>
 							</p>

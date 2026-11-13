@@ -2,6 +2,12 @@
 
 ## Agentic ticket board
 
+Board, backlog, editing, validation, execution settings, recovery, history, Docker
+and cost failures use [shared notifications](foundation.md#shared-notifications).
+Retry and reconciliation controls remain available after expiry; saved failure
+snapshots announce once on display or change. Historical ticket events remain in
+History. Native confirmation dialogs host the same notification viewport.
+
 Tasks has nested Board and Backlog tabs. `/tasks` opens Board by default;
 `/tasks?view=backlog` selects Backlog. Missing or unknown `view` values select
 Board. Both preserve `?ticket=:id` for details, reload and browser history,
@@ -39,7 +45,7 @@ It explains that execution stops and the execution worktree and unmerged branch
 are removed while scope, settings and the latest saved plan are preserved.
 Cancel or Escape closes only the confirmation and restores focus to its trigger.
 Confirmation uses the move API, prevents duplicate submissions and becomes disabled
-if polling removes eligibility. Failures remain in the modal for retry; success
+if polling removes eligibility. Failures toast and retain modal retry controls; success
 keeps details open with cleanup progress. Archive retains its separate confirmation.
 Dragging shares eligibility: Ready can move to Backlog, and In progress can move
 to Backlog or Ready. These moves abandon execution through the existing move API.

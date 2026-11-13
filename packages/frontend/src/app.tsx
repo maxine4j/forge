@@ -13,6 +13,7 @@ import { InterfaceIcon } from "./navigation/interface-icon.tsx";
 import { resolveRoute } from "./navigation/routes.ts";
 import { ForgeSettingsForm } from "./settings/settings-form.tsx";
 import { Tasks } from "./tasks/tasks.tsx";
+import { useErrorState, useFailureToast, ToastVisibility } from "./toasts/toasts.tsx";
 import { Workbench } from "./workspace/workbench.tsx";
 
 const failureMessages = {
@@ -34,6 +35,13 @@ const AccountCard = ({
 	busy: boolean;
 	action: (action: "login" | "retry" | "cancel") => void;
 }) => {
+	useFailureToast(
+		status?.login.failure
+			? failureMessages[status.login.failure]
+			: status?.connection === "unavailable"
+				? "Account connection unavailable. Repository access is still available."
+				: undefined,
+	);
 	const title = provider === "codex" ? "ChatGPT" : "GitHub";
 	return (
 		<section className='account-card' aria-label={title}>
@@ -52,10 +60,7 @@ const AccountCard = ({
 			) : (
 				<>
 					<p className='account-name'>{status.account ? status.account.name : "Not signed in"}</p>
-					{status.connection === "unavailable" && (
-						<p className='notice'>Account connection unavailable. Repository access is still available.</p>
-					)}
-					{status.login.failure && <p className='notice'>{failureMessages[status.login.failure]}</p>}
+
 					{status.login.state === "pending" && (
 						<div className='device-code'>
 							<span>Enter this one-time code</span>
@@ -140,7 +145,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 	if (!global && retained !== selected) setRetained(selected);
 	const [dirty, setDirty] = useState(false);
 	const dirtyChange = useCallback((value: boolean) => setDirty(value), []);
-	const [navigationError, setNavigationError] = useState("");
+	const [, setNavigationError] = useErrorState();
 	const blocker = useBlocker(({ nextLocation }) => {
 		const next = resolveRoute(nextLocation.pathname);
 		const blocked =
@@ -158,11 +163,11 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 		}
 	}, [blocker]);
 	const [accounts, setAccounts] = useState<AccountsStatus>();
-	const [projectError, setProjectError] = useState("");
-	const [accountError, setAccountError] = useState("");
+	const [projectError, setProjectError] = useErrorState();
+	const [, setAccountError] = useErrorState();
 	const [name, setName] = useState("");
 	const [source, setSource] = useState("");
-	const [createError, setCreateError] = useState("");
+	const [, setCreateError] = useErrorState();
 	const [projectBusy, setProjectBusy] = useState(false);
 	const [accountBusy, setAccountBusy] = useState(false);
 	const [agentOptionsRevision, setAgentOptionsRevision] = useState(0);
@@ -195,7 +200,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 			project.stop();
 			account.stop();
 		};
-	}, [api]);
+	}, [api, setProjectError, setAccountError]);
 	const openCreateDialog = () => {
 		setName("");
 		setSource("");
@@ -282,15 +287,13 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 			<main>
 				<div className='tasks-view' hidden={route.page !== "tasks"}>
 					<AgentOptionsRevision.Provider value={agentOptionsRevision}>
-						<Tasks api={workspaceApi} visible={route.page === "tasks"} />
+						<ToastVisibility value={route.page === "tasks"}>
+							<Tasks api={workspaceApi} visible={route.page === "tasks"} />
+						</ToastVisibility>
 					</AgentOptionsRevision.Provider>
 				</div>
 				{route.page === "costs" && <CostDashboard api={workspaceApi} />}
-				{navigationError && dirty && (
-					<p role='alert' className='error'>
-						{navigationError}
-					</p>
-				)}
+
 				{route.page === "not-found" && (
 					<section>
 						<h1>Page not found</h1>
@@ -300,19 +303,21 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 				{route.page === "repo" && !selected && (
 					<section>
 						<h1>{!projects && !projectError ? "Loading repository…" : "Repository unavailable"}</h1>
-						{projectError && <p role='alert'>{projectError}</p>}
+
 						<Link to='/repos'>View repos</Link>
 					</section>
 				)}
 				{selected && (
 					<div className='project-view' hidden={global}>
 						<AgentOptionsRevision.Provider value={agentOptionsRevision}>
-							<Workbench
-								key={selected.id}
-								project={selected}
-								api={workspaceApi}
-								dirtyChange={dirtyChange}
-							/>
+							<ToastVisibility value={!global}>
+								<Workbench
+									key={selected.id}
+									project={selected}
+									api={workspaceApi}
+									dirtyChange={dirtyChange}
+								/>
+							</ToastVisibility>
 						</AgentOptionsRevision.Provider>
 					</div>
 				)}
@@ -326,11 +331,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 								Create repo
 							</button>
 						</div>
-						{projectError && (
-							<p role='alert' className='error'>
-								{projectError}
-							</p>
-						)}
+
 						{!projects ? (
 							<div className='empty'>Loading repositories…</div>
 						) : projects.length === 0 ? (
@@ -445,11 +446,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 									Public HTTPS repositories from operator-approved hosts. Leave blank for an empty
 									repository.
 								</small>
-								{createError && (
-									<p role='alert' className='error'>
-										{createError}
-									</p>
-								)}
+
 								<div className='ticket-dialog-actions'>
 									<button className='primary' disabled={projectBusy} type='submit'>
 										{projectBusy ? "Creating repository…" : "Create repository"}
@@ -472,11 +469,6 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 							Refresh accounts
 						</button>
 					</div>
-					{accountError && (
-						<p role='alert' className='error'>
-							{accountError}
-						</p>
-					)}
 				</section>
 				{config && (
 					<ForgeSettingsForm

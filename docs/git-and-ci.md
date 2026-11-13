@@ -20,6 +20,10 @@ Forge remains a TypeScript implementation, not a Forgejo deployment or fork.
 
 ## Manual local pipelines
 
+Discovery, validation, request and saved run failures use the application-wide
+[shared notifications](foundation.md#shared-notifications). Unchanged polled run
+failures do not repeat. Run status and historical log content remain in the view.
+
 The Pipelines tab discovers `.github/workflows/*.yml` and `*.yaml` on the selected
 local branch (default `main`), displaying names with filenames. Events come from
 `on`; default selection is `workflow_dispatch`, then `push`, then the first event.

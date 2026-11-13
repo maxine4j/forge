@@ -150,6 +150,24 @@ test("metadata and patch loading failures have working retries", async ({ page }
 	await expect(page.locator(".commit-patch").first()).toBeVisible();
 });
 
+test("clipboard failures toast on each attempt and preserve the displayed SHA", async ({ page }) => {
+	await page.addInitScript(() => {
+		Object.defineProperty(navigator, "clipboard", {
+			configurable: true,
+			value: {
+				writeText: () => Promise.reject(new Error("Clipboard unavailable")),
+			},
+		});
+	});
+	await page.goto(commitUrl);
+	const copy = page.getByRole("button", { name: "Copy SHA", exact: true });
+	await copy.click();
+	await expect(page.getByRole("alert")).toHaveText("Could not copy SHA. Select and copy the SHA above.");
+	await copy.click();
+	await expect(page.getByRole("alert")).toHaveText("2x Could not copy SHA. Select and copy the SHA above.");
+	await expect(page.locator(".commit-sha code")).toHaveText(sha);
+});
+
 test("stale whitespace requests are ignored and share a four-request bound", async ({ page }) => {
 	let release!: () => void;
 	const pending = new Promise<void>((resolve) => {

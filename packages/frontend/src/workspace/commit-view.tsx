@@ -4,6 +4,7 @@ import { Link, useLocation, useNavigate } from "react-router";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
+import { useToast } from "../toasts/toasts.tsx";
 import { ChangedFilesTree } from "./changed-files-tree.tsx";
 
 type Line = CommitPatch["hunks"][number]["lines"][number];
@@ -119,6 +120,7 @@ export const CommitView = ({ root, api }: { root: string; api: IWorkspaceApi }) 
 	const readKey = `${root}:${sha}:${revision}`;
 	const [result, setResult] = useState<{ key: string; detail?: CommitDetail; error?: string }>();
 	const detail = result?.key === readKey ? result.detail : undefined;
+	const { notify } = useToast();
 	const error = result?.key === readKey ? result.error : undefined;
 	const [filter, setFilter] = useState("");
 	const patchKey = `${readKey}:${ignore}`;
@@ -154,12 +156,15 @@ export const CommitView = ({ root, api }: { root: string; api: IWorkspaceApi }) 
 				if (!stale) setResult({ key: readKey, detail: value });
 			})
 			.catch(() => {
-				if (!stale) setResult({ key: readKey, error: "Commit unavailable. Retry loading the commit." });
+				if (!stale) {
+					setResult({ key: readKey, error: "Commit unavailable. Retry loading the commit." });
+					notify("Commit unavailable. Retry loading the commit.");
+				}
 			});
 		return () => {
 			stale = true;
 		};
-	}, [api, root, sha, readKey]);
+	}, [api, root, sha, readKey, notify]);
 	useEffect(() => {
 		if (!detail || detail.sha !== sha) return;
 		let stale = false;
@@ -182,6 +187,7 @@ export const CommitView = ({ root, api }: { root: string; api: IWorkspaceApi }) 
 							}));
 					})
 					.catch(() => {
+						if (!stale) notify("Diff unavailable.");
 						if (!stale)
 							setPatchResult((current) => ({
 								key: patchKey,
@@ -214,13 +220,13 @@ export const CommitView = ({ root, api }: { root: string; api: IWorkspaceApi }) 
 			stale = true;
 			observer.disconnect();
 		};
-	}, [api, root, sha, detail, ignore, patchKey]);
+	}, [api, root, sha, detail, ignore, patchKey, notify]);
 	return (
 		<section className='commit-view' aria-label='Commit details'>
 			<Link to={link()}>Back to history</Link>
 			{error && (
-				<p role='alert'>
-					{error} <button onClick={() => setRevision((n) => n + 1)}>Retry commit</button>
+				<p>
+					<button onClick={() => setRevision((n) => n + 1)}>Retry commit</button>
 				</p>
 			)}
 			{!detail && !error && <p role='status'>Loading commit…</p>}
@@ -237,13 +243,9 @@ export const CommitView = ({ root, api }: { root: string; api: IWorkspaceApi }) 
 							<code>{detail.sha}</code>{" "}
 							<button
 								onClick={() =>
-									void navigator.clipboard.writeText(detail.sha).catch(() =>
-										setResult({
-											key: readKey,
-											detail,
-											error: "Could not copy SHA. Select and copy the SHA above.",
-										}),
-									)
+									void navigator.clipboard
+										.writeText(detail.sha)
+										.catch(() => notify("Could not copy SHA. Select and copy the SHA above."))
 								}
 							>
 								Copy SHA
@@ -343,8 +345,7 @@ export const CommitView = ({ root, api }: { root: string; api: IWorkspaceApi }) 
 										</small>
 									</summary>
 									{patches[file.path] === "error" ? (
-										<p role='alert'>
-											Diff unavailable.{" "}
+										<p>
 											<button onClick={() => setRevision((n) => n + 1)}>Retry diffs</button>
 										</p>
 									) : patches[file.path] ? (

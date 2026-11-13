@@ -3,9 +3,11 @@ import { useEffect, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { CostMetrics, PhaseCosts } from "../cost/cost-metrics.tsx";
+import { useToast } from "../toasts/toasts.tsx";
 
 const number = new Intl.NumberFormat("en-AU");
 export const TicketCost = ({ api, ticketId }: { api: IWorkspaceApi; ticketId: string }) => {
+	const { notify } = useToast();
 	const [attempt, setAttempt] = useState(0);
 	const [result, setResult] = useState<{ ticketId: string; value: TicketCostData | "unavailable" }>();
 	const cost = result?.ticketId === ticketId ? result.value : undefined;
@@ -16,18 +18,20 @@ export const TicketCost = ({ api, ticketId }: { api: IWorkspaceApi; ticketId: st
 				if (current) setResult({ ticketId, value });
 			},
 			() => {
-				if (current) setResult({ ticketId, value: "unavailable" });
+				if (current) {
+					setResult({ ticketId, value: "unavailable" });
+					notify("Cost data is unavailable.");
+				}
 			},
 		);
 		return () => {
 			current = false;
 		};
-	}, [api, ticketId, attempt]);
+	}, [api, ticketId, attempt, notify]);
 	if (!cost) return <p role='status'>Loading cost data…</p>;
 	if (cost === "unavailable")
 		return (
 			<div className='cost-card'>
-				<p role='alert'>Cost data is unavailable.</p>
 				<button
 					type='button'
 					onClick={() => {

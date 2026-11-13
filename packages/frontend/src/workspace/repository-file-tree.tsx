@@ -1,6 +1,7 @@
 import type { WorkspaceTree, RepositoryTree } from "@forge/contracts";
 import { useEffect, useState } from "react";
 
+import { useErrorState } from "../toasts/toasts.tsx";
 import { FileIcon } from "./file-icon.tsx";
 
 type Tree = WorkspaceTree | RepositoryTree;
@@ -33,7 +34,7 @@ const TreeEntry = ({ entry, ...actions }: TreeActions & { entry: Tree["entries"]
 	const [expanded, setExpanded] = useState(false);
 	const [tree, setTree] = useState<Tree>();
 	const [loading, setLoading] = useState(false);
-	const [error, setError] = useState("");
+	const [, setError] = useErrorState();
 	const directory = entry.kind === "directory";
 	const select = async () => {
 		setError("");
@@ -68,7 +69,7 @@ const TreeEntry = ({ entry, ...actions }: TreeActions & { entry: Tree["entries"]
 				<span>{entry.name}</span>
 			</button>
 			{loading && <p role='status'>Loading…</p>}
-			{error && <p role='alert'>{error}</p>}
+
 			{expanded && tree && <DirectoryEntries tree={tree} {...actions} />}
 		</li>
 	);
@@ -76,7 +77,7 @@ const TreeEntry = ({ entry, ...actions }: TreeActions & { entry: Tree["entries"]
 
 export const RepositoryFileTree = ({ initial, load, ...actions }: TreeActions & { initial?: Tree }) => {
 	const [tree, setTree] = useState<Tree>();
-	const [error, setError] = useState("");
+	const [, setError] = useErrorState();
 	useEffect(() => {
 		if (initial) return;
 		let cancelled = false;
@@ -90,11 +91,6 @@ export const RepositoryFileTree = ({ initial, load, ...actions }: TreeActions & 
 		return () => {
 			cancelled = true;
 		};
-	}, [initial, load]);
-	return (
-		<>
-			{error && <p>{error}</p>}
-			{(initial ?? tree) && <DirectoryEntries tree={(initial ?? tree)!} load={load} {...actions} />}
-		</>
-	);
+	}, [initial, load, setError]);
+	return <>{(initial ?? tree) && <DirectoryEntries tree={(initial ?? tree)!} load={load} {...actions} />}</>;
 };

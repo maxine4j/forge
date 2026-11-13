@@ -18,6 +18,7 @@ import { Link, useLocation, useNavigate } from "react-router";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
 import { resolveRoute } from "../navigation/routes.ts";
+import { useErrorState, useToast, useFailureToast } from "../toasts/toasts.tsx";
 import { CommitView } from "./commit-view.tsx";
 import { Editor } from "./editor.tsx";
 import { FileIcon } from "./file-icon.tsx";
@@ -114,10 +115,10 @@ const BranchBrowser = ({
 	const [history, setHistory] = useState<RepositoryHistory>();
 	const [busy, setBusy] = useState(false);
 	const [loading, setLoading] = useState(true);
-	const [error, setError] = useState("");
+	const [error, setError] = useErrorState();
 	const [message, setMessage] = useState("");
 	const [revision, setRevision] = useState(0);
-	const [toast, setToast] = useState<{ message: string; error?: boolean }>();
+	const { notify } = useToast();
 	const [syncStatus, setSyncStatus] = useState<UpstreamSyncStatus>();
 	const [syncing, setSyncing] = useState(false);
 	const driftUnavailable = useRef(false);
@@ -131,15 +132,9 @@ const BranchBrowser = ({
 	const reportError = useCallback(
 		(message: string) => {
 			setError(message);
-			setToast({ message, error: true });
 		},
-		[setError, setToast],
+		[setError],
 	);
-	useEffect(() => {
-		if (!toast) return;
-		const timer = setTimeout(() => setToast(undefined), 5_000);
-		return () => clearTimeout(timer);
-	}, [toast]);
 	const readyDrift = syncStatus?.state === "ready" ? syncStatus : undefined;
 	const changed = Object.entries(drafts).filter(([, draft]) => draft.original !== draft.content);
 	const dirty = changed.length > 0;
@@ -155,6 +150,7 @@ const BranchBrowser = ({
 	const readmeKey = `${revision}:${readmePath ?? ""}`;
 	const readme = readmeResult?.key === readmeKey ? readmeResult.file : undefined;
 	const readmeError = readmeResult?.key === readmeKey ? readmeResult.error : undefined;
+	useFailureToast(readmeError);
 	const loadTree = useCallback(
 		(directory: string) =>
 			api.read(
@@ -176,7 +172,7 @@ const BranchBrowser = ({
 			if (cancelled) return;
 			setSyncStatus(status);
 			if (status.state === "unavailable" && !driftUnavailable.current) {
-				setToast((current) => current ?? { message: "Upstream drift unavailable.", error: true });
+				notify("Upstream drift unavailable.");
 			}
 			driftUnavailable.current = status.state === "unavailable";
 		};
@@ -203,7 +199,7 @@ const BranchBrowser = ({
 			clearTimeout(timer);
 			document.removeEventListener("visibilitychange", onVisibility);
 		};
-	}, [api, root, revision, syncing, syncVisible]);
+	}, [api, root, revision, syncing, syncVisible, notify]);
 	useEffect(() => {
 		let cancelled = false;
 		void loadTree(path)
@@ -247,7 +243,6 @@ const BranchBrowser = ({
 	const run = async (action: () => Promise<void>) => {
 		setBusy(true);
 		setError("");
-		setToast(undefined);
 		try {
 			await action();
 		} catch (failure) {
@@ -279,7 +274,7 @@ const BranchBrowser = ({
 		return () => {
 			cancelled = true;
 		};
-	}, [api, root, branch, active, drafts, showingHistory, revision, reportError]);
+	}, [api, root, branch, active, drafts, showingHistory, revision, reportError, setError]);
 	useEffect(() => {
 		if (!showingHistory) return;
 		let cancelled = false;
@@ -297,7 +292,7 @@ const BranchBrowser = ({
 		return () => {
 			cancelled = true;
 		};
-	}, [api, root, branch, showingHistory, revision, reportError]);
+	}, [api, root, branch, showingHistory, revision, reportError, setError]);
 	const open = async (file: string) => {
 		navigateCode(file.split("/").slice(0, -1).join("/"), file);
 	};
@@ -320,17 +315,13 @@ const BranchBrowser = ({
 	const syncUpstream = async () => {
 		setSyncing(true);
 		onSyncingChange(true);
-		setToast(undefined);
 		let targetBranch = readyDrift?.branch;
 		try {
 			const result = await api.read(`${root}/upstream-sync`, upstreamSyncResultSchema, "POST");
 			targetBranch = result.branch;
-			setToast({ message: `${result.branch} synced with upstream.` });
+			notify(`${result.branch} synced with upstream.`, "success");
 		} catch (failure) {
-			setToast({
-				message: failure instanceof Error ? failure.message : "Could not sync with upstream.",
-				error: true,
-			});
+			notify(failure instanceof Error ? failure.message : "Could not sync with upstream.");
 		} finally {
 			// Failed pushes can still update the target branch locally.
 			if (targetBranch) onSynced(targetBranch);
@@ -409,17 +400,7 @@ const BranchBrowser = ({
 					</button>
 				)}
 			</div>
-			{toast && (
-				<div
-					className={`repository-toast${toast.error ? " error" : ""}`}
-					role={toast.error ? "alert" : "status"}
-				>
-					<span>{toast.message}</span>
-					<button type='button' aria-label='Dismiss notification' onClick={() => setToast(undefined)}>
-						×
-					</button>
-				</div>
-			)}
+
 			{loading && !tree && <p role='status'>Loading files…</p>}
 			{!tree && !loading && (
 				<button
@@ -610,11 +591,7 @@ const BranchBrowser = ({
 						<FileIcon name='README.md' />
 						<strong>README</strong>
 					</div>
-					{readme ? (
-						<Readme content={drafts[readme.path]?.content ?? readme.content} />
-					) : (
-						<p>{readmeError}</p>
-					)}
+					{readme ? <Readme content={drafts[readme.path]?.content ?? readme.content} /> : null}
 				</section>
 			)}
 			{dirty && (
@@ -640,9 +617,10 @@ const BranchBrowser = ({
 								),
 							);
 							setMessage("");
-							setToast({
-								message: `Committed ${files.length} ${files.length === 1 ? "file" : "files"} to ${branch}.`,
-							});
+							notify(
+								`Committed ${files.length} ${files.length === 1 ? "file" : "files"} to ${branch}.`,
+								"success",
+							);
 							setLoading(true);
 							setRevision((value) => value + 1);
 						});
@@ -712,9 +690,10 @@ export const RepositoryBrowser = ({
 	const defaultBranch = branches.find((value) => value.name === "main")?.name ?? branches.at(0)?.name ?? "";
 	const branch = inCode ? (new URLSearchParams(location.search).get("branch") ?? defaultBranch) : retainedBranch;
 	const branchExists = branches.some((value) => value.name === branch);
+	useFailureToast(!showingCommit && branches.length > 0 && !branchExists ? "Branch unavailable." : undefined, branch);
 	const branchLocations = useRef(new Map<string, string>());
 	const [visited, setVisited] = useState<string[]>([]);
-	const [error, setError] = useState("");
+	const [error, setError] = useErrorState();
 	const [revision, setRevision] = useState(0);
 	const root = `projects/${projectId}/repository`;
 	const [dirtyBranches, setDirtyBranches] = useState<Record<string, boolean>>({});
@@ -754,19 +733,18 @@ export const RepositoryBrowser = ({
 		return () => {
 			cancelled = true;
 		};
-	}, [api, root, revision]);
+	}, [api, root, revision, setError]);
 	return (
 		<div className='repository-browser'>
 			{showingCommit && <CommitView root={root} api={api} />}
 			{!showingCommit && branches.length > 0 && !branchExists && (
-				<p role='alert'>
-					Branch unavailable.{" "}
+				<p>
 					<button onClick={() => void navigate(`/repos/${projectId}/code`)}>Open default branch</button>
 				</p>
 			)}
 			{error && (
-				<p role='alert'>
-					{error} <button onClick={() => setRevision((value) => value + 1)}>Retry branches</button>
+				<p>
+					<button onClick={() => setRevision((value) => value + 1)}>Retry branches</button>
 				</p>
 			)}
 			{!showingCommit && !branches.length && !error && <p>No branches yet.</p>}

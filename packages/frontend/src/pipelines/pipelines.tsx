@@ -12,6 +12,7 @@ import { useEffect, useRef, useState } from "react";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
+import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 
 const active = (run: PipelineRun) => ["pending", "running"].includes(run.state);
 const eventDefault = (events: string[]) =>
@@ -25,12 +26,16 @@ export function Pipelines({ projectId, api }: { projectId: string; api: IWorkspa
 	const [event, setEvent] = useState("");
 	const [runs, setRuns] = useState<PipelineRunSummary[]>([]);
 	const [selected, setSelected] = useState<PipelineRun>();
-	const [error, setError] = useState("");
+	const [, setError] = useErrorState();
 	const [busy, setBusy] = useState(false);
 	const [offset, setOffset] = useState(0);
 	const [hasMore, setHasMore] = useState(false);
 	const poll = useRef<ResourcePoller<PipelineRun> | undefined>(undefined);
+	const selectionRequest = useRef<AbortController | undefined>(undefined);
+	useEffect(() => () => selectionRequest.current?.abort(), []);
 	const workflow = discovery?.workflows.find((workflow) => workflow.path === path);
+	useFailureToast(workflow?.messages.join(" "));
+	useFailureToast(selected?.failure, selected?.id);
 	useEffect(() => {
 		const abort = new AbortController();
 		void api
@@ -42,7 +47,7 @@ export function Pipelines({ projectId, api }: { projectId: string; api: IWorkspa
 				if (!abort.signal.aborted) setError(error.message);
 			});
 		return () => abort.abort();
-	}, [api, base]);
+	}, [api, base, setError]);
 	useEffect(() => {
 		const abort = new AbortController();
 		void api
@@ -63,7 +68,7 @@ export function Pipelines({ projectId, api }: { projectId: string; api: IWorkspa
 				if (!abort.signal.aborted) setError(error.message);
 			});
 		return () => abort.abort();
-	}, [api, base, branch]);
+	}, [api, base, branch, setError]);
 	useEffect(() => {
 		const abort = new AbortController();
 		void api
@@ -87,7 +92,7 @@ export function Pipelines({ projectId, api }: { projectId: string; api: IWorkspa
 				if (!abort.signal.aborted) setError(error.message);
 			});
 		return () => abort.abort();
-	}, [api, base, offset]);
+	}, [api, base, offset, setError]);
 	const selectedId = selected?.id;
 	const isActive = selected ? active(selected) : false;
 	useEffect(() => {
@@ -108,7 +113,7 @@ export function Pipelines({ projectId, api }: { projectId: string; api: IWorkspa
 			current.stop();
 			poll.current = undefined;
 		};
-	}, [api, base, selectedId, isActive]);
+	}, [api, base, selectedId, isActive, setError]);
 	return (
 		<section className='pipelines'>
 			<h2>Pipelines</h2>
@@ -116,7 +121,7 @@ export function Pipelines({ projectId, api }: { projectId: string; api: IWorkspa
 				Run local GitHub Actions workflows manually. Events that need additional context may fail. Dispatch
 				inputs use declared defaults.
 			</p>
-			{error && <p role='alert'>{error}</p>}
+
 			<div className='pipeline-controls'>
 				<label>
 					Branch{" "}
@@ -176,6 +181,7 @@ export function Pipelines({ projectId, api }: { projectId: string; api: IWorkspa
 						)
 					}
 					onClick={() => {
+						selectionRequest.current?.abort();
 						setBusy(true);
 						setError("");
 						void api
@@ -196,11 +202,7 @@ export function Pipelines({ projectId, api }: { projectId: string; api: IWorkspa
 					Run
 				</button>
 			</div>
-			{workflow?.messages.map((message) => (
-				<p role='alert' key={message}>
-					{message}
-				</p>
-			))}
+
 			{discovery?.workflows.length === 0 && (
 				<p>No workflows found on this branch. Add a YAML workflow under .github/workflows.</p>
 			)}
@@ -211,10 +213,23 @@ export function Pipelines({ projectId, api }: { projectId: string; api: IWorkspa
 					<li key={run.id}>
 						<button
 							onClick={() => {
+								selectionRequest.current?.abort();
+								const request = new AbortController();
+								selectionRequest.current = request;
 								void api
-									.read(`${base}/pipeline-runs/${run.id}`, pipelineRunSchema)
-									.then(setSelected)
-									.catch((error: Error) => setError(error.message));
+									.read(
+										`${base}/pipeline-runs/${run.id}`,
+										pipelineRunSchema,
+										"GET",
+										undefined,
+										request.signal,
+									)
+									.then((value) => {
+										if (!request.signal.aborted) setSelected(value);
+									})
+									.catch((error: Error) => {
+										if (!request.signal.aborted) setError(error.message);
+									});
 							}}
 						>
 							{run.workflowName} · {run.branch} · {run.createdAt} · {run.state}
@@ -231,7 +246,7 @@ export function Pipelines({ projectId, api }: { projectId: string; api: IWorkspa
 						Commit <code>{selected.commit}</code> ·{" "}
 						<span className={`pipeline-state state-${selected.state}`}>{selected.state}</span>
 					</p>
-					{selected.failure && <p role='alert'>{selected.failure}</p>}
+
 					{selected.jobs.map((job) => (
 						<section key={`${job.id}:${JSON.stringify(job.matrix)}`}>
 							<h4>

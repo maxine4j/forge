@@ -5,6 +5,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { ExecutionSettings } from "../agents/execution-settings.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
+import { useErrorState, useToast } from "../toasts/toasts.tsx";
 
 const currencyFlags: Partial<Record<ForgeSettings["localCurrency"], string>> = {
 	AUD: "🇦🇺",
@@ -53,10 +54,11 @@ export const ForgeSettingsForm = ({
 	const [draft, setDraft] = useState<ForgeSettings>();
 	const [options, setOptions] = useState<AgentOptions>();
 	const [optionsError, setOptionsError] = useState(false);
+	const { notify } = useToast();
 	const [optionsAttempt, setOptionsAttempt] = useState(0);
 	const [loadAttempt, setLoadAttempt] = useState(0);
 	const [saving, setSaving] = useState(false);
-	const [error, setError] = useState("");
+	const [error, setError] = useErrorState();
 	const [saved, setSaved] = useState(false);
 
 	useEffect(() => {
@@ -72,7 +74,7 @@ export const ForgeSettingsForm = ({
 		return () => {
 			active = false;
 		};
-	}, [api, loadAttempt]);
+	}, [api, loadAttempt, setError]);
 
 	useEffect(() => {
 		let active = true;
@@ -81,13 +83,16 @@ export const ForgeSettingsForm = ({
 				if (active) setOptions(value);
 			},
 			() => {
-				if (active) setOptionsError(true);
+				if (active) {
+					setOptionsError(true);
+					notify("Could not load model options.");
+				}
 			},
 		);
 		return () => {
 			active = false;
 		};
-	}, [api, optionsAttempt]);
+	}, [api, optionsAttempt, notify]);
 
 	const change = (field: keyof ForgeSettings, value: string | number | undefined) => {
 		setDraft((current) => current && { ...current, [field]: value });
@@ -308,11 +313,6 @@ export const ForgeSettingsForm = ({
 						<p role='status'>Loading settings…</p>
 					)}
 				</>
-			)}
-			{error && (
-				<p role='alert' className='error'>
-					{error}
-				</p>
 			)}
 		</section>
 	);

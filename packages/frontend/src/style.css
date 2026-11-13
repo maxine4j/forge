@@ -2680,29 +2680,74 @@ summary {
 		animation: none;
 	}
 }
-.repository-toast {
+.forge-toast-viewport {
 	position: fixed;
-	inset-inline-start: max(16px, env(safe-area-inset-left));
-	inset-block-end: max(16px, env(safe-area-inset-bottom));
-	z-index: 1000;
-	display: flex;
-	align-items: center;
-	gap: 12px;
-	max-inline-size: min(420px, calc(100vw - 32px));
-	padding: 8px 8px 8px 14px;
+	inset: auto auto max(var(--toast-bottom, 16px), env(safe-area-inset-bottom))
+		max(var(--toast-left, 16px), env(safe-area-inset-left));
+	margin: 0;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	width: min(
+		420px,
+		calc(var(--toast-width, 100vw) - max(16px, env(safe-area-inset-left)) - max(16px, env(safe-area-inset-right)))
+	);
+	overflow: hidden;
+}
+.forge-toast {
+	position: relative;
+	display: block;
+	width: 100%;
+	padding: 14px 18px;
+	text-align: left;
+	white-space: normal;
+	overflow-wrap: anywhere;
 	border: 1px solid #484f58;
 	border-radius: 8px;
 	background: #21262d;
-	box-shadow: 0 6px 24px #0008;
+	color: #f0f6fc;
+	overflow: hidden;
+	animation: forge-toast-enter 180ms ease-out;
 }
-.repository-toast.error {
-	border-color: #f85149;
+.forge-toast.error {
+	border-color: #a34b48;
 }
-.repository-toast button {
-	flex-shrink: 0;
-	padding: 4px 10px;
-	background: transparent;
-	border-color: transparent;
+.forge-toast:focus-visible {
+	outline: 2px solid #79c0ff;
+	outline-offset: -3px;
+}
+.forge-toast > [role] {
+	position: relative;
+}
+.forge-toast-sweep {
+	position: absolute;
+	inset: 0;
+	background: #ffffff0c;
+	transform-origin: left;
+	animation: forge-toast-timeout 3000ms linear forwards;
+}
+@keyframes forge-toast-enter {
+	from {
+		transform: translateY(100%);
+	}
+	to {
+		transform: translateY(0);
+	}
+}
+@keyframes forge-toast-timeout {
+	from {
+		transform: scaleX(1);
+	}
+	to {
+		transform: scaleX(0);
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	.forge-toast,
+	.forge-toast-sweep {
+		animation: none !important;
+	}
 }
 .repository-layout {
 	display: grid;

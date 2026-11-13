@@ -41,7 +41,6 @@ export const TaskBoard = ({
 	tickets,
 	busy,
 	loading,
-	error,
 	notice,
 	open,
 	move,
@@ -148,11 +147,6 @@ export const TaskBoard = ({
 	};
 	return (
 		<div className={`task-board ${drag ? "is-dragging" : ""}`}>
-			{error && (
-				<p role='alert' className='error'>
-					{error}
-				</p>
-			)}
 			<p className='board-feedback' role='status'>
 				{loading ? "Loading tickets…" : notice}
 			</p>

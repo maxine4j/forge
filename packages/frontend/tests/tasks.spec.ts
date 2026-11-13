@@ -6,6 +6,7 @@ import type { Locator, Page } from "@playwright/test";
 import { costFixture, phaseFixtures } from "../dev/cost-fixture.ts";
 import { historyFixture } from "../dev/history-fixture.ts";
 import { chooseDropdown, expectDropdownValue } from "./dropdown-helpers.ts";
+import { expectToastPlacement } from "./toast-placement.ts";
 
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const createdAt = "2026-11-03T00:00:00.000Z";
@@ -1573,7 +1574,7 @@ test("ticket Details and chat share settings and support skill and file completi
 	await chooseDropdown(panel.getByRole("combobox", { name: "Model", exact: true }), "test-model");
 	await expect(panel.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
 	releaseSave();
-	await expect(panel.getByRole("alert")).toContainText("selected model or thinking level is unavailable");
+	await expect(page.getByRole("alert")).toContainText("selected model or thinking level is unavailable");
 	await expect(message).toHaveValue("Use $review @src/main.ts ");
 	await panel.getByRole("tab", { name: "Details", exact: true }).click();
 	await expect(panel.getByRole("checkbox", { name: "Skip planning", exact: true })).toBeChecked();
@@ -1600,7 +1601,7 @@ test("ticket flags retain saved values on failure and disable during saving and 
 	await expect(skip).toBeDisabled();
 	await expect(recommendations).toBeDisabled();
 	release();
-	await expect(panel.getByRole("alert")).toBeVisible();
+	await expect(page.getByRole("alert")).toBeVisible();
 	await expect(skip).toBeEnabled();
 	await expect(skip).not.toBeChecked();
 	await expect(recommendations).not.toBeChecked();
@@ -1833,7 +1834,7 @@ test("Docker statistics, cleanup progress and retries stay independent of agent 
 	};
 	fixture.setDocker({ containers: [], operation });
 	await section.getByRole("button", { name: "Refresh Docker" }).click();
-	await expect(section.getByText("Remove volume named", { exact: true })).toBeVisible();
+	await expect(page.getByRole("alert")).toContainText("Remove volume named");
 	await expect(section.getByText("image: shared (shared)", { exact: true })).toBeVisible();
 	await section.getByRole("button", { name: "Retry Docker cleanup" }).click();
 	expect(fixture.dockerCleanups).toEqual([id, id]);
@@ -1870,7 +1871,7 @@ test("Docker polls only while settings are visible and open, and unavailable Doc
 		Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
 		document.dispatchEvent(new Event("visibilitychange"));
 	});
-	await expect(section.getByText(/Docker unavailable/)).toBeVisible();
+	await expect(page.getByRole("alert")).toContainText("Docker unavailable");
 	await expect(page.getByRole("button", { name: "Stop all agents", exact: true })).toBeEnabled();
 	await page.getByRole("button", { name: "Close board settings" }).click();
 	const closed = fixture.dockerReads();
@@ -2021,7 +2022,7 @@ test("History exposes loading, retryable errors, empty data and cursor pages", a
 	const panel = page.getByRole("tabpanel", { name: "History", exact: true });
 	await expect(panel.getByRole("status")).toHaveText("Loading history…");
 	release();
-	await expect(panel.getByRole("alert")).toContainText("History is unavailable");
+	await expect(page.getByRole("alert")).toContainText("History is unavailable");
 	fail = false;
 	await panel.getByRole("button", { name: "Retry", exact: true }).click();
 	await expect(panel.getByText("No history recorded.")).toBeVisible();
@@ -2635,9 +2636,11 @@ for (const archived of [false, true]) {
 		await expect(modal).toBeVisible();
 		await modal.getByRole("button", { name: "Close ticket" }).click();
 		await page.route("**/api/tickets/TASK-9", (route) => route.fulfill({ json: { ...ticket, repositoryIds: [] } }));
+		await expect(page).toHaveURL("/tasks");
 		await page.goto(`/tasks?ticket=TASK-9`);
 		await expect(modal).toBeVisible();
 		await modal.getByRole("button", { name: "Close ticket" }).click();
+		await expect(page).toHaveURL("/tasks");
 		await page.goto(`/tasks?ticket=TASK-999`);
 		await expect(page.getByRole("alert")).toContainText("Ticket unavailable.");
 	});
@@ -2682,3 +2685,32 @@ test("archived ticket chat retains history and disables input and execution", as
 	await modal.getByRole("tab", { name: "Cost" }).click();
 	await expect(modal.getByRole("tabpanel", { name: "Cost" })).toBeVisible();
 });
+
+for (const width of [390, 820, 1280]) {
+	test(`ticket chat toasts follow the complete composer at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 900 });
+		const fixture = await setup(page, false, true);
+		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+		await page.getByRole("tab", { name: "Chat", exact: true }).click();
+		void fixture;
+		await page.route("**/messages", (route) =>
+			route.fulfill({ status: 503, json: { error: "agent-unavailable" } }),
+		);
+		await page.getByLabel("Message", { exact: true }).fill("Retain this draft");
+		await page.getByRole("button", { name: "Send message", exact: true }).click();
+		await expect(page.getByRole("alert")).toBeVisible();
+		await expectToastPlacement(page, width, 900);
+		await page.locator(".agent-composer:visible textarea").evaluate((node) => {
+			node.style.height = "160px";
+		});
+		await expectToastPlacement(page, width, 900);
+		await page.evaluate(() => {
+			Object.defineProperty(window.visualViewport!, "height", { configurable: true, value: 480 });
+			window.visualViewport!.dispatchEvent(new Event("resize"));
+		});
+		await expectToastPlacement(page, width, 480);
+		await page.emulateMedia({ reducedMotion: "reduce" });
+		await expect(page.locator(".forge-toast-sweep")).toHaveCSS("animation-name", "none");
+		await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Retain this draft");
+	});
+}
