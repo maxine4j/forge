@@ -155,7 +155,8 @@ Tasks, Costs or Config keeps the repository workbench mounted, including editor
 and chat drafts, reading position and terminal connections. Navigation that would
 discard uncommitted code is guarded.
 
-Repos provides listing, creation, import and retry. Ready repository cards link to
+Repos opens directly to the repository list. Create repo opens the
+[creation and import dialog](foundation.md). Ready repository cards link to
 `/repos/:repositoryId/code`. Repository sections are Code, Agents, Pipelines and
 Terminals. The global header's home link opens Tasks, and `/` replaces its
 history entry with `/tasks`. The [global ticket board](tickets.md#agentic-ticket-board)
@@ -164,6 +165,7 @@ repository workbench. Code is the default repository section; Agents provides
 [interactive chats](agents.md#interactive-agents), and Pipelines provides
 [local workflows](git-and-ci.md#manual-local-pipelines).
 Tab navigation stays usable on narrow screens without widening the page.
+Repository tabs share the Tasks tab styling and pair each label with an icon.
 All repository tabs share the Agents spacing below the global header:
 16px on desktop and 8px at widths up to 700px, with matching tab padding and
 spacing below the tab bar.

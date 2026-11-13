@@ -4,6 +4,7 @@ import { Link, useLocation } from "react-router";
 
 import { AgentChat } from "../agents/agent-chat.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { InterfaceIcon } from "../navigation/interface-icon.tsx";
 import { resolveRoute } from "../navigation/routes.ts";
 import { Pipelines } from "../pipelines/pipelines.tsx";
 import { RepositoryBrowser } from "./repository-browser.tsx";
@@ -116,8 +117,15 @@ export const Workbench = ({
 	}, [dirty]);
 	return (
 		<section className='workbench' aria-label='Repository'>
-			<div className='project-tabs' role='tablist' aria-label='Repository sections'>
-				{["Code", "Agents", "Pipelines", "Terminals"].map((name) => (
+			<div className='section-tabs project-tabs' role='tablist' aria-label='Repository sections'>
+				{(
+					[
+						["Code", "code"],
+						["Agents", "agents"],
+						["Pipelines", "pipelines"],
+						["Terminals", "terminals"],
+					] as const
+				).map(([name, section]) => (
 					<Link
 						key={name}
 						id={`tab-${name}`}
@@ -127,10 +135,10 @@ export const Workbench = ({
 						to={
 							name === "Code"
 								? codeFiles
-								: (navigation.locations[name.toLowerCase()]
-									?? `/repos/${project.id}/${name.toLowerCase()}`)
+								: (navigation.locations[section] ?? `/repos/${project.id}/${section}`)
 						}
 					>
+						<InterfaceIcon name={section} />
 						{name}
 					</Link>
 				))}

@@ -9,6 +9,7 @@ import type { IApiClient } from "./api/api-client.ts";
 import { ResourcePoller } from "./api/resource-poller.ts";
 import type { IWorkspaceApi } from "./api/workspace-api.ts";
 import { CostDashboard } from "./cost/cost-dashboard.tsx";
+import { InterfaceIcon } from "./navigation/interface-icon.tsx";
 import { resolveRoute } from "./navigation/routes.ts";
 import { ForgeSettingsForm } from "./settings/settings-form.tsx";
 import { Tasks } from "./tasks/tasks.tsx";
@@ -160,10 +161,13 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 	const [accountError, setAccountError] = useState("");
 	const [name, setName] = useState("");
 	const [source, setSource] = useState("");
+	const [createError, setCreateError] = useState("");
 	const [projectBusy, setProjectBusy] = useState(false);
 	const [accountBusy, setAccountBusy] = useState(false);
 	const [agentOptionsRevision, setAgentOptionsRevision] = useState(0);
 	const projectPoller = useRef<ResourcePoller<Project[]> | undefined>(undefined);
+	const createDialog = useRef<HTMLDialogElement>(null);
+	const projectName = useRef<HTMLInputElement>(null);
 	const accountPoller = useRef<ResourcePoller<AccountsStatus> | undefined>(undefined);
 	useEffect(() => {
 		const project = new ResourcePoller(
@@ -191,29 +195,38 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 			account.stop();
 		};
 	}, [api]);
+	const openCreateDialog = () => {
+		setName("");
+		setSource("");
+		setCreateError("");
+		createDialog.current?.showModal();
+		projectName.current?.focus();
+	};
 	const create = async (event: FormEvent) => {
 		event.preventDefault();
+		if (projectBusy) return;
 		const input = createProjectSchema.safeParse({ name, ...(source.trim() ? { source: source.trim() } : {}) });
 		if (!input.success) {
-			setProjectError("Enter a repository name (up to 120 characters) and a credential-free HTTPS import URL.");
+			setCreateError("Enter a repository name (up to 120 characters) and a credential-free HTTPS import URL.");
 			return;
 		}
+		const dialog = createDialog.current;
+		let created = false;
+		setCreateError("");
 		setProjectBusy(true);
 		await projectPoller.current?.mutate(async (signal) => {
 			try {
 				const project = await api.create(input.data, signal);
-				if (!signal.aborted) {
-					setName("");
-					setSource("");
-				}
+				created = !signal.aborted;
 				return api.projects(signal).catch(() => [...(projects ?? []), project]);
 			} catch (error) {
-				const current = await api.projects(signal).catch(() => undefined);
-				if (current && !signal.aborted) setProjects(current);
-				throw error;
+				if (!signal.aborted)
+					setCreateError(error instanceof Error ? error.message : "Repository operation failed. Try again.");
+				return api.projects(signal);
 			}
 		});
 		setProjectBusy(false);
+		if (created && dialog?.open) dialog.close();
 	};
 	const retry = async (id: string) => {
 		setProjectBusy(true);
@@ -245,18 +258,22 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 				</Link>
 				<nav className='global-nav' aria-label='Forge'>
 					<Link to='/tasks' aria-current={route.page === "tasks" ? "page" : undefined}>
+						<InterfaceIcon name='tasks' />
 						Tasks
 					</Link>
 					<Link
 						to='/repos'
 						aria-current={route.page === "repos" || route.page === "repo" ? "page" : undefined}
 					>
+						<InterfaceIcon name='repos' />
 						Repos
 					</Link>
 					<Link to='/costs' aria-current={route.page === "costs" ? "page" : undefined}>
+						<InterfaceIcon name='costs' />
 						Costs
 					</Link>
 					<Link to='/config' aria-current={config ? "page" : undefined}>
+						<InterfaceIcon name='settings' />
 						Config
 					</Link>
 				</nav>
@@ -286,12 +303,6 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 						<Link to='/repos'>View repos</Link>
 					</section>
 				)}
-				<div className='intro' hidden={route.page !== "repos"}>
-					<div>
-						<h1>Your repos</h1>
-						<p>Build, review, and ship from one place.</p>
-					</div>
-				</div>
 				{selected && (
 					<div className='project-view' hidden={global}>
 						<AgentOptionsRevision.Provider value={agentOptionsRevision}>
@@ -304,20 +315,14 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 						</AgentOptionsRevision.Provider>
 					</div>
 				)}
-				<div className='workspace-grid' hidden={route.page !== "repos"}>
+				{route.page === "repos" && (
 					<section aria-labelledby='projects-heading' className='projects-section'>
 						<div className='section-heading'>
-							<div>
-								<h2 id='projects-heading'>
-									Repos <span className='count'>{projects?.length ?? "—"}</span>
-								</h2>
-							</div>
-							<button
-								className='quiet'
-								onClick={() => projectPoller.current?.refresh()}
-								disabled={projectBusy}
-							>
-								Refresh repos
+							<h2 id='projects-heading'>
+								Repos <span className='count'>{projects?.length ?? "—"}</span>
+							</h2>
+							<button className='primary' type='button' onClick={openCreateDialog}>
+								Create repo
 							</button>
 						</div>
 						{projectError && (
@@ -326,7 +331,7 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 							</p>
 						)}
 						{!projects ? (
-							<div className='empty'>Loading repositorys…</div>
+							<div className='empty'>Loading repositories…</div>
 						) : projects.length === 0 ? (
 							<div className='empty'>
 								<span aria-hidden='true'>＋</span>
@@ -389,44 +394,70 @@ export const App = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWor
 								})}
 							</div>
 						)}
+						<dialog
+							ref={createDialog}
+							className='ticket-dialog'
+							aria-labelledby='create-heading'
+							onCancel={(event) => {
+								if (projectBusy) event.preventDefault();
+							}}
+						>
+							<div className='ticket-dialog-heading'>
+								<h2 id='create-heading'>New repository</h2>
+								<button
+									type='button'
+									aria-label='Close repository form'
+									disabled={projectBusy}
+									onClick={() => createDialog.current?.close()}
+								>
+									✕
+								</button>
+							</div>
+							<form onSubmit={(event) => void create(event)}>
+								<label>
+									Repository name
+									<input
+										ref={projectName}
+										value={name}
+										onChange={(event) => setName(event.target.value)}
+										required
+										maxLength={120}
+										placeholder='e.g. homelab-dashboard'
+										disabled={projectBusy}
+									/>
+								</label>
+								<label>
+									<strong>
+										Import repository <span>(optional)</span>
+									</strong>
+									<input
+										type='url'
+										value={source}
+										onChange={(event) => setSource(event.target.value)}
+										maxLength={2048}
+										placeholder='https://github.com/owner/repo.git'
+										aria-describedby='project-source-help'
+										disabled={projectBusy}
+									/>
+								</label>
+								<small id='project-source-help'>
+									Public HTTPS repositories from operator-approved hosts. Leave blank for an empty
+									repository.
+								</small>
+								{createError && (
+									<p role='alert' className='error'>
+										{createError}
+									</p>
+								)}
+								<div className='ticket-dialog-actions'>
+									<button className='primary' disabled={projectBusy} type='submit'>
+										{projectBusy ? "Creating repository…" : "Create repository"}
+									</button>
+								</div>
+							</form>
+						</dialog>
 					</section>
-					<section className='create-card' aria-labelledby='create-heading'>
-						<h2 id='create-heading'>New repository</h2>
-						<p>A fresh repository, or a new home for existing code.</p>
-						<form onSubmit={(event) => void create(event)}>
-							<label htmlFor='project-name'>Repository name</label>
-							<input
-								id='project-name'
-								value={name}
-								onChange={(event) => setName(event.target.value)}
-								required
-								maxLength={120}
-								placeholder='e.g. homelab-dashboard'
-								disabled={projectBusy}
-							/>
-							<label htmlFor='project-source'>
-								Import repository <span>(optional)</span>
-							</label>
-							<input
-								id='project-source'
-								type='url'
-								value={source}
-								onChange={(event) => setSource(event.target.value)}
-								maxLength={2048}
-								placeholder='https://github.com/owner/repo.git'
-								disabled={projectBusy}
-							/>
-							<small>
-								Public HTTPS repositories from operator-approved hosts. Leave blank for an empty
-								repository.
-							</small>
-							<button className='primary' disabled={projectBusy} type='submit'>
-								{projectBusy ? "Creating repository…" : "Create repository"}
-								<span aria-hidden='true'>↗</span>
-							</button>
-						</form>
-					</section>
-				</div>
+				)}
 				<section className='accounts-section' aria-labelledby='accounts-heading' hidden={!config}>
 					<div className='section-heading'>
 						<div>

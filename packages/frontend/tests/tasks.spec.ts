@@ -412,10 +412,21 @@ test("task views persist URL selection, history and ticket deep links with keybo
 	const board = page.getByRole("tab", { name: "Board", exact: true });
 	const backlog = page.getByRole("tab", { name: "Backlog", exact: true });
 	await expect(board).toHaveAttribute("aria-selected", "true");
+	const boardActions = page.getByRole("group", { name: "Board actions" });
+	await expect(boardActions.getByRole("button", { name: "Board settings" })).toBeVisible();
+	expect((await boardActions.boundingBox())!.y).toBeCloseTo((await board.boundingBox())!.y, 0);
 	await board.focus();
 	await board.press("ArrowRight");
 	await expect(backlog).toBeFocused();
 	await expect(page).toHaveURL("/tasks?view=backlog");
+	await expect(boardActions).toHaveCount(0);
+	const backlogActions = page.getByRole("group", { name: "Backlog actions" });
+	await expect(backlogActions.getByRole("button", { name: "Create epic" })).toBeVisible();
+	expect((await backlogActions.boundingBox())!.y).toBeCloseTo((await backlog.boundingBox())!.y, 0);
+	await page.setViewportSize({ width: 390, height: 844 });
+	const mobileTab = (await backlog.boundingBox())!;
+	expect((await backlogActions.boundingBox())!.y).toBeGreaterThan(mobileTab.y + mobileTab.height);
+	await page.setViewportSize({ width: 1280, height: 900 });
 	await expect(page.getByRole("tabpanel", { name: "Backlog", exact: true })).toBeVisible();
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	await expect(page).toHaveURL("/tasks?view=backlog&ticket=TASK-1");
@@ -764,11 +775,9 @@ test("switching views shares tickets and the single pending list request", async
 	const f = await setup(page);
 	await expect(page.locator(".ticket-card")).toHaveCount(2);
 	f.blockReads();
-	await page.getByRole("button", { name: "Refresh board", exact: true }).click();
 	await expect.poll(f.held).toBe(1);
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
 	await expect(page.getByRole("table").locator("tbody tr:has(td)")).toHaveCount(2);
-	await expect(page.getByRole("status")).toHaveText("Loading tickets…");
 	await page.getByRole("tab", { name: "Board", exact: true }).click();
 	await expect(page.locator(".ticket-card")).toHaveCount(2);
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
@@ -993,7 +1002,7 @@ test("agent icons poll from queued to working to idle, and attention takes prece
 		const style = getComputedStyle(element, "::before");
 		return [style.width, style.height, style.backgroundColor, style.borderRadius];
 	});
-	expect(paint).toEqual(["8px", "8px", "rgb(255, 77, 79)", "50%"]);
+	expect(paint).toEqual(["8px", "8px", "rgb(245, 158, 66)", "50%"]);
 	await card.locator(".ticket-open").focus();
 	await page.keyboard.press("Tab");
 	await page.keyboard.press("Shift+Tab");
@@ -1058,8 +1067,12 @@ test("mobile agent icons reserve room for long titles and metadata", async ({ pa
 test("board settings save the slider and control pause, stop and resume", async ({ page }) => {
 	const fixture = await setup(page);
 	const settings = page.getByRole("button", { name: "Board settings", exact: true });
+	const toolbar = page.getByRole("group", { name: "Board actions" });
+	await toolbar.getByRole("button", { name: "Pause new tickets" }).click();
 	await settings.click();
 	const modal = page.getByRole("dialog", { name: "Board settings" });
+	await modal.getByRole("button", { name: "Resume ticket dispatch" }).click();
+	await expect(modal.getByRole("status")).toHaveText("Ticket dispatch resumed.");
 	const slider = modal.getByRole("slider", { name: "Max concurrent agents" });
 	await expect(slider).toHaveValue("3");
 	await slider.focus();
@@ -1068,6 +1081,9 @@ test("board settings save the slider and control pause, stop and resume", async 
 	await expect(modal.getByRole("status")).toHaveText("Agent limit saved.");
 	await modal.getByRole("button", { name: "Pause new tickets" }).click();
 	await expect(modal.getByRole("status")).toHaveText("New tickets are paused.");
+	await modal.getByRole("button", { name: "Close board settings" }).click();
+	await expect(toolbar.getByRole("button", { name: "Resume ticket dispatch" })).toBeEnabled();
+	await settings.click();
 	expect(fixture.stopRequests()).toBe(0);
 	await modal.getByRole("button", { name: "Stop all agents" }).click();
 	await expect(modal.getByRole("alert")).toHaveText(
@@ -1551,7 +1567,6 @@ test("board writes wait for an in-flight refresh", async ({ page }) => {
 	const f = await setup(page);
 	await expect(page.getByRole("button", { name: "TASK-1 First task", exact: true })).toBeVisible();
 	f.blockReads();
-	await page.getByRole("button", { name: "Refresh board", exact: true }).click();
 	await expect.poll(f.held).toBeGreaterThan(0);
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	await page.getByLabel("Status", { exact: true }).selectOption("todo");

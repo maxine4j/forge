@@ -11,26 +11,20 @@ import { useEffect, useId, useRef, useState } from "react";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { DockerSettings } from "./docker-settings.tsx";
 
-export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close: () => void }) => {
-	const dialog = useRef<HTMLDialogElement>(null);
-	const titleId = useId();
-	const limitId = useId();
+export const useBoardSettings = (api: IWorkspaceApi, visible: boolean) => {
 	const [settings, setSettings] = useState<BoardSettings>();
-	const [limit, setLimit] = useState<number>();
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 	const [notice, setNotice] = useState("");
 	const [loadAttempt, setLoadAttempt] = useState(0);
+	const updating = useRef(false);
 	useEffect(() => {
-		dialog.current?.showModal();
-	}, []);
-	useEffect(() => {
+		if (!visible || settings) return;
 		let current = true;
 		void api.read("board/settings", boardSettingsSchema).then(
 			(value) => {
 				if (!current) return;
 				setSettings(value);
-				setLimit(value.maxAgents);
 			},
 			(failure: unknown) => {
 				if (current) setError(failure instanceof Error ? failure.message : "Cannot load board settings.");
@@ -39,8 +33,10 @@ export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close:
 		return () => {
 			current = false;
 		};
-	}, [api, loadAttempt]);
+	}, [api, loadAttempt, settings, visible]);
 	const act = async (operation: () => Promise<void>) => {
+		if (updating.current) return;
+		updating.current = true;
 		setBusy(true);
 		setError("");
 		setNotice("");
@@ -49,6 +45,7 @@ export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close:
 		} catch (failure) {
 			setError(failure instanceof Error ? failure.message : "Cannot update board settings.");
 		} finally {
+			updating.current = false;
 			setBusy(false);
 		}
 	};
@@ -56,7 +53,6 @@ export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close:
 		act(async () => {
 			const value = await api.read("board/settings", boardSettingsSchema, "PATCH", input);
 			setSettings(value);
-			if (input.maxAgents !== undefined) setLimit(value.maxAgents);
 			setNotice(message);
 		});
 	const stop = () =>
@@ -70,6 +66,36 @@ export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close:
 				);
 			else setNotice(message);
 		});
+	const dispatchLabel = settings?.dispatch === "running" ? "Pause new tickets" : "Resume ticket dispatch";
+	const toggleDispatch = () =>
+		settings?.dispatch === "running"
+			? update({ dispatch: "paused" }, "New tickets are paused.")
+			: update({ dispatch: "running" }, "Ticket dispatch resumed.");
+	const retry = () => {
+		setError("");
+		setLoadAttempt((attempt) => attempt + 1);
+	};
+	return { settings, busy, error, notice, update, stop, dispatchLabel, toggleDispatch, retry };
+};
+
+export const BoardSettingsDialog = ({
+	api,
+	close,
+	board,
+}: {
+	api: IWorkspaceApi;
+	close: () => void;
+	board: ReturnType<typeof useBoardSettings>;
+}) => {
+	const dialog = useRef<HTMLDialogElement>(null);
+	const titleId = useId();
+	const limitId = useId();
+	const { settings, busy, error, notice, update, stop, dispatchLabel, toggleDispatch, retry } = board;
+	const [limitDraft, setLimitDraft] = useState<number>();
+	const limit = limitDraft ?? settings?.maxAgents;
+	useEffect(() => {
+		dialog.current?.showModal();
+	}, []);
 	return (
 		<dialog
 			ref={dialog}
@@ -108,7 +134,7 @@ export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close:
 							max={maxConcurrentAgents}
 							value={limit}
 							disabled={busy}
-							onChange={(event) => setLimit(event.currentTarget.valueAsNumber)}
+							onChange={(event) => setLimitDraft(event.currentTarget.valueAsNumber)}
 						/>
 						<span aria-hidden='true'>{limit}</span>
 						<button type='submit' disabled={busy || limit === settings.maxAgents}>
@@ -123,23 +149,9 @@ export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close:
 								: "Ready tickets start when agent slots open."}
 					</p>
 					<div className='board-settings-actions'>
-						{settings.dispatch === "running" ? (
-							<button
-								type='button'
-								disabled={busy}
-								onClick={() => void update({ dispatch: "paused" }, "New tickets are paused.")}
-							>
-								Pause new tickets
-							</button>
-						) : (
-							<button
-								type='button'
-								disabled={busy}
-								onClick={() => void update({ dispatch: "running" }, "Ticket dispatch resumed.")}
-							>
-								Resume ticket dispatch
-							</button>
-						)}
+						<button type='button' disabled={busy} onClick={() => void toggleDispatch()}>
+							{dispatchLabel}
+						</button>
 						<button type='button' className='board-stop' disabled={busy} onClick={() => void stop()}>
 							Stop all agents
 						</button>
@@ -149,13 +161,7 @@ export const BoardSettingsDialog = ({ api, close }: { api: IWorkspaceApi; close:
 					</p>
 				</>
 			) : error ? (
-				<button
-					type='button'
-					onClick={() => {
-						setError("");
-						setLoadAttempt((attempt) => attempt + 1);
-					}}
-				>
+				<button type='button' onClick={retry}>
 					Retry
 				</button>
 			) : (

@@ -14,7 +14,8 @@ import { useLocation, useSearchParams } from "react-router";
 
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
-import { BoardSettingsDialog } from "./board-settings-dialog.tsx";
+import { InterfaceIcon } from "../navigation/interface-icon.tsx";
+import { BoardSettingsDialog, useBoardSettings } from "./board-settings-dialog.tsx";
 import { EpicDetails, EpicSelection } from "./epic-details.tsx";
 import { RepositorySelection } from "./repository-selection.tsx";
 import { TaskBacklog } from "./task-backlog.tsx";
@@ -214,6 +215,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		};
 	}, [api, linkedId, tickets]);
 	const [showSettings, setShowSettings] = useState(false);
+	const board = useBoardSettings(api, visible);
 	const active = useRef(true);
 	const locked = useRef(false);
 	const [drafts] = useState(() => new Map<string, string>());
@@ -293,6 +295,8 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		});
 
 	const view = search.get("view") === "backlog" ? "backlog" : "board";
+	const [dragging, setDragging] = useState(false);
+	const actionsBusy = busy || loading || (view === "board" && dragging);
 	const opener = useRef<HTMLElement | null>(null);
 	const wasOpen = useRef(false);
 	useEffect(() => {
@@ -341,27 +345,81 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 	};
 	return (
 		<div className='tasks'>
-			<div role='tablist' aria-label='Task views' className='ticket-details-tabs tasks-tabs'>
-				{(["board", "backlog"] as const).map((name, index) => (
-					<button
-						key={name}
-						type='button'
-						role='tab'
-						id={`tasks-tab-${name}`}
-						aria-controls={`tasks-panel-${name}`}
-						aria-selected={view === name}
-						tabIndex={view === name ? 0 : -1}
-						onClick={() => selectView(name)}
-						onKeyDown={(event) => {
-							const next = { ArrowLeft: 1 - index, ArrowRight: 1 - index, Home: 0, End: 1 }[event.key];
-							if (next === undefined) return;
-							event.preventDefault();
-							selectView(next === 0 ? "board" : "backlog", true);
-						}}
-					>
-						{name === "board" ? "Board" : "Backlog"}
+			<div className='tasks-toolbar'>
+				<div role='tablist' aria-label='Task views' className='section-tabs tasks-tabs'>
+					{(["board", "backlog"] as const).map((name, index) => (
+						<button
+							key={name}
+							type='button'
+							role='tab'
+							id={`tasks-tab-${name}`}
+							aria-controls={`tasks-panel-${name}`}
+							aria-selected={view === name}
+							tabIndex={view === name ? 0 : -1}
+							onClick={() => selectView(name)}
+							onKeyDown={(event) => {
+								const next = { ArrowLeft: 1 - index, ArrowRight: 1 - index, Home: 0, End: 1 }[
+									event.key
+								];
+								if (next === undefined) return;
+								event.preventDefault();
+								selectView(next === 0 ? "board" : "backlog", true);
+							}}
+						>
+							<InterfaceIcon name={name} />
+							{name === "board" ? "Board" : "Backlog"}
+						</button>
+					))}
+				</div>
+				<div
+					className='task-board-actions'
+					role='group'
+					aria-label={view === "board" ? "Board actions" : "Backlog actions"}
+				>
+					{view === "board" ? (
+						<>
+							<button
+								type='button'
+								className='board-icon-button'
+								aria-label='Board settings'
+								title='Board settings'
+								disabled={dragging}
+								onClick={() => setShowSettings(true)}
+							>
+								<InterfaceIcon name='settings' />
+							</button>
+							<button
+								type='button'
+								className='board-icon-button'
+								aria-label={board.dispatchLabel}
+								title={board.dispatchLabel}
+								disabled={!board.settings || board.busy || dragging}
+								onClick={() => void board.toggleDispatch()}
+							>
+								<InterfaceIcon name={board.settings?.dispatch === "running" ? "pause" : "play"} />
+							</button>
+						</>
+					) : (
+						<>
+							<button
+								type='button'
+								disabled={actionsBusy}
+								onClick={() => {
+									rememberFocus();
+									setCreatingEpic(true);
+								}}
+							>
+								Create epic
+							</button>
+							<button type='button' disabled={actionsBusy} onClick={refresh}>
+								Refresh
+							</button>
+						</>
+					)}
+					<button type='button' className='primary' disabled={actionsBusy} onClick={create}>
+						Create ticket
 					</button>
-				))}
+				</div>
 			</div>
 			{(["board", "backlog"] as const).map((name) => (
 				<div
@@ -379,13 +437,11 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 								tickets={tickets}
 								busy={busy}
 								loading={loading}
-								error={error}
-								notice={notice}
+								error={error || board.error}
+								notice={board.notice || notice}
 								open={open}
-								create={create}
-								refresh={refresh}
-								settings={() => setShowSettings(true)}
 								move={move}
+								onDragChange={setDragging}
 								reportError={setError}
 							/>
 						) : (
@@ -394,10 +450,6 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 								collapsed={collapsed}
 								toggleEpic={toggleEpic}
 								openEpic={openEpic}
-								createEpic={() => {
-									rememberFocus();
-									setCreatingEpic(true);
-								}}
 								createInEpic={createInEpic}
 								tickets={tickets}
 								busy={busy}
@@ -405,13 +457,11 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 								error={error}
 								notice={notice}
 								open={open}
-								create={create}
-								refresh={refresh}
 							/>
 						))}
 				</div>
 			))}
-			{showSettings && <BoardSettingsDialog api={api} close={() => setShowSettings(false)} />}
+			{showSettings && <BoardSettingsDialog api={api} board={board} close={() => setShowSettings(false)} />}
 			{linkedId && linked?.id !== linkedId && <p role='status'>Loading ticket…</p>}
 			{linkedId && linked?.id === linkedId && linked.error && (
 				<p role='alert'>

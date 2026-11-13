@@ -13,8 +13,6 @@ export type TaskViewProps = {
 	error: string;
 	notice: string;
 	open: (ticket: Ticket) => void;
-	create: () => void;
-	refresh: () => void;
 };
 
 const TicketCardKey = ({ ticket }: { ticket: Ticket }) => (
@@ -40,14 +38,12 @@ export const TaskBoard = ({
 	error,
 	notice,
 	open,
-	create,
-	refresh,
-	settings,
 	move,
+	onDragChange,
 	reportError,
 }: TaskViewProps & {
-	settings: () => void;
 	move: (id: string, input: MoveTicket) => Promise<void>;
+	onDragChange: (dragging: boolean) => void;
 	reportError: (error: string) => void;
 }) => {
 	const [drag, setDrag] = useState<Drag>();
@@ -79,6 +75,7 @@ export const TaskBoard = ({
 	}, []);
 	useEffect(() => {
 		if (!drag?.ticket.id) return;
+		onDragChange(true);
 		let frame: number;
 		const scroll = () => {
 			const current = dragging.current;
@@ -117,8 +114,9 @@ export const TaskBoard = ({
 		return () => {
 			cancelAnimationFrame(frame);
 			window.removeEventListener("keydown", escape);
+			onDragChange(false);
 		};
-	}, [drag?.ticket.id, locate, cancelDrag]);
+	}, [drag?.ticket.id, locate, cancelDrag, onDragChange]);
 	const startDrag = (event: PointerEvent<HTMLButtonElement>, ticket: Ticket) => {
 		if (busy || loading || event.button !== 0) return;
 		event.preventDefault();
@@ -148,22 +146,6 @@ export const TaskBoard = ({
 	};
 	return (
 		<div className={`task-board ${drag ? "is-dragging" : ""}`}>
-			<div className='task-board-heading'>
-				<div>
-					<h2>Board</h2>
-				</div>
-				<div className='task-board-actions'>
-					<button type='button' disabled={!!drag} onClick={settings}>
-						Board settings
-					</button>
-					<button disabled={busy || loading || !!drag} onClick={refresh}>
-						Refresh board
-					</button>
-					<button className='primary' disabled={busy || loading || !!drag} onClick={create}>
-						Create ticket
-					</button>
-				</div>
-			</div>
 			{error && (
 				<p role='alert' className='error'>
 					{error}

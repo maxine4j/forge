@@ -10,39 +10,21 @@ export const TaskBacklog = ({
 	error,
 	notice,
 	open,
-	create,
-	refresh,
 	epics,
 	collapsed,
 	toggleEpic,
 	openEpic,
-	createEpic,
 	createInEpic,
 }: TaskViewProps & {
 	epics: EpicSummary[];
 	collapsed: string[];
 	toggleEpic: (id: string) => void;
 	openEpic: (id: string) => void;
-	createEpic: () => void;
 	createInEpic: (id: string) => void;
 }) => {
 	const unfinished = tickets.filter((ticket) => !ticket.archivedAt && ticket.status !== "done");
 	return (
 		<div className='task-backlog'>
-			<div className='task-board-heading'>
-				<h2>Backlog</h2>
-				<div className='task-board-actions'>
-					<button disabled={busy || loading} onClick={createEpic}>
-						Create epic
-					</button>
-					<button disabled={busy || loading} onClick={refresh}>
-						Refresh
-					</button>
-					<button className='primary' disabled={busy || loading} onClick={create}>
-						Create ticket
-					</button>
-				</div>
-			</div>
 			{error && (
 				<p role='alert' className='error'>
 					{error} Use Refresh to retry.

@@ -190,6 +190,8 @@ to prevent multiple application instances sharing account homes.
 Slice 1 serves a responsive React interface from the same application as its API.
 Owners can list/create/import/retry repositories and connect ChatGPT/GitHub using
 verification links, one-time codes, cancellation, verification and explicit retry.
+The Repos list updates automatically. Create repo opens the creation and import
+form in a dialog.
 Account polling is serialized with actions, aborts on unmount, and never blocks
 project use. Failed creation refreshes durable project intent for explicit retry.
 All API responses are validated by the browser; device links are limited to the

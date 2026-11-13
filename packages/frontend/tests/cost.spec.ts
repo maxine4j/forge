@@ -183,7 +183,7 @@ test("Costs links open archived tickets outside the active board", async ({ page
 	await expect(page).toHaveURL(`/tasks?ticket=TASK-1`);
 	const panel = page.getByRole("dialog", { name: "TASK-1" });
 	await expect(panel).toBeVisible();
-	await expect(panel.getByLabel("Description", { exact: true })).toHaveValue("Archived scope");
+	await expect(panel.getByText("Archived scope", { exact: true })).toBeVisible();
 	await panel.getByRole("button", { name: "Close ticket" }).click();
 	await page.goBack();
 	await expect(panel).toBeVisible();

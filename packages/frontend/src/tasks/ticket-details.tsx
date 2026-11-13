@@ -550,7 +550,7 @@ export const TicketDetails = ({
 							: (job?.state ?? "Loading")}
 				</span>
 			</div>
-			<div role='tablist' aria-label='Ticket sections' className='ticket-details-tabs'>
+			<div role='tablist' aria-label='Ticket sections' className='section-tabs'>
 				{tabs.map((name, index) => (
 					<button
 						key={name}

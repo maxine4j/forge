@@ -6,6 +6,7 @@ Tasks has nested Board and Backlog tabs. `/tasks` opens Board by default;
 `/tasks?view=backlog` selects Backlog. Missing or unknown `view` values select
 Board. Both preserve `?ticket=:id` for details, reload and browser history,
 including existing archived-ticket links from [Costs](#ticket-cost).
+Each view's actions sit beside the tabs and wrap below them when space is limited.
 
 Backlog shows compact Key, Title and Status tables of non-archived tickets in
 Backlog, Ready for development and In progress; Done is excluded. Its visible
@@ -75,12 +76,12 @@ ticket and workflow remain readable by ID.
 Queued work can be archived before it starts. A running turn, unresolved dispatch
 or pending merge must settle before archiving.
 
-| Stage                 | Behavior                                                                                                                                                                                                                                                                                                  |
-| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Backlog               | The owner writes the scope.                                                                                                                                                                                                                                                                               |
-| Ready for development | The scheduler claims the top ticket when an agent slot opens. It reserves the slot before allocating a new ticket worktree from latest local main.                                                                                                                                                        |
-| In progress           | A fresh Codex planner proposes a plan. The orange card shows a red notification dot and Chat renders the Markdown plan and accepts feedback. Approve plan applies to the latest completed revision and queues a fresh implementer in the same worktree. Completed implementation goes to the merge queue. |
-| Done                  | Forge moves the ticket here after confirming its commit is in local main.                                                                                                                                                                                                                                 |
+| Stage                 | Behavior                                                                                                                                                                                                                                                                                               |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Backlog               | The owner writes the scope.                                                                                                                                                                                                                                                                            |
+| Ready for development | The scheduler claims the top ticket when an agent slot opens. It reserves the slot before allocating a new ticket worktree from latest local main.                                                                                                                                                     |
+| In progress           | A fresh Codex planner proposes a plan. The card shows an orange notification dot and Chat renders the Markdown plan and accepts feedback. Approve plan applies to the latest completed revision and queues a fresh implementer in the same worktree. Completed implementation goes to the merge queue. |
+| Done                  | Forge moves the ticket here after confirming its commit is in local main.                                                                                                                                                                                                                              |
 
 The scheduler wakes when tickets enter Ready or Done, when an agent slot is
 released, and when settings open new capacity. All execution shares a pool with
@@ -112,7 +113,7 @@ Active workspace/thread setup and `dispatching` or `running` workflows show a sp
 planner or implementer in `waiting` for input or permission requires attention.
 Completed plans ready for review, failures, uncertain execution and unreadable
 agent state also require attention. These cards have an orange background and
-border, including on hover, and a solid red dot labelled and titled “Action required”.
+border, including on hover, and a solid orange dot labelled and titled “Action required”.
 Attention takes precedence over the queued clock and working spinner: only one
 indicator appears. Idle and merge-queued workflows without attention have no
 status icon; Backlog and Done never show one. Git merge activity is excluded.
@@ -129,7 +130,8 @@ remains static when reduced motion is requested.
 Board settings apply across the global board and persist in SQLite. The concurrency
 limit ranges from 1 to 10 and defaults to 3. Lowering it lets active turns
 finish and holds new turns until a slot opens. Pause new tickets keeps Ready
-tickets queued while in-progress tickets continue. Stop all agents requests
+tickets queued while in-progress tickets continue. The Board toolbar and Board
+settings dialog share the pause and resume control state. Stop all agents requests
 interruption of active ticket and standalone turns in parallel, reports any
 failures, and holds ticket dispatch until explicitly resumed. Completed turns
 and queued Git merges can still settle. Standalone chats can be started manually

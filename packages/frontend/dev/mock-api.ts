@@ -252,7 +252,7 @@ export class MockApi implements IMockApi {
 					title: "Improve repository navigation",
 					epicId,
 					description:
-						"Review the completed navigation plan. The orange card and red dot remain until the plan is approved.",
+						"Review the completed navigation plan. The orange card and notification dot remain until the plan is approved.",
 					status: "in-progress",
 					needsAttention: true,
 					createdAt: date,
