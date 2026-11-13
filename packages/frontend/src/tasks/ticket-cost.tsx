@@ -44,7 +44,6 @@ export const TicketCost = ({ api, ticketId }: { api: IWorkspaceApi; ticketId: st
 	return (
 		<div className='cost-dashboard'>
 			{!ticket.turns && <p>No usage recorded for this ticket.</p>}
-			<button onClick={() => setAttempt((value) => value + 1)}>Refresh</button>
 			<CostMetrics summary={ticket} />
 			<PhaseCosts phases={cost.phases} />
 			{ticket.incomplete.tokens > 0 && (
