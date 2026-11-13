@@ -1645,7 +1645,7 @@ button.ticket-description-text:hover {
 	margin-bottom: 16px;
 	font-size: 13px;
 }
-.ticket-dialog:not(.ticket-details) input:not(.ticket-title-editor input),
+.ticket-dialog:not(.ticket-details) input:not([type="checkbox"]):not(.ticket-title-editor input),
 .ticket-dialog:not(.ticket-details) textarea:not(.ticket-description-text),
 .ticket-dialog:not(.ticket-details) select,
 .ticket-fields input,

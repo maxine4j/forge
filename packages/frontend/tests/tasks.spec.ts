@@ -1,7 +1,7 @@
 import type { DockerOverview, DockerOperation } from "@forge/contracts/docker";
 import type { Epic, TicketWorkflow } from "@forge/contracts/tickets";
 import { expect, test } from "@playwright/test";
-import type { Page } from "@playwright/test";
+import type { Locator, Page } from "@playwright/test";
 
 import { costFixture, phaseFixtures } from "../dev/cost-fixture.ts";
 
@@ -944,45 +944,84 @@ for (const width of [1280, 390]) {
 	});
 }
 
-test("global board creates unassigned tickets and saves ordered references", async ({ page }) => {
-	await page.setViewportSize({ width: 390, height: 844 });
-	const f = await setup(page);
-	await expect(page).toHaveTitle("Forge");
-	await expect(page.getByRole("link", { name: "Tasks", exact: true })).toHaveAttribute("aria-current", "page");
-	await expect(page.getByRole("tab", { name: "Tasks", exact: true })).toHaveCount(0);
-	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
-	let dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
-	await dialog.getByLabel("Title", { exact: true }).fill("No repositories needed");
-	await dialog.getByRole("button", { name: "Create", exact: true }).click();
-	await expect(page.getByRole("button", { name: "TASK-3 No repositories needed", exact: true })).toBeVisible();
-	expect(f.tickets().find((ticket) => ticket.id === "TASK-3")?.repositoryIds).toEqual([]);
-	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
-	dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
-	await dialog.getByLabel("Title", { exact: true }).fill("Several repositories");
-	await dialog.getByRole("button", { name: "Repositories" }).click();
-	const first = "123e4567-e89b-42d3-a456-426614174001";
-	await dialog.getByRole("checkbox", { name: "Reference repo" }).check();
-	await dialog.getByRole("checkbox", { name: "Forge", exact: true }).check();
-	await page.keyboard.press("Escape");
-	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-	await dialog.getByRole("button", { name: "Create", exact: true }).click();
-	expect(f.tickets().find((ticket) => ticket.id === "TASK-4")?.repositoryIds).toEqual([first, projectId]);
-	await page.reload();
-	await page.getByRole("button", { name: "TASK-4 Several repositories", exact: true }).click();
-	const details = page.getByRole("dialog", { name: "TASK-4", exact: true });
-	await details.getByRole("button", { name: "Repositories", exact: true }).click();
-	await expect(details.getByRole("checkbox", { name: "Reference repo" })).toBeChecked();
-	await details.getByRole("button", { name: "Clear repositories" }).click();
-	await expect(details.getByRole("checkbox", { name: "Reference repo" })).not.toBeChecked();
-	await details.getByRole("checkbox", { name: "Forge", exact: true }).check();
-	await details.getByRole("checkbox", { name: "Reference repo" }).check();
-	await page.keyboard.press("Escape");
-	await expect
-		.poll(() => f.tickets().find((ticket) => ticket.id === "TASK-4")?.repositoryIds)
-		.toEqual([projectId, first]);
-	await details.getByRole("button", { name: "Close ticket" }).click();
-	await expect(page.getByRole("button", { name: "TASK-3 No repositories needed", exact: true })).toBeVisible();
-});
+for (const width of [1280, 390]) {
+	test(`global board repository multiselect layout and ordered references at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 844 });
+		const assertRepositoryLayout = async (dialog: Locator) => {
+			const checkboxes = dialog.getByRole("checkbox");
+			await expect(checkboxes).toHaveCount(2);
+			for (const checkbox of await checkboxes.all()) {
+				await expect(checkbox).toBeInViewport();
+				await expect(checkbox).toHaveCSS("width", "14px");
+				await expect(checkbox).toHaveCSS("height", "14px");
+				for (const side of ["top", "right", "bottom", "left"]) {
+					await expect(checkbox).toHaveCSS(`padding-${side}`, "0px");
+				}
+				const box = (await checkbox.boundingBox())!;
+				expect(box.width).toBe(14);
+				expect(box.height).toBe(14);
+				const label = checkbox.locator("..").locator("span");
+				await expect(label).toBeInViewport();
+				const labelBox = (await label.boundingBox())!;
+				expect(labelBox.x).toBeGreaterThanOrEqual(box.x + box.width);
+				expect(labelBox.x + labelBox.width).toBeLessThanOrEqual(width);
+			}
+		};
+		const f = await setup(page);
+		await expect(page).toHaveTitle("Forge");
+		await expect(page.getByRole("link", { name: "Tasks", exact: true })).toHaveAttribute("aria-current", "page");
+		await expect(page.getByRole("tab", { name: "Tasks", exact: true })).toHaveCount(0);
+		await page.getByRole("button", { name: "Create ticket", exact: true }).click();
+		let dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
+		await dialog.getByLabel("Title", { exact: true }).fill("No repositories needed");
+		await dialog.getByRole("button", { name: "Create", exact: true }).click();
+		await expect(page.getByRole("button", { name: "TASK-3 No repositories needed", exact: true })).toBeVisible();
+		expect(f.tickets().find((ticket) => ticket.id === "TASK-3")?.repositoryIds).toEqual([]);
+		await page.getByRole("button", { name: "Create ticket", exact: true }).click();
+		dialog = page.getByRole("dialog", { name: "Create ticket", exact: true });
+		await dialog.getByLabel("Title", { exact: true }).fill("Several repositories");
+		await dialog.getByRole("button", { name: "Repositories" }).click();
+		const first = "123e4567-e89b-42d3-a456-426614174001";
+		await assertRepositoryLayout(dialog);
+		const forge = dialog.getByRole("checkbox", { name: "Forge", exact: true });
+		await forge.focus();
+		await page.keyboard.press("Space");
+		await expect(forge).toBeChecked();
+		await dialog.getByRole("checkbox", { name: "Reference repo" }).check();
+		await forge.press("Space");
+		await expect(forge).not.toBeChecked();
+		await expect(dialog.getByRole("checkbox", { name: "Reference repo" })).toBeChecked();
+		await dialog.getByRole("button", { name: "Clear repositories" }).click();
+		await expect(dialog.getByRole("checkbox", { name: "Reference repo" })).not.toBeChecked();
+		await expect(forge).not.toBeChecked();
+		await dialog.getByRole("checkbox", { name: "Reference repo" }).check();
+		await forge.check();
+		await page.keyboard.press("Escape");
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+		await dialog.getByRole("button", { name: "Create", exact: true }).click();
+		await expect(page.getByRole("button", { name: "TASK-4 Several repositories", exact: true })).toBeVisible();
+		expect(f.tickets().find((ticket) => ticket.id === "TASK-4")?.repositoryIds).toEqual([first, projectId]);
+		await page.reload();
+		await page.getByRole("button", { name: "TASK-4 Several repositories", exact: true }).click();
+		const details = page.getByRole("dialog", { name: "TASK-4", exact: true });
+		await details.getByRole("button", { name: "Repositories", exact: true }).click();
+		await assertRepositoryLayout(details);
+		await expect(details.getByRole("checkbox", { name: "Reference repo" })).toBeChecked();
+		await details.getByRole("button", { name: "Clear repositories" }).click();
+		await expect(details.getByRole("checkbox", { name: "Reference repo" })).not.toBeChecked();
+		const editForge = details.getByRole("checkbox", { name: "Forge", exact: true });
+		await editForge.focus();
+		await editForge.press("Space");
+		await expect(editForge).toBeChecked();
+		await details.getByRole("checkbox", { name: "Reference repo" }).check();
+		await page.keyboard.press("Escape");
+		await expect
+			.poll(() => f.tickets().find((ticket) => ticket.id === "TASK-4")?.repositoryIds)
+			.toEqual([projectId, first]);
+		await details.getByRole("button", { name: "Close ticket" }).click();
+		await expect(page.getByRole("button", { name: "TASK-3 No repositories needed", exact: true })).toBeVisible();
+	});
+}
 
 test("board creation drafts survive visits to Repos and removed browser routes show not-found", async ({ page }) => {
 	await setup(page);
