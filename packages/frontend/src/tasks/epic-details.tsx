@@ -1,7 +1,7 @@
 import { editEpicSchema, type EditEpic, type EpicSummary, type Ticket } from "@forge/contracts/tickets";
 import { useEffect, useRef, useState } from "react";
 
-import { ticketLabels } from "./ticket-labels.ts";
+import { EpicProgress, TicketTable } from "./ticket-table.tsx";
 
 export const EpicSelection = ({
 	epics,
@@ -64,7 +64,7 @@ export const EpicDetails = ({
 	return (
 		<dialog
 			ref={dialog}
-			className='ticket-dialog'
+			className={epic ? "ticket-dialog epic-details" : "ticket-dialog"}
 			aria-labelledby='epic-dialog-title'
 			onCancel={(event) => {
 				event.preventDefault();
@@ -77,14 +77,6 @@ export const EpicDetails = ({
 					✕
 				</button>
 			</div>
-			{epic && (
-				<>
-					<p role='status'>
-						{epic.done}/{epic.total} Done{epic.complete ? " · Complete" : ""}
-					</p>
-					<progress value={epic.done} max={epic.total || 1} aria-label='Epic completion' />
-				</>
-			)}
 			{(error || failure) && (
 				<p role='alert'>
 					{failure || error}{" "}
@@ -139,23 +131,22 @@ export const EpicDetails = ({
 				</div>
 			</form>
 			{epic && (
-				<>
-					<h3>Children</h3>
-					<button disabled={busy} onClick={create}>
-						Create ticket
-					</button>
-					<ul>
-						{tickets.map((ticket) => (
-							<li key={ticket.id}>
-								<button onClick={() => open(ticket)}>
-									{ticket.id} {ticket.title}
-								</button>{" "}
-								· {ticketLabels[ticket.status]}
-							</li>
-						))}
-					</ul>
-					{!tickets.length && <p>No tickets in this epic.</p>}
-				</>
+				<section className='backlog-section epic-children'>
+					<div className='backlog-section-header'>
+						<h3 id='epic-children-title'>Child work items</h3>
+						<EpicProgress done={epic.done} total={epic.total} />
+						<button className='backlog-epic-create' disabled={busy} onClick={create}>
+							<span aria-hidden='true'>+</span> Create ticket
+						</button>
+					</div>
+					<TicketTable
+						tickets={tickets}
+						labelId='epic-children-title'
+						busy={busy}
+						open={open}
+						emptyMessage='No tickets in this epic.'
+					/>
+				</section>
 			)}
 		</dialog>
 	);

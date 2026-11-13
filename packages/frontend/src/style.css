@@ -18,6 +18,9 @@
 	padding: 12px;
 	margin: 12px 0;
 }
+.docker-container h4 {
+	margin-block: 0 8px;
+}
 .docker-container dl {
 	display: grid;
 	grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
@@ -627,6 +630,11 @@
 	border-radius: 7px 7px 0 0;
 	background: #161b22;
 }
+.backlog-scroll .backlog-section-header {
+	position: sticky;
+	top: 0;
+	z-index: 1;
+}
 .backlog-section-header h3 {
 	min-width: 0;
 	margin: 0;
@@ -663,9 +671,33 @@
 .backlog-epic-key {
 	color: #c6a6ff;
 }
-.backlog-epic-progress {
+.epic-progress {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
 	color: #8b949e;
 	font-size: 12px;
+	white-space: nowrap;
+}
+.epic-progress progress {
+	appearance: none;
+	width: 64px;
+	height: 4px;
+	overflow: hidden;
+	border: 0;
+	border-radius: 99px;
+	background: #30363d;
+}
+.epic-progress progress::-webkit-progress-bar {
+	background: #30363d;
+}
+.epic-progress progress::-webkit-progress-value {
+	border-radius: 99px;
+	background: #3fb950;
+}
+.epic-progress progress::-moz-progress-bar {
+	border-radius: 99px;
+	background: #3fb950;
 }
 .backlog-epic-create {
 	margin-inline-start: auto;
@@ -678,28 +710,15 @@
 	border-spacing: 0;
 	font-size: 13px;
 }
-.backlog-table th {
-	position: sticky;
-	top: 0;
-	z-index: 1;
-	background: #0d1117;
-	color: #8b949e;
-	border-top: 1px solid #30363d;
-	text-align: left;
-}
-.backlog-table th,
 .backlog-table td {
 	padding: 8px 12px;
-	border-bottom: 1px solid #30363d;
+	border-top: 1px solid #30363d;
 }
-.backlog-table th:first-child {
-	width: clamp(86px, 14vw, 120px);
+.backlog-key-column {
+	width: clamp(100px, 14vw, 132px);
 }
-.backlog-table th:last-child {
+.backlog-status-column {
 	width: clamp(116px, 19vw, 190px);
-}
-.backlog-table tbody tr:last-child td {
-	border-bottom: 0;
 }
 .backlog-table tbody tr:last-child td:first-child {
 	border-bottom-left-radius: 7px;
@@ -722,6 +741,9 @@
 	padding-right: 40px !important;
 }
 .backlog-open {
+	display: inline-flex;
+	align-items: center;
+	gap: 7px;
 	white-space: nowrap;
 	padding: 2px 4px;
 	border: 0;
@@ -749,7 +771,6 @@
 	color: #d2b8ff;
 }
 @media (max-width: 600px) {
-	.backlog-table th,
 	.backlog-table td {
 		padding-inline: 6px;
 	}
@@ -1120,6 +1141,12 @@
 .ticket-dialog::backdrop {
 	background: #010409b3;
 }
+.ticket-dialog.epic-details {
+	width: min(780px, calc(100vw - 24px));
+}
+.epic-children {
+	margin-top: 20px;
+}
 .ticket-dialog.ticket-details {
 	position: fixed;
 	top: var(--forge-viewport-top, 0px);
@@ -1326,12 +1353,14 @@
 	background: #0d1117;
 	color: inherit;
 }
-.ticket-title-editor button {
+.ticket-title-editor button,
+.ticket-description-actions button {
 	flex: none;
 	min-width: 34px;
 	padding-inline: 6px;
 }
-.ticket-title-editor button[type="submit"] {
+.ticket-title-editor button[type="submit"],
+.ticket-description-actions button[type="submit"] {
 	color: #7ee787;
 }
 .ticket-details-toolbar {
@@ -1445,9 +1474,11 @@
 .ticket-agent-settings .agent-composer-settings {
 	flex-wrap: wrap;
 }
-.ticket-details-save {
-	align-self: flex-start;
-	min-width: 72px;
+.ticket-description-actions {
+	display: flex;
+	justify-content: flex-end;
+	gap: 6px;
+	margin-top: 6px;
 }
 .ticket-fields label {
 	margin: 0 0 8px;

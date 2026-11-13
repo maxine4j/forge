@@ -5,7 +5,6 @@ import {
 	ticketWorkflowSchema,
 	type Ticket,
 	type TicketStatus,
-	type CreateTicket,
 	type MoveTicket,
 	type TicketWorkflow,
 	type EpicSummary,
@@ -26,6 +25,7 @@ export { ticketLabels } from "./ticket-labels.ts";
 
 const tabLabels = { details: "Details", chat: "Chat", cost: "Cost" };
 type TicketTab = keyof typeof tabLabels;
+type UpdateTicket = ReturnType<typeof updateTicketSchema.parse>;
 const tabIcons: Record<TicketTab, string> = {
 	details: "M6 3h8l4 4v14H6z M14 3v5h4 M9 12h6 M9 16h6",
 	chat: "M4 5h16v11H9l-5 4z",
@@ -35,9 +35,7 @@ export interface TicketReadingState {
 	snapshots: Map<string, AgentView>;
 	scroll: { top: number; follow: boolean };
 	tab?: TicketTab;
-	description: string;
-	repositoryIds: string[];
-	epicId?: string | null;
+	descriptionDraft?: string;
 }
 
 export const TicketDetails = ({
@@ -59,7 +57,7 @@ export const TicketDetails = ({
 	busy: boolean;
 	close: () => void;
 	archive: () => Promise<void>;
-	save: (input: CreateTicket, closeAfterSave?: boolean) => Promise<void>;
+	save: (input: UpdateTicket) => Promise<void>;
 	move: (id: string, input: MoveTicket) => Promise<void>;
 	refreshBoard: () => void;
 	drafts: Map<string, string>;
@@ -69,13 +67,10 @@ export const TicketDetails = ({
 }) => {
 	const archived = !!ticket.archivedAt;
 	const dialog = useRef<HTMLDialogElement>(null);
-	const [state] = useState(() => {
-		const saved = reading.get(ticket.id) ?? {
+	const [state] = useState<TicketReadingState>(() => {
+		const saved: TicketReadingState = reading.get(ticket.id) ?? {
 			snapshots: new Map<string, AgentView>(),
 			scroll: { top: 0, follow: true },
-			description: ticket.description,
-			repositoryIds: ticket.repositoryIds,
-			epicId: ticket.epicId ?? null,
 		};
 		reading.set(ticket.id, saved);
 		return saved;
@@ -93,19 +88,49 @@ export const TicketDetails = ({
 	const editTitle = useRef<HTMLButtonElement>(null);
 	const titleInput = useRef<HTMLInputElement>(null);
 	const restoreTitleFocus = useRef(false);
-	const [description, setDescription] = useState(state.description);
-	const [repositoryIds, setRepositoryIds] = useState(state.repositoryIds);
-	const [epicId, setEpicId] = useState(state.epicId ?? null);
+	const [descriptionDraft, setDescriptionDraft] = useState(state.descriptionDraft);
+	const [pendingRepositories, setPendingRepositories] = useState<string[]>();
+	const [scopeError, setScopeError] = useState("");
+	const descriptionInput = useRef<HTMLTextAreaElement>(null);
 	const editable = !archived && ticket.status === "backlog";
-	const parentId = editable ? epicId : (ticket.epicId ?? null);
+	const parentId = ticket.epicId ?? null;
 	const epic = epics.find(({ id }) => id === parentId);
 	const epicPicker = useRef<HTMLDivElement>(null);
+	const saveScope = async (changes: Partial<UpdateTicket>) => {
+		if (!editable || busy) return false;
+		setScopeError("");
+		try {
+			await save(
+				updateTicketSchema.parse({
+					title: ticket.title,
+					description: ticket.description,
+					repositoryIds: ticket.repositoryIds,
+					...changes,
+				}),
+			);
+			return true;
+		} catch (err) {
+			setScopeError(err instanceof Error ? err.message : "Cannot save ticket. Retry.");
+			return false;
+		}
+	};
 	const chooseEpic = (id: string | null) => {
 		epicPicker.current?.hidePopover();
-		setEpicId(id);
+		if (id !== parentId) void saveScope({ epicId: id });
 	};
-	const unsavedRepositories = JSON.stringify(repositoryIds) !== JSON.stringify(ticket.repositoryIds);
-	Object.assign(state, { description, repositoryIds, epicId, tab: section });
+	const changeRepositories = async (ids: string[]) => {
+		setPendingRepositories(ids);
+		await saveScope({ repositoryIds: ids });
+		setPendingRepositories(undefined);
+	};
+	const description = editable ? (descriptionDraft ?? ticket.description) : ticket.description;
+	const descriptionChanged = editable && description !== ticket.description;
+	const discardDescription = () => {
+		setDescriptionDraft(undefined);
+		setScopeError("");
+		descriptionInput.current?.focus();
+	};
+	Object.assign(state, { descriptionDraft, tab: section });
 	const editingTitle = editable && titleDraft !== undefined;
 	useEffect(() => {
 		if (editingTitle) titleInput.current?.focus();
@@ -137,7 +162,7 @@ export const TicketDetails = ({
 		}
 		setTitleError("");
 		try {
-			await save(input.data, false);
+			await save(input.data);
 			finishTitleEdit();
 		} catch (err) {
 			setTitleError(err instanceof Error ? err.message : "Cannot save title. Retry.");
@@ -153,7 +178,6 @@ export const TicketDetails = ({
 	const settings = savedSettings ?? ticket.executionSettings ?? {};
 	const [error, setError] = useState("");
 	const [moveError, setMoveError] = useState("");
-	const [scopeError, setScopeError] = useState("");
 	const [options, setOptions] = useState<AgentOptions>();
 	const optionsRevision = useContext(AgentOptionsRevision);
 	const [savingSettings, setSavingSettings] = useState(false);
@@ -324,7 +348,7 @@ export const TicketDetails = ({
 							<select
 								aria-label='Status'
 								value={ticket.status}
-								disabled={archived || busy || !target || unsavedRepositories || editingTitle}
+								disabled={archived || busy || !target || editingTitle}
 								onChange={(event) => {
 									setMoveError("");
 									void move(ticket.id, { status: event.target.value as TicketStatus })
@@ -502,7 +526,6 @@ export const TicketDetails = ({
 				</div>
 			</dialog>
 			<div className='ticket-details-toolbar'>
-				{unsavedRepositories && <small>Save repository selections before starting planning.</small>}
 				<span role='status'>
 					{reviewPlan
 						? "Plan ready for review"
@@ -579,74 +602,89 @@ export const TicketDetails = ({
 			)}
 			<div className='ticket-fields' {...panel("details")}>
 				<form
+					className='ticket-description-editor'
 					onSubmit={(event) => {
 						event.preventDefault();
-						if (!editable || busy || editingTitle) return;
-						const input = updateTicketSchema.safeParse({
-							title: ticket.title,
-							description,
-							repositoryIds,
-							epicId,
-						});
-						if (!input.success) {
-							setScopeError("Enter a description up to 4000 characters.");
-							return;
+						if (descriptionChanged) {
+							void saveScope({ description }).then((saved) => {
+								if (saved) setDescriptionDraft(undefined);
+							});
 						}
-						setScopeError("");
-						void save(input.data).catch((err: unknown) =>
-							setScopeError(err instanceof Error ? err.message : "Cannot save ticket. Retry."),
-						);
+					}}
+					onKeyDown={(event) => {
+						if (!descriptionChanged || event.key !== "Escape" || event.nativeEvent.isComposing) return;
+						event.preventDefault();
+						if (!busy) discardDescription();
 					}}
 				>
 					<label htmlFor={`${fieldId}-description`}>Description</label>
 					<textarea
+						ref={descriptionInput}
 						id={`${fieldId}-description`}
 						rows={4}
 						maxLength={4000}
 						value={description}
-						disabled={archived || busy || ticket.status !== "backlog"}
-						onChange={(event) => setDescription(event.target.value)}
+						disabled={!editable}
+						readOnly={busy}
+						onChange={(event) => {
+							const value = event.target.value;
+							setDescriptionDraft(value === ticket.description ? undefined : value);
+						}}
 					/>
-					{plan && (
-						<section className='ticket-details-plan' aria-labelledby={`${fieldId}-plan-title`}>
-							<h3 id={`${fieldId}-plan-title`}>Plan</h3>
-							<div className='ticket-plan-markdown'>
-								<PlanMarkdown text={plan.text} />
-							</div>
-							{approvePlan && (
-								<div className='ticket-plan-actions'>
-									<button type='button' onClick={() => selectTab("chat")}>
-										Request changes
-									</button>
-									{approvePlan}
-								</div>
-							)}
-						</section>
-					)}
-					<RepositorySelection
-						api={api}
-						value={repositoryIds}
-						change={setRepositoryIds}
-						disabled={archived || busy || ticket.status !== "backlog"}
-					/>
-					<fieldset className='ticket-agent-settings'>
-						<legend>Agent Settings</legend>
-						<ExecutionSettings
-							settings={settings}
-							options={options}
-							change={changeSettings}
-							disabled={archived || savingSettings || ticket.status === "done"}
-						/>
-					</fieldset>
-					{!archived && ticket.status === "backlog" && (
-						<button className='primary ticket-details-save' disabled={busy || editingTitle}>
-							Save
-						</button>
-					)}
-					{ticket.status !== "backlog" && (
-						<p>Scope is fixed after planning starts. Discuss changes in chat.</p>
+					{descriptionChanged && (
+						<div className='ticket-description-actions'>
+							<button
+								type='submit'
+								aria-label='Save description'
+								title='Save description'
+								disabled={busy}
+							>
+								✓
+							</button>
+							<button
+								type='button'
+								aria-label='Discard description changes'
+								title='Discard description changes'
+								disabled={busy}
+								onClick={discardDescription}
+							>
+								✕
+							</button>
+						</div>
 					)}
 				</form>
+				{plan && (
+					<section className='ticket-details-plan' aria-labelledby={`${fieldId}-plan-title`}>
+						<h3 id={`${fieldId}-plan-title`}>Plan</h3>
+						<div className='ticket-plan-markdown'>
+							<PlanMarkdown text={plan.text} />
+						</div>
+						{approvePlan && (
+							<div className='ticket-plan-actions'>
+								<button type='button' onClick={() => selectTab("chat")}>
+									Request changes
+								</button>
+								{approvePlan}
+							</div>
+						)}
+					</section>
+				)}
+				<RepositorySelection
+					api={api}
+					value={pendingRepositories ?? ticket.repositoryIds}
+					change={(ids) => void changeRepositories(ids)}
+					disabled={!editable || busy}
+				/>
+				<fieldset className='ticket-agent-settings'>
+					<legend>Agent Settings</legend>
+					<ExecutionSettings
+						settings={settings}
+						options={options}
+						change={changeSettings}
+						disabled={archived || savingSettings || ticket.status === "done"}
+					/>
+				</fieldset>
+				{ticket.status !== "backlog" && <p>Scope is fixed after planning starts. Discuss changes in chat.</p>}
 			</div>
 			<div className='ticket-chat' {...panel("chat")}>
 				{job?.state === "running" && <small role='status'>Applies to next turn</small>}

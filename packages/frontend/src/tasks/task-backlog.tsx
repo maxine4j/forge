@@ -2,8 +2,7 @@ import type { EpicSummary } from "@forge/contracts/tickets";
 
 import { EpicIcon } from "./epic-icon.tsx";
 import type { TaskViewProps } from "./task-board.tsx";
-import { TicketIndicator } from "./ticket-indicator.tsx";
-import { ticketLabels } from "./ticket-labels.ts";
+import { EpicProgress, TicketTable } from "./ticket-table.tsx";
 export const TaskBacklog = ({
 	tickets,
 	busy,
@@ -95,10 +94,7 @@ export const TaskBacklog = ({
 								</h3>
 								{epic && (
 									<>
-										<span className='backlog-epic-progress'>
-											{rows.length} unfinished · {epic.done}/{epic.total} Done
-											{epic.complete ? " · Complete" : ""}
-										</span>
+										<EpicProgress done={epic.done} total={epic.total} />
 										<button
 											className='backlog-epic-create'
 											disabled={busy}
@@ -109,50 +105,15 @@ export const TaskBacklog = ({
 									</>
 								)}
 							</div>
-							<table
-								className='backlog-table'
+							<TicketTable
 								id={childrenId}
-								aria-labelledby={titleId}
+								labelId={titleId}
 								hidden={!expanded}
-							>
-								<thead>
-									<tr>
-										<th scope='col'>Key</th>
-										<th scope='col'>Title</th>
-										<th scope='col'>Status</th>
-									</tr>
-								</thead>
-								<tbody>
-									{rows.map((ticket) => (
-										<tr key={ticket.id} className={ticket.needsAttention ? "needs-attention" : ""}>
-											<td>
-												<button
-													className='backlog-open'
-													disabled={busy}
-													aria-label={`${ticket.id} ${ticket.title}`}
-													onClick={() => open(ticket)}
-												>
-													{ticket.id}
-												</button>
-											</td>
-											<td className='backlog-title'>
-												{ticket.title}
-												<TicketIndicator ticket={ticket} />
-											</td>
-											<td>
-												<span className={`backlog-status ticket-status-${ticket.status}`}>
-													{ticketLabels[ticket.status]}
-												</span>
-											</td>
-										</tr>
-									))}
-									{epic && !rows.length && (
-										<tr>
-											<td colSpan={3}>No unfinished tickets in this epic.</td>
-										</tr>
-									)}
-								</tbody>
-							</table>
+								tickets={rows}
+								busy={busy}
+								open={open}
+								emptyMessage={epic ? "No unfinished tickets in this epic." : undefined}
+							/>
 						</section>
 					);
 				})}

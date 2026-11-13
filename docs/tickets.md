@@ -12,8 +12,8 @@ Backlog, Ready for development and In progress; Done is excluded. Its visible
 count follows shared one-second polling; rows retain API order within epic sections.
 Both views use the same collection, create/details dialogs, status transitions,
 archive controls and attention/agent indicators. Polling removes completed or
-archived rows without closing an open ticket. The tables scroll with sticky
-column headers and wrap ticket titles on narrow screens. Arrow keys, Home and End
+archived rows without closing an open ticket. Sections scroll with sticky
+section headings and wrap ticket titles on narrow screens. Arrow keys, Home and End
 select views; ticket-open buttons and dialog tabs support keyboard navigation.
 Creation starts in Backlog. Scope and repository selection remain editable only
 in Backlog status, regardless of selected view; Ready and In progress retain
@@ -244,18 +244,19 @@ shared with Ready transitions. Membership never changes ticket positions.
 Backlog shows No epic first, then every epic in increasing numeric order,
 including empty and completed epics. Each section has its own table and preserves
 the unfinished-ticket filter and ticket order. Headers show the epic icon, key,
-title, unfinished count and Done/total. The title opens the epic and the adjacent
+title and a compact completion bar with the done and total counts. The title opens the epic and the adjacent
 chevron collapses or expands its table. Disclosures have `aria-expanded`
 and `aria-controls`; collapsed IDs use browser storage key
 `forge.epics.collapsed.v1`, tolerating malformed or unavailable storage. One-second
 polling and mutations refresh tickets and epic summaries together, preserving
 collapse state and unsaved dialog edits. Errors remain retryable in open dialogs.
 
-Create epic opens an editable dialog with progress and child links. The URL
+Create epic opens an editable dialog. Existing epics show a child work items table
+with progress and links to all non-archived children, including Done. The URL
 `/tasks?view=backlog&epic=EPIC-n` restores it on reload and Back/Forward. Ticket
 creation offers an optional Epic selector. In ticket details, the header shows a
 linked breadcrumb for an assigned epic. Backlog drafts can add, change or remove
-their parent there and persist the change with Save. Create ticket in an epic header or its details
+their parent there and save it immediately. Create ticket in an epic header or its details
 preselects that epic. See [persistence](architecture.md#persistence-and-recovery)
 and the required [database backup and recreation](development.md#development-databases).
 
@@ -318,7 +319,9 @@ Tickets accept optional `executionSettings: {model?, reasoningEffort?, permissio
 on creation and return the saved selection on reads. Owner-authorized
 `PATCH /api/tickets/:id/settings` replaces that selection independently of Backlog
 scope editing, with exact-origin checks. The title above the ticket tabs saves
-independently of other Backlog edits. Agent Settings appear below Repositories
+independently of other Backlog edits. Description edits save or discard using
+their own controls. Repository selection changes save immediately in selection
+order. Agent Settings appear below Repositories
 in Details and are shared with the chat composer. Changes save immediately and
 remain shared across polling, reopening and planner-to-implementer transitions.
 Done and archived tickets retain their settings but cannot change them.
