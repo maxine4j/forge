@@ -5,11 +5,10 @@ import {
 	type AgentOptions,
 	type AgentSettings,
 } from "@forge/contracts/agents";
-import { updateTicketSchema, ticketSchema, ticketMoveTargets } from "@forge/contracts/tickets";
+import { updateTicketSchema, ticketSchema } from "@forge/contracts/tickets";
 import {
 	ticketWorkflowSchema,
 	type Ticket,
-	type TicketStatus,
 	type MoveTicket,
 	type TicketWorkflow,
 	type EpicSummary,
@@ -84,11 +83,15 @@ export const TicketDetails = ({
 	const snapshots = state.snapshots;
 	const scrollState = state.scroll;
 	const archiveDialog = useRef<HTMLDialogElement>(null);
+	const returnDialog = useRef<HTMLDialogElement>(null);
+	const returning = useRef(false);
+	const [returnPending, setReturnPending] = useState(false);
 	const fieldId = useId();
 	const poller = useRef<ResourcePoller<TicketWorkflow> | undefined>(undefined);
 	const [job, setJob] = useState<TicketWorkflow>();
 	const [section, setTab] = useState<TicketTab | undefined>(state.tab);
 	const [acting, setActing] = useState(false);
+	const actionPending = useRef(false);
 	const [titleDraft, setTitleDraft] = useState<string>();
 	const [titleError, setTitleError] = useState("");
 	const editTitle = useRef<HTMLButtonElement>(null);
@@ -286,19 +289,30 @@ export const TicketDetails = ({
 			)}
 		</div>
 	) : undefined;
-	const targets = resetting ? [] : ticketMoveTargets(ticket);
-	const moveTo = (status: TicketStatus) => {
+	const canReturn = !archived && !!ticket.canReturnToBacklog && !resetting;
+	const returnToBacklog = async () => {
+		if (!canReturn || busy || returning.current) return;
+		returning.current = true;
+		setReturnPending(true);
 		setMoveError("");
-		void move(ticket.id, { status })
-			.catch((err: unknown) => setMoveError(err instanceof Error ? err.message : "Cannot move ticket."))
-			.finally(refresh);
+		try {
+			await move(ticket.id, { status: "backlog" });
+			returnDialog.current?.close();
+		} catch (err) {
+			setMoveError(err instanceof Error ? err.message : "Cannot move ticket.");
+		} finally {
+			returning.current = false;
+			setReturnPending(false);
+			refresh();
+		}
 	};
 	const canQueueMerge =
 		ticket.status === "in-progress"
 		&& job?.resultSha
 		&& ((job.phase === "review" && job.state === "idle") || job.state === "failed");
 	const act = (path: string, body: unknown, onSuccess?: () => void) => {
-		if (archived || acting || !poller.current) return;
+		if (archived || actionPending.current || !poller.current) return;
+		actionPending.current = true;
 		setActing(true);
 		setError("");
 		void poller.current
@@ -308,7 +322,10 @@ export const TicketDetails = ({
 				refreshBoard();
 				return updated;
 			})
-			.finally(() => setActing(false));
+			.finally(() => {
+				actionPending.current = false;
+				setActing(false);
+			});
 	};
 	const approvePlan = !archived && reviewPlan && (
 		<button
@@ -343,7 +360,7 @@ export const TicketDetails = ({
 									onClick={() => openEpic(parentId)}
 								>
 									<EpicIcon />
-									<span>{epic ? `${epic.id} · ${epic.title}` : parentId}</span>
+									<span>{parentId}</span>
 								</button>
 							</>
 						)}
@@ -373,22 +390,6 @@ export const TicketDetails = ({
 							</span>
 							{ticket.id}
 						</h2>
-						<div className={`ticket-status-select ticket-status-${ticket.status}`}>
-							<select
-								aria-label='Status'
-								value={ticket.status}
-								disabled={archived || busy || acting || !targets.length || editingTitle}
-								onChange={(event) => moveTo(event.target.value as TicketStatus)}
-							>
-								<option value={ticket.status}>{ticketLabels[ticket.status]}</option>
-								{targets.map((target) => (
-									<option key={target} value={target}>
-										{ticketLabels[target]}
-									</option>
-								))}
-							</select>
-							<span className='ticket-chevron' aria-hidden='true' />
-						</div>
 					</div>
 					{editable && (
 						<div
@@ -425,10 +426,28 @@ export const TicketDetails = ({
 					{!archived && ticket.canReturnToBacklog && (
 						<button
 							type='button'
+							className='ticket-return-action'
+							aria-label='Return to backlog'
+							title='Return to backlog'
 							disabled={busy || acting || !!resetting}
-							onClick={() => moveTo("backlog")}
+							onClick={() => {
+								setMoveError("");
+								returnDialog.current?.showModal();
+							}}
 						>
-							Return to backlog
+							<svg
+								width='16'
+								height='16'
+								viewBox='0 0 24 24'
+								fill='none'
+								stroke='currentColor'
+								strokeWidth='2'
+								strokeLinecap='round'
+								strokeLinejoin='round'
+								aria-hidden='true'
+							>
+								<path d='M3 10a9 9 0 1 1 2 8 M3 4v6h6' />
+							</svg>
 						</button>
 					)}
 					<button
@@ -519,7 +538,42 @@ export const TicketDetails = ({
 					</button>
 				</div>
 			</dialog>
-			<div className='ticket-details-toolbar'>
+			<dialog
+				ref={returnDialog}
+				className='ticket-dialog ticket-archive-dialog'
+				aria-labelledby={`${fieldId}-return-title`}
+				aria-describedby={`${fieldId}-return-description`}
+				onCancel={(event) => {
+					event.stopPropagation();
+					event.preventDefault();
+					if (!returnPending) returnDialog.current?.close();
+				}}
+			>
+				<h2 id={`${fieldId}-return-title`}>Return {ticket.id} to backlog?</h2>
+				<p id={`${fieldId}-return-description`}>
+					This stops ticket execution and removes its execution worktree and unmerged branch. Scope, settings
+					and the latest saved plan are preserved.
+				</p>
+				{moveError && (
+					<p role='alert' className='error'>
+						{moveError}
+					</p>
+				)}
+				<div className='ticket-dialog-actions'>
+					<button type='button' disabled={returnPending} onClick={() => returnDialog.current?.close()}>
+						Cancel
+					</button>
+					<button
+						type='button'
+						className='primary'
+						disabled={!canReturn || busy || returnPending}
+						onClick={() => void returnToBacklog()}
+					>
+						{returnPending ? "Returning…" : "Return to backlog"}
+					</button>
+				</div>
+			</dialog>
+			<div className='ticket-sections-row'>
 				<span role='status'>
 					{resetting
 						? job?.resetStage === "cleanup"
@@ -531,6 +585,48 @@ export const TicketDetails = ({
 								? "Queued to merge"
 								: (job?.state ?? "Loading")}
 				</span>
+
+				<div role='tablist' aria-label='Ticket sections' className='section-tabs'>
+					{tabs.map((name, index) => (
+						<button
+							key={name}
+							type='button'
+							role='tab'
+							id={`${fieldId}-tab-${name}`}
+							aria-controls={`${fieldId}-panel-${name}`}
+							aria-selected={tab === name}
+							tabIndex={tab === name ? 0 : -1}
+							onClick={() => setTab(name)}
+							onKeyDown={(event) => {
+								const adjacent = {
+									ArrowLeft: index - 1,
+									ArrowRight: index + 1,
+									Home: 0,
+									End: tabs.length - 1,
+								};
+								const next = adjacent[event.key as keyof typeof adjacent];
+								if (typeof next !== "number") return;
+								event.preventDefault();
+								selectTab(tabs.at((next + tabs.length) % tabs.length)!);
+							}}
+						>
+							<svg
+								width='15'
+								height='15'
+								viewBox='0 0 24 24'
+								fill='none'
+								stroke='currentColor'
+								strokeWidth='1.75'
+								strokeLinecap='round'
+								strokeLinejoin='round'
+								aria-hidden='true'
+							>
+								<path d={tabIcons[name]} />
+							</svg>
+							{tabLabels[name]}
+						</button>
+					))}
+				</div>
 			</div>
 			{job?.resetError && (
 				<div className='ticket-recovery' role='alert'>
@@ -540,50 +636,9 @@ export const TicketDetails = ({
 					</button>
 				</div>
 			)}
-			<div role='tablist' aria-label='Ticket sections' className='section-tabs'>
-				{tabs.map((name, index) => (
-					<button
-						key={name}
-						type='button'
-						role='tab'
-						id={`${fieldId}-tab-${name}`}
-						aria-controls={`${fieldId}-panel-${name}`}
-						aria-selected={tab === name}
-						tabIndex={tab === name ? 0 : -1}
-						onClick={() => setTab(name)}
-						onKeyDown={(event) => {
-							const adjacent = {
-								ArrowLeft: index - 1,
-								ArrowRight: index + 1,
-								Home: 0,
-								End: tabs.length - 1,
-							};
-							const next = adjacent[event.key as keyof typeof adjacent];
-							if (typeof next !== "number") return;
-							event.preventDefault();
-							selectTab(tabs.at((next + tabs.length) % tabs.length)!);
-						}}
-					>
-						<svg
-							width='15'
-							height='15'
-							viewBox='0 0 24 24'
-							fill='none'
-							stroke='currentColor'
-							strokeWidth='1.75'
-							strokeLinecap='round'
-							strokeLinejoin='round'
-							aria-hidden='true'
-						>
-							<path d={tabIcons[name]} />
-						</svg>
-						{tabLabels[name]}
-					</button>
-				))}
-			</div>
-			{(scopeError || error || settingsError || moveError) && (
+			{(scopeError || error || settingsError) && (
 				<p role='alert' className='error'>
-					{scopeError || settingsError || moveError || error}
+					{scopeError || settingsError || error}
 				</p>
 			)}
 			{job?.state === "uncertain" && (
@@ -611,6 +666,16 @@ export const TicketDetails = ({
 				</button>
 			)}
 			<div className='ticket-fields' {...panel("details")}>
+				<div className='ticket-status-field'>
+					<span id={`${fieldId}-status`}>Status</span>
+					<span
+						role='group'
+						aria-labelledby={`${fieldId}-status`}
+						className={`ticket-status-pill ticket-status-${ticket.status}`}
+					>
+						{ticketLabels[ticket.status]}
+					</span>
+				</div>
 				<InlineTicketDescription
 					value={ticket.description}
 					draft={descriptionDraft}
@@ -688,7 +753,7 @@ export const TicketDetails = ({
 						draftKey={`ticket:${ticket.id}`}
 						drafts={drafts}
 						planText={!job?.implementerId ? plan?.text : undefined}
-						planAction={approvePlan}
+						planAction={approvePlan && <div className='ticket-chat-plan-actions'>{approvePlan}</div>}
 						prefix={
 							job?.implementerId && job.plannerId ? (
 								<>

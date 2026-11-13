@@ -194,7 +194,7 @@ export const TaskBoard = ({
 											<button
 												className='ticket-drag-handle'
 												aria-label={`Drag ${ticket.id}`}
-												title='Drag to move; open ticket for status menu'
+												title='Drag to move ticket'
 												disabled={busy}
 												onPointerDown={(event) => startDrag(event, ticket)}
 												onPointerMove={pointerMove}

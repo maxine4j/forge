@@ -27,11 +27,17 @@ Done. The corresponding API statuses are `backlog`, `todo`, `in-progress` and
 `done`. The bottom-left corner of each card shows its ticket icon and key,
 prefixed by the epic icon and key followed by a slash when the ticket belongs
 to an epic. Cards support pointer and touch reordering, edge scrolling and
-cancellation. Moving from Backlog to Ready for development is available by
-dragging or through the ticket's status menu.
+cancellation. Status transitions use the board's drag controls; ticket details
+shows a labelled, read-only Status pill at the top of Details instead of a status menu.
 Ready and In progress tickets offer **Return to backlog** beside Archive and Close.
-It executes without confirmation and keeps details open. Dragging and the keyboard
-status menu share eligibility: Ready can move to Backlog, and In progress can move
+The square circular-arrow action opens a confirmation titled “Return TASK-n to backlog?”.
+It explains that execution stops and the execution worktree and unmerged branch
+are removed while scope, settings and the latest saved plan are preserved.
+Cancel or Escape closes only the confirmation and restores focus to its trigger.
+Confirmation uses the move API, prevents duplicate submissions and becomes disabled
+if polling removes eligibility. Failures remain in the modal for retry; success
+keeps details open with cleanup progress. Archive retains its separate confirmation.
+Dragging shares eligibility: Ready can move to Backlog, and In progress can move
 to Backlog or Ready. These moves abandon execution through the existing move API.
 Identity, scope, ordered repositories, epic, settings and the latest saved plan
 survive; approval, feedback, candidate, retries and active execution references clear.
@@ -217,7 +223,10 @@ execution continues. The global board opens at `/tasks`; selection uses `/tasks?
 workflow, model options and cost load by ticket ID even outside active board
 membership. Removed repository ticket APIs return not-found. The ticket modal has keyboard-accessible Details, Chat and Cost
 tabs. Details shows the latest saved Markdown plan below Description, including
-after approval. Agent Settings places the repository picker below the model
+after approval. The tabs share a row with the live execution label on the right.
+The header epic link shows its icon and key, with the full title in its tooltip
+and membership picker. The larger ticket title aligns with the Details tab content.
+Agent Settings places the repository picker below the model
 controls. While a plan awaits approval, Details offers Approve plan and
 Request changes, which opens Chat. Chat opens by default once planning starts.
 One scroll container shows the planner conversation and native Markdown plan
@@ -225,6 +234,8 @@ revisions chronologically. Approve plan applies to the latest completed plan
 only while the workflow is idle;
 feedback queues a revision and disables approval until it finishes. The saved
 workflow revision remains the approval authority.
+Chat places Approve plan beneath the plan, aligned to the right edge of its
+message content, for both conversation plans and saved-plan fallback rendering.
 
 Successful approval inserts a persistent **Plan approved · Implementation** divider,
 with queued/setup status until the implementer starts. Planner history remains

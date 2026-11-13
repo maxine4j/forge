@@ -1209,8 +1209,7 @@
 	flex-direction: column;
 	gap: 8px;
 }
-.ticket-details-heading,
-.ticket-details-toolbar {
+.ticket-details-heading {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
@@ -1281,7 +1280,8 @@
 	flex: none;
 	color: #c6a6ff;
 }
-.ticket-status-select {
+.ticket-status-select,
+.ticket-status-pill {
 	position: relative;
 	margin-inline-start: 4px;
 	max-width: 100%;
@@ -1299,7 +1299,7 @@
 	color: #7ee787;
 }
 .epic-status,
-.ticket-status-select select {
+.ticket-status-pill {
 	max-width: 100%;
 	font-family: inherit;
 	font-size: 11px;
@@ -1310,23 +1310,16 @@
 .ticket-status-select.epic-status {
 	padding: 5px 8px;
 }
-.ticket-status-select select {
-	appearance: none;
-	field-sizing: content;
-	padding: 5px 23px 5px 8px;
-	border: 0;
-	border-radius: inherit;
-	background: transparent;
-	color: inherit;
-	cursor: pointer;
+.ticket-status-pill {
+	padding: 5px 8px;
+	margin: 0;
+	width: fit-content;
 }
-.ticket-status-select select:disabled {
-	opacity: 1;
-	cursor: default;
-}
-.ticket-status-select select option {
-	background: #21262d;
-	color: #e6edf3;
+.ticket-status-field {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-bottom: 8px;
 }
 .ticket-chevron {
 	display: inline-block;
@@ -1336,12 +1329,6 @@
 	border-right: 1.5px solid currentColor;
 	border-bottom: 1.5px solid currentColor;
 	transform: translateY(-2px) rotate(45deg);
-}
-.ticket-status-select .ticket-chevron {
-	position: absolute;
-	right: 9px;
-	top: calc(50% - 1px);
-	pointer-events: none;
 }
 .ticket-details-actions {
 	display: flex;
@@ -1411,9 +1398,51 @@
 .ticket-description-actions button[type="submit"] {
 	color: #7ee787;
 }
-.ticket-details-toolbar {
+.ticket-details .ticket-title,
+.ticket-details .ticket-title-editor input {
+	font-size: 22px;
+}
+.ticket-details .ticket-title button {
+	margin-inline-start: -7px;
+}
+.ticket-details .ticket-title {
+	margin-inline-start: 12px;
+}
+.ticket-details .ticket-title-editor {
+	margin-inline-start: 5px;
+}
+.ticket-details .ticket-title {
+	overflow-wrap: anywhere;
+}
+.ticket-details-actions .ticket-return-action {
+	width: 32px;
+	height: 32px;
+	min-height: 32px;
+	padding: 0;
+}
+.ticket-sections-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	flex-shrink: 0;
+	border-bottom: 1px solid #30363d;
+}
+.ticket-sections-row .section-tabs {
+	order: -1;
+	border-bottom: 0;
+}
+.ticket-sections-row > [role="status"] {
+	flex: 1;
+	min-width: 0;
+	text-align: right;
 	font-size: 12px;
+	overflow-wrap: anywhere;
+}
+.ticket-chat-plan-actions {
+	display: flex;
+	width: 100%;
 	justify-content: flex-end;
+	margin-top: 8px;
 }
 .section-tabs {
 	display: flex;
@@ -1618,6 +1647,16 @@ button.ticket-description-text:hover {
 	.ticket-details .ticket-title,
 	.ticket-title-editor input {
 		font-size: 16px;
+	}
+	.ticket-details .ticket-title,
+	.ticket-details .ticket-title-editor input {
+		font-size: 17.6px;
+	}
+	.ticket-details .ticket-title {
+		margin-inline-start: 10px;
+	}
+	.ticket-details .ticket-title-editor {
+		margin-inline-start: 3px;
 	}
 	.section-tabs > :is(button, a) {
 		padding: 5px 10px;
