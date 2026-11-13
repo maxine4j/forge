@@ -1,4 +1,5 @@
-import { agentOptionsSchema, agentSettingsSchema } from "@forge/contracts/agents";
+import { agentOptionsSchema } from "@forge/contracts/agents";
+import { ticketExecutionSettingsSchema } from "@forge/contracts/tickets";
 import {
 	createTicketSchema,
 	updateTicketSchema,
@@ -33,7 +34,7 @@ export class TicketRouter implements IHttpRouter {
 			ctx.body = agentOptionsSchema.parse(await this.workflow.options(ctx.state.actor, ctx.params["id"]!));
 		});
 		router.patch("/api/tickets/:id/settings", async (ctx) => {
-			const settings = agentSettingsSchema.safeParse(ctx.request.body);
+			const settings = ticketExecutionSettingsSchema.safeParse(ctx.request.body);
 			if (!settings.success) throw new TicketError("invalid-request");
 			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);
 			await this.workflow.settings(ctx.state.actor, ticket, settings.data);

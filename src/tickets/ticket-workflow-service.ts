@@ -1,10 +1,6 @@
 import { createLogger } from "@forge/backend-infrastructure/logger";
-import {
-	agentSettingsSchema,
-	resolveAgentSettings,
-	type AgentOptions,
-	type AgentSettings,
-} from "@forge/contracts/agents";
+import { resolveAgentSettings, type AgentOptions } from "@forge/contracts/agents";
+import { ticketExecutionSettingsSchema, type TicketExecutionSettings } from "@forge/contracts/tickets";
 import type { BoardSettings, Ticket, CreateTicket, MoveTicket, TicketWorkflow } from "@forge/contracts/tickets";
 
 import type { IAgentExecutionPool } from "../agents/agent-execution-pool.ts";
@@ -23,8 +19,8 @@ import type { TicketWorkflowRecord } from "./types.ts";
 export interface ITicketWorkflowService {
 	update(actor: Actor, id: string, input: CreateTicket): Promise<void>;
 	options(actor: Actor, ticketId?: string): Promise<AgentOptions>;
-	validateSettings(actor: Actor, settings: AgentSettings): Promise<void>;
-	settings(actor: Actor, ticket: Ticket, settings: AgentSettings): Promise<void>;
+	validateSettings(actor: Actor, settings: TicketExecutionSettings): Promise<void>;
+	settings(actor: Actor, ticket: Ticket, settings: TicketExecutionSettings): Promise<void>;
 	/** Archives between scheduler operations. Active or unresolved execution and pending merges conflict. */
 	archive(actor: Actor, ticket: Ticket, archivedAt: string): Promise<void>;
 	move(actor: Actor, ticket: Ticket, input: MoveTicket): Promise<void>;
@@ -54,16 +50,16 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			throw new TicketError("ticket-unavailable", { cause });
 		}
 	}
-	async validateSettings(actor: Actor, settings: AgentSettings): Promise<void> {
+	async validateSettings(actor: Actor, settings: TicketExecutionSettings): Promise<void> {
 		this.access.assertOwner(actor);
-		const parsed = agentSettingsSchema.safeParse(settings);
+		const parsed = ticketExecutionSettingsSchema.safeParse(settings);
 		if (!parsed.success) throw new TicketError("invalid-request");
 		const options = await this.options(actor);
 		if (!resolveAgentSettings(options, parsed.data).supported) throw new TicketError("unsupported-settings");
 	}
-	async settings(actor: Actor, ticket: Ticket, settings: AgentSettings): Promise<void> {
+	async settings(actor: Actor, ticket: Ticket, settings: TicketExecutionSettings): Promise<void> {
 		this.access.assertOwner(actor);
-		const parsed = agentSettingsSchema.safeParse(settings);
+		const parsed = ticketExecutionSettingsSchema.safeParse(settings);
 		if (!parsed.success) throw new TicketError("invalid-request");
 		await this.serialize(async () => {
 			const current = await this.tickets.get(ticket.id);
@@ -142,7 +138,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				await this.store.save(
 					{
 						...job,
-						phase: job.plan ? "implementation" : "planning",
+						phase: this.initialPhase(current, job),
 						approvedRevision: job.plan?.revision,
 						state: "queued",
 					},
@@ -170,7 +166,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				const next: TicketWorkflowRecord = {
 					ticketId: job.ticketId,
 					plan: job.plan,
-					phase: !hasResources && input.status === "todo" && job.plan ? "implementation" : "planning",
+					phase: input.status === "todo" ? this.initialPhase(current, job) : "planning",
 					mergeAttempts: 0,
 					approvedRevision: !hasResources && input.status === "todo" ? job.plan?.revision : undefined,
 					state: hasResources ? "resetting" : input.status === "todo" ? "queued" : "idle",
@@ -424,7 +420,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 					ticketId: job.ticketId,
 					plan: job.plan,
 					mergeAttempts: 0,
-					phase: ready && job.plan ? "implementation" : "planning",
+					phase: ready && ticket ? this.initialPhase(ticket, job) : "planning",
 					approvedRevision: ready ? job.plan?.revision : undefined,
 					state: ready ? "queued" : "idle",
 				});
@@ -463,6 +459,10 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	private async dispatch(actor: Actor, ticket: Ticket, job: TicketWorkflowRecord): Promise<void> {
 		const current = await this.tickets.get(ticket.id);
 		if (!current || current.archivedAt) throw new TicketError("ticket-conflict");
+		if (!job.plannerId && !job.implementerId) {
+			job.phase = this.initialPhase(current, job);
+			job.approvedRevision = job.plan?.revision;
+		}
 		const repositoryId = job.executionRepositoryId ?? current.repositoryIds[0];
 		if (!repositoryId) throw new TicketError("ticket-conflict");
 		await this.requireExecutionRepository(actor, repositoryId);
@@ -470,7 +470,8 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			job.executionRepositoryId = repositoryId;
 			await this.store.save(job);
 		}
-		const settings = current.executionSettings;
+		const { model, reasoningEffort, permissions } = current.executionSettings ?? {};
+		const settings = { model, reasoningEffort, permissions };
 		const planning = job.phase === "planning";
 		let id = planning ? job.plannerId : job.implementerId;
 		let releaseReservation = false;
@@ -507,7 +508,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			const view = await this.agents.dispatch(
 				actor,
 				id,
-				this.prompts.build(ticket, job),
+				this.prompts.build(current, job),
 				{ ticketId: ticket.id, phase: job.phase },
 				() => this.canDispatch(ticket),
 				settings,
@@ -521,6 +522,9 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		} finally {
 			this.settingUp.delete(ticket.id);
 		}
+	}
+	private initialPhase(ticket: Ticket, job: TicketWorkflowRecord): "planning" | "implementation" {
+		return job.plan || ticket.executionSettings?.skipPlanning ? "implementation" : "planning";
 	}
 	private async observe(actor: Actor, job: TicketWorkflowRecord): Promise<void> {
 		const id = job.phase === "planning" ? job.plannerId : job.implementerId;

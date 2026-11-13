@@ -76,7 +76,8 @@ plan without another planning or approval turn. **Clear plan** appears beside a
 saved plan only on non-archived Backlog tickets. Owner-only
 `POST /api/tickets/:id/clear-plan` returns the updated workflow and idempotently
 clears the plan and approval after cleanup, preserving scope and usage. Restarting
-after clearing begins fresh planning from the current scope. Abandoned threads and
+after clearing uses the current scope, starting implementation when Skip planning
+is enabled and planning otherwise. Abandoned threads and
 worktrees are never reused. See [ticket cancellation](agents.md#ticket-cancellation).
 
 Tickets belong to the global board, independently of repositories. SQLite allocates
@@ -173,8 +174,11 @@ after the stop request.
 
 The planner receives a short ticket instruction and uses native Codex Plan mode
 for every turn. Forge saves completed plan items as numbered revisions. Followup
-messages contain the owner's text alone. The implementer receives the approved
-plan once, with an instruction to implement and commit on the worktree branch.
+messages contain the owner's text, plus recommendation guidance when enabled.
+The implementer receives the saved plan once, or the current ticket ID, title and
+description when Skip planning starts implementation without a plan, with an
+instruction to implement and commit on the worktree branch. No plan or approved
+revision is fabricated for direct implementation.
 The owner can add separate planning and implementation instructions in
 [Config](foundation.md#forge-settings). Forge includes them in the respective
 initial prompts when starting a ticket-agent conversation.
@@ -231,7 +235,7 @@ The header epic link shows its icon and key, with the full title in its tooltip
 and membership picker. The larger ticket title aligns with the Details tab content.
 Agent Settings places the repository picker below the model
 controls. While a plan awaits approval, Details offers Approve plan and
-Request changes, which opens Chat. Chat opens by default once planning starts.
+Request changes, which opens Chat. Chat opens by default once execution starts.
 One scroll container shows the planner conversation and native Markdown plan
 revisions chronologically. Approve plan applies to the latest completed plan
 only while the workflow is idle;
@@ -243,7 +247,8 @@ message content, for both conversation plans and saved-plan fallback rendering.
 Successful approval inserts a persistent **Plan approved · Implementation** divider,
 with queued/setup status until the implementer starts. Planner history remains
 above it and implementer history appears below it. Codex owns separate threads in
-the same worktree; the fresh implementer receives only the approved plan.
+the same worktree; the fresh implementer receives the saved plan. Direct
+implementation can start without planner history or a plan approval divider.
 Historical requests are inactive. Only the current agent exposes reply and
 interruption controls. Completed tickets and preview fixtures are read-only.
 During an active turn, the composer button interrupts when the draft is empty or
@@ -374,7 +379,10 @@ ticket cleanup.
 
 ### Ticket execution settings
 
-Tickets accept optional `executionSettings: {model?, reasoningEffort?, permissions?}`
+Tickets use the exported `TicketExecutionSettings` type and
+`ticketExecutionSettingsSchema`, extending agent settings with optional boolean
+`skipPlanning` and `acceptRecommendations`. Missing flags mean false.
+Tickets accept optional `executionSettings: {model?, reasoningEffort?, permissions?, skipPlanning?, acceptRecommendations?}`
 on creation and return the saved selection on reads. Owner-authorized
 `PATCH /api/tickets/:id/settings` replaces that selection independently of Backlog
 scope editing, with exact-origin checks. The title above the ticket tabs saves
@@ -383,11 +391,29 @@ The floating controls save or discard the draft, and Escape discards it.
 Repository selection in Agent Settings saves immediately in selection order.
 Model, thinking and permissions are shared with the chat composer. Changes save immediately and
 remain shared across polling, reopening and planner-to-implementer transitions.
-Done and archived tickets retain their settings but cannot change them.
+Two independent checkboxes beneath the repository picker save immediately:
+**Skip planning** starts implementation with a saved plan when available or the
+current scope otherwise. **Accept recommendations** instructs every dispatched
+ticket turn, including feedback and rebase, to choose the recommended
+option, make reasonable assumptions and continue without preference or
+clarification questions. Manual plan approval and tool permissions still apply.
+Controls are disabled while saving, resetting, Done or archived; failures show the
+existing save error. Details and Chat updates preserve all five settings.
+Both flags persist in the existing executionSettings JSON column; existing records
+need no database migration. Standalone chat settings remain unchanged.
+
+Initial phase selection uses implementation when a saved plan exists or Skip
+planning is enabled, and planning otherwise. Selection runs under workflow
+serialization on entering Ready, after abandonment and immediately before initial
+agent setup. Once a planner or implementer exists, the phase is locked for that
+execution. Changing Skip planning then affects the next fresh execution and does
+not approve a pending plan or interrupt work.
 
 One selection applies across planning, implementation, feedback and rebase turns.
-The workflow snapshots it under dispatch coordination. Changes during execution
-apply on the next turn. Unset fields inherit the [Forge defaults](agents.md#interactive-agents)
+The workflow snapshots it and builds prompts from the same current ticket under
+dispatch coordination. Changes during execution apply on the next turn, except
+for the locked initial phase. Only model, reasoning effort and permissions reach
+the agent runtime. Unset fields inherit the [Forge defaults](agents.md#interactive-agents)
 on the next turn. Each planner and implementer pins the global provider when its
 record is created. Clarifications, follow-ups and rebase use their existing
 agent's provider. Explicit selections are validated against that provider at

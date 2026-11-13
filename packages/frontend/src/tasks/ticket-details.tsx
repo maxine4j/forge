@@ -1,10 +1,5 @@
 import type { AgentView } from "@forge/contracts/agents";
-import {
-	agentOptionsSchema,
-	resolveAgentSettings,
-	type AgentOptions,
-	type AgentSettings,
-} from "@forge/contracts/agents";
+import { agentOptionsSchema, resolveAgentSettings, type AgentOptions } from "@forge/contracts/agents";
 import { updateTicketSchema, ticketSchema } from "@forge/contracts/tickets";
 import {
 	ticketWorkflowSchema,
@@ -12,6 +7,7 @@ import {
 	type MoveTicket,
 	type TicketWorkflow,
 	type EpicSummary,
+	type TicketExecutionSettings,
 } from "@forge/contracts/tickets";
 import { useContext, useEffect, useRef, useState, useId } from "react";
 
@@ -196,12 +192,13 @@ export const TicketDetails = ({
 	};
 	const settingsKey = JSON.stringify(ticket.executionSettings);
 	const [observedSettings, setObservedSettings] = useState(settingsKey);
-	const [savedSettings, setSavedSettings] = useState<AgentSettings>();
+	const [savedSettings, setSavedSettings] = useState<TicketExecutionSettings>();
+	const [pendingSettings, setPendingSettings] = useState<TicketExecutionSettings>();
 	if (observedSettings !== settingsKey) {
 		setObservedSettings(settingsKey);
 		setSavedSettings(undefined);
 	}
-	const settings = savedSettings ?? ticket.executionSettings ?? {};
+	const settings = pendingSettings ?? savedSettings ?? ticket.executionSettings ?? {};
 	const [error, setError] = useState("");
 	const [moveError, setMoveError] = useState("");
 	const [options, setOptions] = useState<AgentOptions>();
@@ -222,12 +219,15 @@ export const TicketDetails = ({
 			current = false;
 		};
 	}, [api, ticket.id, job?.phase, job?.plannerId, job?.implementerId, optionsRevision]);
-	const changeSettings = (value: AgentSettings) => {
-		if (archived || savingSettings) return;
+	const settingsDisabled = archived || savingSettings || !!resetting || ticket.status === "done";
+	const changeSettings = (value: TicketExecutionSettings) => {
+		if (settingsDisabled) return;
+		const next = { ...settings, ...value };
 		setSettingsError("");
 		setSavingSettings(true);
+		setPendingSettings(next);
 		void api
-			.read(`tickets/${ticket.id}/settings`, ticketSchema, "PATCH", value)
+			.read(`tickets/${ticket.id}/settings`, ticketSchema, "PATCH", next)
 			.then((updated) => {
 				setSavedSettings(updated.executionSettings ?? {});
 				refreshBoard();
@@ -235,7 +235,10 @@ export const TicketDetails = ({
 			.catch((err: unknown) =>
 				setSettingsError(err instanceof Error ? err.message : "Cannot save execution settings."),
 			)
-			.finally(() => setSavingSettings(false));
+			.finally(() => {
+				setPendingSettings(undefined);
+				setSavingSettings(false);
+			});
 	};
 	const [archiveError, setArchiveError] = useState("");
 	const [refresh] = useState(() => () => poller.current?.refresh());
@@ -718,7 +721,7 @@ export const TicketDetails = ({
 						settings={settings}
 						options={options}
 						change={changeSettings}
-						disabled={archived || savingSettings || !!resetting || ticket.status === "done"}
+						disabled={settingsDisabled}
 					/>
 					<RepositorySelection
 						api={api}
@@ -726,8 +729,36 @@ export const TicketDetails = ({
 						change={(ids) => void changeRepositories(ids)}
 						disabled={!editable || busy}
 					/>
+					{(
+						[
+							[
+								"skipPlanning",
+								"Skip planning",
+								"Start implementation directly, using a saved plan or the current ticket scope.",
+							],
+							[
+								"acceptRecommendations",
+								"Accept recommendations",
+								"Let the agent choose its recommended approach without preference or clarification questions. Plan approval and tool permissions still apply.",
+							],
+						] as const
+					).map(([key, label, description]) => (
+						<div key={key} className='ticket-execution-flag'>
+							<label>
+								<input
+									type='checkbox'
+									checked={settings[key] ?? false}
+									disabled={settingsDisabled}
+									aria-describedby={`${fieldId}-${key}`}
+									onChange={(event) => changeSettings({ [key]: event.target.checked })}
+								/>
+								{label}
+							</label>
+							<p id={`${fieldId}-${key}`}>{description}</p>
+						</div>
+					))}
 				</fieldset>
-				{ticket.status !== "backlog" && <p>Scope is fixed after planning starts. Discuss changes in chat.</p>}
+				{ticket.status !== "backlog" && <p>Scope is fixed after execution starts. Discuss changes in chat.</p>}
 			</div>
 			<div className='ticket-chat' {...panel("chat")}>
 				{currentId ? (
@@ -742,7 +773,7 @@ export const TicketDetails = ({
 						messagePath={`tickets/${ticket.id}/messages`}
 						executionSettings={settings}
 						settingsChanged={changeSettings}
-						settingsDisabled={archived || savingSettings}
+						settingsDisabled={settingsDisabled}
 						blocked={blocked || savingSettings}
 						steer={steering}
 						readOnly={
@@ -781,7 +812,7 @@ export const TicketDetails = ({
 						{ticket.status === "backlog"
 							? plan
 								? "Move this ticket to Ready for development to implement the saved plan."
-								: "Move this ticket to Ready for development to queue planning."
+								: "Move this ticket to Ready for development to queue execution."
 							: "Waiting for a ticket agent to start."}
 					</p>
 				)}

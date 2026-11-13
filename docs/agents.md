@@ -2,6 +2,13 @@
 
 ## Ticket cancellation
 
+Ticket-only [execution settings](tickets.md#ticket-execution-settings) can skip
+planning or request recommended choices without clarification questions.
+Direct implementation receives current ticket scope when there is no saved plan.
+Recommendation guidance applies to every ticket turn while preserving manual
+plan approval and tool permission mode. These flags stay in ticket orchestration;
+standalone chats and runtime model, effort and permission settings are unchanged.
+
 [Returning a ticket](tickets.md#abandonment-and-restart) records durable abandonment
 before requesting ticket-scoped cancellation through the injected agent interface.
 Only the recorded managed planner and implementer are interrupted; unrelated
@@ -26,7 +33,8 @@ reviews; Codex owns model interaction, tools, agent execution, and conversations
 - Map executions to worktrees, branches, Codex thread IDs, active turn IDs, and
   execution status. Ticket planning agents retain their conversation through
   clarification and plan feedback; implementation starts a fresh conversation in
-  the same ticket worktree, carrying only the approved plan and execution skill. Keep [ticket orchestration](tickets.md#agentic-ticket-board) outside the
+  the same ticket worktree, carrying the saved plan or current ticket scope for
+  direct implementation. Keep [ticket orchestration](tickets.md#agentic-ticket-board) outside the
   Codex execution adapter.
 - Persist important normalized activity and approval state for browser reconnects.
   Reconcile actual Codex state after app-server or application restart before

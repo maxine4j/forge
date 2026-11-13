@@ -11,6 +11,77 @@ import { TicketWorkflowService } from "./ticket-workflow-service.ts";
 import type { TicketWorkflowRecord } from "./types.ts";
 
 const actor = { username: "owner" };
+
+test("queued settings select direct implementation and recovery never dispatches twice", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.move(actor, ticket, { status: "todo" });
+	expect(f.jobs.get(ticket.id)?.phase).toBe("planning");
+	await f.service.settings(actor, ticket, { skipPlanning: true, acceptRecommendations: true, permissions: "ask" });
+	await f.service.tick(actor);
+	const job = f.jobs.get(ticket.id)!;
+	expect(job).toMatchObject({ phase: "implementation", state: "running" });
+	expect(job.plannerId).toBeUndefined();
+	expect(job.approvedRevision).toBeUndefined();
+	expect(job.plan).toBeUndefined();
+	expect(f.agents.dispatch.mock.calls[0]?.[2]).toContain("TASK-1 Add search");
+	expect(f.agents.dispatch.mock.calls[0]?.[2]).toContain("Choose the recommended option");
+	expect(f.agents.dispatch.mock.calls[0]?.[5]).toEqual({
+		model: undefined,
+		reasoningEffort: undefined,
+		permissions: "ask",
+	});
+	await f.service.settings(actor, ticket, {});
+	await f.service.recover(actor);
+	await f.service.tick(actor);
+	expect(f.agents.dispatch).toHaveBeenCalledTimes(1);
+	expect(f.jobs.get(ticket.id)?.phase).toBe("implementation");
+});
+
+test("skip planning never approves an existing planner and restart uses the current settings", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	await f.service.settings(actor, ticket, { skipPlanning: true });
+	f.complete(f.jobs.get(ticket.id)!.plannerId!, "Saved plan");
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)).toMatchObject({ phase: "planning", state: "idle" });
+	expect(f.jobs.get(ticket.id)?.approvedRevision).toBeUndefined();
+	await f.service.move(actor, ticket, { status: "backlog" });
+	await f.service.recover(actor, ticket.id);
+	await f.service.clearPlan(actor, ticket);
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)).toMatchObject({ phase: "implementation", state: "running" });
+	expect(f.jobs.get(ticket.id)?.plannerId).toBeUndefined();
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).not.toContain("approved plan");
+});
+
+test("recommendations use current settings on the next feedback and rebase turns", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.settings(actor, ticket, { skipPlanning: true });
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	await f.service.settings(actor, ticket, { skipPlanning: false, acceptRecommendations: true });
+	const job = f.jobs.get(ticket.id)!;
+	await f.service.message(actor, ticket, "Adjust scope", job.turnId);
+	expect(f.agents.steer.mock.calls[0]?.[3]).toBe("Adjust scope");
+	f.views.get(job.implementerId!)!.thread.status = "failed";
+	f.pool.observe(job.implementerId!, "failed");
+	await f.service.tick(actor);
+	await f.service.message(actor, ticket, "Try again");
+	await f.service.tick(actor);
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Try again\n\nChoose the recommended option");
+	f.merges.merge.mockResolvedValue("rebase");
+	f.complete(job.implementerId!);
+	await f.service.tick(actor);
+	await f.service.tick(actor);
+	await f.service.tick(actor);
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Rebase this branch");
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Choose the recommended option");
+});
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => {
 	const jobs = new Map<string, TicketWorkflowRecord>();

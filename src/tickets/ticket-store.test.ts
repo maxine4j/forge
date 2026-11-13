@@ -42,6 +42,8 @@ test("SQLite allocates global sequential ticket keys, preserves global order and
 	await store.move(b.id, { status: "done" });
 	await store.update(a.id, { title: "Edited", description: "Updated" });
 	await store.updateSettings(a.id, {
+		skipPlanning: true,
+		acceptRecommendations: true,
 		model: "catalog-model",
 		reasoningEffort: "high",
 		permissions: "approve-for-me",
@@ -55,6 +57,8 @@ test("SQLite allocates global sequential ticket keys, preserves global order and
 	expect(await persisted.get(b.id)).toMatchObject({ status: "done", repositoryIds: [projectId] });
 	expect(await persisted.get(a.id)).toMatchObject({ title: "Edited", description: "Updated", status: "backlog" });
 	expect((await persisted.get(a.id))?.executionSettings).toEqual({
+		skipPlanning: true,
+		acceptRecommendations: true,
 		model: "catalog-model",
 		reasoningEffort: "high",
 		permissions: "approve-for-me",

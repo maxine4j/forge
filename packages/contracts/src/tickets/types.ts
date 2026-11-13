@@ -2,7 +2,7 @@ export type TicketStatus = "backlog" | "todo" | "in-progress" | "done";
 export interface CreateTicket {
 	epicId?: string | null;
 	repositoryIds?: string[];
-	executionSettings?: import("../agents/types.ts").AgentSettings;
+	executionSettings?: import("./index.ts").TicketExecutionSettings;
 	title: string;
 	description: string;
 }

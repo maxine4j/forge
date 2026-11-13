@@ -1613,6 +1613,25 @@
 .ticket-agent-settings .ticket-repositories {
 	margin: 10px 0 0;
 }
+.ticket-execution-flag {
+	margin-top: 12px;
+}
+.ticket-agent-settings .ticket-execution-flag label {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin: 0;
+}
+.ticket-agent-settings .ticket-execution-flag input[type="checkbox"] {
+	width: auto;
+	margin: 0;
+	padding: 0;
+}
+.ticket-execution-flag p {
+	margin: 4px 0 0;
+	color: #8b949e;
+	font-size: 12px;
+}
 .ticket-description-edit {
 	position: relative;
 }

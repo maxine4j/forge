@@ -42,4 +42,22 @@ test("initial phase prompts include only the scope needed for that phase and fol
 	expect(configured.build(ticket, { ...job, phase: "rebase" })).toBe(
 		prompts.build(ticket, { ...job, phase: "rebase" }),
 	);
+	const direct = configured.build(ticket, { ...job, phase: "implementation" });
+	expect(direct).toContain("TASK-1 Search files");
+	expect(direct).toContain("Filter by extension.");
+	expect(direct).toContain("Run focused tests.");
+	expect(direct).toContain("commit the changes on this worktree branch");
+	expect(direct).not.toContain("approved plan");
+	for (const phase of ["planning", "implementation", "rebase"] as const) {
+		for (const message of [undefined, "Owner feedback"]) {
+			const recommended = configured.build(
+				{ ...ticket, executionSettings: { acceptRecommendations: true } },
+				{ ...job, phase, message },
+			);
+			expect(recommended).toContain("Choose the recommended option");
+			expect(recommended).toContain("without asking the owner preference or clarification questions");
+			expect(recommended).toContain("Retain manual plan approval and the selected tool permission mode");
+			if (message) expect(recommended).toMatch(/^Owner feedback/);
+		}
+	}
 });

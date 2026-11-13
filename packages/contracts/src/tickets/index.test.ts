@@ -1,6 +1,29 @@
 import { expect, test } from "vitest";
 
-import { createTicketSchema, updateTicketSchema, moveTicketSchema, ticketSchema, ticketStatuses } from "./index.ts";
+import {
+	createTicketSchema,
+	updateTicketSchema,
+	moveTicketSchema,
+	ticketSchema,
+	ticketStatuses,
+	ticketExecutionSettingsSchema,
+} from "./index.ts";
+
+test("ticket-only flags are optional booleans with omitted values off", () => {
+	const omitted = ticketExecutionSettingsSchema.parse({});
+	expect(omitted.skipPlanning ?? false).toBe(false);
+	expect(omitted.acceptRecommendations ?? false).toBe(false);
+	for (const key of ["skipPlanning", "acceptRecommendations"]) {
+		for (const value of ["true", 1, null])
+			expect(ticketExecutionSettingsSchema.safeParse({ [key]: value }).success).toBe(false);
+	}
+	expect(
+		createTicketSchema.parse({
+			title: "Direct",
+			executionSettings: { skipPlanning: true, acceptRecommendations: false },
+		}).executionSettings,
+	).toEqual({ skipPlanning: true, acceptRecommendations: false });
+});
 
 test("return capability is optional and only true when supplied", () => {
 	const ticket = {

@@ -47,7 +47,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		status: string;
 		createdAt: string;
 		archivedAt?: string;
-		executionSettings?: import("@forge/contracts/agents").AgentSettings;
+		executionSettings?: import("@forge/contracts/tickets").TicketExecutionSettings;
 		needsAttention?: true;
 		agentStatus?: "queued" | "working";
 		canReturnToBacklog?: true;
@@ -1358,6 +1358,20 @@ test("Backlog execution settings save before moving to Ready and survive reopeni
 	const open = page.getByRole("button", { name: "TASK-1 First task", exact: true });
 	await open.click();
 	const panel = page.getByRole("dialog");
+	const skip = panel.getByRole("checkbox", { name: "Skip planning", exact: true });
+	const recommendations = panel.getByRole("checkbox", { name: "Accept recommendations", exact: true });
+	await expect(skip).not.toBeChecked();
+	await expect(recommendations).not.toBeChecked();
+	await skip.check();
+	await expect(skip).toBeEnabled();
+	await expect(recommendations).not.toBeChecked();
+	await recommendations.check();
+	await expect(recommendations).toBeEnabled();
+	await skip.uncheck();
+	await expect(skip).toBeEnabled();
+	await expect(recommendations).toBeChecked();
+	await skip.check();
+	await expect(skip).toBeEnabled();
 	await panel.getByRole("combobox", { name: "Model", exact: true }).selectOption("test-model");
 	await panel.getByRole("combobox", { name: "Thinking level", exact: true }).selectOption("high");
 	await panel.getByRole("combobox", { name: "Permissions", exact: true }).selectOption("approve-for-me");
@@ -1366,6 +1380,8 @@ test("Backlog execution settings save before moving to Ready and survive reopeni
 	await open.click();
 	await expect(panel.getByRole("combobox", { name: "Model", exact: true })).toHaveValue("test-model");
 	await expect(panel.getByRole("combobox", { name: "Thinking level", exact: true })).toHaveValue("high");
+	await expect(skip).toBeChecked();
+	await expect(recommendations).toBeChecked();
 });
 
 test("ticket Details and chat share settings and support skill and file completion", async ({ page }) => {
@@ -1375,10 +1391,16 @@ test("ticket Details and chat share settings and support skill and file completi
 	await expect(panel.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
 	await panel.getByRole("combobox", { name: "Thinking level", exact: true }).selectOption("high");
 	await panel.getByRole("tab", { name: "Details", exact: true }).click();
+	await panel.getByRole("checkbox", { name: "Skip planning", exact: true }).check();
+	await expect(panel.getByRole("checkbox", { name: "Skip planning", exact: true })).toBeEnabled();
+	await panel.getByRole("checkbox", { name: "Accept recommendations", exact: true }).check();
+	await expect(panel.getByRole("checkbox", { name: "Accept recommendations", exact: true })).toBeEnabled();
 	await expect(panel.getByRole("combobox", { name: "Thinking level", exact: true })).toHaveValue("high");
 	await panel.getByRole("combobox", { name: "Model", exact: true }).selectOption("other-model");
 	await panel.getByRole("tab", { name: "Chat", exact: true }).click();
 	await expect(panel.getByRole("combobox", { name: "Thinking level", exact: true })).toHaveValue("");
+	await panel.getByRole("combobox", { name: "Permissions", exact: true }).selectOption("full-access");
+	await expect(panel.getByRole("combobox", { name: "Permissions", exact: true })).toBeEnabled();
 	const message = panel.getByRole("textbox", { name: "Message", exact: true });
 	await message.fill("Use $rev");
 	await panel.getByRole("option", { name: /review.*Review changes/ }).click();
@@ -1401,8 +1423,51 @@ test("ticket Details and chat share settings and support skill and file completi
 	await expect(panel.getByRole("alert")).toContainText("selected model or thinking level is unavailable");
 	await expect(message).toHaveValue("Use $review @src/main.ts ");
 	await panel.getByRole("tab", { name: "Details", exact: true }).click();
+	await expect(panel.getByRole("checkbox", { name: "Skip planning", exact: true })).toBeChecked();
+	await expect(panel.getByRole("checkbox", { name: "Accept recommendations", exact: true })).toBeChecked();
 	await panel.getByRole("tab", { name: "Chat", exact: true }).click();
 	await expect(message).toHaveValue("Use $review @src/main.ts ");
+});
+
+test("ticket flags retain saved values on failure and disable during saving and settled states", async ({ page }) => {
+	const fixture = await setup(page);
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const panel = page.getByRole("dialog");
+	const skip = panel.getByRole("checkbox", { name: "Skip planning", exact: true });
+	const recommendations = panel.getByRole("checkbox", { name: "Accept recommendations", exact: true });
+	let release = () => {};
+	const pending = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	await page.route("**/api/tickets/TASK-1/settings", async (route) => {
+		await pending;
+		await route.fulfill({ status: 503, json: { error: "ticket-unavailable" } });
+	});
+	await skip.click();
+	await expect(skip).toBeDisabled();
+	await expect(recommendations).toBeDisabled();
+	release();
+	await expect(panel.getByRole("alert")).toBeVisible();
+	await expect(skip).toBeEnabled();
+	await expect(skip).not.toBeChecked();
+	await expect(recommendations).not.toBeChecked();
+	await page.unroute("**/api/tickets/TASK-1/settings");
+	await recommendations.check();
+	await expect(recommendations).toBeEnabled();
+	const ticket = fixture.tickets()[0]!;
+	ticket.resetting = true;
+	await expect(skip).toBeDisabled();
+	await expect(recommendations).toBeDisabled();
+	delete ticket.resetting;
+	ticket.status = "done";
+	await expect(skip).toBeDisabled();
+	await expect(recommendations).toBeDisabled();
+	ticket.archivedAt = createdAt;
+	ticket.status = "backlog";
+	await expect(panel.getByText("Archived · Read only", { exact: true })).toBeVisible();
+	await expect(skip).toBeDisabled();
+	await expect(recommendations).toBeDisabled();
+	await expect(recommendations).toBeChecked();
 });
 
 test("ticket archive requires confirmation and removes the card only after success", async ({ page }) => {

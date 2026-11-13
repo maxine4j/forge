@@ -142,6 +142,7 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		title: "First",
 		description: "Scope",
 		repositoryIds: [projectId],
+		executionSettings: { skipPlanning: false, acceptRecommendations: false },
 	});
 	expect(created.status).toBe(201);
 	const ticket = await created.json();
@@ -158,10 +159,16 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	).toBe(200);
 	const moved = await request(`tickets/${ticket.id}/move`, "POST", { status: "todo" });
 	expect(await moved.json()).toMatchObject({ title: "Edited", status: "todo" });
-	expect((await request(`tickets/${ticket.id}/settings`, "PATCH", { permissions: "full-access" })).status).toBe(200);
+	const executionSettings = { permissions: "full-access", skipPlanning: false, acceptRecommendations: true };
+	expect((await request(`tickets/${ticket.id}/settings`, "PATCH", executionSettings)).status).toBe(200);
 	expect((await (await request(`tickets/${ticket.id}`)).json()).executionSettings).toEqual({
 		permissions: "full-access",
+		skipPlanning: false,
+		acceptRecommendations: true,
 	});
+	for (const key of ["skipPlanning", "acceptRecommendations"]) {
+		expect((await request(`tickets/${ticket.id}/settings`, "PATCH", { [key]: "true" })).status).toBe(400);
+	}
 	expect((await request(`tickets/${ticket.id}/settings`, "PATCH", { model: "invented" })).status).toBe(400);
 	expect((await request(`tickets/${ticket.id}/settings`, "PATCH", { reasoningEffort: "invented" })).status).toBe(400);
 	expect(await (await request(`tickets/${ticket.id}/workflow`)).json()).toMatchObject({
@@ -195,7 +202,7 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		title: "Edited",
 		description: "New scope",
 		repositoryIds: [projectId],
-		executionSettings: { permissions: "full-access" },
+		executionSettings,
 	});
 	await request(`tickets/${ticket.id}/move`, "POST", { status: "todo" });
 	await store.archive(destination.id, "2026-11-03T00:00:00.000Z");

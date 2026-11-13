@@ -1,4 +1,4 @@
-import { agentSettingsSchema, type AgentSettings } from "@forge/contracts/agents";
+import { ticketExecutionSettingsSchema, type TicketExecutionSettings } from "@forge/contracts/tickets";
 import {
 	createTicketSchema,
 	ticketSchema,
@@ -20,7 +20,7 @@ const rowSchema = ticketSchema.extend({
 	executionSettings: z
 		.string()
 		.nullable()
-		.transform((value) => (value === null ? undefined : agentSettingsSchema.parse(JSON.parse(value)))),
+		.transform((value) => (value === null ? undefined : ticketExecutionSettingsSchema.parse(JSON.parse(value)))),
 	archivedAt: ticketSchema.shape.archivedAt.nullable(),
 });
 const decode = (row: unknown): Ticket => {
@@ -47,7 +47,7 @@ const associations = (id: string, ids: string[]): SqlStatement[] => [
 	},
 ];
 export interface ITicketStore {
-	updateSettings(id: string, settings: AgentSettings): Promise<void>;
+	updateSettings(id: string, settings: TicketExecutionSettings): Promise<void>;
 	/** Allocates an immutable global key; at most 1000 active tickets on the board. */
 	insert(input: CreateTicket, createdAt: string): Promise<Ticket>;
 	get(id: string): Promise<Ticket | undefined>;
@@ -168,11 +168,11 @@ export class TicketStore implements ITicketStore {
 			]);
 		});
 	}
-	async updateSettings(id: string, settings: AgentSettings): Promise<void> {
+	async updateSettings(id: string, settings: TicketExecutionSettings): Promise<void> {
 		await this.guard(async () => {
 			if (
 				(await this.database.run("UPDATE tickets SET executionSettings=? WHERE id=?", [
-					JSON.stringify(agentSettingsSchema.parse(settings)),
+					JSON.stringify(ticketExecutionSettingsSchema.parse(settings)),
 					id,
 				])) !== 1
 			)

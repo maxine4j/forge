@@ -2,6 +2,12 @@ import { z } from "zod";
 
 import { agentSettingsSchema } from "../agents/index.ts";
 
+export const ticketExecutionSettingsSchema = agentSettingsSchema.extend({
+	skipPlanning: z.boolean().optional(),
+	acceptRecommendations: z.boolean().optional(),
+});
+export type TicketExecutionSettings = z.infer<typeof ticketExecutionSettingsSchema>;
+
 export const ticketStatuses = ["backlog", "todo", "in-progress", "done"] as const;
 export const ticketStatusSchema = z.enum(ticketStatuses);
 export const ticketIdSchema = z.string().regex(/^TASK-[1-9]\d{0,14}$/u);
@@ -13,7 +19,7 @@ export const repositoryIdsSchema = z
 export const createTicketSchema = z.strictObject({
 	epicId: epicIdSchema.nullable().optional(),
 	repositoryIds: repositoryIdsSchema.default([]),
-	executionSettings: agentSettingsSchema.optional(),
+	executionSettings: ticketExecutionSettingsSchema.optional(),
 	title: z.string().trim().min(1).max(120),
 	description: z.string().max(4000).default(""),
 });
@@ -26,7 +32,7 @@ export const ticketMessageSchema = z.strictObject({
 });
 export const ticketSchema = z.strictObject({
 	epicId: epicIdSchema.nullable().optional(),
-	executionSettings: agentSettingsSchema.optional(),
+	executionSettings: ticketExecutionSettingsSchema.optional(),
 	id: ticketIdSchema,
 	repositoryIds: repositoryIdsSchema,
 	title: z.string().min(1).max(120),
