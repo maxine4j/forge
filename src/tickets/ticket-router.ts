@@ -12,11 +12,13 @@ import {
 	ticketHistoryQuerySchema,
 	ticketHistorySchema,
 } from "@forge/contracts/tickets";
+import { ticketNotificationsSchema } from "@forge/contracts/tickets";
 import Router from "@koa/router";
 
 import type { Actor } from "../auth/types.ts";
 import type { IHttpRouter } from "../http/http-application.ts";
 import { TicketError } from "./errors.ts";
+import type { NotificationService } from "./notification-service.ts";
 import type { TicketHistoryStore } from "./ticket-history-store.ts";
 import type { ITicketService } from "./ticket-service.ts";
 import type { ITicketWorkflowService } from "./ticket-workflow-service.ts";
@@ -26,9 +28,14 @@ export class TicketRouter implements IHttpRouter {
 		private readonly service: ITicketService,
 		private readonly workflow: ITicketWorkflowService,
 		private readonly history: Pick<TicketHistoryStore, "read">,
+		private readonly notifications?: NotificationService,
 	) {}
 	create(): Router<{ actor: Actor }> {
 		const router = new Router<{ actor: Actor }>();
+		router.get("/api/tickets/notifications", async (ctx) => {
+			if (!this.notifications) throw new TicketError("ticket-unavailable");
+			ctx.body = ticketNotificationsSchema.parse(await this.notifications.list(ctx.state.actor));
+		});
 		router.get("/api/tickets/:id/history", async (ctx) => {
 			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);
 			const query = ticketHistoryQuerySchema.safeParse(ctx.query);
@@ -59,7 +66,13 @@ export class TicketRouter implements IHttpRouter {
 			if (!input.success) throw new TicketError("invalid-request");
 			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);
 			ctx.body = ticketWorkflowSchema.parse(
-				await this.workflow.message(ctx.state.actor, ticket, input.data.text, input.data.expectedTurnId),
+				await this.workflow.message(
+					ctx.state.actor,
+					ticket,
+					input.data.text,
+					input.data.expectedTurnId,
+					input.data.revision,
+				),
 			);
 		});
 		router.post("/api/tickets/:id/approve", async (ctx) => {

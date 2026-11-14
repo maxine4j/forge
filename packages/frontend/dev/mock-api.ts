@@ -108,6 +108,7 @@ export class MockApi implements IMockApi {
 		}));
 		const costData: Costs[] = [];
 		const boardTickets: Ticket[] = [];
+		this.routes.set("/api/tickets/notifications", () => []);
 		this.routes.set("/api/tickets", (url) =>
 			boardTickets.filter((ticket) => url.searchParams.get("includeArchived") === "true" || !ticket.archivedAt),
 		);

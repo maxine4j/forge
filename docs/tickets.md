@@ -1,8 +1,36 @@
 # Forge ticket and PR workflow
 
+## Pending notifications
+
+Tasks has Board, Backlog and **🔔 Notifications (N)** tabs. The notification view
+is `/tasks?view=notifications`; ticket and epic modal links preserve that parent
+through reload and Back/Forward. Arrow keys wrap across all three tabs; Home and
+End select the first and last. The count stays visible at zero and uses orange
+emphasis when positive. New identities pulse for two seconds after the initial
+successful snapshot; unchanged polling and removals do not pulse. Reduced motion
+disables animation.
+
+The owner-only `GET /api/tickets/notifications` returns validated ticket/epic
+context, stable identity, first-observed timestamp and current controls. Each
+request counts once, including multi-question requests. Cards are globally oldest
+first, with identity breaking ties. Archived tickets and superseded executions
+are excluded. Questions, approvals, saved plan reviews and execution/cleanup
+attention use the existing action APIs. Plan feedback can carry `revision` and
+rejects stale revisions under workflow serialization. Cleanup reconciliation can
+retry a failed merged-workspace cleanup without repeating the merge.
+
+All Tasks tabs share one-second feed polling. Fetch failures retain the last
+successful count and cards and expose Retry; opening a tab or ticket never
+dismisses a condition. Actions check the current identity, prevent repeated local
+submission, then refresh on success or failure. Only authoritative resolution
+removes a card. Request drafts share Chat's in-memory draft map and survive tab
+changes and failed submissions. Investigation opens ticket Chat. Notifications
+has no creation or backlog-filter toolbar. See [agent request lifecycle](agents.md#notification-request-lifecycle)
+and [metadata persistence](architecture.md#notification-metadata).
+
 ## Task navigation
 
-Tasks retains `view=backlog`, `ticket=TASK-n` and `epic=EPIC-n` links. Tickets
+Tasks retains `view=backlog|notifications`, `ticket=TASK-n` and `epic=EPIC-n` links. Tickets
 also accept `tab=details|chat|history|cost`. The opening entry resolves the
 remembered/default section in place, without another Back step; subsequent
 polling cannot override an explicit section. Back/Forward and reload restore
@@ -17,7 +45,7 @@ ticket preserve their parent location and reading state. Navigation that would
 unmount unsaved edits requires the [application draft guard](foundation.md#navigation).
 Successful actions retire their confirmation entry; Forward restores a view
 without replaying a mutation. Direct ticket and epic links first establish a
-Board/Backlog parent, once; reload preserves this ancestry without adding entries.
+Tasks view parent, once; reload preserves this ancestry without adding entries.
 See [browser and gesture verification](development.md#android-back-verification).
 
 ## Agentic ticket board
@@ -28,11 +56,12 @@ Retry and reconciliation controls remain available after expiry; saved failure
 snapshots announce once on display or change. Historical ticket events remain in
 History. Native confirmation dialogs host the same notification viewport.
 
-Tasks has nested Board and Backlog tabs. `/tasks` opens Board by default;
-`/tasks?view=backlog` selects Backlog. Missing or unknown `view` values select
-Board. Both preserve `?ticket=:id` for details, reload and browser history,
+Tasks has nested Board, Backlog and [Notifications](#pending-notifications) tabs.
+`/tasks` opens Board by default; `/tasks?view=backlog` selects Backlog and
+`/tasks?view=notifications` selects Notifications. Missing or unknown `view` values
+select Board. All preserve `?ticket=:id` for details, reload and browser history,
 including existing archived-ticket links from [Costs](#ticket-cost).
-Each view's actions sit beside the tabs and wrap below them when space is limited.
+Board and Backlog actions sit beside the tabs and wrap below them when space is limited.
 
 Backlog shows compact Key, Title and Status tables. The right-aligned Filters
 dropdown sits below the tabs divider and creation actions, on the same row as the
@@ -55,7 +84,7 @@ rank even with a retained running flag. The final tie-breaker is the ascending
 numeric ticket key (TASK-2 before TASK-10). Archived tickets use the same status,
 activity and key tie-breakers. These tables sort a copy of the shared collection;
 Board and scheduling order remain unchanged.
-Both views use the same collection, create/details dialogs, status transitions,
+Board and Backlog use the same collection, create/details dialogs, status transitions,
 archive controls and attention/agent indicators. Filtering and polling preserve
 open ticket details, including archived read-only controls. Board always excludes
 archived tickets. Sections scroll with sticky

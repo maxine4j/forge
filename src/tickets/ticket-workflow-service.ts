@@ -29,7 +29,13 @@ export interface ITicketWorkflowService {
 	boardSummary(actor: Actor): Promise<Map<string, Pick<Ticket, "agentStatus" | "needsAttention">>>;
 	approve(actor: Actor, ticket: Ticket, revision: number): Promise<TicketWorkflow>;
 	queueMerge(actor: Actor, ticket: Ticket): Promise<TicketWorkflow>;
-	message(actor: Actor, ticket: Ticket, text: string, expectedTurnId?: string): Promise<TicketWorkflow>;
+	message(
+		actor: Actor,
+		ticket: Ticket,
+		text: string,
+		expectedTurnId?: string,
+		revision?: number,
+	): Promise<TicketWorkflow>;
 	tick(actor: Actor): Promise<void>;
 	recover(actor: Actor, id?: string): Promise<void>;
 }
@@ -271,10 +277,21 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			return this.summary(next);
 		});
 	}
-	async message(actor: Actor, ticket: Ticket, text: string, expectedTurnId?: string): Promise<TicketWorkflow> {
+	async message(
+		actor: Actor,
+		ticket: Ticket,
+		text: string,
+		expectedTurnId?: string,
+		revision?: number,
+	): Promise<TicketWorkflow> {
 		this.access.assertOwner(actor);
 		return this.serialize(async () => {
 			const job = await this.inProgress(ticket.id);
+			if (
+				revision !== undefined
+				&& (job.phase !== "planning" || job.plan?.revision !== revision || job.approvedRevision)
+			)
+				throw new TicketError("ticket-conflict");
 			const threadId = job.phase === "planning" ? job.plannerId : job.implementerId;
 			if (expectedTurnId) {
 				if (
@@ -353,6 +370,10 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			}
 			const selected = ticketId ? [await this.record(ticketId)] : await this.store.list();
 			for (const job of selected) {
+				if (ticketId && job.cleanupFailed && (await this.tickets.get(job.ticketId))?.status === "done") {
+					await this.cleanup(actor, job);
+					continue;
+				}
 				if (ticketId && job.state === "setup-failed") {
 					await this.store.save({ ...job, state: "queued" });
 					this.wake();

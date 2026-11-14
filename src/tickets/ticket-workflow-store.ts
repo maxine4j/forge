@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { IDatabase } from "../database/sqlite-database.ts";
 import type { SqlStatement } from "../database/types.ts";
 import { TicketError } from "./errors.ts";
+import type { INotificationStore } from "./notification-store.ts";
 import { historyMilestoneStatements, workflowMilestones } from "./ticket-history-store.ts";
 import { boardMoveStatements } from "./ticket-store.ts";
 import { ticketWorkflowRecordSchema, type TicketWorkflowRecord } from "./types.ts";
@@ -23,6 +24,7 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 	constructor(
 		private readonly database: IDatabase,
 		private readonly now: () => Date = () => new Date(),
+		private readonly notifications?: Pick<INotificationStore, "syncWorkflow">,
 	) {}
 	async initialize(): Promise<void> {
 		await this.database.transaction([
@@ -126,6 +128,7 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 					workspaceId,
 				),
 			]);
+			await this.notifications?.syncWorkflow(value, at);
 		} catch (cause) {
 			throw new TicketError("ticket-unavailable", { cause });
 		}

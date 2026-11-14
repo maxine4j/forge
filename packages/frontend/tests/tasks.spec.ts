@@ -1,5 +1,5 @@
 import type { DockerOverview, DockerOperation } from "@forge/contracts/docker";
-import type { Epic, TicketWorkflow } from "@forge/contracts/tickets";
+import type { Epic, TicketWorkflow, TicketNotification } from "@forge/contracts/tickets";
 import { expect, test } from "@playwright/test";
 import type { Locator, Page } from "@playwright/test";
 
@@ -10,6 +10,221 @@ import { expectToastPlacement } from "./toast-placement.ts";
 
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const createdAt = "2026-11-03T00:00:00.000Z";
+
+const notificationFixture = (id: string, ticketId = "TASK-1"): TicketNotification => ({
+	id,
+	at: createdAt,
+	kind: "request",
+	agentId: "123e4567-e89b-42d3-a456-426614174010",
+	ticket: {
+		id: ticketId,
+		title: ticketId === "TASK-1" ? "First task" : "Second task",
+		description: "",
+		repositoryIds: [],
+		status: "in-progress",
+		createdAt,
+		needsAttention: true,
+	},
+	epic: { id: "EPIC-1", title: "Notifications epic", description: "", createdAt },
+	workflow: { ticketId, state: "running", phase: "planning", mergeAttempts: 0 },
+	request: {
+		id: `request-${id}`,
+		kind: "input",
+		description: "Choose deployment",
+		questions: [
+			{ id: "target", question: "Target environment", secret: false, options: ["Staging", "Production"] },
+			{ id: "token", question: "Access token", secret: true, options: [] },
+		],
+	},
+});
+
+const setupNotifications = async (page: Page, initial: TicketNotification[]) => {
+	await setup(page, false, true);
+	const state = {
+		items: initial,
+		fail: false,
+		failAction: false,
+		posts: [] as { path: string; body: Record<string, unknown> }[],
+	};
+	await page.route("**/api/tickets/notifications", (route) =>
+		state.fail
+			? route.fulfill({ status: 503, json: { error: "ticket-unavailable" } })
+			: route.fulfill({ json: state.items }),
+	);
+	await page.route("**/api/agents/*/replies", async (route) => {
+		const body = route.request().postDataJSON();
+		state.posts.push({ path: "replies", body });
+		if (state.failAction) return route.fulfill({ status: 409, json: { error: "agent-conflict" } });
+		state.items = state.items.filter((item) => item.request?.id !== body.requestId);
+		return route.fulfill({
+			json: {
+				thread: {
+					id: "123e4567-e89b-42d3-a456-426614174010",
+					projectId,
+					workspaceId: projectId,
+					title: "Planning",
+					createdAt,
+					status: "running",
+				},
+				requests: [],
+				items: [],
+				truncated: false,
+			},
+		});
+	});
+	await page.reload();
+	await expect(page.getByRole("tab", { name: `Notifications (${initial.length})`, exact: true })).toBeVisible();
+	return state;
+};
+
+for (const width of [1280, 390]) {
+	test(`notifications inline questions retain drafts and failures, resolve with focus and preserve modal ancestry at ${width}px`, async ({
+		page,
+	}) => {
+		await page.setViewportSize({ width, height: 900 });
+		const state = await setupNotifications(page, [notificationFixture("1"), notificationFixture("2", "TASK-2")]);
+		const tab = page.getByRole("tab", { name: "Notifications (2)", exact: true });
+		await page.getByRole("tab", { name: "Board", exact: true }).focus();
+		await page.keyboard.press("End");
+		await expect(tab).toBeFocused();
+		await expect(page).toHaveURL("/tasks?view=notifications");
+		await expect(page.getByRole("button", { name: "Create ticket", exact: true })).toHaveCount(0);
+		const cards = page.locator(".notification-card");
+		await expect(cards).toHaveCount(2);
+		await expect(cards.first().getByRole("link", { name: "EPIC-1 Notifications epic" })).toBeVisible();
+		await expect(cards.first().getByRole("link", { name: "TASK-1", exact: true })).toBeVisible();
+		await cards.first().getByRole("button", { name: "Staging", exact: true }).click();
+		await cards.first().getByLabel("Access token").fill("private-value");
+		await expect(cards.first().getByLabel("Access token")).toHaveAttribute("type", "password");
+		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+		await tab.click();
+		await expect(cards.first().getByLabel("Target environment")).toHaveValue("Staging");
+		state.failAction = true;
+		await cards.first().getByRole("button", { name: "Submit answers" }).click();
+		await expect(cards.first().getByRole("alert")).toBeVisible();
+		await expect(cards.first().getByLabel("Access token")).toHaveValue("private-value");
+		state.failAction = false;
+		await cards.first().getByRole("button", { name: "Submit answers" }).click();
+		await expect(cards).toHaveCount(1);
+		await expect(cards.first()).toBeFocused();
+		expect(state.posts[1]!.body["answers"]).toEqual({ target: "Staging", token: "private-value" });
+		await cards.first().getByRole("button", { name: "Open ticket Chat" }).click();
+		await expect(page.getByRole("dialog", { name: "TASK-2", exact: true })).toBeVisible();
+		await expect(page).toHaveURL(/view=notifications&ticket=TASK-2&tab=chat/);
+		await page.goBack();
+		await expect(page).toHaveURL("/tasks?view=notifications");
+		state.items = [];
+		await expect(page.getByRole("heading", { name: "No pending notifications" })).toBeVisible();
+		await expect(page.getByRole("tab", { name: "Notifications (0)", exact: true })).toBeVisible();
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+	});
+}
+
+test("notifications approvals, plan feedback, plan approval and recovery use inline controls and refresh stale items", async ({
+	page,
+}) => {
+	const command = notificationFixture("command");
+	command.request = { id: "command", kind: "command", description: "Run tests", questions: [] };
+	const file = notificationFixture("file");
+	file.request = { id: "file", kind: "file", description: "Edit config", questions: [] };
+	const plan = notificationFixture("plan");
+	delete plan.request;
+	plan.kind = "plan";
+	plan.workflow = {
+		...plan.workflow,
+		state: "idle",
+		plan: { revision: 2, text: "## Deployment plan\n\nReview **carefully**." },
+	};
+	const recoveries = ["setup-failed", "uncertain", "idle"] as const;
+	const recoveryItems = recoveries.map((state, index): TicketNotification => ({
+		...notificationFixture(`recovery-${index}`),
+		request: undefined,
+		kind: "recovery",
+		workflow: { ...plan.workflow, state },
+		message: "Action required",
+		action: "reconcile",
+	}));
+	const review: TicketNotification = {
+		...notificationFixture("review"),
+		request: undefined,
+		kind: "review",
+		action: "merge",
+		workflow: { ...plan.workflow, state: "idle", phase: "review" },
+	};
+	const state = await setupNotifications(page, [command, file, plan, ...recoveryItems, review]);
+	await page.route("**/api/tickets/TASK-1/{approve,messages,reconcile,merge}", async (route) => {
+		const path = new URL(route.request().url()).pathname.split("/").at(-1)!;
+		state.posts.push({ path, body: route.request().postDataJSON() });
+		if (state.failAction) return route.fulfill({ status: 409, json: { error: "ticket-conflict" } });
+		const index = state.items.findIndex((item) =>
+			path === "approve" || path === "messages" ? item.kind === "plan" : item.action === path,
+		);
+		const [removed] = state.items.splice(index, 1);
+		return route.fulfill({ json: removed!.workflow });
+	});
+	await page.getByRole("tab", { name: "Notifications (7)", exact: true }).click();
+	await page.locator('[data-notification="command"]').getByRole("button", { name: "Allow once" }).click();
+	await expect(page.locator('[data-notification="command"]')).toHaveCount(0);
+	await page.locator('[data-notification="file"]').getByRole("button", { name: "Decline" }).click();
+	await expect(page.locator('[data-notification="file"]')).toHaveCount(0);
+	expect(state.posts.slice(0, 2).map((post) => post.body["decision"])).toEqual(["accept", "decline"]);
+	const planCard = page.locator('[data-notification="plan"]');
+	await expect(planCard.getByRole("heading", { name: "Deployment plan" })).toBeVisible();
+	await planCard.getByLabel("Plan feedback").fill("Please add rollback");
+	state.failAction = true;
+	await planCard.getByRole("button", { name: "Submit feedback" }).click();
+	await expect(planCard.getByRole("alert")).toBeVisible();
+	await expect(planCard.getByLabel("Plan feedback")).toHaveValue("Please add rollback");
+	state.failAction = false;
+	await planCard.getByRole("button", { name: "Submit feedback" }).click();
+	await expect(planCard).toHaveCount(0);
+	expect(state.posts.at(-1)!.body).toEqual({ text: "Please add rollback", revision: 2 });
+	state.items.push({
+		...plan,
+		id: "plan-3",
+		workflow: { ...plan.workflow, plan: { revision: 3, text: "Updated plan" } },
+	});
+	await page.getByRole("button", { name: "Approve plan", exact: true }).click();
+	await expect(page.locator('[data-notification="plan-3"]')).toHaveCount(0);
+	expect(state.posts.at(-1)!.body).toEqual({ revision: 3 });
+	for (const name of ["Retry setup", "Reconcile execution", "Retry cleanup", "Queue merge"]) {
+		await page.getByRole("button", { name, exact: true }).click();
+	}
+	await expect(page.getByRole("heading", { name: "No pending notifications" })).toBeVisible();
+	state.items = [command];
+	const allow = page.getByRole("button", { name: "Allow once" });
+	await expect(allow).toBeVisible();
+	state.items = [];
+	const posts = state.posts.length;
+	await allow.click();
+	await expect(page.getByRole("heading", { name: "No pending notifications" })).toBeVisible();
+	expect(state.posts).toHaveLength(posts);
+});
+
+test("notifications identity arrivals pulse at unchanged count, errors retain snapshots and reduced motion disables animation", async ({
+	page,
+}) => {
+	const state = await setupNotifications(page, [notificationFixture("1")]);
+	const tab = page.getByRole("tab", { name: "Notifications (1)", exact: true });
+	await expect(tab).not.toHaveClass(/notifications-pulse/);
+	await tab.click();
+	state.items = [notificationFixture("2", "TASK-2")];
+	await expect(tab).toHaveClass(/notifications-pulse/);
+	await expect(page.locator(".notification-card")).toHaveAttribute("data-notification", "2");
+	await expect(tab).not.toHaveClass(/notifications-pulse/);
+	state.fail = true;
+	await expect(page.getByRole("button", { name: "Retry", exact: true })).toBeVisible();
+	await expect(tab).toBeVisible();
+	await expect(page.locator(".notification-card")).toHaveCount(1);
+	state.fail = false;
+	await page.emulateMedia({ reducedMotion: "reduce" });
+	state.items = [notificationFixture("3")];
+	await page.getByRole("button", { name: "Retry", exact: true }).click();
+	await expect(tab).toHaveClass(/notifications-pulse/);
+	await expect(tab).toHaveCSS("animation-name", "none");
+	state.items = [];
+	await expect(page.getByRole("tab", { name: "Notifications (0)", exact: true })).toBeVisible();
+});
 
 for (const width of [1280, 390]) {
 	test(`modal history retraces tabs, dismisses to parent and restores explicit sections at ${width}px`, async ({
@@ -279,6 +494,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 		async (route) => {
 			const path = new URL(route.request().url()).pathname;
 			const method = route.request().method();
+			if (path === "/api/tickets/notifications") return route.fulfill({ json: [] });
 			if (path === "/api/epics" || path.startsWith("/api/epics/")) {
 				if (method !== "GET" && failSave)
 					return route.fulfill({ status: 503, json: { error: "epic-unavailable" } });

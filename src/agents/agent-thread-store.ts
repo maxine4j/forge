@@ -3,19 +3,23 @@ import { inferenceProviderSchema } from "@forge/contracts/settings";
 import { z } from "zod";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
+import type { INotificationStore } from "../tickets/notification-store.ts";
 import { AgentError } from "./errors.ts";
 import type { AgentThreadRecord } from "./types.ts";
 export interface IAgentThreadStore {
 	/** Stores identifiers and normalized execution/approval state, never conversation history. Throws AgentError. */
 	insert(record: AgentThreadRecord): Promise<void>;
-	update(record: AgentThreadRecord): Promise<void>;
+	update(record: AgentThreadRecord, observedAt?: string): Promise<void>;
 	get(id: string): Promise<AgentThreadRecord | undefined>;
 	list(projectId: string): Promise<AgentThreadRecord[]>;
 	/** Startup invalidates live execution/approval handles without replaying work. */
 	recover(): Promise<void>;
 }
 export class AgentThreadStore implements IAgentThreadStore {
-	constructor(private readonly database: IDatabase) {}
+	constructor(
+		private readonly database: IDatabase,
+		private readonly notifications?: Pick<INotificationStore, "sync" | "read">,
+	) {}
 	async initialize(): Promise<void> {
 		await this.guard(() =>
 			this.database
@@ -34,9 +38,13 @@ export class AgentThreadStore implements IAgentThreadStore {
 				value.workspaceId,
 				JSON.stringify(value),
 			]);
+			await this.notifications?.sync(
+				`agent:${value.id}`,
+				value.managed && !value.abandoned ? value.requests.map((request) => request.id) : [],
+			);
 		});
 	}
-	async update(record: AgentThreadRecord): Promise<void> {
+	async update(record: AgentThreadRecord, observedAt?: string): Promise<void> {
 		await this.guard(async () => {
 			const value = recordSchema.parse(record);
 			if (
@@ -46,6 +54,11 @@ export class AgentThreadStore implements IAgentThreadStore {
 				)) !== 1
 			)
 				throw new AgentError("agent-not-found");
+			await this.notifications?.sync(
+				`agent:${value.id}`,
+				value.managed && !value.abandoned ? value.requests.map((request) => request.id) : [],
+				observedAt,
+			);
 		});
 	}
 	async get(id: string): Promise<AgentThreadRecord | undefined> {
@@ -68,6 +81,20 @@ export class AgentThreadStore implements IAgentThreadStore {
 			await this.database.run(
 				"UPDATE agent_threads SET record=json_set(record,'$.status','uncertain','$.requests',json('[]')) WHERE json_extract(record,'$.status') IN ('creating','running','waiting','uncertain')",
 			);
+			if (this.notifications) {
+				const sources = new Set(
+					(await this.notifications.read())
+						.filter((item) => item.source.startsWith("agent:"))
+						.map((item) => item.source),
+				);
+				for (const source of sources) {
+					const record = await this.get(source.slice(6));
+					await this.notifications.sync(
+						source,
+						record && !record.abandoned ? record.requests.map((request) => request.id) : [],
+					);
+				}
+			}
 		});
 	}
 	private parse(row: unknown): AgentThreadRecord {

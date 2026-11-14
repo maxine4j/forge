@@ -12,6 +12,22 @@ import type { TicketWorkflowRecord } from "./types.ts";
 
 const actor = { username: "owner" };
 
+test("plan feedback rejects stale and approved revisions without queuing a turn", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	const job = f.jobs.get(ticket.id)!;
+	f.complete(job.plannerId!, "# Plan");
+	await f.service.tick(actor);
+	const current = f.tickets.get(ticket.id)!;
+	await expect(f.service.message(actor, current, "Change scope", undefined, 2)).rejects.toThrow("ticket-conflict");
+	expect(f.jobs.get(ticket.id)?.state).toBe("idle");
+	await f.service.message(actor, current, "Change scope", undefined, 1);
+	expect(f.jobs.get(ticket.id)?.state).toBe("queued");
+	await expect(f.service.message(actor, current, "Duplicate", undefined, 1)).rejects.toThrow("ticket-conflict");
+});
+
 test("queued settings select direct implementation and recovery never dispatches twice", async () => {
 	const f = fixture();
 	const ticket = f.create();
@@ -945,6 +961,8 @@ test("cleans up after Done and retries interrupted cleanup without replaying the
 	expect(ticket.status).toBe("done");
 	expect(statusAtCleanup).toBe("done");
 	expect(f.cleanup).toHaveBeenCalledExactlyOnceWith(actor, workspaceId, resultSha);
+	await f.service.recover(actor, ticket.id);
+	expect(f.cleanup).toHaveBeenCalledTimes(2);
 	await f.service.archive(actor, ticket, "2026-11-04T00:00:00.000Z");
 	await f.service.recover(actor);
 	await f.service.recover(actor);

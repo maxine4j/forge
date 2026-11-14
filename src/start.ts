@@ -73,6 +73,8 @@ import { TerminalStore } from "./terminal/terminal-store.ts";
 import { BoardSettingsRouter } from "./tickets/board-settings-router.ts";
 import { BoardSettingsService } from "./tickets/board-settings-service.ts";
 import { BoardSettingsStore } from "./tickets/board-settings-store.ts";
+import { NotificationService } from "./tickets/notification-service.ts";
+import { NotificationStore } from "./tickets/notification-store.ts";
 import { TicketHistoryStore } from "./tickets/ticket-history-store.ts";
 import { TicketPrompts } from "./tickets/ticket-prompts.ts";
 import { TicketRouter } from "./tickets/ticket-router.ts";
@@ -252,7 +254,9 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const github = new GithubAccountClient(processes, sleep, attempts);
 	lifecycle.register(() => github.close());
 	const accounts = new AccountService(access, codex, github);
-	const agentStore = new AgentThreadStore(database);
+	const notificationStore = new NotificationStore(database, () => new Date());
+	await notificationStore.initialize();
+	const agentStore = new AgentThreadStore(database, notificationStore);
 	await agentStore.initialize();
 	await agentStore.recover();
 	let wakeRequested = false;
@@ -283,7 +287,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	await boardStore.initialize();
 	const boardSettings = new BoardSettingsService(boardStore, agents, access, wakeScheduler);
 	await boardSettings.initialize();
-	const workflowStore = new TicketWorkflowStore(database, () => new Date());
+	const workflowStore = new TicketWorkflowStore(database, () => new Date(), notificationStore);
 	await workflowStore.initialize();
 	collector.start();
 	const workflow = new TicketWorkflowService(
@@ -301,6 +305,8 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	);
 	const tickets = new TicketService(ticketStore, store, access, () => new Date(), workflow, epicStore);
 	const epics = new EpicService(epicStore, ticketStore, access, () => new Date());
+	const notifications = new NotificationService(notificationStore, tickets, epicStore, agentStore, access);
+	await notifications.initialize();
 	const actor = { username: config.owner };
 	await agents.seed(actor);
 	const workflowAbort = new AbortController();
@@ -342,7 +348,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			new BoardSettingsRouter(boardSettings),
 			new DockerRouter(docker),
 			new PipelineRouter(pipelines),
-			new TicketRouter(tickets, workflow, ticketHistory),
+			new TicketRouter(tickets, workflow, ticketHistory, notifications),
 			new EpicRouter(epics),
 			new CostRouter(cost),
 			new WorkspaceRouter(workspaces),

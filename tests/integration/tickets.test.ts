@@ -16,6 +16,8 @@ import { HttpApplication } from "../../src/http/http-application.ts";
 import { ProjectRouter } from "../../src/projects/project-router.ts";
 import { ProjectService } from "../../src/projects/project-service.ts";
 import { ProjectStore } from "../../src/projects/project-store.ts";
+import { NotificationService } from "../../src/tickets/notification-service.ts";
+import { NotificationStore } from "../../src/tickets/notification-store.ts";
 import { TicketHistoryStore } from "../../src/tickets/ticket-history-store.ts";
 import { TicketPrompts } from "../../src/tickets/ticket-prompts.ts";
 import { TicketRouter } from "../../src/tickets/ticket-router.ts";
@@ -92,9 +94,21 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 		() => projectId,
 		() => new Date(),
 	);
+	const notificationStore = new NotificationStore(db, () => new Date());
+	await notificationStore.initialize();
+	const notifications = new NotificationService(
+		notificationStore,
+		service,
+		epics,
+		{ get: async () => undefined },
+		access,
+	);
 	const server = createServer(
 		new HttpApplication(new ProjectRouter(projectService), access)
-			.create([new TicketRouter(service, workflow, new TicketHistoryStore(db)), new EpicRouter(epicService)])
+			.create([
+				new TicketRouter(service, workflow, new TicketHistoryStore(db), notifications),
+				new EpicRouter(epicService),
+			])
 			.callback(),
 	);
 	cleanups.push(
@@ -115,6 +129,15 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 			...(body === undefined ? {} : { body: JSON.stringify(body) }),
 		});
 	const listPath = "tickets";
+	expect((await request("tickets/notifications")).status).toBe(200);
+	expect(await (await request("tickets/notifications")).json()).toEqual([]);
+	expect(
+		(
+			await fetch(`http://127.0.0.1:${address.port}/api/tickets/notifications`, {
+				headers: { "x-webauth-user": "stranger" },
+			})
+		).status,
+	).toBe(403);
 	for (const method of ["GET", "POST"]) {
 		expect(
 			(

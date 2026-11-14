@@ -6,6 +6,7 @@ import { expect, test } from "vitest";
 
 import { SqliteDatabase } from "../database/sqlite-database.ts";
 import { ProjectStore } from "../projects/project-store.ts";
+import { NotificationStore } from "../tickets/notification-store.ts";
 import { WorkspaceStore } from "../workspaces/workspace-store.ts";
 import { AgentThreadStore } from "./agent-thread-store.ts";
 
@@ -30,9 +31,12 @@ test("persists thread identities and approvals; startup makes execution uncertai
 			status: "ready",
 			createdAt,
 		});
-		let store = new AgentThreadStore(db);
+		let notifications = new NotificationStore(db, () => new Date(createdAt));
+		await notifications.initialize();
+		let store = new AgentThreadStore(db, notifications);
 		await store.initialize();
 		const record = {
+			managed: true,
 			id,
 			projectId: id,
 			workspaceId: id,
@@ -45,14 +49,20 @@ test("persists thread identities and approvals; startup makes execution uncertai
 			requests: [{ id: "request", kind: "file" as const, description: "Edit", questions: [] }],
 		};
 		await store.insert(record);
+		const pending = await notifications.read();
+		expect(pending).toHaveLength(1);
 		expect(await store.list(id)).toEqual([record]);
 		await db.close();
 		db = new SqliteDatabase(path);
 		await db.initialize();
-		store = new AgentThreadStore(db);
+		notifications = new NotificationStore(db, () => new Date("2026-11-14T00:00:00.000Z"));
+		await notifications.initialize();
+		store = new AgentThreadStore(db, notifications);
 		await store.initialize();
 		expect(await store.get(id)).toEqual(record);
+		expect(await notifications.read()).toEqual(pending);
 		await store.recover();
+		expect(await notifications.read()).toEqual([]);
 		expect(await store.get(id)).toEqual({ ...record, status: "uncertain", requests: [] });
 		await store.update({ ...record, status: "completed", requests: [] });
 		await store.recover();

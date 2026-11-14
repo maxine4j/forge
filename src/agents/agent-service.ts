@@ -110,8 +110,9 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		this.unsubscribe = client.subscribe((codexId) => {
 			const id = this.identities.get(codexId);
 			if (!id || this.closed) return;
+			const observedAt = this.now().toISOString();
 			void this.serialize(id, async () => {
-				await this.sync(await this.require(id));
+				await this.sync(await this.require(id), observedAt);
 				for (const listener of this.listeners.get(id) ?? []) listener();
 			}).catch((err: unknown) => this.log.error({ err }, "Could not persist agent activity"));
 		});
@@ -577,7 +578,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			...(thread.status === "failed" && runtime?.turnFailure && { turnFailure: runtime.turnFailure }),
 		};
 	}
-	private async sync(record: AgentThreadRecord): Promise<AgentView> {
+	private async sync(record: AgentThreadRecord, observedAt?: string): Promise<AgentView> {
 		if (record.codexId) {
 			const runtime = this.client.read(record.codexId);
 			// A persisted terminal outcome survives an unloaded runtime/history snapshot.
@@ -593,7 +594,10 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				contextWindow: runtime.contextWindow ?? record.contextWindow,
 			};
 			await this.recordHistory(updated, runtime.turnFailure);
-			if (JSON.stringify(updated) !== JSON.stringify(record)) await this.store.update(updated);
+			if (JSON.stringify(updated) !== JSON.stringify(record)) {
+				if (observedAt) await this.store.update(updated, observedAt);
+				else await this.store.update(updated);
+			}
 			this.tracker.observe(record.id, runtime.status);
 			return this.view(updated);
 		}

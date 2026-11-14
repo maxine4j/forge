@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { agentSettingsSchema } from "../agents/index.ts";
+import { agentSettingsSchema, agentRequestSchema } from "../agents/index.ts";
 
 export const ticketExecutionSettingsSchema = agentSettingsSchema.extend({
 	skipPlanning: z.boolean().optional(),
@@ -70,6 +70,7 @@ export const approveTicketPlanSchema = z.strictObject({ revision: z.number().int
 export const ticketMessageSchema = z.strictObject({
 	text: z.string().trim().min(1).max(8000),
 	expectedTurnId: z.string().min(1).max(256).optional(),
+	revision: z.number().int().positive().optional(),
 });
 export const ticketSchema = z.strictObject({
 	epicId: epicIdSchema.nullable().optional(),
@@ -141,6 +142,20 @@ export const ticketWorkflowSchema = z.strictObject({
 		.optional(),
 });
 export type TicketWorkflow = z.infer<typeof ticketWorkflowSchema>;
+export const ticketNotificationSchema = z.strictObject({
+	id: z.string().min(1),
+	at: z.iso.datetime(),
+	ticket: ticketSchema,
+	epic: epicSchema.optional(),
+	kind: z.enum(["request", "plan", "recovery", "review"]),
+	workflow: ticketWorkflowSchema,
+	request: agentRequestSchema.optional(),
+	agentId: z.uuid().optional(),
+	message: z.string().optional(),
+	action: z.enum(["reconcile", "merge"]).optional(),
+});
+export const ticketNotificationsSchema = z.array(ticketNotificationSchema);
+export type TicketNotification = z.infer<typeof ticketNotificationSchema>;
 /** Shared status-menu and drag eligibility. The server rechecks under workflow serialization. */
 export function ticketMoveTargets(ticket: z.infer<typeof ticketSchema>): z.infer<typeof ticketStatusSchema>[] {
 	if (ticket.archivedAt || ticket.resetting || ticket.status === "done") return [];

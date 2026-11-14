@@ -58,6 +58,24 @@ HTTP / WebSocket / Git protocol adapters / background tasks
 
 ## Persistence and recovery
 
+### Notification metadata
+
+SQLite's additive `ticket_notifications` table stores only source, condition,
+monotonic identity and first-observed UTC timestamp. Content and eligible actions
+are derived from current workflow records and managed-agent request snapshots;
+conversation history is never copied into this table or loaded for the feed.
+Workflow saves and agent request writes synchronize metadata independently of
+browser selection, using injected clocks. Unresolved identities preserve their
+timestamp across restart. Resolved conditions are removed; a recurrence receives
+a new identity. Request handles, plan revisions and execution attempts distinguish
+conditions. Startup idempotently bootstraps existing pending conditions at first
+observation, without inferring historical dates. The owner-only feed validates
+DTOs and excludes archived tickets and abandoned/superseded attempts. See
+[Tasks navigation and resolution](tickets.md#pending-notifications) and
+[agent lifecycle](agents.md#notification-request-lifecycle).
+
+### Persistent resources
+
 ```text
 /data/
   forge.sqlite

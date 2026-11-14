@@ -15,6 +15,7 @@ import { useLocation } from "react-router";
 import { PlanMarkdown } from "../agents/agent-activity.tsx";
 import { Conversation } from "../agents/agent-chat.tsx";
 import { AgentOptionsRevision, ExecutionSettings } from "../agents/execution-settings.tsx";
+import { PlanReviewControls } from "../agents/plan-review-controls.tsx";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown } from "../dropdown.tsx";
@@ -379,14 +380,7 @@ export const TicketDetails = ({
 			});
 	};
 	const approvePlan = !archived && reviewPlan && (
-		<button
-			type='button'
-			className='primary'
-			disabled={acting}
-			onClick={() => act("approve", { revision: reviewPlan.revision })}
-		>
-			Approve plan
-		</button>
+		<PlanReviewControls busy={acting} approve={() => act("approve", { revision: reviewPlan.revision })} />
 	);
 	return (
 		<dialog

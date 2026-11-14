@@ -1,4 +1,5 @@
 const paths = {
+	notifications: "M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4",
 	filters: "M3 4h18l-7 8v7l-4 2v-9z",
 	tasks: "M6 5h14M6 12h14M6 19h14M3 5h.01M3 12h.01M3 19h.01",
 	repos: "M4 19V5a2 2 0 0 1 2-2h14v18H6a2 2 0 0 1 0-4h14M8 7h8",

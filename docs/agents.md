@@ -1,5 +1,19 @@
 # Codex and interactive agents
 
+## Notification request lifecycle
+
+Managed-agent request snapshots feed [Tasks Notifications](tickets.md#pending-notifications)
+without loading conversation history or selecting a chat. Agent store insert/update
+paths synchronize request-handle identities and injected-clock observation times
+as callbacks persist current requests. Answers, approvals, external resolution and
+abandonment remove metadata when the request leaves the authoritative snapshot.
+Startup clears runtime approval handles before bootstrapping current conditions;
+stale handles cannot be replayed. Shared request forms retain choices, free text
+and masked secrets in browser memory, including failed replies. Plan review uses
+saved workflow revisions, and feedback rejects a changed or approved revision.
+Opening Chat or Notifications does not acknowledge or dismiss any request.
+See [notification persistence](architecture.md#notification-metadata).
+
 ## Ticket history recording
 
 The agent service injects a persistence interface at its normalized synchronization

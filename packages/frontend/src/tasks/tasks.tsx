@@ -3,6 +3,8 @@ import {
 	ticketSchema,
 	ticketsSchema,
 	epicsSchema,
+	ticketNotificationsSchema,
+	type TicketNotification,
 	epicDetailSchema,
 	type EpicSummary,
 	type CreateTicket,
@@ -32,6 +34,7 @@ import { EpicDetails, EpicSelection } from "./epic-details.tsx";
 import { RepositorySelection } from "./repository-selection.tsx";
 import { TaskBacklog } from "./task-backlog.tsx";
 import { TaskBoard } from "./task-board.tsx";
+import { TaskNotifications } from "./task-notifications.tsx";
 import { TicketDetails, ticketLabels as labels, type TicketReadingState } from "./ticket-details.tsx";
 const TicketEditor = ({
 	api,
@@ -186,7 +189,6 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 	const openEpic = (id: string) => {
 		rememberFocus();
 		const next = new URLSearchParams(search);
-		next.set("view", "backlog");
 		next.delete("ticket");
 		next.delete("tab");
 		next.set("epic", id);
@@ -251,21 +253,51 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 	const locked = useRef(false);
 	const [drafts] = useState(() => new Map<string, string>());
 	const [reading] = useState(() => new Map<string, TicketReadingState>());
-	type Collection = { tickets: Ticket[]; epics: EpicSummary[] };
+	const [notifications, setNotifications] = useState<TicketNotification[]>([]);
+	const [notificationError, setNotificationError] = useState("");
+	const [notificationsLoaded, setNotificationsLoaded] = useState(false);
+	const identities = useRef<Set<string> | undefined>(undefined);
+	const [pulse, setPulse] = useState(0);
+	useEffect(() => {
+		if (!pulse) return;
+		const timer = setTimeout(() => setPulse(0), 2000);
+		return () => clearTimeout(timer);
+	}, [pulse]);
+	type Collection = {
+		tickets: Ticket[];
+		epics: EpicSummary[];
+		notifications?: TicketNotification[];
+		notificationError?: string;
+	};
 	const poller = useRef<ResourcePoller<Collection> | undefined>(undefined);
 	const readCollection = useCallback(async (): Promise<Collection> => {
-		const [tickets, epics] = await Promise.all([
+		const [tickets, epics, feed] = await Promise.all([
 			api.read("tickets?includeArchived=true", ticketsSchema),
 			api.read("epics", epicsSchema),
+			api.read("tickets/notifications", ticketNotificationsSchema).then(
+				(notifications) => ({ notifications }),
+				(cause: unknown) => ({
+					notificationError: cause instanceof Error ? cause.message : "Cannot load notifications.",
+				}),
+			),
 		]);
-		return { tickets, epics };
+		return { tickets, epics, ...feed };
 	}, [api]);
 	const load = () => poller.current?.refresh();
 	useEffect(() => {
 		active.current = true;
 		const polling = new ResourcePoller(
 			readCollection,
-			({ tickets: values, epics }) => {
+			({ tickets: values, epics, notifications, notificationError }) => {
+				setNotificationError(notificationError ?? "");
+				if (notifications) {
+					const next = new Set(notifications.map((item) => item.id));
+					if (identities.current && notifications.some((item) => !identities.current!.has(item.id)))
+						setPulse((value) => value + 1);
+					identities.current = next;
+					setNotifications(notifications);
+					setNotificationsLoaded(true);
+				}
 				setEpics(epics);
 				setTickets(values);
 				setLinked((current) => {
@@ -325,7 +357,12 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 			setNotice(`${id} moved to ${labels[updated.status]}.`);
 		});
 
-	const view = search.get("view") === "backlog" ? "backlog" : "board";
+	const view =
+		search.get("view") === "notifications"
+			? "notifications"
+			: search.get("view") === "backlog"
+				? "backlog"
+				: "board";
 	const [dragging, setDragging] = useState(false);
 	const actionsBusy = busy || loading || (view === "board" && dragging);
 	const opener = useRef<HTMLElement | null>(null);
@@ -350,6 +387,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		next.set("ticket", ticket.id);
 		next.delete("epic");
 		next.delete("tab");
+		if (view === "notifications") next.set("tab", "chat");
 		navigation.open("ticket", `/tasks?${next}`);
 	};
 	const create = () => {
@@ -371,7 +409,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 	};
 	const selectView = (name: string, focus = false) => {
 		const next = new URLSearchParams(search);
-		if (name === "backlog") next.set("view", name);
+		if (name !== "board") next.set("view", name);
 		else next.delete("view");
 		if (name !== view) navigation.select(`/tasks${next.size ? `?${next}` : ""}`);
 		if (focus) document.getElementById(`tasks-tab-${name}`)?.focus();
@@ -380,9 +418,15 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		<div className='tasks'>
 			<div className='tasks-toolbar'>
 				<SectionTabs aria-label='Task views' className='tasks-tabs'>
-					{(["board", "backlog"] as const).map((name, index) => (
+					{(["board", "backlog", "notifications"] as const).map((name, index) => (
 						<SectionTab
 							key={name}
+							className={
+								name === "notifications"
+									? `notifications-tab ${notifications.length ? "has-notifications" : ""} ${pulse ? `notifications-pulse ${pulse % 2 ? "" : "notifications-pulse-repeat"}` : ""}`
+									: undefined
+							}
+							onAnimationEnd={() => setPulse(0)}
 							id={`tasks-tab-${name}`}
 							panel={`tasks-panel-${name}`}
 							icon={<InterfaceIcon name={name} />}
@@ -390,20 +434,28 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 							tabIndex={view === name ? 0 : -1}
 							onClick={() => selectView(name)}
 							onKeyDown={(event) => {
-								const next = { ArrowLeft: 1 - index, ArrowRight: 1 - index, Home: 0, End: 1 }[
-									event.key
-								];
+								const next = {
+									ArrowLeft: (index + 2) % 3,
+									ArrowRight: (index + 1) % 3,
+									Home: 0,
+									End: 2,
+								}[event.key];
 								if (next === undefined) return;
 								event.preventDefault();
-								selectView(next === 0 ? "board" : "backlog", true);
+								selectView(["board", "backlog", "notifications"][next]!, true);
 							}}
 						>
-							{name === "board" ? "Board" : "Backlog"}
+							{name === "board"
+								? "Board"
+								: name === "backlog"
+									? "Backlog"
+									: `Notifications (${notificationsLoaded ? notifications.length : "…"})`}
 						</SectionTab>
 					))}
 				</SectionTabs>
 				<div
 					className='task-board-actions'
+					hidden={view === "notifications"}
 					role='group'
 					aria-label={view === "board" ? "Board actions" : "Backlog actions"}
 				>
@@ -449,7 +501,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 					</ToolbarButton>
 				</div>
 			</div>
-			{(["board", "backlog"] as const).map((name) => (
+			{(["board", "backlog", "notifications"] as const).map((name) => (
 				<div
 					key={name}
 					id={`tasks-panel-${name}`}
@@ -460,7 +512,18 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 					tabIndex={0}
 				>
 					{view === name
-						&& (name === "board" ? (
+						&& (name === "notifications" ? (
+							<TaskNotifications
+								items={notifications}
+								api={api}
+								drafts={drafts}
+								loading={!notificationsLoaded && !notificationError}
+								error={notificationError || error}
+								refresh={load}
+								open={open}
+								openEpic={openEpic}
+							/>
+						) : name === "board" ? (
 							<TaskBoard
 								tickets={tickets.filter((ticket) => !ticket.archivedAt)}
 								busy={busy}
