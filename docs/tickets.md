@@ -44,7 +44,16 @@ only non-archived unfinished tickets appear. Show done includes non-archived Don
 tickets; Show archived adds every archived ticket, including archived Done tickets,
 independently of Show done. Both on shows all tickets. Counts, region labels and
 empty states describe visible tickets. Its visible
-count follows shared one-second polling; rows retain API order within epic sections.
+count and row ordering follow shared one-second polling. Within each section,
+non-archived tickets precede archived tickets, then tickets sort by status:
+In progress, Ready for development, Backlog, Done. Within a status, activity sorts
+by notification (`needsAttention`), running (`agentStatus: "working"`),
+queued/pending (`agentStatus: "queued"` or `resetting`), then others.
+Notification wins overlapping flags; cleanup pending takes the queued/pending
+rank even with a retained running flag. The final tie-breaker is the ascending
+numeric ticket key (TASK-2 before TASK-10). Archived tickets use the same status,
+activity and key tie-breakers. These tables sort a copy of the shared collection;
+Board and scheduling order remain unchanged.
 Both views use the same collection, create/details dialogs, status transitions,
 archive controls and attention/agent indicators. Filtering and polling preserve
 open ticket details, including archived read-only controls. Board always excludes
@@ -57,7 +66,7 @@ centered and do not shrink. Arrow keys, Home and End
 select views; ticket-open buttons and dialog tabs support keyboard navigation.
 Creation starts in Backlog. Scope and repository selection remain editable only
 in Backlog status, regardless of selected view; Ready and In progress retain
-their chat workflow. Inline editing, search, sorting, table reordering, bulk
+their chat workflow. Inline editing, search, table reordering, bulk
 actions, sprints, priorities and assignees are deferred.
 
 See [epics and grouped backlog](#epics-and-grouped-backlog) for grouping and
@@ -352,7 +361,7 @@ shared with Ready transitions. Membership never changes ticket positions.
 
 Backlog shows No epic first, then every epic in increasing numeric order,
 including empty and completed epics. Each section has its own table and preserves
-the selected Backlog filters and API ticket order, including archived children
+the selected Backlog filters and the sorting contract above, including archived children
 when enabled. Collapsed sections remain collapsed across filter changes.
 Completion counts still use only non-archived children. Headers show the epic icon, key,
 title and a compact completion bar with the done and total counts. At widths of
@@ -371,7 +380,8 @@ successful poll. Errors remain retryable in open dialogs.
 
 Create epic opens an editable dialog. Existing epics open in a centered dialog
 with inline title and description editing and a child work items table with
-progress and links to all non-archived children, including Done. The status
+progress and links to all non-archived children, including Done, using the same
+sorting contract as Backlog regardless of its filters. The status
 shows Done when complete, In progress when any child is In progress or Done
 and work remains, Ready for development when any remaining child is Ready
 and work has yet to start, and Backlog otherwise. The URL

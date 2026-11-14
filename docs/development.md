@@ -63,6 +63,31 @@ files return JSON 404 responses. Fixtures are not persisted. Normal Vite mode
 does not install the mock routes, and production builds exclude the mock API
 even when invoked with `--mode mock`.
 
+## Backlog sorting verification
+
+TASK-30 checks on 2026-11-14 used Node 24.22.0 and pnpm 10.34.7 after
+`nvm use`. Formatting, lint, types and the production build passed. All frontend
+unit tests passed, including status/activity precedence, overlapping flags,
+archives, numeric keys and immutable sorting. The initial unit run had one
+upstream Git sync timeout; that file passed all 17 tests with one worker and
+`--testTimeout=30000`. Initial integration timeouts cleared with one worker and
+`--testTimeout=60000`: all 40 tests passed.
+
+Port 5176 was occupied, so browser checks used a temporary equivalent config on
+5186, removed after verification. The full run passed 162/171 tests, including
+all backlog/epic cases: shuffled sections, every activity rank, both filters,
+archived Done tickets, child ordering, collapse/count preservation, polling with
+an open ticket and all five compact layouts. Retrying the nine failures with
+one worker and `--timeout=60000` passed six. The remaining desktop/mobile
+task-settings navigation and toast retry failures match the unchanged-branch
+failures recorded under [terminal verification](#terminal-keyboard-device-verification).
+The production bundle/CSP case passed on retry.
+
+The image build was stopped with 2.8 GB of disk space remaining. The attempted
+image smoke failed because no `forge:dev` image was available. Image build and
+smoke verification remain blocked by available disk capacity. See the
+[sorting contract](tickets.md#agentic-ticket-board).
+
 ## Android Back verification
 
 TASK-19 automated coverage uses Chromium at desktop and Android-sized layouts

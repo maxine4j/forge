@@ -1,5 +1,6 @@
 import type { EpicSummary, Ticket } from "@forge/contracts/tickets";
 
+import { compareBacklogTickets } from "./backlog-sort.ts";
 import { TicketIndicator } from "./ticket-indicator.tsx";
 import { ticketLabels } from "./ticket-labels.ts";
 
@@ -57,7 +58,7 @@ export const TicketTable = ({
 			<col className='backlog-status-column' />
 		</colgroup>
 		<tbody>
-			{tickets.map((ticket) => (
+			{tickets.toSorted(compareBacklogTickets).map((ticket) => (
 				<tr key={ticket.id} className={ticket.needsAttention ? "needs-attention" : ""}>
 					<td>
 						<button

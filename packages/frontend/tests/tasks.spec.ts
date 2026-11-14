@@ -927,9 +927,7 @@ test("task views persist URL selection, history and ticket deep links with keybo
 	await expect(page.getByRole("dialog", { name: "TASK-2", exact: true })).toBeVisible();
 });
 
-test("backlog filters visible tickets in API order and polling retains an open completed or archived ticket", async ({
-	page,
-}) => {
+test("backlog sorts visible tickets and polling retains an open completed or archived ticket", async ({ page }) => {
 	const f = await setup(page);
 	f.tickets()[0]!.status = "todo";
 	f.tickets()[0]!.agentStatus = "queued";
@@ -939,7 +937,7 @@ test("backlog filters visible tickets in API order and polling retains an open c
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
 	const table = page.getByRole("table");
 	await expect(page.getByRole("status").filter({ hasText: "3 visible tickets" })).toBeVisible();
-	await expect(table.getByRole("button")).toHaveText([/TASK-1$/, /TASK-2$/, /TASK-4$/]);
+	await expect(table.getByRole("button")).toHaveText([/TASK-4$/, /TASK-1$/, /TASK-2$/]);
 	await expect(table.getByRole("img", { name: "Agent queued" })).toHaveCount(1);
 	await expect(table.getByRole("img", { name: "Action required" })).toHaveCount(1);
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
@@ -953,6 +951,71 @@ test("backlog filters visible tickets in API order and polling retains an open c
 	await expect(dialog).toContainText("Archived · Read only");
 	await dialog.getByRole("button", { name: "Close ticket" }).click();
 	await expect(page.getByRole("tab", { name: "Backlog", exact: true })).toBeFocused();
+});
+
+test("backlog and epic children sort shuffled sections and reorder on polling with a ticket open", async ({ page }) => {
+	const f = await setup(page);
+	f.epics.push(...[2, 10].map((n) => ({ id: `EPIC-${n}`, title: `Epic ${n}`, description: "", createdAt })));
+	const base = f.tickets()[0]!;
+	const rows = [0, 20, 40].flatMap((offset) => {
+		const make = (n: number, fields: Partial<typeof base> = {}) => ({
+			...base,
+			id: `TASK-${offset + n}`,
+			epicId: offset === 0 ? undefined : `EPIC-${offset === 20 ? 2 : 10}`,
+			status: "in-progress",
+			...fields,
+		});
+		return [
+			make(10),
+			make(12, { status: "done", archivedAt: createdAt }),
+			make(8, { status: "backlog", needsAttention: true }),
+			make(3, { agentStatus: "queued" }),
+			make(9, { status: "done" }),
+			make(2),
+			make(11, { archivedAt: createdAt }),
+			make(7, { status: "todo", needsAttention: true }),
+			make(5, { agentStatus: "working" }),
+			make(4, { resetting: true, agentStatus: "working" }),
+			make(6, { needsAttention: true, resetting: true, agentStatus: "working" }),
+		];
+	});
+	f.tickets().splice(0, f.tickets().length, ...rows.reverse());
+	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+	await expect(page.locator(".backlog-section h3")).toHaveText(["No epic", "EPIC-2 · Epic 2", "EPIC-10 · Epic 10"]);
+	const tables = page.locator(".backlog-section table");
+	const keys = (offset: number, numbers: number[]) => numbers.map((n) => `✓TASK-${offset + n}`);
+	for (const [index, offset] of [0, 20, 40].entries()) {
+		await expect(tables.nth(index).locator(".backlog-open")).toHaveText(keys(offset, [6, 5, 3, 4, 2, 10, 7, 8]));
+	}
+	await page.getByRole("button", { name: "Collapse EPIC-10", exact: true }).click();
+	await page.getByRole("button", { name: "Filters", exact: true }).click();
+	const done = page.getByRole("checkbox", { name: "Show done", exact: true });
+	const archived = page.getByRole("checkbox", { name: "Show archived", exact: true });
+	await done.check();
+	await expect(tables.nth(0).locator(".backlog-open")).toHaveText(keys(0, [6, 5, 3, 4, 2, 10, 7, 8, 9]));
+	await archived.check();
+	await expect(tables.nth(0).locator(".backlog-open")).toHaveText(keys(0, [6, 5, 3, 4, 2, 10, 7, 8, 9, 11, 12]));
+	await done.uncheck();
+	await expect(tables.nth(0).locator(".backlog-open")).toHaveText(keys(0, [6, 5, 3, 4, 2, 10, 7, 8, 11, 12]));
+	await archived.uncheck();
+	await archived.press("Escape");
+	await expect(page.getByRole("status")).toHaveText("24 visible tickets");
+	await expect(page.getByRole("button", { name: "Expand EPIC-10", exact: true })).toHaveAttribute(
+		"aria-expanded",
+		"false",
+	);
+	await tables.nth(0).getByRole("button", { name: "TASK-2 First task", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "TASK-2", exact: true });
+	await expect(dialog).toBeVisible();
+	f.tickets().find((ticket) => ticket.id === "TASK-2")!.needsAttention = true;
+	await expect(tables.nth(0).locator(".backlog-open")).toHaveText(keys(0, [2, 6, 5, 3, 4, 10, 7, 8]));
+	f.tickets().find((ticket) => ticket.id === "TASK-10")!.status = "todo";
+	await expect(tables.nth(0).locator(".backlog-open")).toHaveText(keys(0, [2, 6, 5, 3, 4, 7, 10, 8]));
+	await expect(dialog).toBeVisible();
+	await dialog.getByRole("button", { name: "Close ticket" }).click();
+	await page.getByRole("heading", { name: "EPIC-2 · Epic 2", exact: true }).getByRole("button").click();
+	const epic = page.getByRole("dialog", { name: "EPIC-2", exact: true });
+	await expect(epic.locator(".backlog-open")).toHaveText(keys(20, [6, 5, 3, 4, 2, 10, 7, 8, 9]));
 });
 
 for (const width of [1280, 375]) {
@@ -1561,7 +1624,7 @@ for (const width of [320, 390, 600, 601, 1280]) {
 			expect(statusCell!.width).toBeLessThanOrEqual(104);
 			// The previous expanding column consumed this much title space.
 			expect(statusCell!.width).toBeLessThan(Math.max(116, Math.min(width * 0.19, 190)));
-			const unbrokenTitle = table.locator(".backlog-title-text").nth(1);
+			const unbrokenTitle = table.locator("tr").filter({ hasText: "TASK-2" }).locator(".backlog-title-text");
 			expect(await unbrokenTitle.evaluate((e) => e.scrollWidth > e.clientWidth)).toBe(true);
 			for (const label of [
 				"Agent queued",
