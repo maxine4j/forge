@@ -14,7 +14,6 @@ import { useLocation, useSearchParams, useNavigate } from "react-router";
 
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
-import { DropdownSurface } from "../dropdown.tsx";
 import {
 	directModalParent,
 	nextModal,
@@ -448,40 +447,6 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 					<ToolbarButton type='button' className='primary' disabled={actionsBusy} onClick={create}>
 						Create ticket
 					</ToolbarButton>
-					{view === "backlog" && (
-						<DropdownSurface
-							label='Filters'
-							size='toolbar'
-							className='backlog-filters'
-							trigger={
-								<>
-									<InterfaceIcon name='filters' />
-									Filters
-								</>
-							}
-						>
-							{() => (
-								<>
-									<label className='dropdown-option'>
-										<input
-											type='checkbox'
-											checked={filters.showDone}
-											onChange={(event) => changeFilter("showDone", event.target.checked)}
-										/>
-										Show done
-									</label>
-									<label className='dropdown-option'>
-										<input
-											type='checkbox'
-											checked={filters.showArchived}
-											onChange={(event) => changeFilter("showArchived", event.target.checked)}
-										/>
-										Show archived
-									</label>
-								</>
-							)}
-						</DropdownSurface>
-					)}
 				</div>
 			</div>
 			{(["board", "backlog"] as const).map((name) => (
@@ -510,6 +475,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 						) : (
 							<TaskBacklog
 								filters={filters}
+								changeFilter={changeFilter}
 								epics={epics}
 								collapsed={collapsed}
 								toggleEpic={toggleEpic}

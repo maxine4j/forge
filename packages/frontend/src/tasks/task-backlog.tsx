@@ -1,5 +1,7 @@
 import type { EpicSummary } from "@forge/contracts/tickets";
 
+import { DropdownSurface } from "../dropdown.tsx";
+import { InterfaceIcon } from "../navigation/interface-icon.tsx";
 import type { BacklogFilters } from "./backlog-filters.ts";
 import { EpicIcon } from "./epic-icon.tsx";
 import type { TaskViewProps } from "./task-board.tsx";
@@ -18,8 +20,10 @@ export const TaskBacklog = ({
 	createInEpic,
 	createUnassigned,
 	filters,
+	changeFilter,
 }: TaskViewProps & {
 	filters: BacklogFilters;
+	changeFilter: (key: keyof BacklogFilters, checked: boolean) => void;
 	epics: EpicSummary[];
 	collapsed: string[];
 	toggleEpic: (id: string) => void;
@@ -32,10 +36,44 @@ export const TaskBacklog = ({
 	);
 	return (
 		<div className='task-backlog'>
-			<p role='status'>
-				{loading ? "Loading tickets…" : `${visible.length} visible tickets`}
-				{notice && ` · ${notice}`}
-			</p>
+			<div className='backlog-toolbar'>
+				<p role='status'>
+					{loading ? "Loading tickets…" : `${visible.length} visible tickets`}
+					{notice && ` · ${notice}`}
+				</p>
+				<DropdownSurface
+					label='Filters'
+					size='toolbar'
+					className='backlog-filters'
+					trigger={
+						<>
+							<InterfaceIcon name='filters' />
+							Filters
+						</>
+					}
+				>
+					{() => (
+						<>
+							<label className='dropdown-option'>
+								<input
+									type='checkbox'
+									checked={filters.showDone}
+									onChange={(event) => changeFilter("showDone", event.target.checked)}
+								/>
+								Show done
+							</label>
+							<label className='dropdown-option'>
+								<input
+									type='checkbox'
+									checked={filters.showArchived}
+									onChange={(event) => changeFilter("showArchived", event.target.checked)}
+								/>
+								Show archived
+							</label>
+						</>
+					)}
+				</DropdownSurface>
+			</div>
 			<div
 				className='backlog-scroll'
 				role='region'

@@ -35,7 +35,8 @@ including existing archived-ticket links from [Costs](#ticket-cost).
 Each view's actions sit beside the tabs and wrap below them when space is limited.
 
 Backlog shows compact Key, Title and Status tables. The right-aligned Filters
-dropdown follows creation actions and contains labelled Show done and Show archived
+dropdown sits below the tabs divider and creation actions, on the same row as the
+visible ticket count, and contains labelled Show done and Show archived
 checkboxes. Changes apply immediately and leave the dropdown open. Both default
 off. Browser storage key `forge.backlog.filters.v1` retains `{showDone,showArchived}`
 across reloads and view switches; missing or invalid preferences default both to

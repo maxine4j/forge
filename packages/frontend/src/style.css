@@ -617,6 +617,21 @@
 	margin-bottom: 12px;
 	border-bottom: 1px solid #30363d;
 }
+.backlog-toolbar {
+	display: flex;
+	flex-shrink: 0;
+	align-items: center;
+	justify-content: space-between;
+	gap: 16px;
+	margin-bottom: 12px;
+}
+.backlog-toolbar > p {
+	min-width: 0;
+	margin: 0;
+}
+.backlog-toolbar .backlog-filters {
+	flex-shrink: 0;
+}
 .backlog-scroll {
 	min-height: 0;
 	overflow: auto;
