@@ -32,7 +32,6 @@ resources:
         ingress:
             public: true
             port: 8080
-        healthcheckUrl: /health
         env:
             - name: OLLAMA_RELAY_TOKEN
               secret: true
