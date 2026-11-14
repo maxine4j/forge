@@ -84,8 +84,10 @@ workspace and agent IDs stay in private abandonment metadata until cleanup finis
 Workspace allocation records its ID in workflow intent before preparation, so setup
 failure before agent creation can still be abandoned and cleaned safely.
 Cancellation is requested promptly for only these ticket agents. Reconciliation
-never replays ambiguous dispatches and retains execution capacity until confirmed
-settlement. Workflow dispatch, feedback, approval and merge reject pending resets;
+never replays ambiguous dispatches and retains execution tracking until confirmed
+settlement. Returning to Ready or Backlog frees ticket capacity immediately, even
+while cancellation is unresolved. The returned ticket cannot restart until its
+reset completes. Workflow dispatch, feedback, approval and merge reject pending resets;
 late results cannot advance the abandoned execution.
 
 Cancellation and cleanup run outside the global workflow queue. Normal ticks and
@@ -140,16 +142,22 @@ or pending merge must settle before archiving.
 | Stage                 | Behavior                                                                                                                                                                                                                                                                                               |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Backlog               | The owner writes the scope.                                                                                                                                                                                                                                                                            |
-| Ready for development | The scheduler claims the top ticket when an agent slot opens. It reserves the slot before allocating a new ticket worktree from latest local main.                                                                                                                                                     |
+| Ready for development | The scheduler admits the top ticket when ticket capacity opens. It persists In progress before allocating a new ticket worktree from latest local main. Setup failures retain that status and capacity.                                                                                                |
 | In progress           | A fresh Codex planner proposes a plan. The card shows an orange notification dot and Chat renders the Markdown plan and accepts feedback. Approve plan applies to the latest completed revision and queues a fresh implementer in the same worktree. Completed implementation goes to the merge queue. |
 | Done                  | Forge moves the ticket here after confirming its commit is in local main.                                                                                                                                                                                                                              |
 
-The scheduler wakes when tickets enter Ready or Done, when an agent slot is
-released, and when settings open new capacity. All execution shares a pool with
-[standalone chats](agents.md).
-Idle chats use no slot. A running agent waiting for structured input or permission
-keeps its slot. Standalone message submissions at capacity retain their drafts.
-Board and conversation selection have no effect on execution.
+The scheduler counts persisted, non-archived In progress tickets, independently
+of active jobs or agent execution states. Each ticket occupies one slot throughout
+planning, awaiting plan approval, implementation, failure recovery and merging.
+Idle, failed and uncertain workflows retain their slots across restart. Under
+workflow serialization, occupancy is rechecked before each Ready admission in
+board order. Subsequent turns, feedback, retries, rebases and merges need no
+additional capacity check.
+
+Done, archive and moves back to Ready or Backlog free capacity. These changes,
+Ready moves and limit increases wake scheduling. [Standalone chats](agents.md#interactive-agents)
+have no board concurrency limit and remain available while ticket dispatch is
+paused or stopped. Board and conversation selection have no effect on execution.
 
 **Stop all agents** durably stops ticket dispatch until explicitly resumed and
 remains available while dispatch is stopped. `POST /api/board/settings/stop`
@@ -157,11 +165,13 @@ returns `settings`, `requested` (interrupt acknowledgments), `recovered`
 (executions confirmed stopped or already inactive/missing), and `failed`
 (unresolved executions, including acknowledged interrupts still running).
 The dialog reports these separately; existing board polling refreshes outcomes.
-Repeated Stop attempts reconcile unresolved slots without replaying input or
+Repeated Stop attempts reconcile unresolved executions without replaying input or
 resetting Codex. Submissions cannot race the stop operation.
 
 [Startup and stop reconciliation](agents.md#interactive-agents) persist settled
-execution and invalidate approvals before releasing slots. Stopped or missing
+execution and invalidate approvals before ending execution tracking. This does
+not free the ticket slot; see [execution recovery](agents.md#interactive-agents).
+Stopped or missing
 ticket executions become failed/recoverable even without a saved turn ID.
 Plans, conversation history, branches and worktrees are retained. Interrupted
 work is never automatically replayed or merged; unavailable runtimes retain
@@ -189,8 +199,11 @@ icons have labels and tooltips “Agent queued” and “Agent working”. The w
 remains static when reduced motion is requested.
 
 Board settings apply across the global board and persist in SQLite. The concurrency
-limit ranges from 1 to 10 and defaults to 3. Lowering it lets active turns
-finish and holds new turns until a slot opens. Pause new tickets keeps Ready
+control is **Max concurrent tickets**, ranges from 1 to 10 and defaults to 3.
+The API and SQLite retain the `maxAgents` field and existing numeric settings;
+no migration is needed. Lowering it leaves existing tickets running and admits
+another Ready ticket only when occupancy falls below the new limit. Pause new
+tickets keeps Ready
 tickets queued while in-progress tickets continue. The Board toolbar and Board
 settings dialog share the pause and resume control state. Stop all agents requests
 interruption of active ticket and standalone turns in parallel, reports any
@@ -290,7 +303,7 @@ text across approval and modal reopening within the board's browser memory.
 
 Messages during running implementation and rebase turns steer the known active
 turn immediately through `turn/steer` with `expectedTurnId`; they retain the same
-execution slot and turn identity. Steering is serialized with ticket completion
+execution tracking and turn identity. Steering is serialized with ticket completion
 and merge transitions. Stale turns, completed tickets and merge-queued submissions
 are rejected. Failed or ambiguous steering is never replayed automatically; the
 browser retains its draft and refreshes status. Planning messages remain limited
@@ -522,7 +535,10 @@ settings edits, conversation/tool contents, plan text and private runtime identi
 `ticket_history` stores ordered event IDs, ticket ID, UTC timestamp, status visit,
 milestone, outcome, optional revision and normalized reason. Creation and actual
 status changes append events in the ticket transaction; reorder alone does not.
-Workflow persistence appends milestones in the state transaction. Serialized state
+Workflow persistence appends milestones in the state transaction. Ticket
+admission opens the In progress visit before workspace or agent setup; dispatch
+and runtime observations then record activity in that visit without copying it
+from Ready. Setup failure belongs to the admitted visit. Serialized state
 comparisons and durable per-thread/turn observations suppress repeated polling and
 recovery observations, while preserving repeated waits and distinct retries.
 An injected persistence boundary records normalized agent activity during agent

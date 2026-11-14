@@ -9,7 +9,7 @@ import { expect, test, vi } from "vitest";
 
 import { AccountProcess } from "../../src/accounts/account-process.ts";
 import { CodexConnection } from "../../src/accounts/codex-connection.ts";
-import { AgentExecutionPool } from "../../src/agents/agent-execution-pool.ts";
+import { AgentExecutionTracker } from "../../src/agents/agent-execution-tracker.ts";
 import { AgentService } from "../../src/agents/agent-service.ts";
 import { AgentThreadStore } from "../../src/agents/agent-thread-store.ts";
 import { AccessService } from "../../src/auth/access-service.ts";
@@ -79,7 +79,7 @@ test("real Git/SQLite and a stdio peer run concurrent agents only in owned workt
 			access,
 			randomUUID,
 			() => new Date(),
-			new AgentExecutionPool(),
+			new AgentExecutionTracker(),
 		);
 		const one = await agents.create(owner, project.id, "One");
 		const two = await agents.create(owner, project.id, "Two");
@@ -131,11 +131,11 @@ test("real Git/SQLite and a stdio peer run concurrent agents only in owned workt
 			codexId: randomUUID(),
 			turnId: undefined,
 		});
-		let recoveredPool = new AgentExecutionPool();
+		let recoveredPool = new AgentExecutionTracker();
 		const restart = async () => {
 			await agents!.shutdown();
 			await store.recover();
-			recoveredPool = new AgentExecutionPool();
+			recoveredPool = new AgentExecutionTracker();
 			agents = new AgentService(
 				store,
 				new CodexAgentClient(connection, files.realpath, randomUUID),

@@ -3,7 +3,6 @@ import { resolveAgentSettings, type AgentOptions } from "@forge/contracts/agents
 import { ticketExecutionSettingsSchema, type TicketExecutionSettings } from "@forge/contracts/tickets";
 import type { BoardSettings, Ticket, CreateTicket, MoveTicket, TicketWorkflow } from "@forge/contracts/tickets";
 
-import type { IAgentExecutionPool } from "../agents/agent-execution-pool.ts";
 import type { ITicketAgents } from "../agents/agent-service.ts";
 import { AgentCatalogError, AgentError } from "../agents/errors.ts";
 import type { IAccessService } from "../auth/access-service.ts";
@@ -86,7 +85,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		private readonly store: ITicketWorkflowStore,
 		private readonly tickets: ITicketStore,
 		private readonly agents: ITicketAgents,
-		private readonly pool: IAgentExecutionPool,
+		private readonly maxConcurrentTickets: () => number,
 		private readonly merges: ITicketMergeClient,
 		private readonly workspaceCleanup: IMergedWorkspaceCleanup,
 		private readonly prompts: ITicketPrompts,
@@ -112,6 +111,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				throw new TicketError("ticket-conflict");
 			await this.tickets.archive(ticket.id, archivedAt);
 		});
+		this.wake();
 	}
 	async move(actor: Actor, ticket: Ticket, input: MoveTicket): Promise<void> {
 		this.access.assertOwner(actor);
@@ -155,6 +155,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				) {
 					// Recover a completed Git update before accepting a destructive reset.
 					await this.store.save({ ...job, state: "idle", message: undefined }, { status: "done" });
+					this.wake();
 					throw new TicketError("ticket-conflict");
 				}
 				const abandonment = {
@@ -311,8 +312,17 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				try {
 					if (["running", "uncertain", "dispatching"].includes(job.state)) await this.observe(actor, job);
 					else if (job.state === "merge-queued") await this.merge(actor, job);
-					else if (job.state === "queued" && this.canDispatch(ticket) && this.pool.available())
+					else if (job.state === "queued" && this.canDispatch(ticket)) {
+						if (ticket.status === "todo") {
+							const occupied = (await this.tickets.list()).filter(
+								(item) => !item.archivedAt && item.status === "in-progress",
+							).length;
+							if (occupied >= this.maxConcurrentTickets()) continue;
+							await this.store.save(job, { status: "in-progress" });
+							ticket.status = "in-progress";
+						}
 						await this.dispatch(actor, ticket, job);
+					}
 				} catch (err) {
 					if (err instanceof AgentError && err.code === "agent-capacity") {
 						if (job.state === "dispatching") await this.store.save({ ...job, state: "queued" });
@@ -324,10 +334,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 						|| err instanceof AgentCatalogError
 						|| (err instanceof AgentError && err.code === "unsupported-settings");
 					const state = setupFailed ? "setup-failed" : job.state === "dispatching" ? "uncertain" : "failed";
-					await this.store.save(
-						{ ...job, state },
-						ticket.status === "todo" ? { status: "in-progress" } : undefined,
-					);
+					await this.store.save({ ...job, state });
 				}
 			}
 		});
@@ -475,7 +482,6 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		const settings = { model, reasoningEffort, permissions };
 		const planning = job.phase === "planning";
 		let id = planning ? job.plannerId : job.implementerId;
-		let releaseReservation = false;
 		this.settingUp.add(ticket.id);
 		try {
 			if (!id) {
@@ -484,14 +490,12 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 					repositoryId,
 					`${ticket.id} ${planning ? "planning" : "implementation"}`,
 					job.workspaceId,
-					true,
 					async (workspaceId) => {
 						job.workspaceId = workspaceId;
 						await this.store.save(job);
 					},
 				);
 				id = view.thread.id;
-				releaseReservation = true;
 				if (planning) {
 					job.plannerId = id;
 					job.workspaceId = view.thread.workspaceId;
@@ -505,7 +509,6 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			job.turnId = undefined;
 			job.state = "dispatching";
 			await this.store.save(job);
-			releaseReservation = false;
 			const view = await this.agents.dispatch(
 				actor,
 				id,
@@ -516,10 +519,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			);
 			job.state = "running";
 			job.turnId = view.thread.turnId;
-			await this.store.save(job, ticket.status === "todo" ? { status: "in-progress" } : undefined);
-		} catch (err) {
-			if (releaseReservation) this.pool.observe(id!, "idle");
-			throw err;
+			await this.store.save(job);
 		} finally {
 			this.settingUp.delete(ticket.id);
 		}

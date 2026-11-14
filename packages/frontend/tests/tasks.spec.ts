@@ -1953,12 +1953,15 @@ test("board settings save the slider and control pause, stop and resume", async 
 	const modal = page.getByRole("dialog", { name: "Board settings" });
 	await modal.getByRole("button", { name: "Resume ticket dispatch" }).click();
 	await expect(modal.getByRole("status")).toHaveText("Ticket dispatch resumed.");
-	const slider = modal.getByRole("slider", { name: "Max concurrent agents" });
+	const slider = modal.getByRole("slider", { name: "Max concurrent tickets" });
+	await expect(
+		modal.getByText("In progress tickets count while awaiting approval. Standalone chats are unrestricted."),
+	).toBeVisible();
 	await expect(slider).toHaveValue("3");
 	await slider.focus();
 	await slider.press("ArrowRight");
 	await modal.getByRole("button", { name: "Save limit" }).click();
-	await expect(modal.getByRole("status")).toHaveText("Agent limit saved.");
+	await expect(modal.getByRole("status")).toHaveText("Ticket limit saved.");
 	await modal.getByRole("button", { name: "Pause new tickets" }).click();
 	await expect(modal.getByRole("status")).toHaveText("New tickets are paused.");
 	await modal.getByRole("button", { name: "Close board settings" }).click();
@@ -1967,13 +1970,13 @@ test("board settings save the slider and control pause, stop and resume", async 
 	expect(fixture.stopRequests()).toBe(0);
 	await modal.getByRole("button", { name: "Stop all agents" }).click();
 	await expect(modal.getByRole("alert")).toHaveText(
-		"Interruption requested for 2 agents. Slots recovered: 1. 1 execution remains unresolved. Retry Stop all agents to reconcile again.",
+		"Interruption requested for 2 agents. Executions settled: 1. 1 execution remains unresolved. Retry Stop all agents to reconcile again.",
 	);
 	expect(fixture.stopRequests()).toBe(1);
 	await expect(modal.getByRole("button", { name: "Stop all agents" })).toBeEnabled();
 	await modal.getByRole("button", { name: "Stop all agents" }).click();
 	await expect.poll(fixture.stopRequests).toBe(2);
-	await expect(modal.getByRole("status")).toHaveText("Interruption requested for 0 agents. Slots recovered: 1.");
+	await expect(modal.getByRole("status")).toHaveText("Interruption requested for 0 agents. Executions settled: 1.");
 	await modal.getByRole("button", { name: "Resume ticket dispatch" }).click();
 	await expect(modal.getByRole("status")).toHaveText("Ticket dispatch resumed.");
 	await modal.getByRole("button", { name: "Close board settings" }).click();

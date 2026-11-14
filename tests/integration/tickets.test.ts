@@ -7,7 +7,6 @@ import { mkdtemp, rm } from "@forge/backend-infrastructure/file";
 import { ticketHistorySchema } from "@forge/contracts/tickets";
 import { afterEach, expect, test, vi } from "vitest";
 
-import { AgentExecutionPool } from "../../src/agents/agent-execution-pool.ts";
 import { AccessService } from "../../src/auth/access-service.ts";
 import { SqliteDatabase } from "../../src/database/sqlite-database.ts";
 import { EpicRouter } from "../../src/epics/epic-router.ts";
@@ -61,7 +60,7 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 			resume: vi.fn(),
 			plan: vi.fn(),
 		},
-		new AgentExecutionPool(),
+		() => 3,
 		{ isMerged: vi.fn(async () => false), merge: vi.fn(), base: vi.fn(), verify: vi.fn(), candidate: vi.fn() },
 		{ cleanupMerged: vi.fn() },
 		new TicketPrompts(),

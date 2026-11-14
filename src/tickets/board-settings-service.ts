@@ -6,7 +6,6 @@ import {
 	type BoardStop,
 } from "@forge/contracts/tickets";
 
-import type { IAgentExecutionLimit } from "../agents/agent-execution-pool.ts";
 import type { IAgentStop } from "../agents/agent-service.ts";
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
@@ -26,13 +25,14 @@ export class BoardSettingsService implements IBoardSettingsService {
 	constructor(
 		private readonly store: IBoardSettingsStore,
 		private readonly agents: IAgentStop,
-		private readonly pool: IAgentExecutionLimit,
 		private readonly access: IAccessService,
 		private readonly wake: () => void,
 	) {}
 	async initialize(): Promise<void> {
 		this.settings = await this.store.load();
-		this.pool.setLimit(this.settings.maxAgents);
+	}
+	maxConcurrentTickets(): number {
+		return this.settings.maxAgents;
 	}
 	dispatchMode(): BoardSettings["dispatch"] {
 		return this.settings.dispatch;
@@ -66,8 +66,11 @@ export class BoardSettingsService implements IBoardSettingsService {
 		const previous = this.settings;
 		await this.store.save(settings);
 		this.settings = settings;
-		this.pool.setLimit(settings.maxAgents);
-		if (previous.dispatch !== settings.dispatch && settings.dispatch !== "stopped") this.wake();
+		if (
+			settings.maxAgents > previous.maxAgents
+			|| (previous.dispatch !== settings.dispatch && settings.dispatch !== "stopped")
+		)
+			this.wake();
 	}
 	private serialize<T>(operation: () => Promise<T>): Promise<T> {
 		const result = this.tail.then(operation);

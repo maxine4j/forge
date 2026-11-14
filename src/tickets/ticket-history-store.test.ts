@@ -189,7 +189,7 @@ test("cursor pages are bounded and deterministic even when timestamps tie", asyn
 	expect(new Set([...first.events, ...second.events].map((event) => event.id)).size).toBe(158);
 });
 
-test("confirmed dispatch starts a status visit with the already observed waiting state", async () => {
+test("admission precedes dispatch and waiting activity without duplicating milestones", async () => {
 	const { workflow, history, ticket } = await setup();
 	const id = "123e4567-e89b-42d3-a456-426614174000";
 	const job: TicketWorkflowRecord = {
@@ -200,7 +200,9 @@ test("confirmed dispatch starts a status visit with the already observed waiting
 		plannerId: id,
 		workspaceId: id,
 	};
-	await workflow.save(job, { status: "todo" });
+	await workflow.save({ ...job, state: "queued" }, { status: "todo" });
+	await workflow.save({ ...job, state: "queued" }, { status: "in-progress" });
+	await workflow.save(job);
 	await history.observe({
 		id,
 		projectId: id,
@@ -213,9 +215,9 @@ test("confirmed dispatch starts a status visit with the already observed waiting
 		requests: [],
 	});
 	const running = { ...job, state: "running" as const, turnId: "turn" };
-	await workflow.save(running, { status: "in-progress" });
+	await workflow.save(running);
 	const snapshot = await history.read(ticket.id, 0);
-	await workflow.save(running, { status: "in-progress" });
+	await workflow.save(running);
 	expect(await history.read(ticket.id, 0)).toEqual(snapshot);
 	expect(snapshot.events.slice(-2)).toMatchObject([
 		{ type: "planning", outcome: "working", status: "in-progress" },

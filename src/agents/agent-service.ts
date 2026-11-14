@@ -23,7 +23,7 @@ import type { TicketUsageScope } from "../cost/types.ts";
 import type { IProjectService } from "../projects/project-service.ts";
 import type { ITicketAgentHistory } from "../tickets/ticket-history-store.ts";
 import type { WorkspaceLocation } from "../workspaces/types.ts";
-import type { IAgentExecutionPool } from "./agent-execution-pool.ts";
+import type { IAgentExecutionTracker } from "./agent-execution-tracker.ts";
 import type { IAgentThreadStore } from "./agent-thread-store.ts";
 import { AgentCatalogError, AgentError } from "./errors.ts";
 import type { AgentThreadRecord } from "./types.ts";
@@ -64,7 +64,6 @@ export interface ITicketAgents {
 		projectId: string,
 		title: string,
 		workspaceId?: string,
-		reserveSlot?: boolean,
 		allocated?: (workspaceId: string) => Promise<void>,
 	): Promise<AgentView>;
 	dispatch(
@@ -80,7 +79,7 @@ export interface ITicketAgents {
 	resume(actor: Actor, id: string): Promise<AgentView>;
 }
 export interface IAgentStop {
-	/** Requests interruption for active reservations. Reports failures individually. */
+	/** Requests interruption for tracked executions. Reports failures individually. */
 	stopAll(actor: Actor): Promise<{ requested: number; recovered: number; failed: number }>;
 }
 export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
@@ -103,7 +102,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		private readonly access: IAccessService,
 		private readonly generateId: () => string,
 		private readonly now: () => Date,
-		private readonly pool: IAgentExecutionPool,
+		private readonly tracker: IAgentExecutionTracker,
 		private readonly defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = () => ({}),
 		private readonly provider: () => InferenceProvider = () => ({ kind: "openai" }),
 		private readonly history?: ITicketAgentHistory,
@@ -125,10 +124,9 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		projectId: string,
 		title: string,
 		workspaceId?: string,
-		reserveSlot = false,
 		allocated?: (workspaceId: string) => Promise<void>,
 	): Promise<AgentView> {
-		return this.createThread(actor, projectId, title, true, workspaceId, reserveSlot, allocated);
+		return this.createThread(actor, projectId, title, true, workspaceId, allocated);
 	}
 	async list(actor: Actor, projectId: string): Promise<AgentThread[]> {
 		this.authorize(actor);
@@ -232,7 +230,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			const record = await this.require(id);
 			if (record.abandoned || this.abandoning.has(id)) throw new AgentError("agent-conflict");
 			if (this.stopping || revision !== this.stopRevision) {
-				this.pool.observe(id, record.status);
+				this.tracker.observe(id, record.status);
 				throw new AgentError("agent-capacity");
 			}
 			const previousStatus = record.status;
@@ -247,19 +245,19 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			);
 			if (!selection.success) throw new AgentError("invalid-request");
 			const catalog = await this.providerOptions(record.provider).catch((cause: unknown) => {
-				this.pool.observe(id, previousStatus);
+				this.tracker.observe(id, previousStatus);
 				throw new AgentCatalogError(cause);
 			});
 			const resolved = resolveAgentSettings(catalog, selection.data);
 			if (!resolved.supported) {
-				this.pool.observe(id, previousStatus);
+				this.tracker.observe(id, previousStatus);
 				throw new AgentError("unsupported-settings");
 			}
 			if (allowed && !allowed()) {
-				this.pool.observe(id, record.status);
+				this.tracker.observe(id, record.status);
 				throw new AgentError("agent-capacity");
 			}
-			this.pool.claim(id);
+			this.tracker.claim(id);
 			record.model = selection.data.model;
 			record.reasoningEffort = selection.data.reasoningEffort;
 			record.permissions = selection.data.permissions;
@@ -289,7 +287,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				) {
 					record.status = previousStatus;
 					await this.store.update(record);
-					this.pool.observe(id, previousStatus);
+					this.tracker.observe(id, previousStatus);
 					return undefined;
 				}
 				await this.client.send(
@@ -310,11 +308,11 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				return await this.sync(record);
 			} catch (cause) {
 				if (!contactedRuntime) {
-					this.pool.observe(id, record.status);
+					this.tracker.observe(id, record.status);
 					throw cause;
 				}
 				record.status = "uncertain";
-				this.pool.observe(id, "uncertain");
+				this.tracker.observe(id, "uncertain");
 				await this.store.update(record);
 				throw cause;
 			}
@@ -357,11 +355,11 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		this.stopRevision++;
 		try {
 			const results = await Promise.allSettled(
-				this.pool.activeIds().map((id) =>
+				this.tracker.activeIds().map((id) =>
 					this.serialize(id, async () => {
 						const record = await this.require(id);
 						if (!["creating", "uncertain", "running", "waiting"].includes(record.status)) {
-							this.pool.observe(id, record.status);
+							this.tracker.observe(id, record.status);
 							return { requested: 0, recovered: 0, failed: 0 };
 						}
 						const result = await this.reconcile(actor, record);
@@ -421,7 +419,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 						await this.store.update(record);
 					}
 					if (!["creating", "uncertain", "running", "waiting"].includes(record.status)) {
-						this.pool.observe(id, record.status);
+						this.tracker.observe(id, record.status);
 						return true;
 					}
 					const result = await this.reconcile(actor, record);
@@ -471,11 +469,11 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			await Promise.all((await this.projects.list(actor)).map((project) => this.store.list(project.id)))
 		).flat();
 		for (const record of records) {
-			this.pool.observe(record.id, record.status);
+			this.tracker.observe(record.id, record.status);
 			if (record.managed) this.ticketThreads.add(record.id);
 		}
 	}
-	/** Background reconciliation never replays a turn; unavailable runtimes retain slots. */
+	/** Background reconciliation never replays a turn; unavailable executions remain tracked. */
 	async recover(actor: Actor): Promise<void> {
 		this.authorize(actor);
 		const records = (
@@ -486,7 +484,10 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			try {
 				await this.serialize(record.id, async () => this.reconcile(actor, await this.require(record.id)));
 			} catch (err) {
-				this.log.error({ err, threadId: record.id }, "Agent reconciliation failed; retaining execution slot");
+				this.log.error(
+					{ err, threadId: record.id },
+					"Agent reconciliation failed; retaining execution tracking",
+				);
 			}
 		}
 	}
@@ -500,7 +501,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				? { ...record, status: "running", turnId: result.turnId, requests: [] }
 				: { ...record, status: "interrupted", requests: [] };
 		await this.store.update(updated);
-		this.pool.observe(record.id, updated.status);
+		this.tracker.observe(record.id, updated.status);
 		for (const listener of this.listeners.get(record.id) ?? []) listener();
 		return result;
 	}
@@ -510,15 +511,12 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		title: string,
 		managed: boolean,
 		workspaceId?: string,
-		reserveSlot = false,
 		allocated?: (workspaceId: string) => Promise<void>,
 	): Promise<AgentView> {
 		this.authorize(actor);
 		const input = createAgentSchema.safeParse({ title });
 		if (!input.success) throw new AgentError("invalid-request");
 		const id = this.generateId();
-		if (reserveSlot && this.stopping) throw new AgentError("agent-capacity");
-		if (reserveSlot) this.pool.claim(id);
 		return this.serialize(id, async () => {
 			if (workspaceId && managed && (await this.workspaces.get(actor, workspaceId)).status === "failed")
 				await this.workspaces.retry(actor, workspaceId);
@@ -540,9 +538,6 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			await this.store.insert(record);
 			if (managed) this.ticketThreads.add(id);
 			return this.view(record);
-		}).catch((cause: unknown) => {
-			if (reserveSlot) this.pool.observe(id, "idle");
-			throw cause;
 		});
 	}
 	private authorize(actor: Actor): void {
@@ -599,7 +594,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			};
 			await this.recordHistory(updated, runtime.turnFailure);
 			if (JSON.stringify(updated) !== JSON.stringify(record)) await this.store.update(updated);
-			this.pool.observe(record.id, runtime.status);
+			this.tracker.observe(record.id, runtime.status);
 			return this.view(updated);
 		}
 		return this.view(record);

@@ -61,7 +61,7 @@ export const useBoardSettings = (api: IWorkspaceApi, visible: boolean) => {
 		act(async () => {
 			const result = await api.read("board/settings/stop", boardStopSchema, "POST");
 			setSettings(result.settings);
-			const message = `Interruption requested for ${result.requested} ${result.requested === 1 ? "agent" : "agents"}. Slots recovered: ${result.recovered}.`;
+			const message = `Interruption requested for ${result.requested} ${result.requested === 1 ? "agent" : "agents"}. Executions settled: ${result.recovered}.`;
 			if (result.failed)
 				setError(
 					`${message} ${result.failed} ${result.failed === 1 ? "execution remains" : "executions remain"} unresolved. Retry Stop all agents to reconcile again.`,
@@ -111,10 +111,10 @@ export const BoardSettingsDialog = ({
 					<form
 						onSubmit={(event) => {
 							event.preventDefault();
-							void update({ maxAgents: limit }, "Agent limit saved.");
+							void update({ maxAgents: limit }, "Ticket limit saved.");
 						}}
 					>
-						<label htmlFor={limitId}>Max concurrent agents</label>
+						<label htmlFor={limitId}>Max concurrent tickets</label>
 						<input
 							id={limitId}
 							type='range'
@@ -129,12 +129,13 @@ export const BoardSettingsDialog = ({
 							Save limit
 						</button>
 					</form>
+					<p>In progress tickets count while awaiting approval. Standalone chats are unrestricted.</p>
 					<p>
 						{settings.dispatch === "stopped"
 							? "Ticket dispatch is stopped."
 							: settings.dispatch === "paused"
 								? "Ready tickets are paused. In-progress tickets can continue."
-								: "Ready tickets start when agent slots open."}
+								: "Ready tickets start when ticket capacity opens."}
 					</p>
 					<div className='board-settings-actions'>
 						<button type='button' disabled={busy} onClick={() => void toggleDispatch()}>

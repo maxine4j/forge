@@ -42,7 +42,7 @@ export class WorkspaceApi implements IWorkspaceApi {
 				"unsupported-settings":
 					"The selected model or thinking level is unavailable, or the provider does not support the permission mode. Use Default for the model or thinking level, or choose an available permission mode. Your draft is preserved.",
 				"agent-capacity":
-					"All agent slots are occupied. Retry when an agent finishes. Your draft is preserved.",
+					"Agent submission was stopped. Retry when the stop operation finishes. Your draft is preserved.",
 				"agent-not-found": "Chat no longer exists. Refresh the chat list.",
 				"agent-conflict": "Chat changed. Refresh its status before trying again. Your draft is preserved.",
 				"agent-unavailable":

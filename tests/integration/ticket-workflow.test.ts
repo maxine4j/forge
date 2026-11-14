@@ -10,7 +10,7 @@ import { expect, test, vi } from "vitest";
 
 import { AccountProcess } from "../../src/accounts/account-process.ts";
 import { CodexConnection } from "../../src/accounts/codex-connection.ts";
-import { AgentExecutionPool } from "../../src/agents/agent-execution-pool.ts";
+import { AgentExecutionTracker } from "../../src/agents/agent-execution-tracker.ts";
 import { AgentService } from "../../src/agents/agent-service.ts";
 import { AgentThreadStore } from "../../src/agents/agent-thread-store.ts";
 import { AccessService } from "../../src/auth/access-service.ts";
@@ -84,7 +84,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		);
 		const agentStore = new AgentThreadStore(db);
 		await agentStore.initialize();
-		let pool = new AgentExecutionPool();
+		let pool = new AgentExecutionTracker();
 		const costStore = new CostStore(db);
 		await costStore.initialize(new Date().toISOString());
 		usage = new CodexUsageClient(
@@ -121,7 +121,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				jobs,
 				ticketStore,
 				service,
-				pool,
+				() => 1,
 				merges,
 				workspaces,
 				new TicketPrompts(),
@@ -143,7 +143,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			await agents!.shutdown();
 			await agentStore.recover();
 			await jobs.initialize();
-			pool = new AgentExecutionPool();
+			pool = new AgentExecutionTracker();
 			agents = new AgentService(
 				agentStore,
 				new CodexAgentClient(connection, files.realpath, randomUUID, usage),
@@ -175,6 +175,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		});
 		const standalone = await Promise.all([1, 2, 3].map((n) => agents!.create(owner, other.id, `Standalone ${n}`)));
 		for (const view of standalone) await agents.send(owner, view.thread.id, "Keep working");
+		dispatch = "paused";
 		await tickets.move(owner, ticket.id, { status: "todo" });
 		await workflow.tick(owner);
 		expect((await jobs.get(ticket.id))?.plannerId).toBeUndefined();
@@ -188,7 +189,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		const resolve = workspaces.resolve.bind(workspaces);
 		expect((await tickets.list(owner)).at(0)?.agentStatus).toBe("queued");
 		vi.spyOn(workspaces, "resolve").mockImplementationOnce(async (...args) => {
-			dispatch = "paused";
+			dispatch = "stopped";
 			return resolve(...args);
 		});
 		await workflow.tick(owner);
@@ -196,12 +197,12 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect(preparedPlanner).toBeDefined();
 		expect((await jobs.get(ticket.id))?.executionRepositoryId).toBe(project.id);
 		expect((await workspaces.get(owner, (await jobs.get(ticket.id))!.workspaceId!)).projectId).toBe(project.id);
-		expect((await ticketStore.get(ticket.id))?.status).toBe("todo");
+		expect((await ticketStore.get(ticket.id))?.status).toBe("in-progress");
 		await restart();
 		expect((await ticketStore.get(ticket.id))?.repositoryIds).toEqual([project.id, other.id]);
 		expect((await jobs.get(ticket.id))?.executionRepositoryId).toBe(project.id);
 		await workflow.tick(owner);
-		expect((await ticketStore.get(ticket.id))?.status).toBe("todo");
+		expect((await ticketStore.get(ticket.id))?.status).toBe("in-progress");
 		expect((await jobs.get(ticket.id))?.state).toBe("queued");
 		dispatch = "running";
 		await workflow.settings(owner, (await ticketStore.get(ticket.id))!, { reasoningEffort: "medium" });
@@ -222,6 +223,22 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		};
 		await expect.poll(idle).toBe("idle");
 		expect((await jobs.get(ticket.id))?.plan?.revision).toBe(1);
+		const next = await tickets.create(owner, {
+			repositoryIds: [project.id],
+			title: "Next",
+			description: "Wait for capacity",
+		});
+		await tickets.move(owner, next.id, { status: "todo" });
+		dispatch = "running";
+		await workflow.tick(owner);
+		expect((await ticketStore.get(next.id))?.status).toBe("todo");
+		await restart();
+		await workflow.tick(owner);
+		expect((await ticketStore.get(next.id))?.status).toBe("todo");
+		await tickets.archive(owner, next.id);
+		const extraChat = await agents.create(owner, other.id, "At board capacity");
+		await agents.send(owner, extraChat.thread.id, "Keep working");
+		dispatch = "paused";
 		expect(rpc).toHaveBeenCalledWith(
 			"turn/start",
 			expect.objectContaining({
@@ -343,13 +360,13 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect(history.contextWindow).toEqual({ used: 1100, max: 128000 });
 		expect(await agents!.list(owner, project.id)).toEqual([]);
 		const archived = await tickets.archive(owner, ticket.id);
-		await expect.poll(async () => (await cost.read(owner)).totals.input).toBe(7000);
+		await expect.poll(async () => (await cost.read(owner)).totals.input).toBe(8000);
 		const recorded = await cost.read(owner);
 		expect(recorded.phases.filter(({ turns }) => turns).map(({ phase, turns }) => [phase, turns])).toEqual([
 			["planning", 2],
 			["implementation", 1],
 			["rebase", 1],
-			["chat", 3],
+			["chat", 4],
 		]);
 		expect(recorded.tickets.at(0)).toMatchObject({
 			id: ticket.id,

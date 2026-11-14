@@ -14,7 +14,7 @@ import { AccountService } from "./accounts/account-service.ts";
 import { CodexAccountClient } from "./accounts/codex-account-client.ts";
 import { CodexConnection } from "./accounts/codex-connection.ts";
 import { GithubAccountClient } from "./accounts/github-account-client.ts";
-import { AgentExecutionPool } from "./agents/agent-execution-pool.ts";
+import { AgentExecutionTracker } from "./agents/agent-execution-tracker.ts";
 import { AgentRouter } from "./agents/agent-router.ts";
 import { AgentService } from "./agents/agent-service.ts";
 import { AgentThreadStore } from "./agents/agent-thread-store.ts";
@@ -261,7 +261,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		wakeRequested = true;
 		schedulerWait?.abort();
 	};
-	const pool = new AgentExecutionPool(wakeScheduler);
+	const tracker = new AgentExecutionTracker(wakeScheduler);
 	const agents = new AgentService(
 		agentStore,
 		agentClient,
@@ -270,7 +270,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		access,
 		randomUUID,
 		() => new Date(),
-		pool,
+		tracker,
 		() => {
 			const { defaultAgentModel, defaultAgentReasoningEffort } = settings.current();
 			return { defaultModel: defaultAgentModel, defaultReasoningEffort: defaultAgentReasoningEffort };
@@ -281,7 +281,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	lifecycle.register(() => agents.shutdown());
 	const boardStore = new BoardSettingsStore(database);
 	await boardStore.initialize();
-	const boardSettings = new BoardSettingsService(boardStore, agents, pool, access, wakeScheduler);
+	const boardSettings = new BoardSettingsService(boardStore, agents, access, wakeScheduler);
 	await boardSettings.initialize();
 	const workflowStore = new TicketWorkflowStore(database, () => new Date());
 	await workflowStore.initialize();
@@ -290,7 +290,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		workflowStore,
 		ticketStore,
 		agents,
-		pool,
+		() => boardSettings.maxConcurrentTickets(),
 		new WorkspaceMergeClient(workspaces, git),
 		workspaces,
 		new TicketPrompts(() => settings.current()),

@@ -26,7 +26,7 @@ Only the recorded managed planner and implementer are interrupted; unrelated
 tickets and standalone chats keep running. Agents retain a private abandonment
 flag rejecting further dispatch, steering and approval replies. Reconciliation
 uses the same termination evidence as Stop all agents, without replaying ambiguous
-turns. Interrupt acknowledgment alone does not release capacity or allow worktree
+turns. Interrupt acknowledgment alone does not settle execution or allow worktree
 removal. Confirmed settlement permits [owned workspace cleanup](workspaces.md#ticket-abandonment-cleanup).
 Agent records, conversations and historical cost attribution survive abandonment.
 
@@ -50,12 +50,15 @@ reviews; Codex owns model interaction, tools, agent execution, and conversations
 - Persist important normalized activity and approval state for browser reconnects.
   Reconcile actual Codex state after app-server or application restart before
   dispatching more work. Surface interrupted execution and recovery failures explicitly.
-- A shared execution pool defaults to three active agents across projects,
-  standalone chats and all ticket phases, including review followups and rebases.
-  The [ticket board settings](tickets.md#agentic-ticket-board) set the shared limit
-  and can interrupt active turns across projects.
-  Running, waiting and uncertain executions retain slots. Completed, failed and
-  interrupted turns release slots. Serialize mutations within each thread.
+- An unbounded execution tracker records active and uncertain executions across
+  projects, standalone chats and ticket phases for global stop and recovery.
+  Completed, failed and interrupted turns end execution tracking. Thread creation
+  reserves no slot. Serialize mutations within each thread and retain submission
+  guards against racing global stop. The [ticket board capacity](tickets.md#agentic-ticket-board)
+  limits persisted In progress tickets independently of execution tracking;
+  awaiting approval and failed workflows still count. Standalone chats have no
+  board concurrency limit, including while ticket dispatch is paused or stopped.
+  **Stop all agents** continues interrupting both ticket agents and standalone chats.
 - Shut down child processes cleanly and reap descendants. Keep the web UI and
   process health available when Codex is unavailable or unauthenticated.
 
@@ -118,25 +121,25 @@ history and reconcile state without submitting a message. An ambiguous thread cr
 cannot be retried; create a new chat, retaining the old worktree. Untouched empty
 chats remain usable across restarts.
 
-Startup seeds every persisted execution reservation before accepting submissions.
+Startup seeds every persisted tracked execution before accepting submissions.
 Background reconciliation resumes thread metadata without loading conversation
-items: history pagination failures cannot prevent slot recovery. Confirmed active
-turns keep their slots and are not interrupted at startup. Confirmed idle threads
+items: history pagination failures cannot prevent execution recovery. Confirmed active
+turns remain tracked and are not interrupted at startup. Confirmed idle threads
 and authoritative missing rollouts settle as interrupted/recoverable; records,
 branches and worktrees remain. In pinned Codex 0.164.0, only the structured
 `-32600` response `no rollout found for thread id <id>` from resume establishes
 absence. `thread not loaded`, authentication failures, timeouts and other RPC
-errors remain unresolved, retaining capacity.
+errors remain unresolved and tracked.
 
 An uncertain creation without an ID is settled only after initialization confirms
 a fresh runtime, or cleanup of the process that received creation. A failed
-creation against the current process remains reserved. Recovery never retries
+creation against the current process remains tracked. Recovery never retries
 thread creation, turns or approvals and never resets the shared runtime.
-Settlement invalidates approval handles and persists status before releasing
-capacity. Stale notifications cannot reactivate a settled reservation.
+Settlement invalidates approval handles and persists status before ending
+execution tracking. Stale notifications cannot reactivate a settled execution.
 **Stop all agents** uses the same serialized reconciliation, interrupts current
 active turn IDs, and checks execution again. An interrupt acknowledgment alone
-does not free capacity. Unresolved executions remain visible and can be retried
+does not settle execution. Unresolved executions remain visible and can be retried
 through [board settings](tickets.md#agentic-ticket-board).
 
 Threads use `danger-full-access` and disabled Codex subagent spawning. Start and
@@ -225,8 +228,8 @@ Full turn output must not be bundled into history metadata responses.
 Pending structured requests are bounded per thread. RPC deadlines remain 15 seconds
 and frames are bounded to 16 MiB, including large individual tool results and
 completion notifications; there is no automatic
-turn timeout. The shared execution limit also applies to these chats;
-capacity failures preserve browser drafts for retry. SSE sends 15-second heartbeats,
+turn timeout. Standalone chats have no board concurrency limit. Failed
+submissions preserve browser drafts for retry. SSE sends 15-second heartbeats,
 disconnects slow consumers and closes on application shutdown. Reconnection reads
 a current snapshot rather than replaying mutations.
 
@@ -327,7 +330,7 @@ verifies workspace ownership, serializes per-thread operations, and submits
 The response is `{turnId}` and must match the expected active turn. These shapes
 were verified with `codex app-server generate-ts` from pinned Codex `0.164.0`
 against the [official steering documentation](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn).
-Steering starts no turn and claims no additional slot. Runtime completion remains
+Steering starts no turn and adds no execution. Runtime completion remains
 authoritative even if it precedes the steering response. Stale or inactive turns
 are rejected; transport failures never trigger replay. Ticket workflow
 serialization also prevents steering after completion/merge queuing. Waiting

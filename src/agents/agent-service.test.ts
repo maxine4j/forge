@@ -6,7 +6,7 @@ import { AccessService } from "../auth/access-service.ts";
 import type { ICodexAgentClient } from "../codex/codex-agent-client.ts";
 import type { AgentRuntimeView, ExecutionReconciliation } from "../codex/types.ts";
 import type { IProjectService } from "../projects/project-service.ts";
-import { AgentExecutionPool } from "./agent-execution-pool.ts";
+import { AgentExecutionTracker } from "./agent-execution-tracker.ts";
 import { AgentService, type IAgentWorkspaces } from "./agent-service.ts";
 import { AgentError } from "./errors.ts";
 import type { AgentThreadRecord } from "./types.ts";
@@ -154,7 +154,7 @@ const setup = (
 		list: async () => [...records.values()],
 		recover: async () => {},
 	};
-	const pool = new AgentExecutionPool();
+	const pool = new AgentExecutionTracker();
 	const history = {
 		observe: vi.fn<(record: AgentThreadRecord, failure?: AgentTurnFailure) => Promise<void>>(async () => {}),
 	};
@@ -210,11 +210,10 @@ test("managed runtime notifications persist normalized history without a selecte
 test("pins providers before lazy creation, through active work and when recovering legacy records", async () => {
 	const local: InferenceProvider = { kind: "ollama", endpoint: "http://ollama.internal/v1", model: "local:latest" };
 	let current: InferenceProvider = { kind: "openai" };
-	const { service, client, records, pool } = setup(
+	const { service, client, records } = setup(
 		() => ({ defaultModel: "alternate", defaultReasoningEffort: "low" }),
 		() => current,
 	);
-	pool.setLimit(3);
 	const { thread: legacy } = await service.create(owner, projectId, "Old chat");
 	delete records.get(legacy.id)!.provider;
 	current = local;
@@ -584,10 +583,10 @@ test("existing chats and tickets inherit updated defaults without saving them as
 	await service.shutdown();
 });
 
-test("unsupported ticket overrides release the reservation before starting a turn", async () => {
+test("unsupported ticket overrides never track an execution before starting a turn", async () => {
 	const { service, client, pool } = setup(() => ({ defaultModel: "alternate" }));
-	const { thread } = await service.createTicketThread(owner, projectId, "Ticket", undefined, true);
-	expect(pool.activeIds()).toEqual([thread.id]);
+	const { thread } = await service.createTicketThread(owner, projectId, "Ticket");
+	expect(pool.activeIds()).toEqual([]);
 	await expect(
 		service.dispatch(owner, thread.id, "Plan", { ticketId: "TASK-1", phase: "planning" }, undefined, {
 			reasoningEffort: "high",
@@ -648,16 +647,15 @@ test("queued ticket followups resume persisted completed conversations without a
 	await service.shutdown();
 });
 
-test("a fourth chat cannot start until a running chat completes", async () => {
+test("standalone chats have no execution concurrency limit", async () => {
 	const { service, records, views, changed } = setup();
 	const threads = await Promise.all([1, 2, 3, 4].map((n) => service.create(owner, projectId, `Chat ${n}`)));
 	for (const thread of threads.slice(0, 3)) await service.send(owner, thread.thread.id, "Work");
-	await expect(service.send(owner, threads[3]!.thread.id, "Work")).rejects.toThrow("agent-capacity");
+	await service.send(owner, threads[3]!.thread.id, "Work");
 	const codexId = records.get(threads[0]!.thread.id)!.codexId!;
 	views.get(codexId)!.status = "completed";
 	changed(codexId);
 	await service.get(owner, threads[0]!.thread.id);
-	await service.send(owner, threads[3]!.thread.id, "Work");
 	await service.shutdown();
 });
 
@@ -678,21 +676,18 @@ test("ticket phases retain one worktree, use separate Codex contexts and reject 
 	await service.shutdown();
 });
 
-test("ticket thread setup reserves capacity before allocating a worktree and releases it on failure", async () => {
+test("ticket setup does not restrict concurrent standalone submissions", async () => {
 	const { service, workspaces } = setup();
 	const chats = await Promise.all([1, 2, 3].map((n) => service.create(owner, projectId, `Chat ${n}`)));
 	for (const chat of chats.slice(0, 2)) await service.send(owner, chat.thread.id, "Work");
 	const pending = Promise.withResolvers<Awaited<ReturnType<IAgentWorkspaces["create"]>>>();
 	vi.mocked(workspaces.create).mockReturnValueOnce(pending.promise);
-	const planning = service.createTicketThread(owner, projectId, "Ticket planning", undefined, true);
-	await expect(service.send(owner, chats[2]!.thread.id, "Work")).rejects.toThrow("agent-capacity");
+	const planning = service.createTicketThread(owner, projectId, "Ticket planning");
+	await service.send(owner, chats[2]!.thread.id, "Work");
 	pending.reject(new Error("Workspace unavailable"));
 	await expect(planning).rejects.toThrow("Workspace unavailable");
-	await service.send(owner, chats[2]!.thread.id, "Work");
-	await expect(service.createTicketThread(owner, projectId, "Queued planning", undefined, true)).rejects.toThrow(
-		"agent-capacity",
-	);
-	expect(workspaces.create).toHaveBeenCalledTimes(4);
+	await service.createTicketThread(owner, projectId, "Queued planning");
+	expect(workspaces.create).toHaveBeenCalledTimes(5);
 	await service.shutdown();
 });
 test("shutdown drains an accepted chat creation before storage may close", async () => {

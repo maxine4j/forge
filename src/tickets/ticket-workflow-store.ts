@@ -116,52 +116,15 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 							...boardMoveStatements(value.ticketId, move, at),
 						]
 					: []),
-				// A confirmed dispatch carries the workspace into its In progress visit.
+				// Associate allocated workspaces with the admitted In progress visit.
 				associateVisit,
 				...historyMilestoneStatements(
 					value.ticketId,
-					[
-						...workflowMilestones(previous, value),
-						...(move?.status === "in-progress"
-						&& value.state === "running"
-						&& previous?.state === "dispatching"
-							? [
-									{
-										type:
-											value.phase === "planning"
-												? ("planning" as const)
-												: value.phase === "rebase"
-													? ("rebasing" as const)
-													: ("implementing" as const),
-										outcome: "working" as const,
-									},
-								]
-							: []),
-					],
+					workflowMilestones(previous, value),
 					at,
 					attempt,
 					workspaceId,
 				),
-				...(move?.status === "in-progress" && value.state === "running" && previous?.state === "dispatching"
-					? [
-							{
-								sql: `INSERT INTO ticket_history(ticketId,at,visitId,status,type,outcome,reason,attempt)
-						 SELECT h.ticketId,?,h.id,h.status,
-						 CASE s.status WHEN 'waiting' THEN 'action-required' WHEN 'failed' THEN 'failure' ELSE 'canceled' END,
-						 CASE s.status WHEN 'waiting' THEN 'action-required' WHEN 'failed' THEN 'failed' ELSE 'canceled' END,
-						 CASE s.status WHEN 'waiting' THEN 'Action required in Chat' WHEN 'failed' THEN 'Agent turn failed. Review Chat and retry.' ELSE NULL END,?
-						 FROM ticket_history h JOIN ticket_history_agent_states s ON s.threadId=? AND s.turnId=?
-						 WHERE h.id=(SELECT MAX(id) FROM ticket_history WHERE ticketId=? AND type='status') AND s.status IN ('waiting','failed','interrupted')`,
-								parameters: [
-									at,
-									attempt ?? null,
-									threadId ?? null,
-									value.turnId ?? null,
-									value.ticketId,
-								],
-							},
-						]
-					: []),
 			]);
 		} catch (cause) {
 			throw new TicketError("ticket-unavailable", { cause });

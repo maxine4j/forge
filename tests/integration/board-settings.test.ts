@@ -7,7 +7,6 @@ import { mkdtemp, rm } from "@forge/backend-infrastructure/file";
 import Router from "@koa/router";
 import { expect, test, vi } from "vitest";
 
-import { AgentExecutionPool } from "../../src/agents/agent-execution-pool.ts";
 import { AccessService } from "../../src/auth/access-service.ts";
 import type { Actor } from "../../src/auth/types.ts";
 import { SqliteDatabase } from "../../src/database/sqlite-database.ts";
@@ -21,14 +20,13 @@ test("owner can adjust and persist board dispatch and capacity and stop active a
 	const path = join(root, "forge.sqlite");
 	let db = new SqliteDatabase(path);
 	const access = new AccessService({ owner: "owner", origin: "https://forge.example" });
-	const pool = new AgentExecutionPool();
 	const agents = { stopAll: vi.fn(async () => ({ requested: 2, recovered: 1, failed: 1 })) };
 	const wake = vi.fn();
 	const settingsService = async () => {
 		await db.initialize();
 		const store = new BoardSettingsStore(db);
 		await store.initialize();
-		const service = new BoardSettingsService(store, agents, pool, access, wake);
+		const service = new BoardSettingsService(store, agents, access, wake);
 		await service.initialize();
 		return service;
 	};
@@ -62,8 +60,7 @@ test("owner can adjust and persist board dispatch and capacity and stop active a
 			dispatch: "paused",
 			maxAgents: 1,
 		});
-		pool.claim("active");
-		expect(pool.available()).toBe(false);
+		expect(wake).toHaveBeenCalledOnce();
 		expect(await (await request("/stop", "POST")).json()).toEqual({
 			settings: { dispatch: "stopped", maxAgents: 1 },
 			requested: 2,
@@ -80,7 +77,7 @@ test("owner can adjust and persist board dispatch and capacity and stop active a
 			dispatch: "stopped",
 			maxAgents: 2,
 		});
-		expect(pool.available()).toBe(true);
+		expect(wake).toHaveBeenCalledTimes(2);
 		wake.mockClear();
 		expect(await (await afterRestart("", "PATCH", { dispatch: "running" })).json()).toEqual({
 			dispatch: "running",

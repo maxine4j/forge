@@ -2,7 +2,7 @@ import type { AgentView } from "@forge/contracts/agents";
 import type { Ticket } from "@forge/contracts/tickets";
 import { expect, test, vi } from "vitest";
 
-import { AgentExecutionPool } from "../agents/agent-execution-pool.ts";
+import { AgentExecutionTracker } from "../agents/agent-execution-tracker.ts";
 import type { ITicketAgents } from "../agents/agent-service.ts";
 import { AgentError } from "../agents/errors.ts";
 import { AccessService } from "../auth/access-service.ts";
@@ -65,6 +65,8 @@ test("recommendations use current settings on the next feedback and rebase turns
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
 	await f.service.settings(actor, ticket, { skipPlanning: false, acceptRecommendations: true });
+	f.settings.maxAgents = 1;
+	f.create("TASK-2").status = "in-progress";
 	const job = f.jobs.get(ticket.id)!;
 	await f.service.message(actor, ticket, "Adjust scope", job.turnId);
 	expect(f.agents.steer.mock.calls[0]?.[3]).toBe("Adjust scope");
@@ -81,6 +83,12 @@ test("recommendations use current settings on the next feedback and rebase turns
 	await f.service.tick(actor);
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Rebase this branch");
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Choose the recommended option");
+	f.merges.merge.mockResolvedValue("merged");
+	f.merges.candidate.mockResolvedValue("c".repeat(40));
+	f.complete(job.implementerId!);
+	await f.service.tick(actor);
+	await f.service.tick(actor);
+	expect(ticket.status).toBe("done");
 });
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => {
@@ -88,7 +96,8 @@ const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => 
 	const tickets = new Map<string, Ticket>();
 	const views = new Map<string, AgentView>();
 	const plans = new Map<string, string>();
-	const pool = new AgentExecutionPool();
+	const pool = new AgentExecutionTracker();
+	const settings = { maxAgents: 3 };
 	const agents = {
 		stopTicket: vi.fn<ITicketAgents["stopTicket"]>(async () => true),
 		assertRepositoryReady: vi.fn(async () => {}),
@@ -151,7 +160,7 @@ const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => 
 			tickets.get(id)!.executionSettings = structuredClone(settings);
 		}),
 		get: async (id: string) => structuredClone(tickets.get(id)),
-		list: vi.fn(),
+		list: vi.fn(async () => [...tickets.values()].map((ticket) => structuredClone(ticket))),
 		insert: vi.fn(),
 		update: vi.fn(async (id: string, input) => {
 			Object.assign(tickets.get(id)!, input);
@@ -176,7 +185,7 @@ const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => 
 			store,
 			ticketStore,
 			agents,
-			pool,
+			() => settings.maxAgents,
 			merges,
 			{ cleanupMerged: cleanup },
 			new TicketPrompts(),
@@ -207,6 +216,7 @@ const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => 
 	};
 	return {
 		service,
+		settings,
 		makeService,
 		jobs,
 		tickets,
@@ -244,8 +254,8 @@ test.each(["paused", "capacity"] as const)(
 		let paused = mode === "paused";
 		const f = fixture(() => (paused ? "paused" : "running"));
 		if (mode === "capacity") {
-			f.pool.setLimit(1);
-			f.pool.claim("other");
+			f.settings.maxAgents = 1;
+			f.create("other").status = "in-progress";
 		}
 		const ticket = f.create();
 		ticket.epicId = "EPIC-1";
@@ -268,7 +278,7 @@ test.each(["paused", "capacity"] as const)(
 		await expect(f.service.move(actor, ticket, { status: "todo" })).rejects.toThrow("ticket-conflict");
 		await f.service.move(actor, ticket, { status: "todo" });
 		paused = false;
-		f.pool.observe("other", "idle");
+		if (f.tickets.has("other")) f.tickets.get("other")!.status = "done";
 		await f.service.tick(actor);
 		expect(f.jobs.get(ticket.id)?.executionRepositoryId).toBe(repositoryIds[0]);
 		expect(f.agents.createTicketThread).toHaveBeenCalledWith(
@@ -276,7 +286,6 @@ test.each(["paused", "capacity"] as const)(
 			repositoryIds[0],
 			`${ticket.id} planning`,
 			undefined,
-			true,
 			expect.any(Function),
 		);
 		expect(f.agents.dispatch.mock.calls[0]?.[2]).toContain("Updated scope");
@@ -431,7 +440,6 @@ test.each(["planning", "implementation", "review", "rebase"] as const)(
 			projectId,
 			`${ticket.id} implementation`,
 			undefined,
-			true,
 			expect.any(Function),
 		);
 		expect(f.jobs.get(ticket.id)?.workspaceId).not.toBe(original.workspaceId);
@@ -578,7 +586,6 @@ test("execution records the first reference and reuses it and its workspace for 
 		first,
 		`${ticket.id} planning`,
 		undefined,
-		true,
 		expect.any(Function),
 	);
 	f.complete(job.plannerId!, "# Plan");
@@ -593,7 +600,6 @@ test("execution records the first reference and reuses it and its workspace for 
 		first,
 		`${ticket.id} implementation`,
 		job.workspaceId,
-		true,
 		expect.any(Function),
 	);
 	expect(f.jobs.get(ticket.id)?.workspaceId).toBe(job.workspaceId);
@@ -779,14 +785,14 @@ test("archiving serializes with ticket execution and preserves workflow history"
 test("ready waits for capacity, starts planning in progress, and approves only the displayed revision", async () => {
 	const f = fixture();
 	const ticket = f.create();
-	for (const id of ["one", "two", "three"]) f.pool.claim(id);
+	for (const id of ["one", "two", "three"]) f.create(id).status = "in-progress";
 	await f.service.move(actor, ticket, { status: "todo" });
 	expect(f.wake).toHaveBeenCalledOnce();
 	await f.service.tick(actor);
 	expect(ticket.status).toBe("todo");
 	expect(f.agents.createTicketThread).not.toHaveBeenCalled();
 
-	f.pool.observe("one", "completed");
+	f.tickets.get("one")!.status = "done";
 	await f.service.tick(actor);
 	expect(ticket.status).toBe("in-progress");
 	const planning = f.jobs.get(ticket.id)!;
@@ -825,18 +831,102 @@ const implement = async (f: ReturnType<typeof fixture>, ticket: Ticket) => {
 	return f.jobs.get(ticket.id)!.implementerId!;
 };
 
-test("implementation queues and fast-forwards automatically even when every agent slot is occupied", async () => {
+test("approval waits hold ticket capacity while feedback and implementation continue", async () => {
+	const f = fixture();
+	f.settings.maxAgents = 1;
+	const first = f.create();
+	const second = f.create("TASK-2");
+	await f.service.move(actor, first, { status: "todo" });
+	await f.service.move(actor, second, { status: "todo" });
+	await f.service.tick(actor);
+	f.complete(f.jobs.get(first.id)!.plannerId!, "# Plan");
+	await f.service.tick(actor);
+	expect(second.status).toBe("todo");
+	await f.service.message(actor, first, "Revise the plan");
+	await f.service.tick(actor);
+	f.complete(f.jobs.get(first.id)!.plannerId!, "# Revised");
+	await f.service.tick(actor);
+	await f.service.approve(actor, first, 2);
+	await f.service.tick(actor);
+	expect(f.jobs.get(first.id)).toMatchObject({ phase: "implementation", state: "running" });
+	expect(second.status).toBe("todo");
+});
+
+test.each(["setup-failed", "failed", "uncertain", "idle"] as const)(
+	"persisted %s In progress tickets retain capacity after service restart",
+	async (state) => {
+		const f = fixture();
+		f.settings.maxAgents = 1;
+		const first = f.create();
+		first.status = "in-progress";
+		f.jobs.set(first.id, { ticketId: first.id, state, phase: "planning", mergeAttempts: 0 });
+		const second = f.create("TASK-2");
+		await f.service.move(actor, second, { status: "todo" });
+		const restarted = f.makeService();
+		await restarted.recover(actor);
+		await restarted.tick(actor);
+		expect(second.status).toBe("todo");
+		expect(f.agents.createTicketThread).not.toHaveBeenCalled();
+	},
+);
+
+test("admission precedes setup, failures hold capacity, and limit changes preserve board order", async () => {
+	const f = fixture();
+	f.settings.maxAgents = 1;
+	const tickets = [f.create(), f.create("TASK-2"), f.create("TASK-3")];
+	for (const ticket of tickets) await f.service.move(actor, ticket, { status: "todo" });
+	f.agents.createTicketThread.mockImplementationOnce(async () => {
+		expect(tickets[0]!.status).toBe("in-progress");
+		throw new Error("Setup unavailable");
+	});
+	await f.service.tick(actor);
+	expect(tickets.map((ticket) => ticket.status)).toEqual(["in-progress", "todo", "todo"]);
+	f.settings.maxAgents = 2;
+	await f.service.tick(actor);
+	expect(tickets.map((ticket) => ticket.status)).toEqual(["in-progress", "in-progress", "todo"]);
+	f.settings.maxAgents = 1;
+	await f.service.archive(actor, tickets[0]!, "2026-11-14T00:00:00.000Z");
+	await f.service.tick(actor);
+	expect(tickets[2]!.status).toBe("todo");
+	f.agents.stopTicket.mockResolvedValue(false);
+	await f.service.move(actor, tickets[1]!, { status: "backlog" });
+	await f.service.tick(actor);
+	expect(tickets[2]!.status).toBe("in-progress");
+	expect(f.jobs.get(tickets[1]!.id)?.state).toBe("resetting");
+	expect(f.cleanupAbandoned).not.toHaveBeenCalled();
+	await expect(f.service.move(actor, tickets[1]!, { status: "todo" })).rejects.toThrow("ticket-conflict");
+});
+
+test.each(["todo", "backlog"] as const)("return to %s frees capacity before cancellation settles", async (status) => {
+	const f = fixture();
+	f.settings.maxAgents = 1;
+	const first = f.create();
+	await implement(f, first);
+	const next = f.create("TASK-2");
+	await f.service.move(actor, next, { status: "todo" });
+	f.agents.stopTicket.mockResolvedValue(false);
+	await f.service.move(actor, first, { status });
+	await f.service.tick(actor);
+	expect(next.status).toBe("in-progress");
+	expect(f.jobs.get(first.id)?.state).toBe("resetting");
+	expect(f.cleanupAbandoned).not.toHaveBeenCalled();
+});
+
+test("completion admits the next Ready ticket even while standalone executions remain active", async () => {
 	const f = fixture();
 	const ticket = f.create();
 	const id = await implement(f, ticket);
+	f.settings.maxAgents = 1;
+	const next = f.create("TASK-2");
+	await f.service.move(actor, next, { status: "todo" });
 	f.complete(id);
 	for (const slot of ["one", "two", "three"]) f.pool.claim(slot);
 	await f.service.tick(actor);
 	await f.service.tick(actor);
 	expect(ticket.status).toBe("done");
+	expect(next.status).toBe("in-progress");
 	expect(f.merges.merge).toHaveBeenCalledOnce();
-	expect(f.agents.dispatch).toHaveBeenCalledTimes(2);
-	expect(f.wake).toHaveBeenCalledTimes(4);
+	expect(f.agents.dispatch).toHaveBeenCalledTimes(3);
 });
 
 test("cleans up after Done and retries interrupted cleanup without replaying the merge", async () => {
