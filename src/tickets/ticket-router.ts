@@ -80,7 +80,10 @@ export class TicketRouter implements IHttpRouter {
 			ctx.body = ticketWorkflowSchema.parse(await this.workflow.get(ctx.state.actor, ticket.id));
 		});
 		router.get("/api/tickets", async (ctx) => {
-			ctx.body = ticketsSchema.parse(await this.service.list(ctx.state.actor));
+			const includeArchived = ctx.query["includeArchived"];
+			if (includeArchived !== undefined && includeArchived !== "true" && includeArchived !== "false")
+				throw new TicketError("invalid-request");
+			ctx.body = ticketsSchema.parse(await this.service.list(ctx.state.actor, includeArchived === "true"));
 		});
 		router.post("/api/tickets", async (ctx) => {
 			const input = createTicketSchema.safeParse(ctx.request.body);

@@ -87,6 +87,10 @@ test("mock commit pages expose validated parent links, structured patches and wh
 test("mock cost data includes every global ticket and archived history", async () => {
 	const tickets = ticketsSchema.parse(await read("/api/tickets"));
 	const cost = costsSchema.parse(await read("/api/costs"));
+	const included = ticketsSchema.parse(await read("/api/tickets?includeArchived=true"));
+	expect(included.filter((ticket) => !ticket.archivedAt)).toEqual(tickets);
+	expect(included.some((ticket) => ticket.archivedAt)).toBe(true);
+	expect(await read("/api/tickets?includeArchived=false")).toEqual(tickets);
 	expect(cost.tickets.filter((ticket) => !ticket.archivedAt).map(({ id }) => id)).toEqual(
 		tickets.map(({ id }) => id),
 	);

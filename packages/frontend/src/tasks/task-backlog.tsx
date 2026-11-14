@@ -1,5 +1,6 @@
 import type { EpicSummary } from "@forge/contracts/tickets";
 
+import type { BacklogFilters } from "./backlog-filters.ts";
 import { EpicIcon } from "./epic-icon.tsx";
 import type { TaskViewProps } from "./task-board.tsx";
 import { EpicProgress, TicketTable } from "./ticket-table.tsx";
@@ -16,7 +17,9 @@ export const TaskBacklog = ({
 	openEpic,
 	createInEpic,
 	createUnassigned,
+	filters,
 }: TaskViewProps & {
+	filters: BacklogFilters;
 	epics: EpicSummary[];
 	collapsed: string[];
 	toggleEpic: (id: string) => void;
@@ -24,22 +27,24 @@ export const TaskBacklog = ({
 	createInEpic: (id: string) => void;
 	createUnassigned: () => void;
 }) => {
-	const unfinished = tickets.filter((ticket) => !ticket.archivedAt && ticket.status !== "done");
+	const visible = tickets.filter((ticket) =>
+		ticket.archivedAt ? filters.showArchived : filters.showDone || ticket.status !== "done",
+	);
 	return (
 		<div className='task-backlog'>
 			<p role='status'>
-				{loading ? "Loading tickets…" : `${unfinished.length} unfinished tickets`}
+				{loading ? "Loading tickets…" : `${visible.length} visible tickets`}
 				{notice && ` · ${notice}`}
 			</p>
 			<div
 				className='backlog-scroll'
 				role='region'
-				aria-label='Unfinished tickets'
+				aria-label='Visible tickets'
 				tabIndex={0}
 				aria-busy={busy || loading}
 			>
 				{[undefined, ...epics].map((epic) => {
-					const rows = unfinished.filter((ticket) => (ticket.epicId ?? undefined) === epic?.id);
+					const rows = visible.filter((ticket) => (ticket.epicId ?? undefined) === epic?.id);
 					const expanded = !epic || !collapsed.includes(epic.id);
 					const titleId = `backlog-title-${epic?.id ?? "no-epic"}`;
 					const childrenId = `children-${epic?.id ?? "no-epic"}`;
@@ -91,13 +96,15 @@ export const TaskBacklog = ({
 								tickets={rows}
 								busy={busy}
 								open={open}
-								emptyMessage={epic ? "No unfinished tickets in this epic." : undefined}
+								emptyMessage={epic ? "No visible tickets in this epic." : undefined}
 							/>
 						</section>
 					);
 				})}
-				{!loading && !error && !unfinished.length && (
-					<p className='kanban-empty'>No unfinished tickets. Create a ticket to get started.</p>
+				{!loading && !error && !visible.length && (
+					<p className='kanban-empty'>
+						No visible tickets. Change filters or create a ticket to get started.
+					</p>
 				)}
 			</div>
 		</div>

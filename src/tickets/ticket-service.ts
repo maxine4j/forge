@@ -17,7 +17,7 @@ import type { ITicketWorkflowService } from "./ticket-workflow-service.ts";
 
 export interface ITicketService {
 	/** Existing owner access applies. Invalid input, missing tickets and invalid destinations throw TicketError. */
-	list(actor: Actor): Promise<Ticket[]>;
+	list(actor: Actor, includeArchived?: boolean): Promise<Ticket[]>;
 	create(actor: Actor, input: CreateTicket): Promise<Ticket>;
 	get(actor: Actor, id: string): Promise<Ticket>;
 	update(actor: Actor, id: string, input: CreateTicket): Promise<Ticket>;
@@ -36,12 +36,15 @@ export class TicketService implements ITicketService {
 		private readonly workflow: ITicketWorkflowService,
 		private readonly epics: Pick<IEpicStore, "get">,
 	) {}
-	async list(actor: Actor): Promise<Ticket[]> {
+	async list(actor: Actor, includeArchived = false): Promise<Ticket[]> {
 		this.access.assertOwner(actor);
-		const [tickets, summary] = await Promise.all([this.store.list(), this.workflow.boardSummary(actor)]);
+		const [tickets, summary] = await Promise.all([
+			this.store.list(includeArchived),
+			this.workflow.boardSummary(actor),
+		]);
 		return Promise.all(
 			tickets.map(async (ticket) => {
-				if (ticket.status === "done") return ticket;
+				if (ticket.archivedAt || ticket.status === "done") return ticket;
 				return {
 					...ticket,
 					...(await this.workflow.capabilities(actor, ticket)),

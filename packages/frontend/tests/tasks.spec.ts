@@ -487,15 +487,21 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 					operations.push("read");
 				}
 				if (failList) return route.fulfill({ status: 503, json: { error: "ticket-unavailable" } });
-				return route.fulfill({ json: tickets });
+				return route.fulfill({
+					json: tickets.filter(
+						(ticket) =>
+							new URL(route.request().url()).searchParams.get("includeArchived") === "true"
+							|| !ticket.archivedAt,
+					),
+				});
 			}
 			if (path.startsWith("/api/tickets/")) {
 				const ticket = tickets.find((value) => value.id === path.split("/")[3])!;
 				if (path.endsWith("/archive") && method === "POST") {
 					operations.push("archive");
 					if (failArchive) return route.fulfill({ status: 503, json: { error: "ticket-unavailable" } });
-					tickets = tickets.filter((value) => value.id !== ticket.id);
-					return route.fulfill({ json: { ...ticket, archivedAt: createdAt } });
+					ticket.archivedAt = createdAt;
+					return route.fulfill({ json: ticket });
 				}
 				if (path.endsWith("/move")) {
 					operations.push("move");
@@ -921,7 +927,7 @@ test("task views persist URL selection, history and ticket deep links with keybo
 	await expect(page.getByRole("dialog", { name: "TASK-2", exact: true })).toBeVisible();
 });
 
-test("backlog filters unfinished tickets in API order and polling retains an open completed or archived ticket", async ({
+test("backlog filters visible tickets in API order and polling retains an open completed or archived ticket", async ({
 	page,
 }) => {
 	const f = await setup(page);
@@ -932,7 +938,7 @@ test("backlog filters unfinished tickets in API order and polling retains an ope
 	f.tickets().push({ ...f.tickets()[0]!, id: "TASK-5", status: "backlog", archivedAt: createdAt });
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
 	const table = page.getByRole("table");
-	await expect(page.getByRole("status").filter({ hasText: "3 unfinished tickets" })).toBeVisible();
+	await expect(page.getByRole("status").filter({ hasText: "3 visible tickets" })).toBeVisible();
 	await expect(table.getByRole("button")).toHaveText([/TASK-1$/, /TASK-2$/, /TASK-4$/]);
 	await expect(table.getByRole("img", { name: "Agent queued" })).toHaveCount(1);
 	await expect(table.getByRole("img", { name: "Action required" })).toHaveCount(1);
@@ -948,6 +954,84 @@ test("backlog filters unfinished tickets in API order and polling retains an ope
 	await dialog.getByRole("button", { name: "Close ticket" }).click();
 	await expect(page.getByRole("tab", { name: "Backlog", exact: true })).toBeFocused();
 });
+
+for (const width of [1280, 375]) {
+	test(`backlog filters persist, combine archived Done and group tickets at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 800 });
+		const f = await setup(page);
+		f.epics.push({ id: "EPIC-1", title: "Filtered epic", description: "", createdAt });
+		f.tickets().push(
+			{ ...f.tickets()[0]!, id: "TASK-3", status: "done", epicId: "EPIC-1" },
+			{ ...f.tickets()[0]!, id: "TASK-4", status: "done", epicId: "EPIC-1", archivedAt: createdAt },
+			{ ...f.tickets()[0]!, id: "TASK-5", status: "backlog", archivedAt: createdAt },
+		);
+		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+		const count = page.getByRole("status");
+		await expect(count).toHaveText("2 visible tickets");
+		const trigger = page.getByRole("button", { name: "Filters", exact: true });
+		await trigger.focus();
+		await trigger.press("ArrowDown");
+		const done = page.getByRole("checkbox", { name: "Show done", exact: true });
+		const archived = page.getByRole("checkbox", { name: "Show archived", exact: true });
+		await expect(done).toBeFocused();
+		await expect(done).not.toBeChecked();
+		await expect(archived).not.toBeChecked();
+		await done.press("Space");
+		await expect(count).toHaveText("3 visible tickets");
+		await done.press("End");
+		await expect(archived).toBeFocused();
+		await archived.press("Space");
+		await expect(count).toHaveText("5 visible tickets");
+		const popup = page.getByRole("group", { name: "Filters", exact: true });
+		const bounds = await popup.boundingBox();
+		expect(bounds!.x).toBeGreaterThanOrEqual(0);
+		expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
+		await done.uncheck();
+		await expect(count).toHaveText("4 visible tickets");
+		const epic = page.getByRole("table", { name: "EPIC-1 · Filtered epic", exact: true });
+		await expect(epic.getByRole("button")).toHaveText([/TASK-4$/]);
+		await expect(page.getByRole("progressbar", { name: "1 / 1 done", exact: true })).toBeVisible();
+		await archived.press("Escape");
+		await expect(trigger).toBeFocused();
+		await trigger.click();
+		await page.getByRole("status").click();
+		await expect(popup).toBeHidden();
+		await page.getByRole("tab", { name: "Board", exact: true }).click();
+		await expect(page.getByRole("button", { name: /TASK-4|TASK-5/ })).toHaveCount(0);
+		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+		await expect(count).toHaveText("4 visible tickets");
+		await page.reload();
+		await expect(count).toHaveText("4 visible tickets");
+		await trigger.click();
+		await expect(done).not.toBeChecked();
+		await expect(archived).toBeChecked();
+	});
+}
+
+for (const storage of ["malformed", "unavailable"] as const) {
+	test(`backlog filters tolerate ${storage} storage`, async ({ page }) => {
+		await page.addInitScript((mode) => {
+			if (mode === "malformed")
+				localStorage.setItem("forge.backlog.filters.v1", '{"showDone":"true","showArchived":true}');
+			else {
+				Storage.prototype.getItem = () => {
+					throw new Error("Unavailable");
+				};
+				Storage.prototype.setItem = () => {
+					throw new Error("Unavailable");
+				};
+			}
+		}, storage);
+		await setup(page);
+		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+		await page.getByRole("button", { name: "Filters", exact: true }).click();
+		const done = page.getByRole("checkbox", { name: "Show done", exact: true });
+		await expect(done).not.toBeChecked();
+		await expect(page.getByRole("checkbox", { name: "Show archived", exact: true })).not.toBeChecked();
+		await done.check();
+		await expect(done).toBeChecked();
+	});
+}
 
 test("epic groups include empty and completed sections, preserve collapse through polling, views and reload", async ({
 	page,
@@ -1410,7 +1494,7 @@ test("switching views shares tickets and the single pending list request", async
 	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
 	expect(f.held()).toBe(1);
 	f.releaseReads();
-	await expect(page.getByRole("status")).toHaveText("2 unfinished tickets");
+	await expect(page.getByRole("status")).toHaveText("2 visible tickets");
 });
 
 test("backlog recovers from list errors on the next successful poll", async ({ page }) => {
@@ -1422,8 +1506,8 @@ test("backlog recovers from list errors on the next successful poll", async ({ p
 	await expect(page.getByRole("alert")).toContainText("Tickets are unavailable");
 	f.tickets().splice(0);
 	f.failLists(false);
-	await expect(page.getByRole("status")).toHaveText("0 unfinished tickets");
-	await expect(page.getByText("No unfinished tickets. Create a ticket to get started.")).toBeVisible();
+	await expect(page.getByRole("status")).toHaveText("0 visible tickets");
+	await expect(page.getByText("No visible tickets. Change filters or create a ticket to get started.")).toBeVisible();
 	await expect(page.getByRole("alert")).toHaveCount(0);
 });
 
@@ -1530,7 +1614,7 @@ for (const width of [320, 390, 600, 601, 1280]) {
 			await expect(heading).toHaveCSS("text-overflow", "ellipsis");
 		}
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-		const scroll = page.getByRole("region", { name: "Unfinished tickets" });
+		const scroll = page.getByRole("region", { name: "Visible tickets" });
 		expect(await scroll.evaluate((e) => e.scrollWidth <= e.clientWidth)).toBe(true);
 		for (const indicator of await table.locator(".is-working").all())
 			await expect(indicator).toHaveCSS("animation-name", "none");
@@ -1567,7 +1651,7 @@ for (const width of [1280, 390]) {
 		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
 		await expect(page.getByRole("table").locator("tbody tr:has(td)")).toHaveCount(60);
 		await expect(page.getByRole("alert")).toHaveCount(0);
-		const scroll = page.getByRole("region", { name: "Unfinished tickets" });
+		const scroll = page.getByRole("region", { name: "Visible tickets" });
 		await expect.poll(() => scroll.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
 		await scroll.evaluate((element) => {
 			element.scrollTop = 400;
@@ -2535,7 +2619,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	state = "merge-queued";
 	done = true;
 	await expect(send).toBeDisabled();
-	await page.route("**/api/tickets", (route) =>
+	await page.route("**/api/tickets?includeArchived=true", (route) =>
 		route.fulfill({
 			json: [
 				{

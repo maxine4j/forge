@@ -14,6 +14,7 @@ import { useLocation, useSearchParams, useNavigate } from "react-router";
 
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { DropdownSurface } from "../dropdown.tsx";
 import {
 	directModalParent,
 	nextModal,
@@ -24,6 +25,7 @@ import {
 } from "../navigation/controller.tsx";
 import { InterfaceIcon } from "../navigation/interface-icon.tsx";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
+import { backlogFiltersKey, readBacklogFilters, type BacklogFilters } from "./backlog-filters.ts";
 import { BoardSettingsDialog, useBoardSettings } from "./board-settings-dialog.tsx";
 import { EpicDetails, EpicSelection } from "./epic-details.tsx";
 import { RepositorySelection } from "./repository-selection.tsx";
@@ -146,6 +148,16 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 			initializing.current = false;
 		})();
 	}, [visible, linkedId, epicLink, navigation.modal, location, navigate, search]);
+	const [filters, setFilters] = useState(readBacklogFilters);
+	const changeFilter = (key: keyof BacklogFilters, checked: boolean) => {
+		const next = { ...filters, [key]: checked };
+		setFilters(next);
+		try {
+			localStorage.setItem(backlogFiltersKey, JSON.stringify(next));
+		} catch {
+			/* Keep controls usable when storage is unavailable. */
+		}
+	};
 	const [collapsed, setCollapsed] = useState<string[]>(() => {
 		try {
 			const value: unknown = JSON.parse(localStorage.getItem("forge.epics.collapsed.v1") ?? "[]");
@@ -242,7 +254,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 	const poller = useRef<ResourcePoller<Collection> | undefined>(undefined);
 	const readCollection = useCallback(async (): Promise<Collection> => {
 		const [tickets, epics] = await Promise.all([
-			api.read("tickets", ticketsSchema),
+			api.read("tickets?includeArchived=true", ticketsSchema),
 			api.read("epics", epicsSchema),
 		]);
 		return { tickets, epics };
@@ -436,6 +448,39 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 					<button type='button' className='primary' disabled={actionsBusy} onClick={create}>
 						Create ticket
 					</button>
+					{view === "backlog" && (
+						<DropdownSurface
+							label='Filters'
+							className='backlog-filters'
+							trigger={
+								<>
+									<InterfaceIcon name='filters' />
+									Filters
+								</>
+							}
+						>
+							{() => (
+								<>
+									<label className='dropdown-option'>
+										<input
+											type='checkbox'
+											checked={filters.showDone}
+											onChange={(event) => changeFilter("showDone", event.target.checked)}
+										/>
+										Show done
+									</label>
+									<label className='dropdown-option'>
+										<input
+											type='checkbox'
+											checked={filters.showArchived}
+											onChange={(event) => changeFilter("showArchived", event.target.checked)}
+										/>
+										Show archived
+									</label>
+								</>
+							)}
+						</DropdownSurface>
+					)}
 				</div>
 			</div>
 			{(["board", "backlog"] as const).map((name) => (
@@ -451,7 +496,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 					{view === name
 						&& (name === "board" ? (
 							<TaskBoard
-								tickets={tickets}
+								tickets={tickets.filter((ticket) => !ticket.archivedAt)}
 								busy={busy}
 								loading={loading}
 								error={error || board.error}
@@ -463,6 +508,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 							/>
 						) : (
 							<TaskBacklog
+								filters={filters}
 								epics={epics}
 								collapsed={collapsed}
 								toggleEpic={toggleEpic}
@@ -503,9 +549,16 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 					close={closeTicket}
 					archive={() =>
 						mutate(async () => {
-							await api.read(`tickets/${selectedTicket.id}/archive`, ticketSchema, "POST");
+							const archived = await api.read(
+								`tickets/${selectedTicket.id}/archive`,
+								ticketSchema,
+								"POST",
+							);
 							if (!active.current) return;
-							setTickets((current) => current.filter((ticket) => ticket.id !== selectedTicket.id));
+							setTickets((current) =>
+								current.map((ticket) => (ticket.id === archived.id ? archived : ticket)),
+							);
+							setLinked({ id: archived.id, ticket: archived });
 							setNotice(`${selectedTicket.id} archived.`);
 						})
 					}

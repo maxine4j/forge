@@ -139,6 +139,21 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	expect((await request(`tickets/${unassigned.id}/move`, "POST", { status: "todo" })).status).toBe(409);
 	expect((await request(`tickets/${unassigned.id}/model-options`)).status).toBe(200);
 	await request(`tickets/${unassigned.id}/archive`, "POST");
+	expect(await (await request("tickets")).json()).toEqual([]);
+	expect(await (await request("tickets?includeArchived=false")).json()).toEqual([]);
+	expect(await (await request("tickets?includeArchived=true")).json()).toEqual([
+		{ ...unassigned, archivedAt: expect.any(String) },
+	]);
+	for (const query of ["", "1", "TRUE", "true&includeArchived=false", "true&includeArchived=true"]) {
+		expect((await request(`tickets?includeArchived=${query}`)).status).toBe(400);
+	}
+	expect(
+		(
+			await fetch(`http://127.0.0.1:${address.port}/api/tickets?includeArchived=true`, {
+				headers: { "x-webauth-user": "guest" },
+			})
+		).status,
+	).toBe(403);
 	const created = await request(listPath, "POST", {
 		title: "First",
 		description: "Scope",

@@ -34,12 +34,21 @@ Board. Both preserve `?ticket=:id` for details, reload and browser history,
 including existing archived-ticket links from [Costs](#ticket-cost).
 Each view's actions sit beside the tabs and wrap below them when space is limited.
 
-Backlog shows compact Key, Title and Status tables of non-archived tickets in
-Backlog, Ready for development and In progress; Done is excluded. Its visible
+Backlog shows compact Key, Title and Status tables. The right-aligned Filters
+dropdown follows creation actions and contains labelled Show done and Show archived
+checkboxes. Changes apply immediately and leave the dropdown open. Both default
+off. Browser storage key `forge.backlog.filters.v1` retains `{showDone,showArchived}`
+across reloads and view switches; missing or invalid preferences default both to
+false, and storage failures leave controls usable in memory. With both off,
+only non-archived unfinished tickets appear. Show done includes non-archived Done
+tickets; Show archived adds every archived ticket, including archived Done tickets,
+independently of Show done. Both on shows all tickets. Counts, region labels and
+empty states describe visible tickets. Its visible
 count follows shared one-second polling; rows retain API order within epic sections.
 Both views use the same collection, create/details dialogs, status transitions,
-archive controls and attention/agent indicators. Polling removes completed or
-archived rows without closing an open ticket. Sections scroll with sticky
+archive controls and attention/agent indicators. Filtering and polling preserve
+open ticket details, including archived read-only controls. Board always excludes
+archived tickets. Sections scroll with sticky
 section headings. Ticket titles and fixed 80px status pills stay on one line
 with ellipsis truncation at every width; ticket buttons retain full accessible
 titles and hover text, and status hover text exposes the full label. Indicators
@@ -313,6 +322,15 @@ reply controls. See the [agent protocol contract](agents.md#interactive-agents).
 
 ### Epics and grouped backlog
 
+Owner-authorized `GET /api/tickets` accepts optional `includeArchived=true|false`,
+defaulting to false. Malformed or repeated values return the existing 400
+invalid-request response. Inclusion preserves the response shape and ordering
+by position then ticket number; archived tickets receive no workflow indicator
+enrichment. Retained archives may take the collection beyond the 1,000 active-ticket
+capacity; the response schema does not cap the combined collection. Tasks polls `tickets?includeArchived=true` for immediate local
+filtering without requests on checkbox changes. Epic-detail child lists retain
+only non-archived children.
+
 Epics have independent increasing `EPIC-n` keys, a trimmed 1–120 character title,
 a plain-text description up to 4000 characters (default empty) and creation time.
 They remain editable after completion. They never enter Kanban or scheduling.
@@ -334,7 +352,9 @@ shared with Ready transitions. Membership never changes ticket positions.
 
 Backlog shows No epic first, then every epic in increasing numeric order,
 including empty and completed epics. Each section has its own table and preserves
-the unfinished-ticket filter and ticket order. Headers show the epic icon, key,
+the selected Backlog filters and API ticket order, including archived children
+when enabled. Collapsed sections remain collapsed across filter changes.
+Completion counts still use only non-archived children. Headers show the epic icon, key,
 title and a compact completion bar with the done and total counts. At widths of
 600px and below, a 20px circular ring replaces the bar and visible counts;
 empty epics show an empty ring. Each epic exposes one accessible progressbar

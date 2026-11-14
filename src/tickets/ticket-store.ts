@@ -63,7 +63,7 @@ export interface ITicketStore {
 	/** Allocates an immutable global key; at most 1000 active tickets on the board. */
 	insert(input: CreateTicket, createdAt: string): Promise<Ticket>;
 	get(id: string): Promise<Ticket | undefined>;
-	list(): Promise<Ticket[]>;
+	list(includeArchived?: boolean): Promise<Ticket[]>;
 	archive(id: string, archivedAt: string): Promise<void>;
 	update(id: string, input: CreateTicket): Promise<void>;
 	move(id: string, input: MoveTicket): Promise<void>;
@@ -134,11 +134,11 @@ export class TicketStore implements ITicketStore {
 			return rows.length ? decode(rows[0]) : undefined;
 		});
 	}
-	async list(): Promise<Ticket[]> {
+	async list(includeArchived = false): Promise<Ticket[]> {
 		return this.guard(async () =>
 			(
 				await this.database.all(
-					`SELECT ${columns} FROM tickets WHERE archivedAt IS NULL ORDER BY position,number`,
+					`SELECT ${columns} FROM tickets ${includeArchived ? "" : "WHERE archivedAt IS NULL"} ORDER BY position,number`,
 				)
 			).map(decode),
 		);

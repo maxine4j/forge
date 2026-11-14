@@ -108,7 +108,9 @@ export class MockApi implements IMockApi {
 		}));
 		const costData: Costs[] = [];
 		const boardTickets: Ticket[] = [];
-		this.routes.set("/api/tickets", () => boardTickets);
+		this.routes.set("/api/tickets", (url) =>
+			boardTickets.filter((ticket) => url.searchParams.get("includeArchived") === "true" || !ticket.archivedAt),
+		);
 		this.routes.set("/api/costs", () => {
 			const first = costData[0]!;
 			return {
@@ -277,7 +279,7 @@ export class MockApi implements IMockApi {
 					archivedAt: date,
 				},
 			];
-			boardTickets.push(...tickets.filter((ticket) => !ticket.archivedAt));
+			boardTickets.push(...tickets);
 			const usage = costFixture({ input: 164000, cached: 96000, output: 21000, turns: 8 }, 0.73, 1.17, 0.075);
 			const daily = Array.from({ length: 30 }, (_, index) => ({
 				date: new Date(Date.parse(date) - (29 - index) * 86_400_000).toISOString().slice(0, 10),
@@ -542,7 +544,7 @@ export class MockApi implements IMockApi {
 			}));
 		}
 		const summaries = epics.map((epic) => {
-			const children = boardTickets.filter((ticket) => ticket.epicId === epic.id);
+			const children = boardTickets.filter((ticket) => !ticket.archivedAt && ticket.epicId === epic.id);
 			const counts = { backlog: 0, todo: 0, "in-progress": 0, done: 0 };
 			for (const child of children) counts[child.status]++;
 			const summary = {

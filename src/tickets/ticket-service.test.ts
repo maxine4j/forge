@@ -25,7 +25,9 @@ const fixture = () => {
 			return value;
 		}),
 		get: vi.fn(async (id) => tickets.get(id)),
-		list: vi.fn(async () => [...tickets.values()]),
+		list: vi.fn(async (includeArchived = false) =>
+			[...tickets.values()].filter((ticket) => includeArchived || !ticket.archivedAt),
+		),
 		update: vi.fn(async (id, input) => {
 			Object.assign(tickets.get(id)!, input);
 		}),
@@ -111,6 +113,18 @@ test("references never limit visibility or same-column drop targets", async () =
 	await expect(service.move(actor, ticket.id, { status: "backlog", beforeId: "TASK-2" })).resolves.toMatchObject({
 		id: ticket.id,
 	});
+});
+
+test("archived lists require owner access and retain order without workflow indicators", async () => {
+	const { service, tickets, summary, store } = fixture();
+	const ticket = await service.create(actor, { title: "Task", description: "" });
+	const archived = { ...ticket, id: "TASK-2", status: "todo" as const, archivedAt: now.toISOString() };
+	tickets.set(archived.id, archived);
+	summary.set(archived.id, { agentStatus: "queued", needsAttention: true });
+	expect((await service.list(actor)).map((value) => value.id)).toEqual([ticket.id]);
+	expect(await service.list(actor, true)).toEqual([ticket, archived]);
+	expect(store.list).toHaveBeenLastCalledWith(true);
+	await expect(service.list({ username: "guest" }, true)).rejects.toThrow("Access denied");
 });
 
 test("create backlog tickets, edit scope and delegate moves to the workflow", async () => {

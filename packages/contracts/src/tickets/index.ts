@@ -86,7 +86,8 @@ export const ticketSchema = z.strictObject({
 	canReturnToBacklog: z.literal(true).optional(),
 	resetting: z.literal(true).optional(),
 });
-export const ticketsSchema = z.array(ticketSchema).max(1000);
+// The active board is capped by the store; retained archives can exceed that cap.
+export const ticketsSchema = z.array(ticketSchema);
 export const editEpicSchema = createTicketSchema.pick({ title: true, description: true });
 export const epicSchema = editEpicSchema.extend({ id: epicIdSchema, createdAt: z.iso.datetime() });
 export const epicSummarySchema = epicSchema.extend({

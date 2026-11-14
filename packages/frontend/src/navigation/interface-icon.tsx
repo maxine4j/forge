@@ -1,4 +1,5 @@
 const paths = {
+	filters: "M3 4h18l-7 8v7l-4 2v-9z",
 	tasks: "M6 5h14M6 12h14M6 19h14M3 5h.01M3 12h.01M3 19h.01",
 	repos: "M4 19V5a2 2 0 0 1 2-2h14v18H6a2 2 0 0 1 0-4h14M8 7h8",
 	costs: "M12 2v20m5-15H9a2.5 2.5 0 0 0 0 5h6a2.5 2.5 0 0 1 0 5H7",

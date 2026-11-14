@@ -5,9 +5,23 @@ import {
 	updateTicketSchema,
 	moveTicketSchema,
 	ticketSchema,
+	ticketsSchema,
 	ticketStatuses,
 	ticketExecutionSettingsSchema,
 } from "./index.ts";
+
+test("ticket collections can include retained archives beyond active board capacity", () => {
+	const archived = Array.from({ length: 1001 }, (_, index) => ({
+		id: `TASK-${index + 1}`,
+		title: "Archived ticket",
+		description: "",
+		repositoryIds: [],
+		status: "done",
+		createdAt: "2026-11-03T00:00:00.000Z",
+		archivedAt: "2026-11-04T00:00:00.000Z",
+	}));
+	expect(ticketsSchema.parse(archived)).toEqual(archived);
+});
 
 test("ticket-only flags are optional booleans with omitted values off", () => {
 	const omitted = ticketExecutionSettingsSchema.parse({});
