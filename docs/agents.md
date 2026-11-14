@@ -186,6 +186,9 @@ The shared app-server keeps OpenAI account access while Ollama threads use a
 thread-scoped Responses provider without OpenAI credentials. Ollama turns do not
 sample or contribute to OpenAI costs and quotas. Provider errors follow existing
 execution and recovery paths without provider fallback.
+Forge can also reach a local Ollama worker through the [Ollama relay](development.md#ollama-relay).
+The relay forwards Ollama's stateless Responses and SSE stream, and the worker
+connects from the approved inference host over TLS.
 
 Ollama accepts **Ask** and **Full access**. Codex 0.164.0 requests a separate
 `codex-auto-review` model for **Approve for me**, outside Forge's single-model

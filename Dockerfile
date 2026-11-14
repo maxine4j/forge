@@ -7,6 +7,7 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml .npmrc ./
 COPY packages/backend-infrastructure/package.json packages/backend-infrastructure/package.json
 COPY packages/contracts/package.json packages/contracts/package.json
 COPY packages/frontend/package.json packages/frontend/package.json
+COPY ollama-relay/package.json ollama-relay/package.json
 RUN apt-get update && apt-get install -y --no-install-recommends python3=3.13.5-1 make=4.4.1-2 g++=4:14.2.0-1 && rm -rf /var/lib/apt/lists/*
 ENV npm_config_build_from_source=true
 
@@ -14,6 +15,7 @@ FROM manifests AS builder
 RUN --mount=type=cache,id=forge-pnpm,target=/pnpm/store pnpm install --frozen-lockfile --store-dir /pnpm/store
 COPY tsconfig.json tsconfig.build.json ./
 COPY packages packages
+COPY ollama-relay ollama-relay
 COPY src src
 RUN pnpm build
 

@@ -4,6 +4,7 @@ metadata:
 resources:
     app:
         type: web
+        primary: true
         privileged: true
         image: ghcr.io/maxine4j/forge:${COMMIT_ID:40}
         replicas: 1
@@ -23,3 +24,18 @@ resources:
             - mountPath: /data
         termination:
             timeoutSeconds: 30
+    ollama-relay:
+        type: web
+        image: ghcr.io/maxine4j/forge-ollama-relay:${COMMIT_ID:40}
+        replicas: 1
+        rolloutStrategy: recreate
+        ingress:
+            public: true
+            port: 8080
+        healthcheckUrl: /health
+        env:
+            - name: OLLAMA_RELAY_TOKEN
+              secret: true
+        limits:
+            cpus: 0.5
+            memoryMiB: 192

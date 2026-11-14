@@ -84,6 +84,7 @@ const methods = new Map<string, z.ZodType>([
 		}),
 	],
 	["thread/read", z.strictObject({ threadId: z.string().min(1), includeTurns: z.boolean() })],
+	["thread/compact/start", z.strictObject({ threadId: z.string().min(1) })],
 	[
 		"thread/turns/list",
 		z.strictObject({

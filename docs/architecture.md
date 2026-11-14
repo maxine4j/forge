@@ -24,6 +24,9 @@ once it is ready. See
   and [Board cleanup](tickets.md#docker-containers).
 - Do not add a separate runner service, custom model-provider layer, or custom
   agent tool-execution loop.
+- The optional inference path through the [Ollama relay](development.md#ollama-relay)
+  forwards the existing Codex provider's Responses traffic to an approved
+  local Ollama worker.
 - Ask the owner before adding third-party dependencies. Pin Codex CLI and any new
   dependencies to tested versions.
 

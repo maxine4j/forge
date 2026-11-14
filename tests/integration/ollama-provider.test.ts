@@ -6,13 +6,19 @@ import { join, resolve } from "node:path";
 import * as files from "@forge/backend-infrastructure/file";
 import { sleep } from "@forge/backend-infrastructure/sleep";
 import { expect, test, vi } from "vitest";
+import { WebSocket } from "ws";
 import { z } from "zod";
 
+import { OllamaClient } from "../../ollama-relay/src/ollama-client.ts";
+import { RelayHttp } from "../../ollama-relay/src/relay-http.ts";
+import { RelayService } from "../../ollama-relay/src/relay-service.ts";
+import { maxRequestBytes } from "../../ollama-relay/src/types.ts";
+import { WorkerSession } from "../../ollama-relay/src/worker-session.ts";
 import { AccountProcess } from "../../src/accounts/account-process.ts";
 import { CodexConnection } from "../../src/accounts/codex-connection.ts";
 import { CodexAgentClient } from "../../src/codex/codex-agent-client.ts";
 
-test("pinned Codex streams a custom-provider turn and resumes it after restart without sending OpenAI auth", async () => {
+test("pinned Codex streams through the relay and resumes after restart without sending OpenAI auth", async () => {
 	const root = await files.mkdtemp(join(tmpdir(), "forge-provider-test-"));
 	const requests: { url?: string; headers: Record<string, unknown>; body: string }[] = [];
 	const syntheticToken = "forge-test-synthetic-chatgpt-token";
@@ -102,6 +108,9 @@ test("pinned Codex streams a custom-provider turn and resumes it after restart w
 		sleep,
 	);
 	const connection = new CodexConnection(processes, sleep);
+	const bearer = "Bearer synthetic-ollama-pairing-token";
+	const relay = new RelayHttp(new RelayService(sleep), Buffer.from(bearer), sleep);
+	let socket: WebSocket | undefined;
 	try {
 		await processes.initialize();
 		const claims = Buffer.from(
@@ -129,6 +138,24 @@ test("pinned Codex streams a custom-provider turn and resumes it after restart w
 			server.listen(0, "127.0.0.1", ready);
 		});
 		const address = z.object({ port: z.number() }).parse(server.address());
+		await relay.listen("127.0.0.1", 0, 0);
+		const worker = new WebSocket(`ws://127.0.0.1:${relay.ports.pairing}/pair`, {
+			headers: { Authorization: bearer },
+			maxPayload: maxRequestBytes,
+		});
+		socket = worker;
+		const workerRequests: Headers[] = [];
+		new WorkerSession(
+			worker,
+			new OllamaClient(`http://127.0.0.1:${address.port}`, (url, init) => {
+				workerRequests.push(new Headers(init?.headers));
+				return fetch(url, init);
+			}),
+		);
+		await new Promise<void>((ready, reject) => {
+			worker.once("open", ready);
+			worker.once("error", reject);
+		});
 		await files.writeFile(
 			join(root, "codex", "config.toml"),
 			`chatgpt_base_url = "http://127.0.0.1:${address.port}/chatgpt/"\n[analytics]\nenabled = false\n`,
@@ -142,7 +169,7 @@ test("pinned Codex streams a custom-provider turn and resumes it after restart w
 		);
 		const provider = {
 			kind: "ollama",
-			endpoint: `http://127.0.0.1:${address.port}/v1`,
+			endpoint: `http://127.0.0.1:${relay.ports.inference}/v1`,
 			model: "fixture:latest",
 		} as const;
 		const track = vi.fn(async () => {});
@@ -194,12 +221,37 @@ test("pinned Codex streams a custom-provider turn and resumes it after restart w
 		);
 		await vi.waitFor(() => expect(client.read(id).status).toBe("completed"), { timeout: 5000 });
 		expect(client.read(id).plan).toContain("# Greeting");
+		const beforeCompact = requests.length;
+		const compactionItems: unknown[] = [];
+		const unsubscribe = connection.subscribe((method, params) => {
+			if (method === "item/completed" && z.object({ threadId: z.literal(id) }).safeParse(params).success)
+				compactionItems.push(params);
+		});
+		try {
+			await connection.request("thread/compact/start", { threadId: id });
+			await vi.waitFor(() => expect(requests.length).toBeGreaterThan(beforeCompact));
+			await vi.waitFor(
+				() =>
+					expect(compactionItems).toContainEqual(
+						expect.objectContaining({
+							item: expect.objectContaining({ type: "contextCompaction" }),
+						}),
+					),
+				{ timeout: 5000 },
+			);
+		} finally {
+			unsubscribe();
+		}
 		await client.send(id, path, "Fail the fixture turn.", { permissions: "ask" });
 		await vi.waitFor(() => expect(client.read(id).status).toBe("failed"), { timeout: 40000, interval: 100 });
 		expect(client.read(id).turnFailure).toBe("provider-request");
 		expect(JSON.stringify(client.read(id))).not.toContain("Private template error");
 		expect(track).not.toHaveBeenCalled();
 		expect(requests.length).toBeGreaterThanOrEqual(2);
+		for (const headers of workerRequests) {
+			expect(headers.has("authorization")).toBe(false);
+			expect(headers.has("chatgpt-account-id")).toBe(false);
+		}
 		for (const request of requests) {
 			expect(request.url).toBe("/v1/responses");
 			expect(request.headers).not.toHaveProperty("authorization");
@@ -209,6 +261,8 @@ test("pinned Codex streams a custom-provider turn and resumes it after restart w
 		}
 	} finally {
 		await connection.close();
+		socket?.terminate();
+		await relay.close();
 		server.closeAllConnections();
 		await new Promise<void>((done) => server.close(() => done()));
 		await files.rm(root, { recursive: true, force: true });

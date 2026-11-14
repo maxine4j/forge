@@ -250,11 +250,11 @@ explicitly. The application restores the identity from SQLite before serving
 requests after container replacement. Native development leaves the host's Git
 configuration alone.
 
-`forge.sd.yaml` uses private ingress, one replica, recreate rollout and persistent
+`forge.sd.yaml` gives the primary Forge app private ingress, one replica, recreate rollout and persistent
 `/data`, with no HTTP host ports. Its deployment defaults set `FORGE_OWNER` to
 `maxine4j`, derive `FORGE_ORIGIN` from `https://${SERVICE_DOMAIN}`, and allow
 credential-free HTTPS imports from `github.com` through `FORGE_IMPORT_HOSTS`.
-No owner secret file is required. The production cluster must allow `maxine4j`
+The [Ollama relay](#ollama-relay) requires a service secret. The production cluster must allow `maxine4j`
 through its GitHub login and provide authenticated HTTPS ingress on port 443.
 For another deployment, edit the literal owner, origin or exact DNS import
 allowlist as appropriate; an empty import allowlist disables remote imports.
@@ -270,3 +270,54 @@ the full commit SHA and `latest`. A `vX.X.X` tag publishes the full SHA and
 release tag. The root descriptor selects the image by its full commit SHA.
 Configure the platform to read the descriptor from this repository and retain
 the [Forge ingress trust boundary](foundation.md#slice-1-foundation-contract).
+
+### Ollama relay
+
+The descriptor adds a separate `ollama-relay` resource. Its public HTTPS host is
+`ollama-relay.forge.<base-domain>`. Port 8080 serves `GET /health` and the
+authenticated `/pair` WebSocket upgrade. The health check reports listener
+availability even when the worker is offline. The Forge container reaches
+`POST /v1/responses` on port 8081 through the shared service Docker network.
+Treat that network as trusted for inference requests.
+
+1. Provision `OLLAMA_RELAY_TOKEN` in `/etc/homelab-paas/env/forge.env` before
+   deploying. Use a random value of 32–256 URL-safe characters, such as 32 bytes
+   encoded as hex. Grant the deployment registry pull access to
+   `ghcr.io/maxine4j/forge-ollama-relay`. CI publishes the same SHA, branch,
+   and release tags as the Forge image after the relay smoke test and checks.
+2. Confirm the public `/health` returns 200 and a public
+   `POST /v1/responses` returns 404. On the approved Mac, install Ollama and
+   the local model you intend to use. Stop any existing Ollama instance on port 11434. From the matching Forge checkout, run:
+
+    ```sh
+    nvm use
+    pnpm install --frozen-lockfile
+    pnpm --filter @forge/ollama-relay... build
+    export OLLAMA_RELAY_URL='wss://ollama-relay.forge.<base-domain>/pair'
+    # Supply OLLAMA_RELAY_TOKEN through your secret manager or shell environment.
+    node ollama-relay/dist/worker-main.js
+    ```
+
+3. Set the [Ollama provider](agents.md#codex-harness-and-lifecycle) base URL to
+   `http://ollama-relay:8081/v1` and use the installed model tag. Verify a streamed
+   tool-call round trip with a new test agent before routing regular work to the
+   relay. The worker starts local-only Ollama on `127.0.0.1:11434`. Set
+   `OLLAMA_CONTEXT_LENGTH` if the model or Mac needs a different context size
+   from the 164000-token default.
+
+The Alpine relay runs as a nonroot user with limits of 0.5 CPU and 192 MiB.
+It runs one inference at a time and holds up to four requests for 30 seconds,
+with a 16 MiB per-request limit and a 32 MiB combined request budget. The active
+request has a 10-minute deadline. A disconnected worker fails active and queued
+requests. To rotate the token, update the PaaS secret atomically and wait for the
+relay to be recreated, then restart the Mac CLI with the new token. Recreating
+the relay closes the previous pairing and interrupts in-flight inference.
+
+To build and smoke-test the image locally:
+
+```sh
+nvm use
+pnpm --filter @forge/backend-infrastructure build
+docker buildx build --platform linux/amd64 -f ollama-relay/Dockerfile -t forge-ollama-relay:dev --load .
+node ollama-relay/tests/image-smoke.mjs
+```
