@@ -1236,10 +1236,6 @@
 .ticket-details-heading > div {
 	min-width: 0;
 }
-.ticket-details-heading {
-	align-items: flex-start;
-	flex-wrap: wrap;
-}
 .ticket-details-key-row,
 .ticket-details-key-row h2,
 .ticket-epic-link {
@@ -1249,10 +1245,8 @@
 	min-width: 0;
 }
 .ticket-details-key-row {
-	flex-wrap: wrap;
 	gap: 6px 8px;
 	min-height: 30px;
-	margin-bottom: 4px;
 }
 .ticket-details-key-row h2 {
 	font-size: 16px;
@@ -1276,7 +1270,8 @@
 .ticket-epic-link svg {
 	flex: none;
 }
-.ticket-epic-link span {
+.ticket-epic-link span,
+.ticket-key-label {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -1348,6 +1343,11 @@
 .ticket-details-actions button {
 	display: grid;
 	place-items: center;
+	flex: none;
+	width: 36px;
+	height: 36px;
+	min-height: 36px;
+	padding: 0;
 }
 .ticket-details-actions .ticket-archive-action {
 	background: #2b2619;
@@ -1423,12 +1423,6 @@
 .ticket-details .ticket-title {
 	overflow-wrap: anywhere;
 }
-.ticket-details-actions .ticket-return-action {
-	width: 32px;
-	height: 32px;
-	min-height: 32px;
-	padding: 0;
-}
 .ticket-sections-row {
 	display: flex;
 	align-items: center;
@@ -1437,15 +1431,16 @@
 	border-bottom: 1px solid #30363d;
 }
 .ticket-sections-row .section-tabs {
-	order: -1;
 	border-bottom: 0;
 }
-.ticket-sections-row > [role="status"] {
-	flex: 1;
+.ticket-details-status {
+	flex: 1 1 0;
 	min-width: 0;
 	text-align: right;
 	font-size: 12px;
-	overflow-wrap: anywhere;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 .ticket-chat-plan-actions {
 	display: flex;
@@ -1680,8 +1675,9 @@ button.ticket-description-text:hover {
 		max-width: 108px;
 	}
 	.ticket-details-actions button {
-		padding: 4px 8px;
-		min-height: 28px;
+		width: 32px;
+		height: 32px;
+		min-height: 32px;
 	}
 	.ticket-details .ticket-title,
 	.ticket-title-editor input {

@@ -79,6 +79,9 @@ to an epic. Cards support pointer and touch reordering, edge scrolling and
 cancellation. Status transitions use the board's drag controls; ticket details
 shows a labelled, read-only Status pill at the top of Details instead of a status menu.
 Ready and In progress tickets offer **Return to backlog** beside Archive and Close.
+The ticket header keeps epic/ticket keys, right-aligned execution status and these
+actions on one row. Long execution statuses truncate with an ellipsis. All three
+actions use equal square buttons: 36px on larger screens and 32px at phone widths.
 The square circular-arrow action opens a confirmation titled “Return TASK-n to backlog?”.
 It explains that execution stops and the execution worktree and unmerged branch
 are removed while scope, settings and the latest saved plan are preserved.

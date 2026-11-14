@@ -705,7 +705,7 @@ for (const view of ["Board", "Backlog"]) {
 	});
 }
 
-for (const width of [1280, 390]) {
+for (const width of [1280, 768, 600, 390, 320]) {
 	test(`ticket details title, tabs and status align at ${width}px`, async ({ page }) => {
 		await page.setViewportSize({ width, height: 850 });
 		const f = await setup(page);
@@ -722,7 +722,7 @@ for (const width of [1280, 390]) {
 				range.selectNodeContents(el);
 				return range.getBoundingClientRect().left;
 			});
-		await expect(title).toHaveCSS("font-size", width === 390 ? "17.6px" : "22px");
+		await expect(title).toHaveCSS("font-size", width <= 600 ? "17.6px" : "22px");
 		expect(await textLeft(title.getByRole("button"))).toBeCloseTo(contentLeft, 0);
 		await title.getByRole("button").click();
 		const input = details.getByRole("textbox", { name: "Title", exact: true });
@@ -742,18 +742,36 @@ for (const width of [1280, 390]) {
 		await expect(details.getByLabel("Status", { exact: true })).toHaveText("Ready for development");
 		expect(await textLeft(title)).toBeCloseTo(contentLeft, 0);
 		const returning = details.getByRole("button", { name: "Return to backlog", exact: true });
-		expect(await returning.boundingBox()).toMatchObject({ width: 32, height: 32 });
+		const size = width <= 600 ? 32 : 36;
+		for (const name of ["Return to backlog", "Archive ticket", "Close ticket"]) {
+			expect(await details.getByRole("button", { name, exact: true }).boundingBox()).toMatchObject({
+				width: size,
+				height: size,
+			});
+		}
 		await expect(returning).toHaveAttribute("title", "Return to backlog");
-		const row = details.locator(".ticket-sections-row");
+		const row = details.locator(".ticket-details-heading");
 		const status = row.getByRole("status");
 		await status.evaluate((el) => {
-			el.textContent = "A very long execution label that wraps within its own available space";
+			el.textContent = "A very long execution label that must truncate within its own available space";
 		});
-		const tabsBox = (await row.getByRole("tablist").boundingBox())!;
+		await expect(status).toHaveCSS("text-align", "right");
+		await expect(status).toHaveCSS("white-space", "nowrap");
+		await expect(status).toHaveCSS("text-overflow", "ellipsis");
+		await expect(status).toHaveCSS("overflow", "hidden");
+		expect(await status.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+		const keysBox = (await row.locator(".ticket-details-key-row").boundingBox())!;
 		const statusBox = (await status.boundingBox())!;
-		expect(statusBox.x).toBeGreaterThanOrEqual(tabsBox.x + tabsBox.width);
-		expect(await row.getByRole("tablist").getByRole("status").count()).toBe(0);
-		expect(await details.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+		const actionsBox = (await row.locator(".ticket-details-actions").boundingBox())!;
+		expect(statusBox.x).toBeGreaterThanOrEqual(keysBox.x + keysBox.width);
+		expect(statusBox.x + statusBox.width).toBeLessThanOrEqual(actionsBox.x);
+		for (const box of [keysBox, statusBox, actionsBox]) {
+			expect(box.y + box.height / 2).toBeCloseTo(actionsBox.y + actionsBox.height / 2, 0);
+		}
+		expect((await row.boundingBox())!.height).toBe(size);
+		expect(await row.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+		await expect(details.locator(".ticket-sections-row").getByRole("status")).toHaveCount(0);
+		if (width >= 390) expect(await details.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
 		await tab.focus();
 		await tab.press("ArrowRight");
 		await expect(details.getByRole("tab", { name: "Chat", exact: true })).toBeFocused();

@@ -446,10 +446,21 @@ export const TicketDetails = ({
 							>
 								✓
 							</span>
-							{ticket.id}
+							<span className='ticket-key-label'>{ticket.id}</span>
 						</h2>
 					</div>
 				</div>
+				<span className='ticket-details-status' role='status'>
+					{resetting
+						? job?.resetStage === "cleanup"
+							? "Removing abandoned work…"
+							: "Stopping ticket agents…"
+						: reviewPlan
+							? "Plan ready for review"
+							: job?.state === "merge-queued"
+								? "Queued to merge"
+								: (job?.state ?? "Loading")}
+				</span>
 				<div className='ticket-details-actions'>
 					{!archived && ticket.canReturnToBacklog && (
 						<button
@@ -587,18 +598,6 @@ export const TicketDetails = ({
 				</div>
 			</dialog>
 			<div className='ticket-sections-row'>
-				<span role='status'>
-					{resetting
-						? job?.resetStage === "cleanup"
-							? "Removing abandoned work…"
-							: "Stopping ticket agents…"
-						: reviewPlan
-							? "Plan ready for review"
-							: job?.state === "merge-queued"
-								? "Queued to merge"
-								: (job?.state ?? "Loading")}
-				</span>
-
 				<div role='tablist' aria-label='Ticket sections' className='section-tabs'>
 					{tabs.map((name, index) => (
 						<button
