@@ -214,6 +214,17 @@ repository workbench. Code is the default repository section; Agents provides
 [local workflows](git-and-ci.md#manual-local-pipelines).
 Tab navigation stays usable on narrow screens without widening the page.
 Repository tabs share the Tasks tab styling and pair each label with an icon.
+Both bars use shared frontend section/tab primitives with an explicit 42px minimum
+tab height, matching the Tasks toolbar, and retain horizontal scrolling on narrow
+screens. Task tabs retain arrow-key selection and panel associations; repository
+tabs retain real router links and their existing history behavior.
+Code standalone actions and Tasks toolbar actions share a 36px minimum button
+height, typography, padding, borders and keyboard focus treatment. The branch
+dropdown opts into that toolbar size with its decorative icon inside the trigger;
+long selected names truncate while popup options wrap to show complete names.
+Sync uses content-driven width and wraps long target names within the viewport,
+including the same minimum height for its disabled empty-repository variant.
+Breadcrumbs, file rows and editor tabs retain their specialized presentation.
 All repository tabs share the Agents spacing below the global header:
 16px on desktop and 8px at widths up to 700px, with matching tab padding and
 spacing below the tab bar.

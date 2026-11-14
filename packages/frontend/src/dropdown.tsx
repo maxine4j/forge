@@ -44,6 +44,7 @@ export const DropdownSurface = ({
 	onOpen,
 	dismissWhenDisabled = true,
 	popupLabel = label,
+	size,
 }: {
 	label: string;
 	disabled?: boolean;
@@ -61,6 +62,7 @@ export const DropdownSurface = ({
 	onOpen?: () => void;
 	dismissWhenDisabled?: boolean;
 	popupLabel?: string;
+	size?: "toolbar";
 }) => {
 	const id = useId();
 	const anchor = `--dropdown-${id.replace(/[^a-zA-Z0-9]/gu, "")}`;
@@ -188,7 +190,7 @@ export const DropdownSurface = ({
 				aria-controls={id}
 				aria-activedescendant={open ? activeId : undefined}
 				disabled={disabled}
-				className={`dropdown-trigger ${className}`}
+				className={`dropdown-trigger ${size === "toolbar" ? "toolbar-button" : ""} ${className}`}
 				style={{ anchorName: anchor } as CSSProperties}
 				onKeyDown={keys}
 				onClick={() => (open ? close() : show())}
@@ -225,6 +227,7 @@ export const Dropdown = ({
 	className,
 	trigger,
 	emptyLabel = "No options available.",
+	size,
 	"aria-label": label,
 }: {
 	value: string | number;
@@ -235,6 +238,7 @@ export const Dropdown = ({
 	className?: string;
 	trigger?: ReactNode;
 	emptyLabel?: string;
+	size?: "toolbar";
 	"aria-label": string;
 }) => {
 	const choices: DropdownChoice[] =
@@ -270,6 +274,7 @@ export const Dropdown = ({
 	);
 	return (
 		<DropdownSurface
+			size={size}
 			label={label}
 			disabled={disabled}
 			className={className}

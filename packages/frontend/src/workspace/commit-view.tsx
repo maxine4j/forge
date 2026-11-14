@@ -5,6 +5,7 @@ import { Link, useLocation, useNavigate } from "react-router";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
 import { useToast } from "../toasts/toasts.tsx";
+import { ToolbarButton } from "../toolbar-button.tsx";
 import { ChangedFilesTree } from "./changed-files-tree.tsx";
 
 type Line = CommitPatch["hunks"][number]["lines"][number];
@@ -226,7 +227,7 @@ export const CommitView = ({ root, api }: { root: string; api: IWorkspaceApi }) 
 			<Link to={link()}>Back to history</Link>
 			{error && (
 				<p>
-					<button onClick={() => setRevision((n) => n + 1)}>Retry commit</button>
+					<ToolbarButton onClick={() => setRevision((n) => n + 1)}>Retry commit</ToolbarButton>
 				</p>
 			)}
 			{!detail && !error && <p role='status'>Loading commit…</p>}
@@ -241,7 +242,7 @@ export const CommitView = ({ root, api }: { root: string; api: IWorkspaceApi }) 
 						</p>
 						<p className='commit-sha'>
 							<code>{detail.sha}</code>{" "}
-							<button
+							<ToolbarButton
 								onClick={() =>
 									void navigator.clipboard
 										.writeText(detail.sha)
@@ -249,7 +250,7 @@ export const CommitView = ({ root, api }: { root: string; api: IWorkspaceApi }) 
 								}
 							>
 								Copy SHA
-							</button>
+							</ToolbarButton>
 						</p>
 						<p>
 							Parents:{" "}
@@ -346,7 +347,9 @@ export const CommitView = ({ root, api }: { root: string; api: IWorkspaceApi }) 
 									</summary>
 									{patches[file.path] === "error" ? (
 										<p>
-											<button onClick={() => setRevision((n) => n + 1)}>Retry diffs</button>
+											<ToolbarButton onClick={() => setRevision((n) => n + 1)}>
+												Retry diffs
+											</ToolbarButton>
 										</p>
 									) : patches[file.path] ? (
 										<Patch patch={patches[file.path] as CommitPatch} split={split} />

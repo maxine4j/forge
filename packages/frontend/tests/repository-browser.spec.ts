@@ -140,12 +140,99 @@ test("editor sidebar shows every root file without expansion controls", async ({
 	await expect(page.getByRole("button", { name: /Show all|Show fewer/ })).toHaveCount(0);
 });
 
+for (const width of [1280, 820, 390]) {
+	test(`shared Tasks and repository controls fit at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 900 });
+		await page.route("**/api/tickets?includeArchived=true", (route) => route.fulfill({ json: [] }));
+		await page.route("**/api/epics", (route) => route.fulfill({ json: [] }));
+		await page.route("**/api/board/settings", (route) =>
+			route.fulfill({ json: { dispatch: "stopped", maxAgents: 3 } }),
+		);
+		const metrics = async (name: string) =>
+			page.getByRole("tablist", { name }).evaluate((bar) => {
+				const tab = bar.querySelector('[role="tab"]')!;
+				const style = getComputedStyle(tab);
+				return {
+					height: bar.getBoundingClientRect().height,
+					tabHeight: tab.getBoundingClientRect().height,
+					font: style.font,
+					padding: style.padding,
+				};
+			});
+		await page.goto("/tasks");
+		const tasks = await metrics("Task views");
+		await page.getByRole("tab", { name: "Board", exact: true }).press("End");
+		await expect(page.getByRole("tab", { name: "Backlog", exact: true })).toBeFocused();
+		await page.screenshot({ path: `../../artifacts/forge/tasks-toolbar-${width}.png` });
+		await page.goto(`/repos/${projectId}/code`);
+		await expect(page.getByRole("combobox", { name: "Branch" })).toBeVisible();
+		expect(await metrics("Repository sections")).toEqual(tasks);
+		const branch = page.getByRole("combobox", { name: "Branch" });
+		const sync = page.getByRole("button", { name: /Sync/ });
+		await expect(branch).toHaveCSS("min-height", "36px");
+		await expect(sync).toHaveCSS("min-height", "36px");
+		const branchBox = (await branch.boundingBox())!;
+		const syncBox = (await sync.boundingBox())!;
+		expect(branchBox.height).toBe(36);
+		expect(syncBox.height).toBe(36);
+		if (width >= 820) expect(branchBox.y).toBe(syncBox.y);
+		await page.screenshot({ path: `../../artifacts/forge/code-toolbar-${width}.png` });
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+	});
+
+	test(`long branch controls wrap and keyboard selection fits at ${width}px`, async ({ page }) => {
+		const longBranch = `feature/${"long-branch-name-".repeat(14)}end`;
+		await page.setViewportSize({ width, height: 900 });
+		await page.route("**/repository/branches", (route) =>
+			route.fulfill({
+				json: [
+					{ name: "main", sha: head },
+					{ name: longBranch, sha: head },
+				],
+			}),
+		);
+		await page.route("**/repository/upstream-sync", (route) =>
+			route.fulfill({
+				json: {
+					state: "ready",
+					branch: longBranch,
+					ahead: 12,
+					behind: 34,
+				},
+			}),
+		);
+		await page.reload();
+		let picker = page.getByRole("combobox", { name: "Branch" });
+		await picker.press("Enter");
+		await picker.press("End");
+		const popup = page.getByRole("listbox", { name: "Branch" });
+		await expect(popup.getByRole("option", { name: longBranch, exact: true })).toBeVisible();
+		const box = (await popup.boundingBox())!;
+		expect(box.x).toBeGreaterThanOrEqual(0);
+		expect(box.x + box.width).toBeLessThanOrEqual(width);
+		await picker.press("Enter");
+		picker = page.getByRole("combobox", { name: "Branch" });
+		await expect(picker).toContainText(longBranch);
+		await expect(page.getByRole("listbox", { name: "Branch" })).toBeHidden();
+		await picker.press("Enter");
+		await picker.press("Escape");
+		await expect(picker).toBeFocused();
+		await expect(picker.locator(".dropdown-label")).toHaveCSS("text-overflow", "ellipsis");
+		const sync = page.getByRole("button", { name: /Sync/ });
+		await expect(sync).toContainText("↑12 ↓34 Sync");
+		await expect(sync.getByLabel("Target branch")).toHaveText(longBranch);
+		await page.screenshot({ path: `../../artifacts/forge/code-toolbar-long-${width}.png` });
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+	});
+}
+
 test("an eligible empty repository shows unavailable sync without fabricating a branch", async ({ page }) => {
 	await page.route("**/repository/branches", (route) => route.fulfill({ json: [] }));
 	await page.reload();
 	await expect(page.getByText("No branches yet.")).toBeVisible();
 	const sync = page.getByRole("button", { name: "Sync", exact: true });
 	await expect(sync).toBeDisabled();
+	await expect(sync).toHaveCSS("min-height", "36px");
 	await expect(sync).toHaveAttribute("title", "The upstream default branch must exist locally before syncing.");
 	await expect(page.getByRole("combobox", { name: "Branch" })).toHaveCount(0);
 });
@@ -186,6 +273,7 @@ test("Code shows main drift, refreshes after sync, and reports merge conflicts",
 		await expect(sync).toHaveText("↑2 ↓1 Syncing… main");
 		await expect(sync).toBeDisabled();
 		await expect(sync).toHaveAttribute("aria-busy", "true");
+		await expect(sync).toHaveCSS("min-height", "36px");
 		await expect(spinner).toBeVisible();
 		await expect(spinner).toHaveAttribute("aria-hidden", "true");
 		await expect(spinner).toHaveCSS("animation-name", "repository-sync-spin");

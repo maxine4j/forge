@@ -911,9 +911,6 @@
 	margin-block-end: 6px;
 	margin-inline-start: auto;
 }
-.task-board-actions > button {
-	min-height: 36px;
-}
 .board-icon-button {
 	display: inline-grid;
 	place-items: center;
@@ -1452,7 +1449,17 @@
 }
 .tasks-toolbar .tasks-tabs {
 	max-width: 100%;
-	border-bottom: 0;
+	border-bottom-color: transparent;
+}
+.section-tabs-toolbar {
+	min-width: 0;
+	max-width: 100%;
+	min-height: 42px;
+	align-self: flex-start;
+}
+.section-tabs-toolbar > :is(button, a) {
+	box-sizing: border-box;
+	min-height: 42px;
 }
 .section-tabs > :is(button, a) {
 	display: flex;
@@ -2649,22 +2656,11 @@ summary {
 	flex-wrap: wrap;
 }
 .branch-picker {
-	display: flex;
-	align-items: center;
-	gap: 8px;
-	margin: 0;
-	padding: 6px 12px;
-	border: 1px solid #30363d;
-	border-radius: 6px;
-	background: #21262d;
+	min-width: 0;
 	max-width: 100%;
 }
 .branch-picker .dropdown-trigger {
-	font: inherit;
-	color: #e6edf3;
-	background: #21262d;
-	border: 0;
-	max-width: 200px;
+	max-width: min(240px, 100%);
 	min-width: 0;
 }
 .repository-toolbar nav {
@@ -2679,7 +2675,6 @@ summary {
 	padding: 2px;
 }
 .repository-sync-button {
-	min-inline-size: 13.5rem;
 	max-inline-size: 100%;
 	text-align: start;
 	overflow-wrap: anywhere;
@@ -2834,9 +2829,6 @@ summary {
 }
 .history-button {
 	display: inline-flex;
-	padding: 5px;
-	background: transparent;
-	border-color: transparent;
 }
 .repository-date-heading {
 	display: flex;
@@ -3407,6 +3399,41 @@ summary {
 .dropdown-trigger:disabled {
 	opacity: 0.5;
 	cursor: default;
+}
+.toolbar-button {
+	box-sizing: border-box;
+	min-height: 36px;
+	max-width: 100%;
+	padding: 7px 12px;
+	border: 1px solid #30363d;
+	border-radius: 6px;
+	font-family: inherit;
+	font-size: 13px;
+	font-weight: 600;
+	line-height: 1.5;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+.toolbar-button:not(.primary) {
+	background: #21262d;
+	color: #e6edf3;
+}
+.toolbar-button:not(.primary):hover {
+	background: #30363d;
+	border-color: #8b949e;
+}
+.toolbar-button.primary {
+	border-color: #2ea043;
+}
+.toolbar-button.primary:hover {
+	background: #2ea043;
+}
+.toolbar-button:focus-visible {
+	outline: 2px solid #58a6ff;
+	outline-offset: 2px;
+}
+.toolbar-button.board-icon-button {
+	padding: 0;
 }
 .dropdown-label {
 	color: inherit;

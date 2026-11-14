@@ -1,12 +1,13 @@
 import { workspaceSchema, workspacesSchema, type Project, type Workspace } from "@forge/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useLocation } from "react-router";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { useLocation } from "react-router";
 
 import { AgentChat } from "../agents/agent-chat.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { InterfaceIcon } from "../navigation/interface-icon.tsx";
 import { resolveRoute } from "../navigation/routes.ts";
 import { Pipelines } from "../pipelines/pipelines.tsx";
+import { SectionTabs, SectionTab } from "../section-tabs.tsx";
 import { useErrorState } from "../toasts/toasts.tsx";
 import { RepositoryBrowser } from "./repository-browser.tsx";
 import { WorkspaceTerminal } from "./terminal.tsx";
@@ -117,7 +118,7 @@ export const Workbench = ({
 	}, [dirty]);
 	return (
 		<section className='workbench' aria-label='Repository'>
-			<div className='section-tabs project-tabs' role='tablist' aria-label='Repository sections'>
+			<SectionTabs className='project-tabs' aria-label='Repository sections'>
 				{(
 					[
 						["Code", "code"],
@@ -126,27 +127,26 @@ export const Workbench = ({
 						["Terminals", "terminals"],
 					] as const
 				).map(([name, section]) => (
-					<Link
+					<SectionTab
 						key={name}
 						id={`tab-${name}`}
-						role='tab'
-						aria-selected={tab === name}
-						onClick={(event) => {
+						selected={tab === name}
+						onClick={(event: MouseEvent<HTMLAnchorElement>) => {
 							if (event.currentTarget.getAttribute("href") === location.pathname + location.search)
 								event.preventDefault();
 						}}
-						aria-controls={`panel-${name}`}
+						panel={`panel-${name}`}
+						icon={<InterfaceIcon name={section} />}
 						to={
 							name === "Code"
 								? codeFiles
 								: (navigation.locations[section] ?? `/repos/${project.id}/${section}`)
 						}
 					>
-						<InterfaceIcon name={section} />
 						{name}
-					</Link>
+					</SectionTab>
 				))}
-			</div>
+			</SectionTabs>
 			<section id='panel-Code' role='tabpanel' aria-labelledby='tab-Code' hidden={tab !== "Code"}>
 				<RepositoryBrowser
 					projectId={project.id}

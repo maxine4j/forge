@@ -24,7 +24,9 @@ import {
 	useDialogDismissal,
 } from "../navigation/controller.tsx";
 import { InterfaceIcon } from "../navigation/interface-icon.tsx";
+import { SectionTabs, SectionTab } from "../section-tabs.tsx";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
+import { ToolbarButton } from "../toolbar-button.tsx";
 import { backlogFiltersKey, readBacklogFilters, type BacklogFilters } from "./backlog-filters.ts";
 import { BoardSettingsDialog, useBoardSettings } from "./board-settings-dialog.tsx";
 import { EpicDetails, EpicSelection } from "./epic-details.tsx";
@@ -378,15 +380,14 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 	return (
 		<div className='tasks'>
 			<div className='tasks-toolbar'>
-				<div role='tablist' aria-label='Task views' className='section-tabs tasks-tabs'>
+				<SectionTabs aria-label='Task views' className='tasks-tabs'>
 					{(["board", "backlog"] as const).map((name, index) => (
-						<button
+						<SectionTab
 							key={name}
-							type='button'
-							role='tab'
 							id={`tasks-tab-${name}`}
-							aria-controls={`tasks-panel-${name}`}
-							aria-selected={view === name}
+							panel={`tasks-panel-${name}`}
+							icon={<InterfaceIcon name={name} />}
+							selected={view === name}
 							tabIndex={view === name ? 0 : -1}
 							onClick={() => selectView(name)}
 							onKeyDown={(event) => {
@@ -398,11 +399,10 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 								selectView(next === 0 ? "board" : "backlog", true);
 							}}
 						>
-							<InterfaceIcon name={name} />
 							{name === "board" ? "Board" : "Backlog"}
-						</button>
+						</SectionTab>
 					))}
-				</div>
+				</SectionTabs>
 				<div
 					className='task-board-actions'
 					role='group'
@@ -410,7 +410,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 				>
 					{view === "board" ? (
 						<>
-							<button
+							<ToolbarButton
 								type='button'
 								className='board-icon-button'
 								aria-label='Board settings'
@@ -419,8 +419,8 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 								onClick={() => navigation.open("board-settings")}
 							>
 								<InterfaceIcon name='settings' />
-							</button>
-							<button
+							</ToolbarButton>
+							<ToolbarButton
 								type='button'
 								className='board-icon-button'
 								aria-label={board.dispatchLabel}
@@ -429,11 +429,11 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 								onClick={() => void board.toggleDispatch()}
 							>
 								<InterfaceIcon name={board.settings?.dispatch === "running" ? "pause" : "play"} />
-							</button>
+							</ToolbarButton>
 						</>
 					) : (
 						<>
-							<button
+							<ToolbarButton
 								type='button'
 								disabled={actionsBusy}
 								onClick={() => {
@@ -442,15 +442,16 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 								}}
 							>
 								Create epic
-							</button>
+							</ToolbarButton>
 						</>
 					)}
-					<button type='button' className='primary' disabled={actionsBusy} onClick={create}>
+					<ToolbarButton type='button' className='primary' disabled={actionsBusy} onClick={create}>
 						Create ticket
-					</button>
+					</ToolbarButton>
 					{view === "backlog" && (
 						<DropdownSurface
 							label='Filters'
+							size='toolbar'
 							className='backlog-filters'
 							trigger={
 								<>

@@ -19,6 +19,7 @@ import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
 import { resolveRoute } from "../navigation/routes.ts";
 import { useErrorState, useToast, useFailureToast } from "../toasts/toasts.tsx";
+import { ToolbarButton } from "../toolbar-button.tsx";
 import { CommitView } from "./commit-view.tsx";
 import { Editor } from "./editor.tsx";
 import { FileIcon } from "./file-icon.tsx";
@@ -332,7 +333,7 @@ const BranchBrowser = ({
 		}
 	};
 	const historyButton = (
-		<button
+		<ToolbarButton
 			className='history-button'
 			aria-label='Commit history'
 			title='Commit history'
@@ -342,12 +343,12 @@ const BranchBrowser = ({
 			<svg width='18' height='18' viewBox='0 0 20 20' aria-hidden='true'>
 				<path d='M3 8a7 7 0 1 1 0 5M3 3v5h5m2-3v5l3 2' fill='none' stroke='currentColor' strokeWidth='1.6' />
 			</svg>
-		</button>
+		</ToolbarButton>
 	);
 	const backToFiles = (
-		<button disabled={disabled} onClick={() => navigateCode(path)}>
+		<ToolbarButton disabled={disabled} onClick={() => navigateCode(path)}>
 			Back to files
-		</button>
+		</ToolbarButton>
 	);
 	const dateHeading = (
 		<span className='repository-date-heading'>
@@ -377,7 +378,7 @@ const BranchBrowser = ({
 					{active && <span> / {active.split("/").at(-1)}</span>}
 				</nav>
 				{syncVisible && syncStatus?.state !== "unconfigured" && (
-					<button
+					<ToolbarButton
 						className='repository-sync-button'
 						type='button'
 						disabled={disabled || dirty || syncBlocked}
@@ -398,13 +399,13 @@ const BranchBrowser = ({
 						{syncing && <span className='repository-sync-spinner' aria-hidden='true' />}
 						{syncing ? "Syncing…" : "Sync"}
 						{readyDrift && <span aria-label='Target branch'> {readyDrift.branch}</span>}
-					</button>
+					</ToolbarButton>
 				)}
 			</div>
 
 			{loading && !tree && <p role='status'>Loading files…</p>}
 			{!tree && !loading && (
-				<button
+				<ToolbarButton
 					onClick={() => {
 						setLoading(true);
 						setError("");
@@ -412,7 +413,7 @@ const BranchBrowser = ({
 					}}
 				>
 					Retry loading files
-				</button>
+				</ToolbarButton>
 			)}
 			<div className={active && !showingHistory ? "repository-layout has-file" : "repository-layout"}>
 				{active && !showingHistory && (
@@ -510,9 +511,12 @@ const BranchBrowser = ({
 									))}
 									{history?.commits.length === 0 && <p>No commits yet.</p>}
 									{history?.hasMore && (
-										<button disabled={disabled} onClick={() => void run(() => showHistory(true))}>
+										<ToolbarButton
+											disabled={disabled}
+											onClick={() => void run(() => showHistory(true))}
+										>
 											Load more commits
-										</button>
+										</ToolbarButton>
 									)}
 								</section>
 							) : (
@@ -642,10 +646,10 @@ const BranchBrowser = ({
 						/>
 					</label>
 					<div className='toolbar'>
-						<button className='primary' type='submit' disabled={disabled || !message.trim()}>
+						<ToolbarButton className='primary' type='submit' disabled={disabled || !message.trim()}>
 							Commit
-						</button>
-						<button
+						</ToolbarButton>
+						<ToolbarButton
 							type='button'
 							disabled={disabled}
 							onClick={() => {
@@ -660,7 +664,7 @@ const BranchBrowser = ({
 							}}
 						>
 							Discard all drafts
-						</button>
+						</ToolbarButton>
 					</div>
 				</form>
 			)}
@@ -740,24 +744,26 @@ export const RepositoryBrowser = ({
 			{showingCommit && <CommitView root={root} api={api} />}
 			{!showingCommit && branches.length > 0 && !branchExists && (
 				<p>
-					<button onClick={() => void navigate(`/repos/${projectId}/code`)}>Open default branch</button>
+					<ToolbarButton onClick={() => void navigate(`/repos/${projectId}/code`)}>
+						Open default branch
+					</ToolbarButton>
 				</p>
 			)}
 			{error && (
 				<p>
-					<button onClick={() => setRevision((value) => value + 1)}>Retry branches</button>
+					<ToolbarButton onClick={() => setRevision((value) => value + 1)}>Retry branches</ToolbarButton>
 				</p>
 			)}
 			{!showingCommit && !branches.length && !error && <p>No branches yet.</p>}
 			{inCode && !showingCommit && !branches.length && !error && upstreamSyncAvailable && (
-				<button
+				<ToolbarButton
 					className='repository-sync-button'
 					type='button'
 					disabled
 					title='The upstream default branch must exist locally before syncing.'
 				>
 					Sync
-				</button>
+				</ToolbarButton>
 			)}
 			{visited.map((value) => (
 				<div key={value} hidden={branch !== value || showingCommit}>
@@ -776,10 +782,29 @@ export const RepositoryBrowser = ({
 						syncInProgress={syncInProgress}
 						onSyncingChange={setSyncInProgress}
 						branchControl={
-							<label className='branch-picker'>
-								<span aria-hidden='true'>⑂</span>
+							<div className='branch-picker'>
 								<Dropdown
 									aria-label='Branch'
+									size='toolbar'
+									trigger={
+										<>
+											<svg
+												width='16'
+												height='16'
+												viewBox='0 0 16 16'
+												fill='none'
+												stroke='currentColor'
+												aria-hidden='true'
+												className='dropdown-icon'
+											>
+												<circle cx='4' cy='3' r='2' />
+												<circle cx='12' cy='3' r='2' />
+												<circle cx='4' cy='13' r='2' />
+												<path d='M4 5v6m8-6c0 4-8 2-8 6' />
+											</svg>
+											<span className='dropdown-label'>{branch}</span>
+										</>
+									}
 									value={branch}
 									disabled={!branches.length}
 									onChange={(value) => {
@@ -795,7 +820,7 @@ export const RepositoryBrowser = ({
 										</DropdownOption>
 									))}
 								</Dropdown>
-							</label>
+							</div>
 						}
 					/>
 				</div>
