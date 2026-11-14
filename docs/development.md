@@ -126,6 +126,35 @@ historical currencies. Preview fixtures show all three metrics and phase costs.
 See [agent usage](agents.md#cost-and-usage), [ticket costs](tickets.md#ticket-cost)
 and [settings access](foundation.md#navigation).
 
+## Terminal keyboard device verification
+
+TASK-27 automated Chromium coverage simulates phone VisualViewport shrinkage and
+offsets, tablet layout shrinkage without VisualViewport, exact terminal bytes,
+cursor modes, one-shot Ctrl, retained focus, horizontal overflow, disconnection,
+dismissal and navigation cleanup. Unit tests cover thresholds, zoom rejection and
+orientation baseline reset. The production CSP fixture also renders the toolbar.
+See the [terminal contract](workspaces.md#slice-2-terminal-contract).
+
+Implementation checks on 2026-11-14 used Node 24.22.0 and pnpm 10.34.7.
+Formatting, lint, types, unit/integration tests, production build, terminal browser
+tests, production layout and CSP checks passed. The full browser run passed
+164/170 tests; six settings/task/toast cases failed outside the terminal cases.
+The two task-settings navigation cases and toast retry case also failed on the
+unchanged branch. Provider settings and repository multiselect passed isolated
+retries. The ticket Details/chat settings completion case also failed on the
+unchanged branch in two of three repeated runs, confirming an existing flaky test.
+The image build was stopped with only 2.6 GB of disk space
+remaining; image smoke could not run without the resulting `forge:dev` image.
+
+Physical-device verification is **pending**: no Android or Apple devices are
+available in the implementation environment. Before treating native keyboard
+behavior as verified, test Android Chrome, iPhone Safari and iPad Safari with
+docked keyboards: focus, pan the row, send shortcuts, rotate, dismiss/reopen,
+switch tabs and navigate away. Record device/OS/browser versions and results
+here. Rotation deliberately resets detection; dismiss/reopen the keyboard to
+establish the new keyboard-closed baseline. Browser simulation cannot establish
+native keyboard behavior. Floating keyboards are out of scope.
+
 ## Image and deployment
 
 The runtime uses a digest-pinned `docker/sandbox-templates:codex` base. It retains the

@@ -46,6 +46,28 @@ the Terminals tab automatically inspects the latest session, attaches a live
 session, or creates one when absent or ended/lost. While mounted, the browser
 automatically replaces ended/lost shells and reconnects disconnected sockets.
 
+On touch devices, focusing the terminal and reducing the keyboard-closed viewport
+height by at least 120 CSS pixels and 20% opens a single horizontally scrollable
+keyboard row: **^R · ^C · Esc · Tab · Ctrl · ← · ↑ · ↓ · →**. Targets are at least
+44px. The row follows the visible viewport bottom (including offsets), reserves
+space for the terminal cursor, and refits xterm. Detection supports both visual
+and layout viewport shrinkage, falls back to window dimensions, ignores pinch
+zoom, and reacquires its closed baseline after orientation changes. Floating
+keyboards are outside this contract.
+
+Toolbar gestures retain terminal focus. Ctrl is a one-shot modifier: a single
+ASCII letter becomes its control character, case-insensitively; other input,
+including pasted/composed multi-character text, passes intact and clears Ctrl.
+Tapping Ctrl again cancels it. Dedicated keys clear Ctrl and send their stated
+bytes through xterm's public `input()` API and the existing `onData` stream path.
+Arrows follow xterm's current normal CSI or application-cursor SS3 mode. Buttons
+are disabled while disconnected and input is never queued for reconnection.
+Keyboard dismissal, focus leaving the terminal/toolbar, an inactive terminal tab
+or navigation away hides the row and clears Ctrl without detaching retained shells.
+Additional shortcuts (^D, ^Z, ^L, ^A/^E, ^W/^U/^K) remain available through Ctrl;
+their interpretation depends on the shell or terminal application. See
+[device verification](development.md#terminal-keyboard-device-verification).
+
 WebSockets accept JSON `{type:"input",data}` or `{type:"resize",cols,rows}`.
 Server frames are `{type:"output",sequence,data}`, `{type:"gap",through}`, and
 `{type:"status",session}`. Sequence starts at 1 per session; reconnect supplies

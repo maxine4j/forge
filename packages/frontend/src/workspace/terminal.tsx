@@ -2,10 +2,14 @@ import { terminalSessionSchema, terminalStatusSchema, terminalServerMessageSchem
 import { FitAddon } from "@xterm/addon-fit";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { useErrorState } from "../toasts/toasts.tsx";
+import { TerminalKeyboardToolbar } from "./terminal-keyboard-toolbar.tsx";
+import { controlInput } from "./terminal-keyboard.ts";
 import { TerminalStream } from "./terminal-stream.ts";
+import { useTerminalKeyboard } from "./use-terminal-keyboard.ts";
 
 import "@xterm/xterm/css/xterm.css";
 
@@ -14,9 +18,37 @@ export const WorkspaceTerminal = ({ id, api }: { id: string; api: IWorkspaceApi 
 	const [, setError] = useErrorState();
 	const [gap, setGap] = useState<number>();
 	const element = useRef<HTMLDivElement>(null);
+	const root = useRef<HTMLElement>(null);
+	const terminal = useRef<Terminal | undefined>(undefined);
+	const control = useRef(false);
+	const [controlPressed, setControlPressed] = useState(false);
+	const location = useLocation();
+	const keyboard = useTerminalKeyboard(root, location.pathname.endsWith("/terminals"));
+	const clearControl = () => {
+		control.current = false;
+		setControlPressed(false);
+	};
+	useEffect(() => {
+		if (!keyboard || connection !== "Connected") {
+			control.current = false;
+			// Synchronize the button with the imperative xterm input modifier.
+			// oxlint-disable-next-line react/set-state-in-effect
+			setControlPressed(false);
+		}
+	}, [keyboard, connection]);
+	useEffect(() => {
+		const target = element.current;
+		if (!target || !keyboard) return;
+		const top = target.getBoundingClientRect().top;
+		target.style.height = `${Math.max(44, keyboard.top + keyboard.height - 52 - top)}px`;
+		return () => {
+			target.style.height = "";
+		};
+	}, [keyboard]);
 	useEffect(() => {
 		if (!element.current) return;
 		const view = new Terminal({ cursorBlink: true, cols: 80, rows: 24, scrollback: 1000 });
+		terminal.current = view;
 		const addon = new FitAddon();
 		view.loadAddon(addon);
 		view.open(element.current);
@@ -102,6 +134,11 @@ export const WorkspaceTerminal = ({ id, api }: { id: string; api: IWorkspaceApi 
 			}
 		};
 		view.onData((data) => {
+			if (control.current) {
+				data = controlInput(data);
+				control.current = false;
+				setControlPressed(false);
+			}
 			for (const frame of transcript.input(data)) if (socket?.readyState === WebSocket.OPEN) socket.send(frame);
 		});
 		view.onResize(() => send({ type: "resize", ...dimensions() }));
@@ -117,16 +154,43 @@ export const WorkspaceTerminal = ({ id, api }: { id: string; api: IWorkspaceApi 
 			observer.disconnect();
 			socket?.close();
 			view.dispose();
+			terminal.current = undefined;
 		};
 	}, [id, api, setError]);
 	return (
-		<section aria-label='Terminal'>
+		<section aria-label='Terminal' ref={root}>
 			<p role='status'>{connection}</p>
 
 			{gap !== undefined && (
 				<p className='notice'>Output gap through {gap}. Some terminal output is unavailable.</p>
 			)}
 			<div className='terminal-view' ref={element} />
+			{keyboard && (
+				<div
+					className='terminal-keyboard-position'
+					style={{ top: keyboard.top + keyboard.height - 52, left: keyboard.left, width: keyboard.width }}
+				>
+					<TerminalKeyboardToolbar
+						connected={connection === "Connected"}
+						control={controlPressed}
+						toggleControl={() => {
+							control.current = !control.current;
+							setControlPressed(control.current);
+							terminal.current?.focus();
+						}}
+						input={(value) => {
+							clearControl();
+							if (connection !== "Connected") return;
+							const view = terminal.current;
+							view?.input(
+								typeof value === "string" ? value : value(view.modes.applicationCursorKeysMode),
+								true,
+							);
+							view?.focus();
+						}}
+					/>
+				</div>
+			)}
 		</section>
 	);
 };

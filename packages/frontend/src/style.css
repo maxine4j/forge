@@ -2615,6 +2615,32 @@ summary {
 	border: 1px solid #30363d;
 	border-radius: 6px;
 }
+.terminal-keyboard-position {
+	position: fixed;
+	z-index: 20;
+	height: 52px;
+}
+.terminal-keyboard-toolbar {
+	display: flex;
+	gap: 4px;
+	padding: 4px;
+	height: 52px;
+	background: #161b22;
+	overflow-x: auto;
+	overflow-y: hidden;
+	scrollbar-width: none;
+	touch-action: pan-x;
+}
+.terminal-keyboard-toolbar button {
+	flex: 0 0 44px;
+	min-width: 44px;
+	min-height: 44px;
+	padding: 4px;
+}
+.terminal-keyboard-toolbar button[aria-pressed="true"] {
+	background: #1f6feb;
+	color: white;
+}
 .repository-toolbar {
 	display: flex;
 	align-items: center;

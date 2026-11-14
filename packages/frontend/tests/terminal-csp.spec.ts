@@ -63,6 +63,8 @@ test("real xterm renders without violating the production HTTP CSP", async ({ pa
 		const response = await page.goto(`http://127.0.0.1:${address.port}/`);
 		expect(response?.headers()["content-security-policy"]).toContain("default-src 'self'");
 		await expect(page.locator(".xterm")).toBeVisible();
+		await expect(page.getByRole("toolbar", { name: "Terminal keyboard" })).toBeVisible();
+		await page.getByRole("button", { name: "Control C", exact: true }).click();
 		await page.waitForTimeout(300);
 		await page.screenshot({ path: "../../artifacts/forge/terminal-production-csp.png" });
 		expect(await page.evaluate(() => (window as unknown as { cspViolations: string[] }).cspViolations)).toEqual([]);
