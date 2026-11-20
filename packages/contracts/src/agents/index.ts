@@ -11,7 +11,7 @@ export const agentStatusSchema = z.enum([
 	"failed",
 	"uncertain",
 ]);
-export const createAgentSchema = z.strictObject({ title: z.string().trim().min(1).max(120) });
+export const createAgentSchema = z.strictObject({ title: z.string().trim().min(1).max(120), providerId: z.uuid() });
 export const agentSettingsSchema = z.strictObject({
 	model: z.string().min(1).max(256).optional(),
 	reasoningEffort: z.string().min(1).max(256).optional(),
@@ -69,6 +69,8 @@ export const agentReplySchema = z.strictObject({
 	answers: z.record(z.string().max(256), z.string().min(1).max(4000)).optional(),
 });
 export const agentThreadSchema = agentSettingsSchema.extend({
+	providerId: z.uuid().optional(),
+	providerName: z.string().optional(),
 	id: z.uuid(),
 	projectId: z.uuid(),
 	workspaceId: z.uuid(),

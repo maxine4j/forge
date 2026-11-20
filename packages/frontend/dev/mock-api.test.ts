@@ -16,6 +16,7 @@ import {
 } from "@forge/contracts";
 import { agentThreadsSchema, agentViewSchema, agentOptionsSchema, agentFilesSchema } from "@forge/contracts/agents";
 import { dockerOverviewSchema } from "@forge/contracts/docker";
+import { modelProvidersSchema } from "@forge/contracts/model-providers";
 import {
 	pullRequestsSchema,
 	pullRequestSchema,
@@ -56,6 +57,18 @@ const read = async (path: string) => {
 	expect(response.headers.get("cache-control")).toBe("no-store");
 	return response.json();
 };
+
+test("mock providers expose named cards and provider-specific catalogs", async () => {
+	const providers = modelProvidersSchema.parse(await read("/api/model-providers"));
+	expect(providers.map((p) => p.kind)).toEqual(["openai", "ollama"]);
+	for (const provider of providers) {
+		const catalog = agentOptionsSchema.parse(await read(`/api/model-providers/${provider.id}/model-options`));
+		if (provider.kind === "ollama") {
+			expect(catalog.models.map((m) => m.id)).toEqual([provider.model]);
+			expect(catalog.supportsAutoReview).toBe(false);
+		}
+	}
+});
 
 test("mock history exposes safe ordered events and cursor reads", async () => {
 	const ticket = ticketsSchema.parse(await read("/api/tickets"))[0]!;

@@ -7,6 +7,7 @@ import { AccessDeniedError, type IAccessService } from "../auth/access-service.t
 import type { Actor } from "../auth/types.ts";
 import { DockerError } from "../docker/docker-command.ts";
 import { EpicError } from "../epics/errors.ts";
+import { ModelProviderError } from "../model-providers/errors.ts";
 import { InvalidProjectError, ProjectNotFoundError, ProjectUnavailableError } from "../projects/errors.ts";
 import type { IProjectRouter } from "../projects/project-router.ts";
 import { SettingsError } from "../settings/settings-service.ts";
@@ -50,6 +51,14 @@ export class HttpApplication implements IHttpApplication {
 					ctx.body = { error: err.code };
 				} else if (err instanceof EpicError) {
 					ctx.status = err.code === "invalid-request" ? 400 : err.code === "epic-not-found" ? 404 : 503;
+					ctx.body = { error: err.code };
+				} else if (err instanceof ModelProviderError) {
+					ctx.status =
+						err.code === "provider-not-found"
+							? 404
+							: err.code === "provider-conflict" || err.code === "provider-retired"
+								? 409
+								: 400;
 					ctx.body = { error: err.code };
 				} else if (err instanceof SettingsError) {
 					ctx.status = err.code === "invalid-request" || err.code === "unsupported-settings" ? 400 : 503;

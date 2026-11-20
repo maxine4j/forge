@@ -7,6 +7,7 @@ import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { navigationState } from "../navigation/controller.tsx";
 import { resolveRoute } from "../navigation/routes.ts";
+import { ProviderSelection } from "../settings/model-providers.tsx";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { AgentActivity } from "./agent-activity.tsx";
 import { AgentComposer } from "./agent-composer.tsx";
@@ -477,6 +478,7 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 	if (selected && !opened.includes(selected)) setOpened([...opened, selected]);
 	const [error, setError] = useErrorState();
 	const [creating, setCreating] = useState(false);
+	const [providerId, setProviderId] = useState("");
 	const acting = useRef(false);
 	const poller = useRef<ResourcePoller<AgentThread[]> | undefined>(undefined);
 	const [refresh] = useState(() => () => poller.current?.refresh());
@@ -531,10 +533,15 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 	return (
 		<div className='agent-panel'>
 			<aside className='agent-sidebar' aria-label='Chats' hidden={mobile && Boolean(selected)}>
+				<ProviderSelection api={api} value={providerId} change={setProviderId} disabled={creating} />
 				<button
 					ref={createButton}
 					disabled={creating}
 					onClick={() => {
+						if (!providerId) {
+							setError("Select a model provider before creating a chat.");
+							return;
+						}
 						if (acting.current) return;
 						acting.current = true;
 						setCreating(true);
@@ -542,6 +549,7 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 						void api
 							.read(`projects/${projectId}/agents`, agentViewSchema, "POST", {
 								title: `Chat ${threads.length + 1}`,
+								providerId,
 							})
 							.then((view) => {
 								setThreads((values) => [...values, view.thread]);
@@ -573,6 +581,7 @@ export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspa
 							onClick={() => open(thread.id)}
 						>
 							<span>{thread.title}</span>
+							{thread.providerName && <small>{thread.providerName}</small>}
 							{thread.status !== "uncertain" && (
 								<small className={`agent-status agent-status-${thread.status}`}>{thread.status}</small>
 							)}

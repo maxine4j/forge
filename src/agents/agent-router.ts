@@ -48,7 +48,12 @@ export class AgentRouter {
 			const input = createAgentSchema.safeParse(ctx.request.body);
 			if (!input.success) throw new AgentError("invalid-request");
 			ctx.body = agentViewSchema.parse(
-				await this.service.create(ctx.state.actor, ctx.params["projectId"]!, input.data.title),
+				await this.service.create(
+					ctx.state.actor,
+					ctx.params["projectId"]!,
+					input.data.title,
+					input.data.providerId,
+				),
 			);
 			ctx.status = 201;
 		});

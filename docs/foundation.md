@@ -158,28 +158,53 @@ Backend foundation configuration:
 
 ### Forge settings
 
-The top-level **Config** tab lets the owner choose the
-[inference provider for new agents](agents.md#codex-harness-and-lifecycle), set
-OpenAI model and thinking defaults, edit multiline instructions for
-[ticket planners and implementers](tickets.md#agentic-ticket-board) and the
-[container-wide Git identity](development.md#image-and-deployment). Forge stores
-these settings in SQLite. Unset agent defaults delegate to Codex. Each instruction field accepts
-up to 4,000 characters. Set both Git identity fields or clear both together.
+Config contains **Model providers**, **Cost tracking**, **Ticket agents**, and
+**Version control upstream**. Billing, ticket instructions and Git identity use
+owner-only `GET/PUT /api/settings`. Instructions accept 4,000 characters each.
+Set both Git identity fields or clear both. The public settings contract no longer
+contains inference routing, singleton Ollama configuration or OpenAI defaults.
 
-**Version control upstream** contains GitHub sign-in and Git identity.
-**Inference provider** contains ChatGPT sign-in and the provider selector.
-Older settings default to OpenAI. Ollama requires a model tag and a container-reachable
-HTTP or HTTPS Responses API base URL, such as `http://ollama.internal:11434/v1`.
-The URL cannot contain credentials, a query, or a fragment. Saving settings
-does not contact the Ollama endpoint. Switching providers retains both configurations.
+### Model providers
 
-The owner-only `GET /api/settings` and `PUT /api/settings` routes use
-`@forge/contracts/settings`. PUT replaces the settings and requires the
-configured HTTPS origin. `GET /api/settings/model-options` provides the owner with
-the Codex catalog used to validate changes to `defaultAgentModel` and
-`defaultAgentReasoningEffort`. Unsupported selections return 400 and unavailable
-settings or catalog lookups return 503. The owner can clear both defaults or save
-unrelated settings during a catalog outage.
+Fresh installations have no providers. Named cards show the name, type, OpenAI
+account status or Ollama endpoint/model, and Edit/Remove actions. Add and edit use
+routed dialogs at `/config?provider=new|<id>`; removal adds `remove=true` and
+requires confirmation. Dialogs use shared history, dismissal, draft guards,
+dropdowns and toasts. Cancelling OpenAI authentication leaves its saved card
+reconnectable. Existing verified credentials can be reused.
+
+Owner-only APIs (mutations require the configured origin):
+
+| Route                                        | Contract                                         |
+| -------------------------------------------- | ------------------------------------------------ |
+| `GET/POST /api/model-providers`              | List active providers / create a named provider. |
+| `PATCH/DELETE /api/model-providers/:id`      | Edit configuration / retire after confirmation.  |
+| `GET /api/model-providers/:id/model-options` | Selected provider's model and thinking catalog.  |
+
+Browser contracts live in `@forge/contracts/model-providers`. IDs are stable;
+kind is immutable. Names are trimmed, required, at most 120 characters, and unique
+among active providers ignoring case. At most one active OpenAI provider exists,
+including incomplete login; the type picker disables OpenAI and SQLite enforces
+the restriction transactionally. Any number of Ollama providers can be configured,
+each with one model tag and a container-reachable HTTP(S) Responses API base URL
+ending in `/v1`, without credentials, query or fragment. Saving Ollama performs no
+connection test or model discovery.
+
+OpenAI cards reuse the [account APIs](#account-login-and-application-access) and device-code flow.
+The editor owns OpenAI model/thinking defaults. Unset values delegate to Codex;
+changes apply to subsequent turns. Changed explicit defaults are catalog-validated;
+clearing defaults and unrelated edits remain possible during a catalog outage.
+Provider responses never contain credentials or internal login identifiers.
+Invalid input returns `invalid-provider` (400); duplicate names or OpenAI creation
+return `provider-conflict` (409); unknown and retired selections return
+`provider-not-found` (404) and `provider-retired` (409). Missing required selection
+returns `provider-required` (400).
+
+Retirement hides cards and new selections while preserving historical records,
+credentials, conversations and workspaces. A replacement OpenAI provider can reuse
+the retained account. [Ticket attempts](tickets.md#ticket-execution-settings) and
+[standalone chats](agents.md#codex-harness-and-lifecycle) snapshot routing.
+The [versioned migration](development.md#named-provider-upgrades) runs before recovery.
 
 ### Repositories and imports
 

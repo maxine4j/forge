@@ -52,6 +52,11 @@ export const dismissalDepth = (state: NavigationState, owner: string | undefined
 
 export const directModalParent = (location: Location): Location | undefined => {
 	const query = new URLSearchParams(location.search);
+	if (location.pathname === "/config" && query.has("provider") && !navigationState(location).modal) {
+		query.delete("provider");
+		query.delete("remove");
+		return { ...location, search: query.size ? `?${query}` : "", state: null };
+	}
 	if (
 		location.pathname !== "/tasks"
 		|| navigationState(location).modal

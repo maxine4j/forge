@@ -1,11 +1,10 @@
-import { agentOptionsSchema, type AgentOptions } from "@forge/contracts/agents";
 import { billingCurrencies, forgeSettingsSchema, type ForgeSettings } from "@forge/contracts/settings";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
-import { ExecutionSettings } from "../agents/execution-settings.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
-import { useErrorState, useToast } from "../toasts/toasts.tsx";
+import { useErrorState } from "../toasts/toasts.tsx";
+import { ModelProviders } from "./model-providers.tsx";
 
 const currencyFlags: Partial<Record<ForgeSettings["localCurrency"], string>> = {
 	AUD: "🇦🇺",
@@ -45,17 +44,15 @@ export const ForgeSettingsForm = ({
 	defaultsSaved,
 	githubAccount,
 	chatgptAccount,
+	connectOpenAI,
 }: {
 	api: IWorkspaceApi;
 	defaultsSaved: () => void;
 	githubAccount: ReactNode;
 	chatgptAccount: ReactNode;
+	connectOpenAI: () => void;
 }) => {
 	const [draft, setDraft] = useState<ForgeSettings>();
-	const [options, setOptions] = useState<AgentOptions>();
-	const [optionsError, setOptionsError] = useState(false);
-	const { notify } = useToast();
-	const [optionsAttempt, setOptionsAttempt] = useState(0);
 	const [loadAttempt, setLoadAttempt] = useState(0);
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useErrorState();
@@ -76,24 +73,6 @@ export const ForgeSettingsForm = ({
 		};
 	}, [api, loadAttempt, setError]);
 
-	useEffect(() => {
-		let active = true;
-		void api.read("settings/model-options", agentOptionsSchema).then(
-			(value) => {
-				if (active) setOptions(value);
-			},
-			() => {
-				if (active) {
-					setOptionsError(true);
-					notify("Could not load model options.");
-				}
-			},
-		);
-		return () => {
-			active = false;
-		};
-	}, [api, optionsAttempt, notify]);
-
 	const change = (field: keyof ForgeSettings, value: string | number | undefined) => {
 		setDraft((current) => current && { ...current, [field]: value });
 		setError("");
@@ -106,19 +85,10 @@ export const ForgeSettingsForm = ({
 		setSaved(false);
 		const parsed = forgeSettingsSchema.safeParse(draft);
 		if (!parsed.success) {
-			const providerIssue = parsed.error.issues.find(({ path }) => path.at(0) === "inferenceProvider");
-			const invalidEndpoint = parsed.error.issues.some(({ path }) => path.at(0) === "ollamaEndpoint");
-			const invalidModel = parsed.error.issues.some(({ path }) => path.at(0) === "ollamaModel");
 			setError(
-				invalidEndpoint
-					? "Enter an absolute HTTP or HTTPS Ollama endpoint without credentials, a query, or a fragment."
-					: invalidModel
-						? "Enter an Ollama model tag without spaces."
-						: providerIssue
-							? providerIssue.message
-							: Boolean(draft?.gitName.trim()) === Boolean(draft?.gitEmail.trim())
-								? "Check cost tracking values, Git identity and instruction lengths."
-								: "Provide both a Git name and email, or leave both blank.",
+				Boolean(draft?.gitName.trim()) === Boolean(draft?.gitEmail.trim())
+					? "Check cost tracking values, Git identity and instruction lengths."
+					: "Provide both a Git name and email, or leave both blank.",
 			);
 			return;
 		}
@@ -138,6 +108,7 @@ export const ForgeSettingsForm = ({
 	return (
 		<section className='forge-settings' aria-labelledby='forge-settings-heading'>
 			<h2 id='forge-settings-heading'>Forge settings</h2>
+			<ModelProviders api={api} account={chatgptAccount} changed={defaultsSaved} connectOpenAI={connectOpenAI} />
 			{draft ? (
 				<form onSubmit={(event) => void save(event)}>
 					<fieldset disabled={saving}>
@@ -176,71 +147,6 @@ export const ForgeSettingsForm = ({
 							</label>
 						</div>
 						<p>Applies to future turns. Historical costs keep their saved prices and exchange rates.</p>
-					</fieldset>
-					<fieldset disabled={saving}>
-						<legend>Inference provider</legend>
-						{chatgptAccount}
-						<label>
-							Provider for new agents
-							<Dropdown
-								aria-label='Provider for new agents'
-								value={draft.inferenceProvider}
-								onChange={(value) => change("inferenceProvider", value)}
-							>
-								<DropdownOption value='openai'>OpenAI</DropdownOption>
-								<DropdownOption value='ollama'>Ollama</DropdownOption>
-							</Dropdown>
-						</label>
-						<div className='forge-settings-fields'>
-							<label>
-								Ollama endpoint
-								<input
-									value={draft.ollamaEndpoint ?? ""}
-									maxLength={2048}
-									placeholder='http://ollama.internal:11434/v1'
-									onChange={(event) => change("ollamaEndpoint", event.target.value || undefined)}
-								/>
-							</label>
-							<label>
-								Ollama model
-								<input
-									value={draft.ollamaModel ?? ""}
-									maxLength={256}
-									onChange={(event) => change("ollamaModel", event.target.value || undefined)}
-								/>
-							</label>
-						</div>
-						<p>Use the Responses API base URL ending in /v1.</p>
-						<h3>OpenAI defaults</h3>
-						<p>Apply to OpenAI tickets and chats that use Default on their next turn.</p>
-						<ExecutionSettings
-							configureDefaults
-							options={options}
-							settings={{
-								model: draft.defaultAgentModel,
-								reasoningEffort: draft.defaultAgentReasoningEffort,
-							}}
-							change={({ model, reasoningEffort }) => {
-								setDraft({
-									...draft,
-									defaultAgentModel: model,
-									defaultAgentReasoningEffort: reasoningEffort,
-								});
-								setError("");
-								setSaved(false);
-							}}
-						/>
-						{optionsError && (
-							<button
-								type='button'
-								onClick={() => {
-									setOptionsError(false);
-									setOptionsAttempt((value) => value + 1);
-								}}
-							>
-								Retry loading models
-							</button>
-						)}
 					</fieldset>
 					<fieldset disabled={saving}>
 						<legend>Ticket agents</legend>
@@ -295,10 +201,7 @@ export const ForgeSettingsForm = ({
 				</form>
 			) : (
 				<>
-					<div className='account-grid'>
-						{chatgptAccount}
-						{githubAccount}
-					</div>
+					<div className='account-grid'>{githubAccount}</div>
 					{error ? (
 						<button
 							type='button'

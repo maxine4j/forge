@@ -26,6 +26,7 @@ import {
 } from "../navigation/controller.tsx";
 import { InterfaceIcon } from "../navigation/interface-icon.tsx";
 import { SectionTabs, SectionTab } from "../section-tabs.tsx";
+import { ProviderSelection } from "../settings/model-providers.tsx";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { ToolbarButton } from "../toolbar-button.tsx";
 import { backlogFiltersKey, readBacklogFilters, type BacklogFilters } from "./backlog-filters.ts";
@@ -58,13 +59,23 @@ const TicketEditor = ({
 	const [description, setDescription] = useState("");
 	const [repositoryIds, setRepositoryIds] = useState<string[]>([]);
 	const [epicId, setEpicId] = useState(initialEpic);
+	const [providerId, setProviderId] = useState("");
 	const [, setError] = useErrorState();
-	const release = useModalDraft(!!(title || description || repositoryIds.length || epicId !== initialEpic), busy);
+	const release = useModalDraft(
+		!!(title || description || providerId || repositoryIds.length || epicId !== initialEpic),
+		busy,
+	);
 	const dismissal = useDialogDismissal(busy);
 	useModalDialog(dialog, visible);
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
-		const input = createTicketSchema.safeParse({ title, description, repositoryIds, epicId });
+		const input = createTicketSchema.safeParse({
+			title,
+			description,
+			repositoryIds,
+			epicId,
+			executionSettings: { providerId: providerId || undefined },
+		});
 		if (!input.success) {
 			setError("Enter a title up to 120 characters and a description up to 4000 characters.");
 			return;
@@ -87,6 +98,7 @@ const TicketEditor = ({
 				</button>
 			</div>
 			<form onSubmit={(event) => void submit(event)}>
+				<ProviderSelection api={api} value={providerId} change={setProviderId} disabled={busy} />
 				<label>
 					Title
 					<input

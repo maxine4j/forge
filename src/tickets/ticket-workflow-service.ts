@@ -7,6 +7,8 @@ import type { ITicketAgents } from "../agents/agent-service.ts";
 import { AgentCatalogError, AgentError } from "../agents/errors.ts";
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
+import { ModelProviderError } from "../model-providers/errors.ts";
+import { inferenceConfiguration, type IModelProviderService } from "../model-providers/model-provider-service.ts";
 import type { ITicketMergeClient } from "../workspaces/workspace-merge-client.ts";
 import type { IMergedWorkspaceCleanup, IAbandonedWorkspaceCleanup } from "../workspaces/workspace-service.ts";
 import { TicketError } from "./errors.ts";
@@ -49,9 +51,23 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		this.access.assertOwner(actor);
 		try {
 			const job = ticketId ? await this.store.get(ticketId) : undefined;
-			const threadId = job?.phase === "planning" ? job.plannerId : job?.implementerId;
+			const threadId =
+				(job?.phase === "planning" ? job.plannerId : job?.implementerId)
+				?? job?.plannerId
+				?? job?.implementerId;
+			if (!threadId && this.providers && ticketId) {
+				if (job?.providerSnapshot)
+					return await this.providers.snapshotOptions(
+						actor,
+						job.providerSnapshot.configuration,
+						job.providerSnapshot.providerId,
+					);
+				const ticket = await this.tickets.get(ticketId);
+				return await this.providers.options(actor, ticket?.executionSettings?.providerId ?? "");
+			}
 			return await this.agents.catalogOptions(actor, threadId);
 		} catch (cause) {
+			if (cause instanceof ModelProviderError) throw cause;
 			throw new TicketError("ticket-unavailable", { cause });
 		}
 	}
@@ -59,6 +75,12 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		this.access.assertOwner(actor);
 		const parsed = ticketExecutionSettingsSchema.safeParse(settings);
 		if (!parsed.success) throw new TicketError("invalid-request");
+		if (this.providers) {
+			if (!parsed.data.providerId) return;
+			const options = await this.providers.options(actor, parsed.data.providerId);
+			if (!resolveAgentSettings(options, parsed.data).supported) throw new TicketError("unsupported-settings");
+			return;
+		}
 		const options = await this.options(actor);
 		if (!resolveAgentSettings(options, parsed.data).supported) throw new TicketError("unsupported-settings");
 	}
@@ -70,17 +92,33 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			const current = await this.tickets.get(ticket.id);
 			if (!current || current.archivedAt || current.status === "done") throw new TicketError("ticket-conflict");
 			if ((await this.record(ticket.id)).state === "resetting") throw new TicketError("ticket-conflict");
-			const options = await this.options(actor, ticket.id);
+			const job = await this.record(ticket.id);
+			const changedProvider = parsed.data.providerId !== current.executionSettings?.providerId;
+			if (changedProvider && (job.providerSnapshot || job.plannerId || job.implementerId))
+				throw new TicketError("ticket-conflict");
+			if (changedProvider) {
+				parsed.data.model = undefined;
+				parsed.data.reasoningEffort = undefined;
+			}
+			if (this.providers && !parsed.data.providerId && !job.providerSnapshot) {
+				if (parsed.data.model || parsed.data.reasoningEffort) throw new TicketError("unsupported-settings");
+				await this.tickets.updateSettings(ticket.id, parsed.data);
+				return;
+			}
+			const options =
+				this.providers && changedProvider
+					? await this.providers.options(actor, parsed.data.providerId ?? "")
+					: await this.options(actor, ticket.id);
 			const previous = current.executionSettings;
 			const { model, reasoningEffort, permissions } = parsed.data;
 			const modelChanged = model !== previous?.model;
 			const effortChanged = reasoningEffort !== previous?.reasoningEffort;
-			const validateModel = modelChanged || (effortChanged && reasoningEffort !== undefined);
+			const validateModel = changedProvider || modelChanged || (effortChanged && reasoningEffort !== undefined);
 			if (
 				!resolveAgentSettings(options, {
 					model: validateModel ? model : undefined,
 					reasoningEffort: validateModel ? reasoningEffort : undefined,
-					permissions: permissions === previous?.permissions ? undefined : permissions,
+					permissions: !changedProvider && permissions === previous?.permissions ? undefined : permissions,
 				}).supported
 			)
 				throw new TicketError("unsupported-settings");
@@ -99,6 +137,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		private readonly wake: () => void = () => {},
 		private readonly dispatchMode: () => BoardSettings["dispatch"] = () => "running",
 		private readonly abandonmentCleanup?: IAbandonedWorkspaceCleanup,
+		private readonly providers?: IModelProviderService,
 	) {}
 	async update(actor: Actor, id: string, input: CreateTicket): Promise<void> {
 		this.access.assertOwner(actor);
@@ -138,6 +177,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			if (input.status === current.status) {
 				await this.store.save(job, input);
 			} else if (current.status === "backlog" && input.status === "todo") {
+				await this.providers?.require(actor, current.executionSettings?.providerId);
 				const repositoryId = current.repositoryIds[0];
 				if (!repositoryId) throw new TicketError("ticket-conflict");
 				await this.requireExecutionRepository(actor, repositoryId);
@@ -351,7 +391,11 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 						|| err instanceof AgentCatalogError
 						|| (err instanceof AgentError && err.code === "unsupported-settings");
 					const state = setupFailed ? "setup-failed" : job.state === "dispatching" ? "uncertain" : "failed";
-					await this.store.save({ ...job, state });
+					await this.store.save({
+						...job,
+						state,
+						providerSelectionError: err instanceof ModelProviderError || undefined,
+					});
 				}
 			}
 		});
@@ -470,9 +514,19 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		workspaceCleaned: _cleaned,
 		cleanupFailed: _cleanupFailed,
 		abandonment: _abandonment,
+		providerSnapshot: _providerSnapshot,
 		...workflow
 	}: TicketWorkflowRecord): TicketWorkflow {
-		return workflow;
+		return {
+			...workflow,
+			...(_providerSnapshot
+				? {
+						providerId: _providerSnapshot.providerId,
+						providerName: _providerSnapshot.providerName,
+						providerLocked: true as const,
+					}
+				: {}),
+		};
 	}
 	private canDispatch(ticket: Ticket): boolean {
 		const mode = this.dispatchMode();
@@ -486,8 +540,23 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		}
 	}
 	private async dispatch(actor: Actor, ticket: Ticket, job: TicketWorkflowRecord): Promise<void> {
+		job.providerSelectionError = undefined;
 		const current = await this.tickets.get(ticket.id);
 		if (!current || current.archivedAt) throw new TicketError("ticket-conflict");
+		if (!job.providerSnapshot && this.providers) {
+			const existing = job.implementerId ?? job.plannerId;
+			if (existing && this.agents.providerSnapshot)
+				job.providerSnapshot = await this.agents.providerSnapshot(actor, existing);
+			else {
+				const provider = await this.providers.require(actor, current.executionSettings?.providerId);
+				job.providerSnapshot = {
+					providerId: provider.id,
+					providerName: provider.name,
+					configuration: inferenceConfiguration(provider),
+				};
+			}
+			await this.store.save(job);
+		}
 		if (!job.plannerId && !job.implementerId) {
 			job.phase = this.initialPhase(current, job);
 			job.approvedRevision = job.plan?.revision;
@@ -515,6 +584,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 						job.workspaceId = workspaceId;
 						await this.store.save(job);
 					},
+					job.providerSnapshot,
 				);
 				id = view.thread.id;
 				if (planning) {

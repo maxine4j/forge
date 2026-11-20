@@ -110,6 +110,12 @@ DTOs and excludes archived tickets and abandoned/superseded attempts. See
 
 - Git is authoritative for commits, trees, branches, and tags. Bare repositories
   are stored locally on the mounted volume.
+- SQLite also stores named model providers with stable IDs, immutable kinds and
+  retirement records. Partial unique indexes enforce active names and one OpenAI
+  provider. Versioned migration runs before scheduler recovery; attempt snapshots
+  keep inference routing private and immutable across ticket phases. See
+  [provider APIs](foundation.md#model-providers), [execution](agents.md#codex-harness-and-lifecycle)
+  and [upgrades](development.md#named-provider-upgrades).
 - SQLite holds repositories (internally `projects`), board-owned tickets and ordered
   repository associations, plan revisions, PRs, reviews, jobs, execution
   state, Codex identifiers, pipeline runs/jobs/steps, and durable application events.

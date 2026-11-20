@@ -340,3 +340,28 @@ pnpm --filter @forge/backend-infrastructure build
 docker buildx build --platform linux/amd64 -f ollama-relay/Dockerfile -t forge-ollama-relay:dev --load .
 node ollama-relay/tests/image-smoke.mjs
 ```
+
+## Named-provider upgrades
+
+TASK-34 adds `model_providers` and the versioned
+`named-model-providers-v1` migration. Startup initializes legacy tables, runs the
+migration transaction, then begins scheduler recovery. Fresh databases stay empty.
+A persisted marker prevents retirement or restart from recreating providers.
+
+Legacy settings/account setup become **OpenAI**, retaining defaults and credential
+homes. Complete legacy Ollama configuration becomes **Ollama**. Unstarted tickets
+inherit the former global selection. Existing agents remain unchanged; underway
+attempts are seeded from their original agent configuration, with missing provider
+meaning OpenAI. Unmatched routing remains recoverable without inventing selectable
+providers. Removal only retires records and never touches credential homes,
+conversations or workspaces. Back up persistent data as described under
+[development databases](#development-databases).
+
+See [architecture](architecture.md#persistent-resources),
+[Config/API contracts](foundation.md#model-providers),
+[agent recovery](agents.md#codex-harness-and-lifecycle) and
+[ticket selection](tickets.md#ticket-execution-settings).
+Controlled tests cover migration idempotency, active uniqueness, retirement and
+re-addition, explicit selection, immutable attempts, routing, credentials,
+permissions, costs and concurrency. Live device verification and Ollama inference
+remain manual checks using owner-provided services.

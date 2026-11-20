@@ -1,5 +1,10 @@
 # Ollama inference provider implementation handover
 
+> Superseded by TASK-34 for singleton/global provider configuration. Use
+> [named providers](foundation.md#model-providers), [attempt snapshots](tickets.md#ticket-execution-settings)
+> and [versioned upgrades](development.md#named-provider-upgrades).
+> Relay and credential-isolation details remain applicable.
+
 ## Objective and current state
 
 Add Ollama as a second inference provider in Forge. Keep the existing OpenAI / ChatGPT account sign-in available alongside the saved Ollama configuration. Give the owner one global selector that determines which provider newly created agents use. Reuse the existing Codex app-server harness for both providers.

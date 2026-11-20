@@ -9,6 +9,8 @@ export type ModalOwner =
 	| "create-epic"
 	| "create-repo"
 	| "board-settings"
+	| "model-provider"
+	| "remove-provider"
 	| "archive"
 	| "return";
 export interface ModalEntry {

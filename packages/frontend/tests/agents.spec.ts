@@ -1,5 +1,6 @@
 import { agentMessageSchema, type AgentView } from "@forge/contracts/agents";
-import { defaultForgeSettings, type ForgeSettings } from "@forge/contracts/settings";
+import type { ModelProvider } from "@forge/contracts/model-providers";
+import { defaultForgeSettings } from "@forge/contracts/settings";
 import { expect, test } from "@playwright/test";
 import type { Page } from "@playwright/test";
 
@@ -10,6 +11,7 @@ const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const createdAt = "2026-11-03T00:00:00.000Z";
 const setup = async (page: Page, initialItems: AgentView["items"] = []) => {
 	const views: AgentView[] = [];
+	const provider: ModelProvider = { id: projectId, name: "OpenAI", kind: "openai", retired: false };
 	const writes: string[] = [];
 	const replies: unknown[] = [];
 	let fail = false;
@@ -41,6 +43,11 @@ const setup = async (page: Page, initialItems: AgentView["items"] = []) => {
 			const path = new URL(route.request().url()).pathname;
 			const method = route.request().method();
 			if (method !== "GET") writes.push(path);
+			if (path === "/api/model-providers") return route.fulfill({ json: [provider] });
+			if (path === `/api/model-providers/${projectId}`) {
+				if (method === "PATCH") Object.assign(provider, route.request().postDataJSON());
+				return route.fulfill({ json: provider });
+			}
 			if (path === "/api/projects")
 				return route.fulfill({ json: [{ id: projectId, name: "Forge", status: "ready", createdAt }] });
 			if (path === "/api/accounts")
@@ -60,6 +67,8 @@ const setup = async (page: Page, initialItems: AgentView["items"] = []) => {
 							projectId,
 							workspaceId: id,
 							title: route.request().postDataJSON().title,
+							providerId: route.request().postDataJSON().providerId,
+							providerName: provider.name,
 							createdAt,
 							status: "idle",
 						},
@@ -139,6 +148,7 @@ const setup = async (page: Page, initialItems: AgentView["items"] = []) => {
 		const count = views.length;
 		const back = page.getByRole("button", { name: "Back to chats", exact: true });
 		if (await back.isVisible()) await back.click();
+		await chooseDropdown(page.getByRole("combobox", { name: "Model provider", exact: true }), projectId);
 		await page.getByRole("button", { name: "Create chat", exact: true }).click();
 		await expect.poll(() => views.length).toBe(count + 1);
 		await expect(page).toHaveURL(new RegExp(`/agents/${views.at(-1)!.thread.id}$`));
@@ -147,6 +157,7 @@ const setup = async (page: Page, initialItems: AgentView["items"] = []) => {
 	const event = async (type = "changed") =>
 		page.evaluate((detail) => window.dispatchEvent(new CustomEvent("agent-event", { detail })), type);
 	return {
+		provider,
 		views,
 		writes,
 		replies,
@@ -351,9 +362,18 @@ test("standalone thinking uses catalog levels and resets on incompatible model c
 	});
 });
 
+test("standalone chat creation requires an explicit provider before sending the create request", async ({ page }) => {
+	const f = await setup(page);
+	await page.getByRole("button", { name: "Create chat", exact: true }).click();
+	await expect(page.getByRole("alert")).toContainText("Select a model provider");
+	expect(f.views).toHaveLength(0);
+	await f.create();
+	expect(f.views[0]?.thread).toMatchObject({ providerId: projectId, providerName: "OpenAI" });
+});
+
 test("Config changes refresh the default labels in an open chat and preserve its draft", async ({ page }) => {
 	const fixture = await setup(page);
-	let settings: ForgeSettings = { ...defaultForgeSettings };
+	let settings = { ...defaultForgeSettings };
 	const options = {
 		models: [
 			{ id: "test-model", name: "Test model", isDefault: true },
@@ -370,13 +390,13 @@ test("Config changes refresh the default labels in an open chat and preserve its
 		if (route.request().method() === "PUT") settings = route.request().postDataJSON();
 		return route.fulfill({ json: settings });
 	});
-	await page.route("**/api/settings/model-options", (route) => route.fulfill({ json: options }));
+	await page.route("**/api/model-providers/*/model-options", (route) => route.fulfill({ json: options }));
 	await page.route("**/api/agents/*/options", (route) =>
 		route.fulfill({
 			json: {
 				...options,
-				defaultModel: settings.defaultAgentModel,
-				defaultReasoningEffort: settings.defaultAgentReasoningEffort,
+				defaultModel: fixture.provider.defaultAgentModel,
+				defaultReasoningEffort: fixture.provider.defaultAgentReasoningEffort,
 			},
 		}),
 	);
@@ -387,10 +407,11 @@ test("Config changes refresh the default labels in an open chat and preserve its
 	await expect(model).toHaveText("Default model (Test model)");
 	await message.fill("Keep this draft");
 	await page.getByRole("link", { name: "Config", exact: true }).click();
+	await page.getByRole("button", { name: "Edit OpenAI", exact: true }).click();
 	await chooseDropdown(page.getByRole("combobox", { name: "Default model", exact: true }), "other-model");
 	await chooseDropdown(page.getByRole("combobox", { name: "Default thinking", exact: true }), "high");
-	await page.getByRole("button", { name: "Save settings" }).click();
-	await expect(page.getByRole("status")).toHaveText("Settings saved.");
+	await page.getByRole("button", { name: "Save provider" }).click();
+	await expect(page.getByRole("dialog", { name: "Model provider" })).toHaveCount(0);
 	await page.goBack();
 	await expect(model).toHaveText("Default model (Other model)");
 	await expect(thinking).toHaveText("Default thinking (high)");

@@ -1,4 +1,5 @@
 import type { AgentOptions, AgentTurnFailure } from "@forge/contracts/agents";
+import type { ModelProvider } from "@forge/contracts/model-providers";
 import type { InferenceProvider } from "@forge/contracts/settings";
 import { expect, test, vi } from "vitest";
 
@@ -6,6 +7,7 @@ import { AccessService } from "../auth/access-service.ts";
 import type { ICodexAgentClient } from "../codex/codex-agent-client.ts";
 import type { IAgentPerformance } from "../codex/performance-telemetry.ts";
 import type { AgentRuntimeView, ExecutionReconciliation } from "../codex/types.ts";
+import { ModelProviderService, type IModelProviderService } from "../model-providers/model-provider-service.ts";
 import type { IProjectService } from "../projects/project-service.ts";
 import { AgentExecutionTracker } from "./agent-execution-tracker.ts";
 import { AgentService, type IAgentWorkspaces } from "./agent-service.ts";
@@ -17,6 +19,7 @@ const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const setup = (
 	defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = () => ({}),
 	provider?: () => InferenceProvider,
+	providers?: IModelProviderService,
 	performance?: IAgentPerformance,
 ) => {
 	let sequence = 0;
@@ -173,6 +176,7 @@ const setup = (
 		provider,
 		history,
 		performance,
+		providers,
 	);
 	return {
 		service,
@@ -209,6 +213,7 @@ test("performance is independent of billing/provider and available without a wor
 	const fixture = setup(
 		undefined,
 		() => ({ kind: "ollama", endpoint: "http://127.0.0.1:11434", model: "local" }),
+		undefined,
 		performance,
 	);
 	const created = await fixture.service.create(owner, projectId, "Chat");
@@ -230,6 +235,93 @@ test("performance is independent of billing/provider and available without a wor
 	expect(fixture.workspaces.resolve).not.toHaveBeenCalled();
 	await fixture.service.shutdown();
 	expect(changed).toBeUndefined();
+});
+
+test("named standalone chats validate before workspace allocation and retain routing through edits, retirement and recovery", async () => {
+	const provider: ModelProvider = {
+		id: projectId,
+		name: "Local",
+		kind: "ollama",
+		endpoint: "http://local/v1",
+		model: "local",
+		retired: false,
+	};
+	let saved = structuredClone(provider);
+	const providers = new ModelProviderService(
+		{
+			list: async () => [saved],
+			get: async (id) => (id === provider.id ? saved : undefined),
+			save: async (p) => {
+				saved = p;
+			},
+		},
+		new AccessService({ owner: "owner", origin: "https://forge.example" }),
+		() => projectId,
+		async () => ({ models: [], skills: [] }),
+	);
+	const f = setup(undefined, undefined, providers);
+	await expect(f.service.create(owner, projectId, "Chat")).rejects.toThrow("provider-required");
+	expect(f.workspaces.create).not.toHaveBeenCalled();
+	const view = await f.service.create(owner, projectId, "Chat", provider.id);
+	expect(view.thread).toMatchObject({ providerId: provider.id, providerName: provider.name });
+	expect(JSON.stringify(view)).not.toContain("http://");
+	await providers.update(owner, provider.id, { endpoint: "http://edited/v1", model: "edited" });
+	await providers.remove(owner, provider.id);
+	await expect(f.service.create(owner, projectId, "Other", provider.id)).rejects.toThrow("provider-retired");
+	expect(f.workspaces.create).toHaveBeenCalledTimes(1);
+	await f.service.send(owner, view.thread.id, "Hello");
+	expect(f.client.start).toHaveBeenCalledWith(expect.any(String), {
+		kind: "ollama",
+		endpoint: provider.endpoint,
+		model: provider.model,
+	});
+	await f.service.recover(owner);
+	expect(f.records.get(view.thread.id)?.provider).toEqual({
+		kind: "ollama",
+		endpoint: provider.endpoint,
+		model: provider.model,
+	});
+	await f.service.shutdown();
+});
+
+test("named OpenAI and multiple Ollama providers share the existing concurrency tracker without provider limits", async () => {
+	const configured: ModelProvider[] = [
+		{ id: "123e4567-e89b-42d3-a456-426614174091", name: "Account", kind: "openai", retired: false },
+		{
+			id: "123e4567-e89b-42d3-a456-426614174092",
+			name: "Local A",
+			kind: "ollama",
+			endpoint: "http://a/v1",
+			model: "a",
+			retired: false,
+		},
+		{
+			id: "123e4567-e89b-42d3-a456-426614174093",
+			name: "Local B",
+			kind: "ollama",
+			endpoint: "http://b/v1",
+			model: "b",
+			retired: false,
+		},
+	];
+	const providers = new ModelProviderService(
+		{ list: async () => configured, get: async (id) => configured.find((p) => p.id === id), save: async () => {} },
+		new AccessService({ owner: "owner", origin: "https://forge.example" }),
+		() => projectId,
+		async () => ({ models: [], skills: [] }),
+	);
+	const f = setup(undefined, undefined, providers);
+	const chats = await Promise.all(configured.map((p) => f.service.create(owner, projectId, p.name, p.id)));
+	await Promise.all(chats.map((chat) => f.service.send(owner, chat.thread.id, "Hello")));
+	expect(f.pool.activeIds()).toHaveLength(3);
+	expect(f.client.start.mock.calls.map((call) => call[1])).toEqual(
+		expect.arrayContaining([
+			{ kind: "openai" },
+			{ kind: "ollama", endpoint: "http://a/v1", model: "a" },
+			{ kind: "ollama", endpoint: "http://b/v1", model: "b" },
+		]),
+	);
+	await f.service.shutdown();
 });
 
 test("managed runtime notifications persist normalized history without a selected conversation", async () => {

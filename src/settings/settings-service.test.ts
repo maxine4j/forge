@@ -6,7 +6,6 @@ import { SettingsService } from "./settings-service.ts";
 
 const owner = { username: "owner" };
 const saved: ForgeSettings = {
-	inferenceProvider: "openai",
 	localCurrency: "AUD",
 	monthlyPlanLocal: 30,
 	planningInstructions: "Check migrations.",

@@ -1,10 +1,9 @@
-import { resolveAgentSettings, type AgentOptions } from "@forge/contracts/agents";
+import { type AgentOptions } from "@forge/contracts/agents";
 import {
 	defaultForgeSettings,
 	forgeSettingsSchema,
 	type ForgeSettings,
 	type GitIdentity,
-	type InferenceProvider,
 } from "@forge/contracts/settings";
 
 import type { IAccessService } from "../auth/access-service.ts";
@@ -50,13 +49,6 @@ export class SettingsService implements ISettingsService {
 		return { ...this.settings };
 	}
 
-	inferenceProvider(): InferenceProvider {
-		const { inferenceProvider, ollamaEndpoint, ollamaModel } = this.settings;
-		return inferenceProvider === "ollama"
-			? { kind: "ollama", endpoint: ollamaEndpoint!, model: ollamaModel! }
-			: { kind: "openai" };
-	}
-
 	gitIdentity(): GitIdentity | undefined {
 		return this.identity(this.settings);
 	}
@@ -81,16 +73,6 @@ export class SettingsService implements ISettingsService {
 		const parsed = forgeSettingsSchema.safeParse(input);
 		if (!parsed.success) throw new SettingsError("invalid-request");
 		const saved = this.pending.then(async () => {
-			const { defaultAgentModel: model, defaultAgentReasoningEffort: reasoningEffort } = parsed.data;
-			if (
-				(model || reasoningEffort)
-				&& (model !== this.settings.defaultAgentModel
-					|| reasoningEffort !== this.settings.defaultAgentReasoningEffort)
-			) {
-				const options = await this.modelOptions(actor);
-				if (!resolveAgentSettings(options, { model, reasoningEffort }).supported)
-					throw new SettingsError("unsupported-settings");
-			}
 			return this.apply(parsed.data);
 		});
 		this.pending = saved.catch(() => {});

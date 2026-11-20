@@ -46,6 +46,8 @@ export interface AgentRequest {
 	questions: AgentQuestion[];
 }
 export interface AgentThread extends AgentSettings {
+	providerId?: string;
+	providerName?: string;
 	id: string;
 	projectId: string;
 	workspaceId: string;
