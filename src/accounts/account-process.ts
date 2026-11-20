@@ -63,26 +63,30 @@ export class AccountProcess implements IAccountProcess {
 		const codex = spec.program === "codex";
 		let child: ChildProcessWithoutNullStreams;
 		try {
-			child = spawn(codex ? this.config.codexExecutable : this.config.githubExecutable, spec.arguments, {
-				detached: true,
-				stdio: ["pipe", "pipe", "pipe"],
-				cwd: this.config.dataDirectory,
-				env: {
-					DOCKER_HOST,
-					PATH: this.config.path,
-					HOME: this.config.dataDirectory,
-					LANG: "C",
-					LC_ALL: "C",
-					TERM: "dumb",
-					NO_COLOR: "1",
-					CODEX_HOME: join(this.config.dataDirectory, "codex"),
-					GH_CONFIG_DIR: join(this.config.dataDirectory, "github"),
-					GH_HOST: "github.com",
-					GH_PROMPT_DISABLED: "1",
-					BROWSER: "/bin/true",
-					GH_BROWSER: "/bin/true",
+			child = spawn(
+				codex ? this.config.codexExecutable : this.config.githubExecutable,
+				codex ? [...spec.arguments, ...(this.config.codexArguments ?? [])] : spec.arguments,
+				{
+					detached: true,
+					stdio: ["pipe", "pipe", "pipe"],
+					cwd: this.config.dataDirectory,
+					env: {
+						DOCKER_HOST,
+						PATH: this.config.path,
+						HOME: this.config.dataDirectory,
+						LANG: "C",
+						LC_ALL: "C",
+						TERM: "dumb",
+						NO_COLOR: "1",
+						CODEX_HOME: join(this.config.dataDirectory, "codex"),
+						GH_CONFIG_DIR: join(this.config.dataDirectory, "github"),
+						GH_HOST: "github.com",
+						GH_PROMPT_DISABLED: "1",
+						BROWSER: "/bin/true",
+						GH_BROWSER: "/bin/true",
+					},
 				},
-			});
+			);
 		} catch (cause) {
 			throw new AccountProcessError({ cause });
 		}

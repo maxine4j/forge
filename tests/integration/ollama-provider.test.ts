@@ -242,6 +242,8 @@ test("pinned Codex streams through the relay and resumes after restart without s
 		} finally {
 			unsubscribe();
 		}
+		// The compaction item finishes before its owning turn releases the thread.
+		await vi.waitFor(() => expect(client.read(id).status).toBe("completed"), { timeout: 5000 });
 		await client.send(id, path, "Fail the fixture turn.", { permissions: "ask" });
 		await vi.waitFor(() => expect(client.read(id).status).toBe("failed"), { timeout: 40000, interval: 100 });
 		expect(client.read(id).turnFailure).toBe("provider-request");

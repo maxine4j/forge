@@ -19,6 +19,7 @@ import { z } from "zod";
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
 import type { ICodexAgentClient } from "../codex/codex-agent-client.ts";
+import type { IAgentPerformance } from "../codex/performance-telemetry.ts";
 import type { TicketUsageScope } from "../cost/types.ts";
 import type { IProjectService } from "../projects/project-service.ts";
 import type { ITicketAgentHistory } from "../tickets/ticket-history-store.ts";
@@ -91,6 +92,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 	private readonly listeners = new Map<string, Set<() => void>>();
 	private readonly historyStates = new Map<string, string>();
 	private readonly unsubscribe: () => void;
+	private readonly unsubscribePerformance?: () => void;
 	private closed = false;
 	private stopping = 0;
 	private stopRevision = 0;
@@ -106,7 +108,12 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		private readonly defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = () => ({}),
 		private readonly provider: () => InferenceProvider = () => ({ kind: "openai" }),
 		private readonly history?: ITicketAgentHistory,
+		private readonly performance?: IAgentPerformance,
 	) {
+		this.unsubscribePerformance = performance?.subscribe((codexId) => {
+			const id = this.identities.get(codexId);
+			if (id && !this.closed) for (const listener of this.listeners.get(id) ?? []) listener();
+		});
 		this.unsubscribe = client.subscribe((codexId) => {
 			const id = this.identities.get(codexId);
 			if (!id || this.closed) return;
@@ -134,7 +141,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		await this.projects.get(actor, projectId);
 		return (await this.store.list(projectId))
 			.filter((record) => !record.managed)
-			.map((record) => agentThreadSchema.parse(this.view(record).thread));
+			.map((record) => agentThreadSchema.parse(this.publicThread(record)));
 	}
 	async get(actor: Actor, id: string): Promise<AgentView> {
 		this.authorize(actor);
@@ -460,6 +467,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 	async shutdown(): Promise<void> {
 		this.closed = true;
 		this.unsubscribe();
+		this.unsubscribePerformance?.();
 		await Promise.allSettled([...this.queues.values()]);
 		this.listeners.clear();
 	}
@@ -554,27 +562,34 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		if (!record) throw new AgentError("agent-not-found");
 		return record;
 	}
-	private view(record: AgentThreadRecord): AgentView {
-		let runtime;
-		try {
-			if (record.codexId && this.identities.has(record.codexId)) runtime = this.client.read(record.codexId);
-		} catch {}
+	private publicThread(record: AgentThreadRecord): AgentThread {
 		const {
 			codexId: _codexId,
 			managed: _managed,
 			provider: _provider,
 			abandoned: _abandoned,
-			requests,
-			contextWindow: savedContext,
+			requests: _requests,
+			contextWindow: _contextWindow,
 			...thread
 		} = record;
-		const contextWindow = runtime?.contextWindow ?? savedContext;
+		return thread;
+	}
+	private async view(record: AgentThreadRecord): Promise<AgentView> {
+		let runtime;
+		try {
+			if (record.codexId && this.identities.has(record.codexId)) runtime = this.client.read(record.codexId);
+		} catch {}
+		const thread = this.publicThread(record);
+		const contextWindow = runtime?.contextWindow ?? record.contextWindow;
+		const performance =
+			record.codexId && thread.turnId ? await this.performance?.read(record.codexId, thread.turnId) : undefined;
 		return {
 			thread,
 			items: runtime?.items ?? [],
-			requests: runtime?.requests ?? requests,
+			requests: runtime?.requests ?? record.requests,
 			truncated: runtime?.truncated ?? false,
 			...(contextWindow && { contextWindow }),
+			...(performance && { performance }),
 			...(thread.status === "failed" && runtime?.turnFailure && { turnFailure: runtime.turnFailure }),
 		};
 	}

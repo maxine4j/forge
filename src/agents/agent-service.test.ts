@@ -4,6 +4,7 @@ import { expect, test, vi } from "vitest";
 
 import { AccessService } from "../auth/access-service.ts";
 import type { ICodexAgentClient } from "../codex/codex-agent-client.ts";
+import type { IAgentPerformance } from "../codex/performance-telemetry.ts";
 import type { AgentRuntimeView, ExecutionReconciliation } from "../codex/types.ts";
 import type { IProjectService } from "../projects/project-service.ts";
 import { AgentExecutionTracker } from "./agent-execution-tracker.ts";
@@ -16,6 +17,7 @@ const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const setup = (
 	defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = () => ({}),
 	provider?: () => InferenceProvider,
+	performance?: IAgentPerformance,
 ) => {
 	let sequence = 0;
 	const records = new Map<string, AgentThreadRecord>();
@@ -170,6 +172,7 @@ const setup = (
 		defaults,
 		provider,
 		history,
+		performance,
 	);
 	return {
 		service,
@@ -183,6 +186,51 @@ const setup = (
 		changed: (key: string) => changed(key),
 	};
 };
+
+test("performance is independent of billing/provider and available without a workspace", async () => {
+	let changed: ((id: string) => void) | undefined;
+	const performance = {
+		read: vi.fn<IAgentPerformance["read"]>(async (_threadId, turnId) => ({
+			turnId,
+			outputTokens: 100,
+			requestCount: 1,
+			requestDurationMs: 5000,
+			firstTokenLatencyMs: 1000,
+			generationDurationMs: 4000,
+			state: "complete",
+		})),
+		subscribe: (listener: (id: string) => void) => {
+			changed = listener;
+			return () => {
+				changed = undefined;
+			};
+		},
+	};
+	const fixture = setup(
+		undefined,
+		() => ({ kind: "ollama", endpoint: "http://127.0.0.1:11434", model: "local" }),
+		performance,
+	);
+	const created = await fixture.service.create(owner, projectId, "Chat");
+	await fixture.service.send(owner, created.thread.id, "Hello");
+	const record = fixture.records.get(created.thread.id)!;
+	const notify = vi.fn();
+	await fixture.service.subscribe(owner, record.id, notify);
+	changed?.(record.codexId!);
+	expect(notify).toHaveBeenCalledOnce();
+	const view = await fixture.service.get(owner, record.id);
+	expect(view.performance).toMatchObject({ turnId: "turn", outputTokens: 100, requestDurationMs: 5000 });
+	record.managed = true;
+	record.status = "completed";
+	fixture.workspaces.resolve = vi.fn(async () => {
+		throw new Error("Workspace removed");
+	});
+	const reopened = await fixture.service.get(owner, record.id);
+	expect(reopened.performance).toEqual(view.performance);
+	expect(fixture.workspaces.resolve).not.toHaveBeenCalled();
+	await fixture.service.shutdown();
+	expect(changed).toBeUndefined();
+});
 
 test("managed runtime notifications persist normalized history without a selected conversation", async () => {
 	const f = setup();

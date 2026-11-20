@@ -21,10 +21,20 @@ test("owner/origin validation, bounded inputs, safe failures and reconnectable S
 			title: "Chat",
 			createdAt: "2026-11-03T00:00:00.000Z",
 			status: "idle" as const,
+			turnId: "turn",
 		},
 		items: [],
 		requests: [],
 		truncated: false,
+		performance: {
+			turnId: "turn",
+			outputTokens: 100,
+			requestCount: 1,
+			requestDurationMs: 5000,
+			firstTokenLatencyMs: 1000,
+			generationDurationMs: 4000,
+			state: "complete" as const,
+		},
 	};
 	let changed = () => {};
 	const detach = vi.fn();
@@ -66,6 +76,10 @@ test("owner/origin validation, bounded inputs, safe failures and reconnectable S
 			...(body === undefined ? {} : { body: JSON.stringify(body) }),
 		});
 	try {
+		expect(await (await request(`agents/${id}`)).json()).toEqual(view);
+		view.performance.requestDurationMs = 0;
+		expect((await request(`agents/${id}`)).status).toBe(500);
+		view.performance.requestDurationMs = 5000;
 		expect(await (await request(`agents/${id}/options`)).json()).toEqual({ models: [], skills: [] });
 		expect(await (await request(`agents/${id}/files?query=main`)).json()).toEqual(["src/main.ts"]);
 		expect(service.files).toHaveBeenCalledWith({ username: "owner" }, id, "main");

@@ -59,6 +59,15 @@ export interface AgentContextWindow {
 	max: number;
 }
 export type AgentTurnFailure = "provider-request" | "context-window" | "other";
+export interface AgentPerformance {
+	turnId: string;
+	outputTokens: number;
+	requestCount: number;
+	requestDurationMs: number;
+	firstTokenLatencyMs?: number;
+	generationDurationMs?: number;
+	state: "complete" | "partial" | "unavailable";
+}
 export interface AgentView {
 	thread: AgentThread;
 	items: AgentItem[];
@@ -66,6 +75,7 @@ export interface AgentView {
 	truncated: boolean;
 	contextWindow?: AgentContextWindow;
 	turnFailure?: AgentTurnFailure;
+	performance?: AgentPerformance;
 }
 export interface AgentReply {
 	requestId: string;

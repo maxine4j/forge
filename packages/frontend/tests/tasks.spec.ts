@@ -409,7 +409,14 @@ test("busy creation blocks Back and rapid Back unwinds ticket entries", async ({
 	await expect(dialog).toHaveCount(0);
 });
 
-const setup = async (page: Page, crowded = false, agentic = false, review = false, conversationPlan = false) => {
+const setup = async (
+	page: Page,
+	crowded = false,
+	agentic = false,
+	review = false,
+	conversationPlan = false,
+	measured = false,
+) => {
 	const threadId = "123e4567-e89b-42d3-a456-426614174010";
 	let messages = 0;
 	const modelOptions = {
@@ -628,7 +635,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 							title: "Planning",
 							createdAt,
 							status: review ? "waiting" : "completed",
-							...(review ? { turnId: "turn" } : {}),
+							...(review || measured ? { turnId: "turn" } : {}),
 						},
 						items: [
 							...Array.from({ length: 30 }, (_, i) => ({
@@ -662,6 +669,19 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 							: [],
 						truncated: review,
 						contextWindow: { used: 32000, max: 128000 },
+						...(measured
+							? {
+									performance: {
+										turnId: "turn",
+										outputTokens: 100,
+										requestCount: 1,
+										requestDurationMs: 5000,
+										firstTokenLatencyMs: 1000,
+										generationDurationMs: 4000,
+										state: "complete",
+									},
+								}
+							: {}),
 					},
 				});
 			}
@@ -2619,6 +2639,21 @@ test("ticket chat shows the current context window", async ({ page }) => {
 	await expect(modal.getByRole("tooltip")).toContainText("25% used");
 });
 
+for (const implementation of [false, true]) {
+	test(`ticket ${implementation ? "implementation" : "planning and plan review"} retains model-request inference speed`, async ({
+		page,
+	}) => {
+		await setup(page, false, true, implementation, false, true);
+		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+		const modal = page.getByRole("dialog", { name: "TASK-1" });
+		const stat = modal.getByRole("button", { name: "Inference speed: 20.0 tokens/s", exact: true });
+		await expect(stat).toBeVisible();
+		await stat.hover();
+		await expect(modal.getByRole("tooltip")).toContainText("Output tokens: 100");
+		await expect(modal.getByRole("tooltip")).toContainText("Model-request time: 5.00 s");
+	});
+}
+
 test("ticket Cost shows this ticket's estimates and token counts", async ({ page }) => {
 	await setup(page, false, true);
 	const totals = costFixture({ input: 1800, cached: 600, output: 200, turns: 2 }, 0.0625, 0.123456, 0.015 / 1.44);
@@ -3221,7 +3256,7 @@ for (const archived of [false, true]) {
 }
 
 test("archived ticket chat retains history and disables input and execution", async ({ page }) => {
-	await setup(page, false, true);
+	await setup(page, false, true, false, false, true);
 	await page.route("**/api/tickets/TASK-9", (route) =>
 		route.fulfill({
 			json: {
@@ -3252,6 +3287,12 @@ test("archived ticket chat retains history and disables input and execution", as
 	await expect(modal.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
 	await expect(modal.getByText("Planning message 0: implement search with tests.", { exact: true })).toBeAttached();
 	await expect(modal.getByLabel("Message", { exact: true })).toBeDisabled();
+	const performance = modal.getByRole("button", { name: "Inference speed: 20.0 tokens/s", exact: true });
+	await expect(performance).toBeVisible();
+	await performance.focus();
+	await expect(modal.getByRole("tooltip")).toContainText("Effective rate: 20.0 tokens/s");
+	await performance.press("Escape");
+	await expect(modal).toBeVisible();
 	await expect(modal.getByRole("button", { name: "Interrupt", exact: true })).toHaveCount(0);
 	await expect(modal.getByRole("button", { name: "Approve plan", exact: true })).toHaveCount(0);
 	await modal.getByRole("tab", { name: "Details" }).click();

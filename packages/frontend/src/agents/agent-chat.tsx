@@ -10,6 +10,7 @@ import { resolveRoute } from "../navigation/routes.ts";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { AgentActivity } from "./agent-activity.tsx";
 import { AgentComposer } from "./agent-composer.tsx";
+import { AgentPerformanceStat } from "./agent-performance.tsx";
 import { RequestCard } from "./request-card.tsx";
 
 type ConversationScroll = {
@@ -403,6 +404,7 @@ export const Conversation = ({
 					</button>
 				)}
 			</div>
+			{view && <AgentPerformanceStat key={view.thread.turnId ?? view.thread.status} view={view} />}
 			{view && (
 				<AgentComposer
 					id={id}

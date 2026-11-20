@@ -1,5 +1,20 @@
 # Forge ticket and PR workflow
 
+## Chat inference speed
+
+Ticket planning and implementation share the standalone-chat footer's latest-turn
+`tokens/s` stat, including reopened and read-only completed/archived chats. Values
+round to one decimal. Hover, keyboard focus or tapping the button reveals output
+tokens, model-request time, time to first token, generation speed and effective
+rate. The tooltip describes client-observed requests including transport latency.
+
+New turns show “Measuring…” until completed requests arrive; tools, approvals,
+clarifications and plan review retain the current value. Missing telemetry is
+labelled “Partial” or “Unavailable”; zero, infinity and historical wall-clock
+estimates are not displayed. Worktree cleanup preserves measurements. See
+[the agent performance contract](agents.md#latest-turn-inference-performance) and
+[persistence](architecture.md#private-request-telemetry).
+
 ## Pending notifications
 
 Tasks has Board, Backlog and **🔔 Notifications (N)** tabs. The notification view

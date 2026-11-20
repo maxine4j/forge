@@ -21,6 +21,9 @@ import { AgentThreadStore } from "./agents/agent-thread-store.ts";
 import { AccessService } from "./auth/access-service.ts";
 import { CodexAgentClient } from "./codex/codex-agent-client.ts";
 import { CodexUsageClient } from "./codex/codex-usage-client.ts";
+import { PerformanceStore } from "./codex/performance-store.ts";
+import { PerformanceTelemetry } from "./codex/performance-telemetry.ts";
+import { TelemetryReceiver, telemetryArguments } from "./codex/telemetry-receiver.ts";
 import { Configuration } from "./config/configuration.ts";
 import { CostRouter } from "./cost/cost-router.ts";
 import { CostService } from "./cost/cost-service.ts";
@@ -113,12 +116,48 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const docker = new DockerService(new DockerClient(dockerCommand), access, randomUUID, () => new Date());
 	const costStore = new CostStore(database);
 	await costStore.initialize(new Date().toISOString());
+	const performanceStore = new PerformanceStore(database);
+	await performanceStore.initialize();
+	const performance = new PerformanceTelemetry(database, performanceStore, (threadId) =>
+		performanceStore.ownsThread(threadId),
+	);
+	await performance.initialize();
+	const telemetrySecret = randomUUID();
+	const telemetryReceiver = new TelemetryReceiver(telemetrySecret, performance);
+	const telemetryServer = createServer((request, response) => {
+		void telemetryReceiver.handle(request, response);
+	});
+	const telemetryListening = new Promise<void>((resolve, reject) => {
+		const onError = (error: Error) => reject(error);
+		telemetryServer.once("error", onError);
+		telemetryServer.listen(0, "127.0.0.1", () => {
+			telemetryServer.off("error", onError);
+			resolve();
+		});
+	});
+	lifecycle.register(async () => {
+		await telemetryListening.catch(() => {});
+		telemetryServer.closeAllConnections();
+		if (telemetryServer.listening)
+			await new Promise<void>((resolve, reject) =>
+				telemetryServer.close((error) => (error ? reject(error) : resolve())),
+			);
+		await telemetryReceiver.close();
+	});
+	await telemetryListening;
+	if (!lifecycle.isOpen()) return;
+	telemetryServer.on("error", (error) => {
+		throw error;
+	});
+	const telemetryAddress = telemetryServer.address();
+	if (!telemetryAddress || typeof telemetryAddress === "string") throw new Error("Telemetry listener unavailable");
 	const processes = new AccountProcess(
 		{
 			dataDirectory: config.dataDirectory,
 			path: process.env["PATH"] ?? "",
 			codexExecutable: fileURLToPath(new URL("../node_modules/.bin/codex", import.meta.url)),
 			githubExecutable: "gh",
+			codexArguments: telemetryArguments(`http://127.0.0.1:${telemetryAddress.port}`, telemetrySecret),
 		},
 		sleep,
 	);
@@ -281,6 +320,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		},
 		() => settings.inferenceProvider(),
 		ticketHistory,
+		performance,
 	);
 	lifecycle.register(() => agents.shutdown());
 	const boardStore = new BoardSettingsStore(database);

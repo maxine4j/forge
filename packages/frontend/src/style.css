@@ -395,6 +395,41 @@
 .agent-context {
 	position: relative;
 }
+.agent-performance {
+	position: relative;
+	display: flex;
+	justify-content: flex-end;
+	padding: 4px 14px;
+	font-size: 12px;
+}
+.agent-performance button {
+	border: 0;
+	background: transparent;
+	color: #bfc5cf;
+	font: inherit;
+	padding: 4px;
+}
+.agent-performance-tooltip {
+	position: absolute;
+	z-index: 10;
+	bottom: 100%;
+	right: 10px;
+	width: min(330px, calc(100vw - 40px));
+	padding: 10px;
+	border: 1px solid #41424a;
+	border-radius: 8px;
+	background: #232428;
+	color: #e8e8eb;
+	visibility: hidden;
+}
+.agent-performance:hover .agent-performance-tooltip,
+.agent-performance:focus-within .agent-performance-tooltip,
+.agent-performance-open .agent-performance-tooltip {
+	visibility: visible;
+}
+.agent-performance.agent-performance-dismissed .agent-performance-tooltip {
+	visibility: hidden;
+}
 .agent-context button {
 	display: grid;
 	place-items: center;

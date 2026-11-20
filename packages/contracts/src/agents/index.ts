@@ -105,15 +105,34 @@ export const agentContextWindowSchema = z.strictObject({
 	used: z.int().nonnegative(),
 	max: z.int().positive(),
 });
-export const agentViewSchema = z.strictObject({
-	thread: agentThreadSchema,
-	items: z.array(agentItemSchema).max(500),
-	requests: z.array(agentRequestSchema).max(32),
-	truncated: z.boolean(),
-	contextWindow: agentContextWindowSchema.optional(),
-	turnFailure: z.enum(["provider-request", "context-window", "other"]).optional(),
-});
+export const agentPerformanceSchema = z
+	.strictObject({
+		turnId: z.string().min(1).max(256),
+		outputTokens: z.int().nonnegative(),
+		requestCount: z.int().nonnegative(),
+		requestDurationMs: z.number().nonnegative(),
+		firstTokenLatencyMs: z.number().nonnegative().optional(),
+		generationDurationMs: z.number().positive().optional(),
+		state: z.enum(["complete", "partial", "unavailable"]),
+	})
+	.refine((p) => p.state === "unavailable" || (p.requestCount > 0 && p.requestDurationMs > 0))
+	.refine(
+		(p) => p.state !== "complete" || (p.firstTokenLatencyMs !== undefined && p.generationDurationMs !== undefined),
+	)
+	.refine((p) => p.generationDurationMs === undefined || p.generationDurationMs <= p.requestDurationMs);
+export const agentViewSchema = z
+	.strictObject({
+		thread: agentThreadSchema,
+		items: z.array(agentItemSchema).max(500),
+		requests: z.array(agentRequestSchema).max(32),
+		truncated: z.boolean(),
+		contextWindow: agentContextWindowSchema.optional(),
+		turnFailure: z.enum(["provider-request", "context-window", "other"]).optional(),
+		performance: agentPerformanceSchema.optional(),
+	})
+	.refine((v) => !v.performance || v.performance.turnId === v.thread.turnId);
 export type {
+	AgentPerformance,
 	AgentStatus,
 	AgentItem,
 	AgentQuestion,

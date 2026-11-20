@@ -21,6 +21,7 @@ export interface AccountProcessHandle {
 	stop(): Promise<void>;
 }
 export interface AccountProcessConfiguration {
+	codexArguments?: string[];
 	dataDirectory: string;
 	codexExecutable: string;
 	githubExecutable: string;

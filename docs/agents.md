@@ -1,5 +1,42 @@
 # Codex and interactive agents
 
+## Latest-turn inference performance
+
+`AgentView.performance` is an optional validated latest-turn snapshot shared by
+ticket planning, implementation and standalone chats, including Ollama. It carries
+`turnId`, `outputTokens`, `requestCount`, `requestDurationMs`, optional
+`firstTokenLatencyMs` and `generationDurationMs`, and `state` (`complete`, `partial`
+or `unavailable`). Rates are derived from these totals. It is independent of
+billing: Ollama remains excluded from OpenAI costs.
+
+The private Codex 0.164.0 OTLP JSON adapter correlates transport spans through
+`stream_request` and the sampling-attempt parent with `codex.sampling` thread and
+turn identities. Successful `codex.sse_event` completion records supply source
+timestamps, output counts and runtime first-token timing on HTTP and WebSockets.
+First-token latency adds request setup to Codex's post-setup first-token timing.
+Effective rate divides output tokens by summed request-start-to-completion time;
+generation speed divides output tokens by summed post-first-token response time.
+Reasoning and tool-call output are included in reported output tokens; reasoning
+is never added again. Input and cached-input tokens are discarded.
+
+These are client-observed model-request measurements including transport latency.
+Tools, approvals, clarification, scheduling and plan review add no time. WebSocket
+warmups, catalog traffic and unrelated/automatic-review threads are excluded.
+Failed transport attempts do not duplicate successful responses. Missing tokens or
+timing produce partial/unavailable results, with no wall-clock fallback. A new
+turn starts at Measuring; source-only measurements never bridge a disconnect or
+restart. Existing measured responses remain visible during tool and review waits.
+
+Normalized samples have idempotent `(thread, turn, sampling attempt)` identities in
+SQLite. Additive normalized correlation fragments allow delayed logs, duplicate
+and reordered batches, and recovery without raw telemetry retention. Only required
+IDs, timestamps and counters pass the parser; prompt, response, tool and account
+content is discarded. Agent responses and existing change events expose totals;
+saved samples can be read without resolving a deleted worktree. Older unmeasured
+turns have no estimates. See [the private boundary](architecture.md#private-request-telemetry),
+[chat presentation](tickets.md#chat-inference-speed) and
+[protocol checks](development.md#request-telemetry-verification).
+
 ## Notification request lifecycle
 
 Managed-agent request snapshots feed [Tasks Notifications](tickets.md#pending-notifications)

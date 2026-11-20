@@ -188,6 +188,65 @@ test("untouched defaults send the first message and a follow-up after completion
 	await expect(message).toHaveValue("");
 });
 
+for (const width of [390, 1280]) {
+	test.describe(`performance tooltip at ${width}px`, () => {
+		test.use({ hasTouch: width === 390 });
+		test(`latest-turn inference speed survives tools and reopening, with touch and keyboard details at ${width}px`, async ({
+			page,
+		}) => {
+			await page.setViewportSize({ width, height: 900 });
+			const fixture = await setup(page);
+			await fixture.create();
+			const view = fixture.views[0]!;
+			view.thread.status = "running";
+			view.thread.turnId = "turn-1";
+			await fixture.event();
+			await expect(page.getByRole("button", { name: "Inference speed: Measuring…", exact: true })).toBeVisible();
+			view.performance = {
+				turnId: "turn-1",
+				outputTokens: 100,
+				requestCount: 1,
+				requestDurationMs: 5000,
+				firstTokenLatencyMs: 1000,
+				generationDurationMs: 4000,
+				state: "complete",
+			};
+			await fixture.event();
+			const stat = page.getByRole("button", { name: "Inference speed: 20.0 tokens/s", exact: true });
+			await expect(stat).toBeVisible();
+			await stat.focus();
+			await expect(page.getByRole("tooltip")).toContainText("Time to first token: 1.00 s");
+			await expect(page.getByRole("tooltip")).toContainText("Generation speed: 25.0 tokens/s");
+			await stat.press("Escape");
+			await expect(page.locator(".agent-performance-tooltip")).toBeHidden();
+			view.thread.status = "waiting";
+			view.requests = [{ id: "approval", kind: "command", description: "Wait for approval", questions: [] }];
+			await fixture.event();
+			await expect(stat).toBeVisible();
+			await page.reload();
+			await expect(stat).toBeVisible();
+			if (width === 390) await stat.tap();
+			else await stat.click();
+			await expect(page.getByRole("tooltip")).toContainText("Effective rate: 20.0 tokens/s");
+			view.performance.state = "partial";
+			delete view.performance.generationDurationMs;
+			await fixture.event();
+			await expect(
+				page.getByRole("button", { name: "Inference speed: 20.0 tokens/s · Partial", exact: true }),
+			).toBeVisible();
+			view.thread.turnId = "turn-2";
+			view.thread.status = "running";
+			view.requests = [];
+			delete view.performance;
+			await fixture.event();
+			await expect(page.getByRole("button", { name: "Inference speed: Measuring…", exact: true })).toBeVisible();
+			view.thread.status = "interrupted";
+			await fixture.event();
+			await expect(page.getByRole("button", { name: "Inference speed: Unavailable", exact: true })).toBeVisible();
+		});
+	});
+}
+
 test("saved settings survive reopening and a failed send preserves selections and draft for retry", async ({
 	page,
 }) => {

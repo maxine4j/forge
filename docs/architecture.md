@@ -61,6 +61,25 @@ HTTP / WebSocket / Git protocol adapters / background tasks
 
 ## Persistence and recovery
 
+### Private request telemetry
+
+Forge owns a separate ephemeral-port HTTP listener bound exclusively to
+`127.0.0.1`, outside its public API/router. The owned Codex process exports OTLP
+JSON logs and traces to this receiver using an ephemeral authentication header;
+neither its endpoint nor credential enters browser contracts. Prompt and response
+logging is disabled. Startup constructs and closes the listener through the
+existing process lifecycle in `start.ts`/`main.ts`.
+
+Injected telemetry/store interfaces keep parsing, correlation and aggregation
+separate from startup and billing. SQLite's additive `agent_request_performance`
+table persists normalized request samples with idempotent identities;
+`agent_performance_fragments` stores only allowlisted correlation identities,
+source timestamps and counters needed for reordered/delayed exports. Raw account,
+prompt, response and tool content is discarded at ingestion. Samples survive
+worktree cleanup and restart; no timer runs across an unavailable interval.
+See [agent measurement semantics](agents.md#latest-turn-inference-performance) and
+[development verification](development.md#request-telemetry-verification).
+
 ### Notification metadata
 
 SQLite's additive `ticket_notifications` table stores only source, condition,

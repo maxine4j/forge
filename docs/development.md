@@ -2,6 +2,25 @@
 
 ## Development checks
 
+### Request telemetry verification
+
+`src/codex/request-performance.test.ts` covers deterministic request aggregation,
+duplicate/reordered exports, delayed token counts, missing timing, retries,
+warmups, isolation, contract validation and real SQLite restart recovery.
+`telemetry-receiver.test.ts` verifies authentication, paths, size limits and drain.
+Credential-free integration tests launch the pinned Codex 0.164.0 against controlled
+HTTP streaming and WebSocket inference endpoints, asserting runtime transport,
+turn identity, output counts (including reasoning once), first-token timing and
+saved measurements after reversed duplicate export delivery. No Codex upgrade,
+provider credentials or additional dependencies are required.
+
+Browser checks cover standalone, ticket planning, implementation and read-only
+chat footers, live reset/partial/unavailable states, reopening and mobile tooltip
+access. See [the measurement contract](agents.md#latest-turn-inference-performance)
+and [private persistence boundary](architecture.md#private-request-telemetry).
+
+### Commands
+
 Run `nvm use` from the repository root before the following commands:
 
 ```sh
