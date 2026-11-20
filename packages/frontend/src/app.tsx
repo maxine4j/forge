@@ -498,6 +498,15 @@ const Application = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWo
 				{config && (
 					<ForgeSettingsForm
 						api={workspaceApi}
+						connectOpenAI={() => {
+							if (!accounts?.codex.account && accounts?.codex.login.state !== "pending")
+								void accountAction(
+									"codex",
+									["failed", "uncertain", "cancelled"].includes(accounts?.codex.login.state ?? "")
+										? "retry"
+										: "login",
+								);
+						}}
 						githubAccount={
 							<AccountCard
 								provider='github'

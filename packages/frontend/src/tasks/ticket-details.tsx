@@ -20,6 +20,7 @@ import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown } from "../dropdown.tsx";
 import { useDialogDismissal, useModalDialog, useModalDraft, useModalNavigation } from "../navigation/controller.tsx";
+import { ProviderSelection } from "../settings/model-providers.tsx";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { EpicIcon } from "./epic-icon.tsx";
 import { InlineTicketDescription, InlineTicketTitle } from "./inline-ticket-fields.tsx";
@@ -237,16 +238,24 @@ export const TicketDetails = ({
 	const settings = pendingSettings ?? savedSettings ?? ticket.executionSettings ?? {};
 	const [, setError] = useErrorState();
 	const [, setMoveError] = useErrorState();
-	const [options, setOptions] = useState<AgentOptions>();
+	const [loadedOptions, setLoadedOptions] = useState<{ key: string; value: AgentOptions }>();
+	const optionsKey = `${settings.providerId}:${job?.phase}:${job?.plannerId}:${job?.implementerId}:${job?.providerLocked}`;
+	const options = loadedOptions?.key === optionsKey ? loadedOptions.value : undefined;
 	const optionsRevision = useContext(AgentOptionsRevision);
 	const [savingSettings, setSavingSettings] = useState(false);
 	const [, setSettingsError] = useErrorState();
 	useEffect(() => {
 		let current = true;
+		if (!settings.providerId && !job?.plannerId && !job?.implementerId) return;
 		void api
-			.read(`tickets/${ticket.id}/model-options`, agentOptionsSchema)
+			.read(
+				!job?.providerLocked && !job?.plannerId && !job?.implementerId && settings.providerId
+					? `model-providers/${settings.providerId}/model-options`
+					: `tickets/${ticket.id}/model-options`,
+				agentOptionsSchema,
+			)
 			.then((value) => {
-				if (current) setOptions(value);
+				if (current) setLoadedOptions({ key: optionsKey, value });
 			})
 			.catch(() => {
 				if (current) setError("Models unavailable.");
@@ -254,7 +263,18 @@ export const TicketDetails = ({
 		return () => {
 			current = false;
 		};
-	}, [api, ticket.id, job?.phase, job?.plannerId, job?.implementerId, optionsRevision, setError]);
+	}, [
+		api,
+		ticket.id,
+		job?.phase,
+		job?.plannerId,
+		job?.implementerId,
+		job?.providerLocked,
+		optionsKey,
+		settings.providerId,
+		optionsRevision,
+		setError,
+	]);
 	const settingsDisabled = archived || savingSettings || !!resetting || ticket.status === "done";
 	const changeSettings = (value: TicketExecutionSettings) => {
 		if (settingsDisabled) return;
@@ -326,9 +346,11 @@ export const TicketDetails = ({
 	useFailureToast(job?.resetError);
 	useFailureToast(
 		job?.state === "setup-failed"
-			? options && !resolveAgentSettings(options, settings).supported
-				? "Some agent settings are unavailable. Use Default for the model or thinking level, or choose an available permission mode, then retry."
-				: "Agent setup failed."
+			? job.providerSelectionError
+				? "Select an active model provider in Agent Settings, then retry setup."
+				: options && !resolveAgentSettings(options, settings).supported
+					? "Some agent settings are unavailable. Use Default for the model or thinking level, or choose an available permission mode, then retry."
+					: "Agent setup failed."
 			: undefined,
 	);
 	const blocked = !job || (!steering && !["idle", "failed"].includes(job.state)) || ticket.status !== "in-progress";
@@ -710,6 +732,15 @@ export const TicketDetails = ({
 				)}
 				<fieldset className='ticket-detail-section ticket-agent-settings'>
 					<legend>Agent Settings</legend>
+					<ProviderSelection
+						api={api}
+						value={job?.providerLocked ? (job.providerId ?? settings.providerId) : settings.providerId}
+						change={(providerId) =>
+							changeSettings({ ...settings, providerId, model: undefined, reasoningEffort: undefined })
+						}
+						name={job?.providerName}
+						disabled={settingsDisabled || !!job?.providerLocked || !!job?.plannerId || !!job?.implementerId}
+					/>
 					<ExecutionSettings
 						settings={settings}
 						options={options}
@@ -754,6 +785,15 @@ export const TicketDetails = ({
 				{ticket.status !== "backlog" && <p>Scope is fixed after execution starts. Discuss changes in chat.</p>}
 			</div>
 			<div className='ticket-chat' {...panel("chat")}>
+				<ProviderSelection
+					api={api}
+					value={job?.providerLocked ? (job.providerId ?? settings.providerId) : settings.providerId}
+					change={(providerId) =>
+						changeSettings({ ...settings, providerId, model: undefined, reasoningEffort: undefined })
+					}
+					name={job?.providerName}
+					disabled={settingsDisabled || !!job?.providerLocked || !!job?.plannerId || !!job?.implementerId}
+				/>
 				{currentId ? (
 					<Conversation
 						key={currentId}

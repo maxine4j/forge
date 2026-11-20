@@ -46,6 +46,9 @@ test("create/import and retry projects while account infrastructure is unavailab
 
 test("account verification code/link, completion, cancellation, uncertainty and explicit retry", async ({ page }) => {
 	let codex: unknown = idle;
+	await page.route("**/api/model-providers", (route) =>
+		route.fulfill({ json: [{ id, name: "OpenAI", kind: "openai", retired: false }] }),
+	);
 	await page.route("**/api/settings", (route) => route.fulfill({ json: defaultForgeSettings }));
 	await page.route("**/api/settings/model-options", (route) => route.fulfill({ json: { models: [], skills: [] } }));
 	await page.route("**/api/projects", (route) =>

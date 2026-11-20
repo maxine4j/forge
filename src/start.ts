@@ -39,6 +39,10 @@ import { EpicStore } from "./epics/epic-store.ts";
 import { HttpApplication } from "./http/http-application.ts";
 import type { ILifecycle } from "./http/lifecycle.ts";
 import { StaticAssets } from "./http/static-assets.ts";
+import { migrateModelProviders } from "./model-providers/model-provider-migration.ts";
+import { ModelProviderRouter } from "./model-providers/model-provider-router.ts";
+import { ModelProviderService } from "./model-providers/model-provider-service.ts";
+import { ModelProviderStore } from "./model-providers/model-provider-store.ts";
 import { ActProcess } from "./pipelines/act-process.ts";
 import { GitSnapshotClient } from "./pipelines/git-snapshot-client.ts";
 import { PipelineRouter } from "./pipelines/pipeline-router.ts";
@@ -259,6 +263,11 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const agentStore = new AgentThreadStore(database, notificationStore);
 	await agentStore.initialize();
 	await agentStore.recover();
+	const providerStore = new ModelProviderStore(database);
+	await providerStore.initialize();
+	const providers = new ModelProviderService(providerStore, access, randomUUID, (provider) =>
+		agentClient.options(undefined, provider),
+	);
 	let wakeRequested = false;
 	let schedulerWait: AbortController | undefined;
 	const wakeScheduler = () => {
@@ -275,12 +284,10 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		randomUUID,
 		() => new Date(),
 		tracker,
-		() => {
-			const { defaultAgentModel, defaultAgentReasoningEffort } = settings.current();
-			return { defaultModel: defaultAgentModel, defaultReasoningEffort: defaultAgentReasoningEffort };
-		},
-		() => settings.inferenceProvider(),
+		() => ({}),
+		() => ({ kind: "openai" }),
 		ticketHistory,
+		providers,
 	);
 	lifecycle.register(() => agents.shutdown());
 	const boardStore = new BoardSettingsStore(database);
@@ -289,6 +296,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	await boardSettings.initialize();
 	const workflowStore = new TicketWorkflowStore(database, () => new Date(), notificationStore);
 	await workflowStore.initialize();
+	await migrateModelProviders(database, randomUUID, !!(await codex.status()).account);
 	collector.start();
 	const workflow = new TicketWorkflowService(
 		workflowStore,
@@ -302,6 +310,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		wakeScheduler,
 		() => boardSettings.dispatchMode(),
 		new AbandonedWorkspaceCleanup(terminals, workspaces),
+		providers,
 	);
 	const tickets = new TicketService(ticketStore, store, access, () => new Date(), workflow, epicStore);
 	const epics = new EpicService(epicStore, ticketStore, access, () => new Date());
@@ -344,6 +353,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		[
 			new AccountRouter(accounts),
 			new SettingsRouter(settings),
+			new ModelProviderRouter(providers),
 			agentRouter,
 			new BoardSettingsRouter(boardSettings),
 			new DockerRouter(docker),

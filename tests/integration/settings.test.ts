@@ -58,7 +58,6 @@ test("Forge settings are owner-only, origin-protected and persist across startup
 				...(body === undefined ? {} : { body: JSON.stringify(body) }),
 			});
 		const settings = {
-			inferenceProvider: "openai",
 			localCurrency: "AUD",
 			monthlyPlanLocal: 30,
 			planningInstructions: "Review the design.\nInclude rollout steps.",
@@ -91,37 +90,14 @@ test("Forge settings are owner-only, origin-protected and persist across startup
 		).toBe(200);
 		expect((await request("PUT", { ...settings, defaultAgentModel: "missing" })).status).toBe(400);
 		expect((await request("PUT", { ...settings, defaultAgentReasoningEffort: "low" })).status).toBe(400);
-		const configured = { ...settings, defaultAgentModel: "model-a", defaultAgentReasoningEffort: "high" };
-		const saved = await request("PUT", configured);
-		expect(saved.status).toBe(200);
-		expect(await saved.json()).toEqual(configured);
-		expect(await (await request()).json()).toEqual(configured);
-		catalog.mockRejectedValue(new Error("Codex offline"));
-		expect((await request("GET", undefined, "owner", origin, "/model-options")).status).toBe(503);
-		expect((await request("PUT", { ...configured, defaultAgentModel: undefined })).status).toBe(503);
-		expect((await request("PUT", settings)).status).toBe(200);
-		expect((await request("PUT", configured)).status).toBe(503);
-		catalog.mockResolvedValue(options);
+		const configured = { ...settings, localCurrency: "EUR", monthlyPlanLocal: 45.5 };
 		expect((await request("PUT", configured)).status).toBe(200);
-		catalog.mockRejectedValue(new Error("Codex offline"));
-		const updated = {
-			...configured,
-			inferenceProvider: "ollama",
-			ollamaEndpoint: "http://ollama.internal:11434/v1",
-			ollamaModel: "local:latest",
-			localCurrency: "EUR",
-			monthlyPlanLocal: 45.5,
-			planningInstructions: "Updated during outage.",
-		};
-		expect((await request("PUT", { ...configured, inferenceProvider: "ollama" })).status).toBe(400);
-		expect((await request("PUT", updated)).status).toBe(200);
-		const inactive = { ...updated, inferenceProvider: "openai" };
-		expect(await (await request("PUT", inactive)).json()).toEqual(inactive);
+		expect(await (await request()).json()).toEqual(configured);
 		await db.close();
 		await reopened.initialize();
 		const recovered = new SettingsService(new SettingsStore(reopened), { publish }, access);
 		await recovered.initialize();
-		expect(recovered.get({ username: "owner" })).toEqual(inactive);
+		expect(recovered.get({ username: "owner" })).toEqual(configured);
 		expect(publish).toHaveBeenLastCalledWith({ name: settings.gitName, email: settings.gitEmail });
 	} finally {
 		await new Promise<void>((resolve) => server.close(() => resolve()));

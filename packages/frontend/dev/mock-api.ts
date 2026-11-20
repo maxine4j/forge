@@ -100,6 +100,17 @@ export class MockApi implements IMockApi {
 	constructor() {
 		this.routes.set("/api/projects", () => projects);
 		this.routes.set("/api/settings", () => defaultForgeSettings);
+		this.routes.set("/api/model-providers", () => [
+			{ id: "123e4567-e89b-42d3-a456-426614174099", name: "OpenAI", kind: "openai", retired: false },
+			{
+				id: "123e4567-e89b-42d3-a456-426614174098",
+				name: "Local Ollama",
+				kind: "ollama",
+				retired: false,
+				endpoint: "http://ollama/v1",
+				model: "local:latest",
+			},
+		]);
 		this.routes.set("/api/board/settings", () => defaultBoardSettings);
 		this.routes.set("/api/board/docker", () => dockerOverview);
 		this.routes.set("/api/accounts", () => ({
@@ -178,6 +189,13 @@ export class MockApi implements IMockApi {
 				models: [{ id: "preview-model", name: "Codex", isDefault: true }],
 				skills: [{ name: "review", description: "Review changes and check behavior" }],
 			});
+			this.routes.set("/api/model-providers/123e4567-e89b-42d3-a456-426614174099/model-options", agentOptions);
+			this.routes.set("/api/model-providers/123e4567-e89b-42d3-a456-426614174098/model-options", () => ({
+				models: [{ id: "local:latest", name: "local:latest", isDefault: true }],
+				skills: [],
+				defaultModel: "local:latest",
+				supportsAutoReview: false,
+			}));
 			this.routes.set(`/api/agents/${agent.id}/options`, agentOptions);
 			this.routes.set(`/api/agents/${agent.id}/files`, () => ["src/main.ts"]);
 			this.routes.set(`/api/agents/${agent.id}`, () => ({
@@ -389,6 +407,10 @@ export class MockApi implements IMockApi {
 					this.routes.set(`/api/agents/${plannerId}/options`, agentOptions);
 					this.routes.set(`/api/agents/${plannerId}/files`, () => Object.keys(files));
 				}
+				ticket.executionSettings = {
+					providerId: "123e4567-e89b-42d3-a456-426614174099",
+					...ticket.executionSettings,
+				};
 				this.routes.set(`/api/tickets/${ticket.id}`, () => ticket);
 				this.routes.set(`/api/tickets/${ticket.id}/model-options`, agentOptions);
 				this.routes.set(`/api/tickets/${ticket.id}/workflow`, () => ({

@@ -490,7 +490,7 @@ ticket cleanup.
 Tickets use the exported `TicketExecutionSettings` type and
 `ticketExecutionSettingsSchema`, extending agent settings with optional boolean
 `skipPlanning` and `acceptRecommendations`. Missing flags mean false.
-Tickets accept optional `executionSettings: {model?, reasoningEffort?, permissions?, skipPlanning?, acceptRecommendations?}`
+Tickets accept optional `executionSettings: {providerId?, model?, reasoningEffort?, permissions?, skipPlanning?, acceptRecommendations?}`
 on creation and return the saved selection on reads. Owner-authorized
 `PATCH /api/tickets/:id/settings` replaces that selection independently of Backlog
 scope editing, with exact-origin checks. The title above the ticket tabs saves
@@ -523,17 +523,30 @@ agent setup. Once a planner or implementer exists, the phase is locked for that
 execution. Changing Skip planning then affects the next fresh execution and does
 not approve a pending plan or interrupt work.
 
-One selection applies across planning, implementation, feedback and rebase turns.
-The workflow snapshots it and builds prompts from the same current ticket under
-dispatch coordination. Changes during execution apply on the next turn, except
-for the locked initial phase. Only model, reasoning effort and permissions reach
-the agent runtime. Unset fields inherit the [Forge defaults](agents.md#interactive-agents)
-on the next turn. Each planner and implementer pins the global provider when its
-record is created. Clarifications, follow-ups and rebase use their existing
-agent's provider. Explicit selections are validated against that provider at
-dispatch. If a selection becomes unsupported, use Default for model and thinking
-or select an available permission mode, then retry setup. Ticket chats use the shared composer and completion controls with a
-compact mobile header, a separately scrolling timeline and viewport-bounded popups.
+Draft tickets may omit `providerId`. Moving to Todo requires a valid active
+[named provider](foundation.md#model-providers), and dispatch rechecks selection.
+Missing/retired selections produce an actionable error without falling back.
+Creation, Details and Chat use the shared provider dropdown and selected provider's
+model catalog. Switching providers clears explicit model/thinking overrides while
+preserving flags and validating permission compatibility.
+
+Selection can change before execution begins. First dispatch persists an internal
+attempt snapshot of provider identity and inference configuration, shared by
+planning, implementation, feedback, rebase and recovery. Provider edits/retirement
+cannot reroute an existing attempt. Selection locks until the existing return to
+Backlog/reset flow completes. Public workflow summaries expose identity/name and
+the lock, never endpoint configuration. Legacy running attempts are seeded from
+their existing agent, preserving implicit OpenAI and unmapped historical routing;
+see [upgrade](development.md#named-provider-upgrades).
+
+Other model, reasoning, permission and ticket flag changes retain their next-turn
+behavior. OpenAI defaults live in its provider editor; Ollama inherits its single
+configured tag. Explicit settings are validated against the attempt's provider.
+Unsupported settings require choosing Default or a compatible permission mode.
+Only model, reasoning effort and permissions reach the runtime. Capacity,
+reservations, pause/stop and standalone concurrency remain unchanged.
+Ticket chats retain the shared composer, completion controls, mobile header,
+scrolling timeline and viewport-bounded popups.
 
 ### Ticket cost
 

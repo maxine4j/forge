@@ -124,7 +124,6 @@ try {
 	nested("volume", "create", "restart-disposable");
 	nested("run", "-d", "--name", "restart-workload", "busybox:1.37.0", "sleep", "300");
 	const settings = {
-		inferenceProvider: "openai",
 		localCurrency: "AUD",
 		monthlyPlanLocal: 30,
 		planningInstructions: "Include rollout steps.",
@@ -221,14 +220,24 @@ try {
 	assert.equal(project.status, "ready");
 	await pipelineSmoke({ docker, name, request, execute, headers, nested });
 	await clean("/api/board/docker/cleanup");
+	assert.deepEqual(JSON.parse(request("/api/model-providers", { headers }).body), []);
+	const providerResponse = request("/api/model-providers", {
+		method: "POST",
+		headers,
+		body: JSON.stringify({ name: "Persistent OpenAI", kind: "openai" }),
+	});
+	assert.equal(providerResponse.status, 201);
+	const provider = JSON.parse(providerResponse.body);
 	const chatResponse = request(`/api/projects/${project.id}/agents`, {
 		method: "POST",
 		headers,
-		body: JSON.stringify({ title: "Persistent chat" }),
+		body: JSON.stringify({ title: "Persistent chat", providerId: provider.id }),
 	});
 	assert.equal(chatResponse.status, 201);
 	const chat = JSON.parse(chatResponse.body);
 	assert.equal(chat.thread.status, "idle");
+	assert.equal(chat.thread.providerId, provider.id);
+	assert.equal(request(`/api/model-providers/${provider.id}`, { method: "DELETE", headers }).status, 204);
 	assert.deepEqual(chat.items, []);
 	assert.equal(request(`/api/workspaces/${chat.thread.workspaceId}`, { headers }).status, 200);
 	assert.equal(
@@ -414,6 +423,8 @@ try {
 	assert.equal(JSON.parse(request(`/api/terminals/${terminal.id}`, { headers }).body).status, "closed");
 	assert.equal(JSON.parse(request("/api/projects", { headers }).body)[0].id, project.id);
 	assert.equal(JSON.parse(request(`/api/agents/${chat.thread.id}`, { headers }).body).thread.status, "idle");
+	assert.equal(JSON.parse(request(`/api/agents/${chat.thread.id}`, { headers }).body).thread.providerId, provider.id);
+	assert.deepEqual(JSON.parse(request("/api/model-providers", { headers }).body), []);
 	assert.equal(JSON.parse(request(`/api/tickets/${ticket.id}`, { headers }).body).status, "backlog");
 	assert.equal(JSON.parse(request(`/api/tickets/${ticket.id}`, { headers }).body).epicId, epic.id);
 	assert.equal(JSON.parse(request(`/api/epics/${epic.id}`, { headers }).body).total, 1);

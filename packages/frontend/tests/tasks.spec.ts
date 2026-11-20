@@ -376,6 +376,77 @@ for (const width of [1280, 390]) {
 	});
 }
 
+test("ticket creation selects a named provider and switching clears overrides while retaining ticket flags", async ({
+	page,
+}) => {
+	const f = await setup(page);
+	const other = "123e4567-e89b-42d3-a456-426614174099";
+	await page.route("**/api/model-providers", (route) =>
+		route.fulfill({
+			json: [
+				{ id: projectId, name: "OpenAI", kind: "openai", retired: false },
+				{
+					id: other,
+					name: "Local",
+					kind: "ollama",
+					endpoint: "http://ollama/v1",
+					model: "local",
+					retired: false,
+				},
+			],
+		}),
+	);
+	await page.route(`**/api/model-providers/${other}/model-options`, (route) =>
+		route.fulfill({
+			json: {
+				models: [{ id: "local", name: "Local model", isDefault: true }],
+				skills: [],
+				supportsAutoReview: false,
+			},
+		}),
+	);
+	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
+	const editor = page.getByRole("dialog", { name: "Create ticket", exact: true });
+	await expectDropdownValue(editor.getByRole("combobox", { name: "Model provider" }), "");
+	await chooseDropdown(editor.getByRole("combobox", { name: "Model provider" }), projectId);
+	await editor.getByLabel("Title", { exact: true }).fill("Named ticket");
+	await editor.getByRole("button", { name: "Create", exact: true }).click();
+	await expect(editor).toHaveCount(0);
+	expect(f.tickets().at(-1)?.executionSettings?.providerId).toBe(projectId);
+	f.tickets()[0]!.executionSettings = {
+		providerId: projectId,
+		model: "test-model",
+		reasoningEffort: "high",
+		permissions: "ask",
+		skipPlanning: true,
+		acceptRecommendations: true,
+	};
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await expect(dialog.getByRole("checkbox", { name: "Skip planning", exact: true })).toBeChecked();
+	await chooseDropdown(dialog.getByRole("combobox", { name: "Model provider" }), other);
+	await expect.poll(() => f.tickets()[0]!.executionSettings?.providerId).toBe(other);
+	expect(f.tickets()[0]!.executionSettings).toMatchObject({
+		permissions: "ask",
+		skipPlanning: true,
+		acceptRecommendations: true,
+	});
+	expect(f.tickets()[0]!.executionSettings?.model).toBeUndefined();
+	expect(f.tickets()[0]!.executionSettings?.reasoningEffort).toBeUndefined();
+	await expect(dialog.getByRole("combobox", { name: "Model", exact: true })).toContainText("Local model");
+	await dialog.getByRole("tab", { name: "Chat", exact: true }).click();
+	await expectDropdownValue(dialog.getByRole("tabpanel", { name: "Chat", exact: true }).getByRole("combobox", { name: "Model provider" }), other);
+});
+
+test("running ticket provider selection stays locked in Details and Chat", async ({ page }) => {
+	await setup(page, false, true);
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await expect(dialog.getByRole("combobox", { name: "Model provider" })).toBeDisabled();
+	await dialog.getByRole("tab", { name: "Chat", exact: true }).click();
+	await expect(dialog.getByRole("tabpanel", { name: "Chat", exact: true }).getByRole("combobox", { name: "Model provider" })).toBeDisabled();
+});
+
 test("busy creation blocks Back and rapid Back unwinds ticket entries", async ({ page }) => {
 	await setup(page);
 	let release = () => {};
@@ -457,6 +528,7 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 	}[] = [
 		{
 			id: "TASK-1",
+			executionSettings: { providerId: projectId },
 			repositoryIds: [projectId],
 			title: "First task",
 			description: "Scope",
@@ -546,6 +618,8 @@ const setup = async (page: Page, crowded = false, agentic = false, review = fals
 				};
 				return route.fulfill({ status: 202, json: docker.operation });
 			}
+			if (path === "/api/model-providers")
+				return route.fulfill({ json: [{ id: projectId, name: "OpenAI", kind: "openai", retired: false }] });
 			if (path.endsWith("/model-options") || path.endsWith("/options"))
 				return route.fulfill({ json: modelOptions });
 			if (path.endsWith("/files")) return route.fulfill({ json: ["src/main.ts", "README.md"] });
@@ -1625,8 +1699,12 @@ test("dropdowns retain unavailable models, skip disabled permissions and do not 
 	page,
 }) => {
 	const f = await setup(page);
-	f.tickets()[0]!.executionSettings = { model: "retired-model", permissions: "approve-for-me" };
-	await page.route("**/api/tickets/*/model-options", (route) =>
+	f.tickets()[0]!.executionSettings = {
+		providerId: projectId,
+		model: "retired-model",
+		permissions: "approve-for-me",
+	};
+	await page.route("**/api/model-providers/*/model-options", (route) =>
 		route.fulfill({ json: { models: [], skills: [], supportsAutoReview: false } }),
 	);
 	let updates = 0;

@@ -68,11 +68,6 @@ export const forgeSettingsSchema = z
 		monthlyPlanLocal: z.number().nonnegative(),
 		planningInstructions: instructions,
 		implementationInstructions: instructions,
-		defaultAgentModel: z.string().min(1).max(256).optional(),
-		defaultAgentReasoningEffort: z.string().min(1).max(256).optional(),
-		inferenceProvider: z.enum(["openai", "ollama"]).default("openai"),
-		ollamaEndpoint: ollamaEndpoint.optional(),
-		ollamaModel: ollamaModel.optional(),
 		gitName: z
 			.string()
 			.trim()
@@ -86,15 +81,7 @@ export const forgeSettingsSchema = z
 	})
 	.refine(({ gitName, gitEmail }) => Boolean(gitName) === Boolean(gitEmail), {
 		message: "Provide both a Git name and email, or leave both blank.",
-	})
-	.refine(
-		({ inferenceProvider, ollamaEndpoint, ollamaModel }) =>
-			inferenceProvider === "openai" || Boolean(ollamaEndpoint && ollamaModel),
-		{
-			path: ["inferenceProvider"],
-			message: "Provide an Ollama endpoint and model tag.",
-		},
-	);
+	});
 
 export type ForgeSettings = z.infer<typeof forgeSettingsSchema>;
 
@@ -108,7 +95,6 @@ export const defaultForgeSettings: Readonly<ForgeSettings> = {
 	monthlyPlanLocal: 30,
 	planningInstructions: "",
 	implementationInstructions: "",
-	inferenceProvider: "openai",
 	gitName: "",
 	gitEmail: "",
 };

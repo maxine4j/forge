@@ -22,7 +22,15 @@ export class SettingsStore implements ISettingsStore {
 		if (!rows.length) return { ...defaultForgeSettings };
 		const { payload } = z.object({ payload: z.string() }).parse(rows.at(0));
 		const stored: unknown = JSON.parse(payload);
-		return forgeSettingsSchema.parse(stored);
+		const {
+			inferenceProvider: _provider,
+			ollamaEndpoint: _endpoint,
+			ollamaModel: _model,
+			defaultAgentModel: _defaultModel,
+			defaultAgentReasoningEffort: _effort,
+			...settings
+		} = stored as Record<string, unknown>;
+		return forgeSettingsSchema.parse(settings);
 	}
 
 	async save(settings: ForgeSettings): Promise<void> {

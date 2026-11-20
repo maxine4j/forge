@@ -178,14 +178,25 @@ thread and turn; disconnects invalidate them. Worktrees remain a trusted-owner
 boundary, not process isolation or protection from deliberately modifying shared
 Git metadata.
 
-Forge snapshots the [configured provider](foundation.md#forge-settings) when it
-creates each agent record, including chats whose Codex threads start on first
-message. Existing records without a provider use OpenAI. Ollama records retain
-their endpoint and model through follow-ups, process restarts and reconciliation.
+Forge uses [named providers](foundation.md#model-providers) with the existing
+Codex harness. Standalone chat creation requires `{title, providerId}`; validation
+and a configuration snapshot precede workspace allocation. The creation selector
+starts unselected. Existing chats retain their saved inference configuration.
+Public agent summaries expose provider ID/name, never inference endpoints.
+
+Tickets snapshot provider identity and configuration at their first dispatch.
+Planning, implementation, follow-ups, rebase and recovery use that attempt snapshot,
+including after provider edits or retirement. There is no provider fallback.
+Legacy agent records without a provider still mean OpenAI; upgrade never rewrites
+their inference snapshots or replays dispatched turns. See
+[ticket selection and reset](tickets.md#ticket-execution-settings) and
+[migration](development.md#named-provider-upgrades).
+
 The shared app-server keeps OpenAI account access while Ollama threads use a
-thread-scoped Responses provider without OpenAI credentials. Ollama turns do not
-sample or contribute to OpenAI costs and quotas. Provider errors follow existing
-execution and recovery paths without provider fallback.
+thread-scoped Responses provider without OpenAI credentials. Ollama permission
+restrictions remain in force. Ollama turns neither sample nor contribute to OpenAI
+costs and quotas. Provider errors follow existing recovery paths. Named providers
+add no queues, limits, reservations or changes to board/standalone concurrency.
 Forge can also reach a local Ollama worker through the [Ollama relay](development.md#ollama-relay).
 The relay forwards Ollama's stateless Responses and SSE stream, and the worker
 connects from the approved inference host over TLS.
@@ -219,7 +230,7 @@ Browser-safe schemas are exported from `@forge/contracts/agents`:
 
 | Route                                      | Contract                                                                                                                                                                                                   |
 | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET/POST /api/projects/:projectId/agents` | List summaries / create `{title}`; returns 201 and a view.                                                                                                                                                 |
+| `GET/POST /api/projects/:projectId/agents` | List summaries / create `{title, providerId}`; returns 201 and a view.                                                                                                                                     |
 | `GET /api/agents/:id`                      | `{thread,items,requests,truncated}`; no Codex thread IDs or internal workspace paths in metadata.                                                                                                          |
 | `POST /api/agents/:id/messages`            | `{text,model?,permissions?}`; starts one turn and returns its current view. Permission values are `ask`, `approve-for-me`, `full-access`.                                                                  |
 | `GET /api/agents/:id/options`              | Runtime models `{id,name,isDefault}` and enabled worktree skills `{name,description}`; no internal skill paths.                                                                                            |

@@ -1,4 +1,5 @@
 import type { AgentView } from "@forge/contracts/agents";
+import type { ModelProvider } from "@forge/contracts/model-providers";
 import type { Ticket } from "@forge/contracts/tickets";
 import { expect, test, vi } from "vitest";
 
@@ -6,11 +7,104 @@ import { AgentExecutionTracker } from "../agents/agent-execution-tracker.ts";
 import type { ITicketAgents } from "../agents/agent-service.ts";
 import { AgentError } from "../agents/errors.ts";
 import { AccessService } from "../auth/access-service.ts";
+import { ModelProviderService, type IModelProviderService } from "../model-providers/model-provider-service.ts";
 import { TicketPrompts } from "./ticket-prompts.ts";
 import { TicketWorkflowService } from "./ticket-workflow-service.ts";
 import type { TicketWorkflowRecord } from "./types.ts";
 
 const actor = { username: "owner" };
+
+test("named selection is explicit, switchable before dispatch, locked until reset, and immutable across phases and recovery", async () => {
+	const first: ModelProvider = {
+		id: "123e4567-e89b-42d3-a456-426614174001",
+		name: "First",
+		kind: "ollama",
+		endpoint: "http://first/v1",
+		model: "first",
+		retired: false,
+	};
+	const second: ModelProvider = {
+		...first,
+		id: "123e4567-e89b-42d3-a456-426614174002",
+		name: "Second",
+		endpoint: "http://second/v1",
+		model: "second",
+	};
+	const records = new Map([first, second].map((p) => [p.id, p]));
+	const providers = new ModelProviderService(
+		{
+			list: async () => [...records.values()].filter((p) => !p.retired),
+			get: async (id) => structuredClone(records.get(id)),
+			save: async (p) => {
+				records.set(p.id, p);
+			},
+		},
+		new AccessService({ owner: "owner", origin: "https://forge.example" }),
+		() => first.id,
+		async (p) => ({
+			models: p.kind === "ollama" ? [{ id: p.model, name: p.model, isDefault: true }] : [],
+			skills: [],
+			supportsAutoReview: false,
+		}),
+	);
+	const f = fixture(() => "running", providers);
+	const ticket = f.create();
+	await f.service.settings(actor, ticket, { skipPlanning: false });
+	await expect(f.service.move(actor, ticket, { status: "todo" })).rejects.toThrow("provider-required");
+	ticket.executionSettings = { providerId: first.id, permissions: "approve-for-me" };
+	await expect(
+		f.service.settings(actor, ticket, { providerId: second.id, permissions: "approve-for-me" }),
+	).rejects.toThrow("unsupported-settings");
+	ticket.executionSettings = {};
+	await f.service.settings(actor, ticket, { providerId: first.id, model: "first", acceptRecommendations: true });
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.settings(actor, ticket, { providerId: second.id, model: "first", acceptRecommendations: true });
+	expect(ticket.executionSettings).toMatchObject({ providerId: second.id, acceptRecommendations: true });
+	expect(ticket.executionSettings?.model).toBeUndefined();
+	await expect(
+		f.service.settings(actor, ticket, { providerId: second.id, permissions: "approve-for-me" }),
+	).rejects.toThrow("unsupported-settings");
+	await f.service.tick(actor);
+	const snapshot = {
+		providerId: second.id,
+		providerName: second.name,
+		configuration: { kind: "ollama", endpoint: second.endpoint, model: second.model },
+	};
+	expect(f.jobs.get(ticket.id)?.providerSnapshot).toEqual(snapshot);
+	expect(f.agents.createTicketThread.mock.calls[0]?.[5]).toEqual(snapshot);
+	await expect(f.service.settings(actor, ticket, { providerId: first.id })).rejects.toThrow("ticket-conflict");
+	await providers.update(actor, second.id, { endpoint: "http://changed/v1", model: "changed" });
+	await providers.remove(actor, second.id);
+	f.complete(f.jobs.get(ticket.id)!.plannerId!, "Original plan");
+	await f.service.tick(actor);
+	await f.service.approve(actor, ticket, 1);
+	const recovered = f.makeService();
+	await recovered.recover(actor);
+	await recovered.tick(actor);
+	expect(f.agents.createTicketThread.mock.calls.at(-1)?.[5]).toEqual(snapshot);
+	expect(f.jobs.get(ticket.id)?.providerSnapshot).toEqual(snapshot);
+	expect(JSON.stringify(await recovered.get(actor, ticket.id))).not.toContain("http://");
+	await recovered.move(actor, ticket, { status: "backlog" });
+	await recovered.recover(actor, ticket.id);
+	await recovered.settings(actor, ticket, { providerId: first.id });
+	expect(ticket.executionSettings?.providerId).toBe(first.id);
+});
+
+test("retired selections fail admission and dispatch without allocating a thread or falling back", async () => {
+	const requireProvider = vi.fn(async () => {
+		throw new Error("provider-retired");
+	});
+	const providers = { require: requireProvider } as unknown as IModelProviderService;
+	const f = fixture(() => "running", providers);
+	const ticket = f.create();
+	ticket.executionSettings = { providerId: "123e4567-e89b-42d3-a456-426614174001" };
+	await expect(f.service.move(actor, ticket, { status: "todo" })).rejects.toThrow("provider-retired");
+	ticket.status = "todo";
+	f.jobs.set(ticket.id, { ticketId: ticket.id, phase: "planning", state: "queued", mergeAttempts: 0 });
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)?.state).toBe("setup-failed");
+	expect(f.agents.createTicketThread).not.toHaveBeenCalled();
+});
 
 test("plan feedback rejects stale and approved revisions without queuing a turn", async () => {
 	const f = fixture();
@@ -107,7 +201,7 @@ test("recommendations use current settings on the next feedback and rebase turns
 	expect(ticket.status).toBe("done");
 });
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
-const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => {
+const fixture = (dispatchMode: () => "running" | "paused" = () => "running", providers?: IModelProviderService) => {
 	const jobs = new Map<string, TicketWorkflowRecord>();
 	const tickets = new Map<string, Ticket>();
 	const views = new Map<string, AgentView>();
@@ -209,6 +303,7 @@ const fixture = (dispatchMode: () => "running" | "paused" = () => "running") => 
 			wake,
 			dispatchMode,
 			{ cleanupAbandoned },
+			providers,
 		);
 	const service = makeService();
 	const create = (id = "TASK-1") => {
@@ -303,6 +398,7 @@ test.each(["paused", "capacity"] as const)(
 			`${ticket.id} planning`,
 			undefined,
 			expect.any(Function),
+			undefined,
 		);
 		expect(f.agents.dispatch.mock.calls[0]?.[2]).toContain("Updated scope");
 	},
@@ -457,6 +553,7 @@ test.each(["planning", "implementation", "review", "rebase"] as const)(
 			`${ticket.id} implementation`,
 			undefined,
 			expect.any(Function),
+			undefined,
 		);
 		expect(f.jobs.get(ticket.id)?.workspaceId).not.toBe(original.workspaceId);
 		expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Saved plan");
@@ -603,6 +700,7 @@ test("execution records the first reference and reuses it and its workspace for 
 		`${ticket.id} planning`,
 		undefined,
 		expect.any(Function),
+		undefined,
 	);
 	f.complete(job.plannerId!, "# Plan");
 	await f.service.tick(actor);
@@ -617,6 +715,7 @@ test("execution records the first reference and reuses it and its workspace for 
 		`${ticket.id} implementation`,
 		job.workspaceId,
 		expect.any(Function),
+		undefined,
 	);
 	expect(f.jobs.get(ticket.id)?.workspaceId).toBe(job.workspaceId);
 	await expect(
@@ -645,7 +744,7 @@ test("ticket settings validate before saving and each phase snapshots the curren
 	await f.service.tick(actor);
 	await f.service.approve(actor, f.tickets.get(ticket.id)!, 1);
 	await f.service.options(actor, ticket.id);
-	expect(f.agents.catalogOptions).toHaveBeenLastCalledWith(actor, undefined);
+	expect(f.agents.catalogOptions).toHaveBeenLastCalledWith(actor, f.jobs.get(ticket.id)?.plannerId);
 	await f.service.tick(actor);
 	expect(f.agents.dispatch.mock.calls[1]?.[5]).toEqual({});
 	await f.service.settings(actor, ticket, settings);

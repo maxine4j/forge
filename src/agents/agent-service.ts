@@ -20,6 +20,9 @@ import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
 import type { ICodexAgentClient } from "../codex/codex-agent-client.ts";
 import type { TicketUsageScope } from "../cost/types.ts";
+import { ModelProviderError } from "../model-providers/errors.ts";
+import { inferenceConfiguration, type IModelProviderService } from "../model-providers/model-provider-service.ts";
+import type { ModelProviderSnapshot } from "../model-providers/types.ts";
 import type { IProjectService } from "../projects/project-service.ts";
 import type { ITicketAgentHistory } from "../tickets/ticket-history-store.ts";
 import type { WorkspaceLocation } from "../workspaces/types.ts";
@@ -41,7 +44,7 @@ export interface IAgentWorkspaces {
 }
 export interface IAgentService {
 	/** Owner-only. Creates a dedicated workspace; Codex identifiers stay private. Throws AgentError. */
-	create(actor: Actor, projectId: string, title: string): Promise<AgentView>;
+	create(actor: Actor, projectId: string, title: string, providerId?: string): Promise<AgentView>;
 	list(actor: Actor, projectId: string): Promise<AgentThread[]>;
 	get(actor: Actor, id: string): Promise<AgentView>;
 	send(actor: Actor, id: string, text: string, settings?: AgentSettings): Promise<AgentView>;
@@ -57,6 +60,7 @@ export interface ITicketAgents {
 	/** Reconciles and interrupts only these managed threads. True requires confirmed settlement. */
 	stopTicket(actor: Actor, ids: string[]): Promise<boolean>;
 	catalogOptions(actor: Actor, threadId?: string): Promise<AgentOptions>;
+	providerSnapshot?(actor: Actor, id: string): Promise<ModelProviderSnapshot>;
 	assertRepositoryReady(actor: Actor, id: string): Promise<void>;
 	steer(actor: Actor, id: string, turnId: string, text: string): Promise<AgentView>;
 	createTicketThread(
@@ -65,6 +69,7 @@ export interface ITicketAgents {
 		title: string,
 		workspaceId?: string,
 		allocated?: (workspaceId: string) => Promise<void>,
+		snapshot?: ModelProviderSnapshot,
 	): Promise<AgentView>;
 	dispatch(
 		actor: Actor,
@@ -106,6 +111,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		private readonly defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = () => ({}),
 		private readonly provider: () => InferenceProvider = () => ({ kind: "openai" }),
 		private readonly history?: ITicketAgentHistory,
+		private readonly providers?: IModelProviderService,
 	) {
 		this.unsubscribe = client.subscribe((codexId) => {
 			const id = this.identities.get(codexId);
@@ -117,8 +123,23 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			}).catch((err: unknown) => this.log.error({ err }, "Could not persist agent activity"));
 		});
 	}
-	async create(actor: Actor, projectId: string, title: string): Promise<AgentView> {
-		return this.createThread(actor, projectId, title, false);
+	async create(actor: Actor, projectId: string, title: string, providerId?: string): Promise<AgentView> {
+		const provider = this.providers ? await this.providers.require(actor, providerId) : undefined;
+		return this.createThread(
+			actor,
+			projectId,
+			title,
+			false,
+			undefined,
+			undefined,
+			provider
+				? {
+						providerId: provider.id,
+						providerName: provider.name,
+						configuration: inferenceConfiguration(provider),
+					}
+				: undefined,
+		);
 	}
 	async createTicketThread(
 		actor: Actor,
@@ -126,8 +147,9 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		title: string,
 		workspaceId?: string,
 		allocated?: (workspaceId: string) => Promise<void>,
+		snapshot?: ModelProviderSnapshot,
 	): Promise<AgentView> {
-		return this.createThread(actor, projectId, title, true, workspaceId, allocated);
+		return this.createThread(actor, projectId, title, true, workspaceId, allocated, snapshot);
 	}
 	async list(actor: Actor, projectId: string): Promise<AgentThread[]> {
 		this.authorize(actor);
@@ -144,11 +166,12 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		this.authorize(actor);
 		const record = await this.require(id);
 		const location = await this.workspaces.resolve(actor, record.workspaceId);
-		return this.providerOptions(record.provider, location.path);
+		return this.providerOptions(record.provider, location.path, actor, record.providerId);
 	}
 	async catalogOptions(actor: Actor, threadId?: string): Promise<AgentOptions> {
 		this.authorize(actor);
-		return this.providerOptions(threadId ? (await this.require(threadId)).provider : this.provider());
+		const record = threadId ? await this.require(threadId) : undefined;
+		return this.providerOptions(record?.provider ?? this.provider(), undefined, actor, record?.providerId);
 	}
 	async assertRepositoryReady(actor: Actor, id: string): Promise<void> {
 		this.authorize(actor);
@@ -245,10 +268,12 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				},
 			);
 			if (!selection.success) throw new AgentError("invalid-request");
-			const catalog = await this.providerOptions(record.provider).catch((cause: unknown) => {
-				this.tracker.observe(id, previousStatus);
-				throw new AgentCatalogError(cause);
-			});
+			const catalog = await this.providerOptions(record.provider, undefined, actor, record.providerId).catch(
+				(cause: unknown) => {
+					this.tracker.observe(id, previousStatus);
+					throw new AgentCatalogError(cause);
+				},
+			);
 			const resolved = resolveAgentSettings(catalog, selection.data);
 			if (!resolved.supported) {
 				this.tracker.observe(id, previousStatus);
@@ -513,9 +538,11 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		managed: boolean,
 		workspaceId?: string,
 		allocated?: (workspaceId: string) => Promise<void>,
+		snapshot?: ModelProviderSnapshot,
 	): Promise<AgentView> {
 		this.authorize(actor);
-		const input = createAgentSchema.safeParse({ title });
+		if (this.providers && !snapshot) throw new ModelProviderError("provider-required");
+		const input = createAgentSchema.shape.title.safeParse(title);
 		if (!input.success) throw new AgentError("invalid-request");
 		const id = this.generateId();
 		return this.serialize(id, async () => {
@@ -523,31 +550,49 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				await this.workspaces.retry(actor, workspaceId);
 			const workspace = workspaceId
 				? (await this.workspaces.resolve(actor, workspaceId)).workspace
-				: await this.workspaces.create(actor, projectId, { name: input.data.title }, allocated);
+				: await this.workspaces.create(actor, projectId, { name: input.data }, allocated);
 			if (workspace.projectId !== projectId) throw new AgentError("agent-conflict");
 			const record: AgentThreadRecord = {
 				id,
 				projectId,
 				workspaceId: workspace.id,
-				title: input.data.title,
+				title: input.data,
 				createdAt: this.now().toISOString(),
 				status: "idle",
 				requests: [],
 				managed,
-				provider: this.provider(),
+				provider: snapshot?.configuration ?? this.provider(),
+				providerId: snapshot?.providerId,
+				providerName: snapshot?.providerName,
 			};
 			await this.store.insert(record);
 			if (managed) this.ticketThreads.add(id);
 			return this.view(record);
 		});
 	}
+	async providerSnapshot(actor: Actor, id: string): Promise<ModelProviderSnapshot> {
+		this.authorize(actor);
+		const record = await this.require(id);
+		return {
+			providerId: record.providerId,
+			providerName:
+				record.providerName ?? (record.provider?.kind === "ollama" ? "Ollama (legacy)" : "OpenAI (legacy)"),
+			configuration: record.provider ?? { kind: "openai" },
+		};
+	}
 	private authorize(actor: Actor): void {
 		this.access.assertOwner(actor);
 		if (this.closed) throw new AgentError("agent-unavailable");
 	}
-	private async providerOptions(provider?: InferenceProvider, path?: string): Promise<AgentOptions> {
+	private async providerOptions(
+		provider?: InferenceProvider,
+		path?: string,
+		actor?: Actor,
+		providerId?: string,
+	): Promise<AgentOptions> {
 		if (provider?.kind === "ollama") return this.client.options(path, provider);
-		return { ...(await this.client.options(path)), ...this.defaults() };
+		const defaults = actor && this.providers ? await this.providers.defaults(actor, providerId) : this.defaults();
+		return { ...(await this.client.options(path)), ...defaults };
 	}
 	private async require(id: string): Promise<AgentThreadRecord> {
 		const record = await this.store.get(id);
@@ -570,7 +615,11 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		} = record;
 		const contextWindow = runtime?.contextWindow ?? savedContext;
 		return {
-			thread,
+			thread: {
+				...thread,
+				providerName:
+					thread.providerName ?? (record.provider?.kind === "ollama" ? "Ollama (legacy)" : "OpenAI (legacy)"),
+			},
 			items: runtime?.items ?? [],
 			requests: runtime?.requests ?? requests,
 			truncated: runtime?.truncated ?? false,

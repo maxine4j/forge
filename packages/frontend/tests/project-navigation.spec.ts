@@ -30,6 +30,8 @@ test("dark project tabs hide infrastructure and keep account setup in Config", a
 		(url) => url.pathname.startsWith("/api/"),
 		(route) => {
 			const path = new URL(route.request().url()).pathname;
+			if (path === "/api/model-providers")
+				return route.fulfill({ json: [{ id, name: "OpenAI", kind: "openai", retired: false }] });
 			if (path === "/api/projects")
 				return route.fulfill({ json: [{ id: projectId, name: "Forge", status: "ready", createdAt }] });
 			if (path === "/api/accounts")

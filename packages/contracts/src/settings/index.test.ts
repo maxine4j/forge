@@ -1,17 +1,16 @@
 import { expect, test } from "vitest";
 
+import { modelProviderInputSchema } from "../model-providers/index.ts";
 import { defaultForgeSettings, forgeSettingsSchema } from "./index.ts";
 
-test("defaults old settings to OpenAI and keeps inactive Ollama configuration", () => {
-	const { inferenceProvider: _provider, ...legacy } = defaultForgeSettings;
-	expect(forgeSettingsSchema.parse(legacy)).toEqual(defaultForgeSettings);
-	const ollama = { ollamaEndpoint: "http://ollama.internal:11434/v1", ollamaModel: "gpt-oss:20b" };
-	expect(forgeSettingsSchema.parse({ ...legacy, ...ollama })).toEqual({ ...defaultForgeSettings, ...ollama });
-	expect(forgeSettingsSchema.safeParse({ ...legacy, inferenceProvider: "ollama", ...ollama }).success).toBe(true);
-	for (const incomplete of [{}, { ollamaEndpoint: ollama.ollamaEndpoint }, { ollamaModel: ollama.ollamaModel }])
-		expect(forgeSettingsSchema.safeParse({ ...legacy, inferenceProvider: "ollama", ...incomplete }).success).toBe(
-			false,
-		);
+test("public settings exclude inference routing and model defaults", () => {
+	expect(forgeSettingsSchema.parse(defaultForgeSettings)).toEqual(defaultForgeSettings);
+	for (const update of [
+		{ inferenceProvider: "openai" },
+		{ ollamaEndpoint: "http://ollama/v1" },
+		{ defaultAgentModel: "model" },
+	])
+		expect(forgeSettingsSchema.safeParse({ ...defaultForgeSettings, ...update }).success).toBe(false);
 });
 
 test.each([
@@ -25,7 +24,10 @@ test.each([
 	"http://ollama.internal/v1?key=x",
 	`http://ollama.internal/${"x".repeat(2048)}`,
 ])("rejects invalid Ollama endpoint %s", (ollamaEndpoint) => {
-	expect(forgeSettingsSchema.safeParse({ ...defaultForgeSettings, ollamaEndpoint }).success).toBe(false);
+	expect(
+		modelProviderInputSchema.safeParse({ name: "Local", kind: "ollama", endpoint: ollamaEndpoint, model: "local" })
+			.success,
+	).toBe(false);
 });
 
 test("Forge settings accept multiline instructions and normalize Git identity", () => {

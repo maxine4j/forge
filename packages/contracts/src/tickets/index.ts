@@ -3,6 +3,7 @@ import { z } from "zod";
 import { agentSettingsSchema, agentRequestSchema } from "../agents/index.ts";
 
 export const ticketExecutionSettingsSchema = agentSettingsSchema.extend({
+	providerId: z.uuid().optional(),
 	skipPlanning: z.boolean().optional(),
 	acceptRecommendations: z.boolean().optional(),
 });
@@ -109,6 +110,10 @@ export type EditEpic = z.input<typeof editEpicSchema>;
 export type EpicSummary = z.infer<typeof epicSummarySchema>;
 export type EpicDetail = z.infer<typeof epicDetailSchema>;
 export const ticketWorkflowSchema = z.strictObject({
+	providerId: z.uuid().optional(),
+	providerName: z.string().optional(),
+	providerLocked: z.literal(true).optional(),
+	providerSelectionError: z.boolean().optional(),
 	ticketId: ticketIdSchema,
 	executionRepositoryId: z.uuid().optional(),
 	workspaceId: z.uuid().optional(),
