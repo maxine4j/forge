@@ -300,11 +300,11 @@ for (const width of [1280, 390]) {
 		const f = await setup(page);
 		await page.getByRole("button", { name: "Board settings", exact: true }).click();
 		const settings = page.getByRole("dialog", { name: "Board settings", exact: true });
-		await settings.getByLabel("Max concurrent agents", { exact: true }).fill("5");
+		await settings.getByLabel("Max concurrent tickets", { exact: true }).fill("5");
 		await page.goBack();
 		const guard = page.getByRole("dialog", { name: "Unsaved changes" });
 		await guard.getByRole("button", { name: "Keep editing" }).click();
-		await expect(settings.getByLabel("Max concurrent agents", { exact: true })).toHaveValue("5");
+		await expect(settings.getByLabel("Max concurrent tickets", { exact: true })).toHaveValue("5");
 		await settings.getByRole("button", { name: "Close board settings" }).click();
 		await guard.getByRole("button", { name: "Discard changes" }).click();
 		await expect(settings).toHaveCount(0);
@@ -407,8 +407,8 @@ test("ticket creation selects a named provider and switching clears overrides wh
 	);
 	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
 	const editor = page.getByRole("dialog", { name: "Create ticket", exact: true });
-	await expectDropdownValue(editor.getByRole("combobox", { name: "Model provider" }), "");
-	await chooseDropdown(editor.getByRole("combobox", { name: "Model provider" }), projectId);
+	await expectDropdownValue(editor.getByRole("combobox", { name: "Planning agent", exact: true }), "");
+	await chooseDropdown(editor.getByRole("combobox", { name: "Planning agent", exact: true }), projectId);
 	await editor.getByLabel("Title", { exact: true }).fill("Named ticket");
 	await editor.getByRole("button", { name: "Create", exact: true }).click();
 	await expect(editor).toHaveCount(0);
@@ -424,7 +424,7 @@ test("ticket creation selects a named provider and switching clears overrides wh
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 	await expect(dialog.getByRole("checkbox", { name: "Skip planning", exact: true })).toBeChecked();
-	await chooseDropdown(dialog.getByRole("combobox", { name: "Model provider" }), other);
+	await chooseDropdown(dialog.getByRole("combobox", { name: "Planning agent", exact: true }), other);
 	await expect.poll(() => f.tickets()[0]!.executionSettings?.providerId).toBe(other);
 	expect(f.tickets()[0]!.executionSettings).toMatchObject({
 		permissions: "ask",
@@ -433,22 +433,112 @@ test("ticket creation selects a named provider and switching clears overrides wh
 	});
 	expect(f.tickets()[0]!.executionSettings?.model).toBeUndefined();
 	expect(f.tickets()[0]!.executionSettings?.reasoningEffort).toBeUndefined();
-	await expect(dialog.getByRole("combobox", { name: "Model", exact: true })).toContainText("Local model");
+	await expect(dialog.getByRole("combobox", { name: "Model", exact: true }).first()).toContainText("Local model");
 	await dialog.getByRole("tab", { name: "Chat", exact: true }).click();
 	await expectDropdownValue(
-		dialog.getByRole("tabpanel", { name: "Chat", exact: true }).getByRole("combobox", { name: "Model provider" }),
+		dialog
+			.getByRole("tabpanel", { name: "Chat", exact: true })
+			.getByRole("combobox", { name: "Planning agent", exact: true }),
 		other,
 	);
+});
+
+test("ticket phases start inherited, unlink independently, save immediately and survive reopening", async ({
+	page,
+}) => {
+	const f = await setup(page);
+	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
+	const editor = page.getByRole("dialog", { name: "Create ticket", exact: true });
+	await expectDropdownValue(editor.getByRole("combobox", { name: "Planning agent", exact: true }), "");
+	await expect(editor.getByRole("combobox", { name: "Implementing agent", exact: true })).toHaveText(
+		"Same as planner",
+	);
+	await expect(
+		editor
+			.getByRole("group", { name: "Implementing agent settings", exact: true })
+			.getByRole("combobox", { name: "Model", exact: true }),
+	).toBeDisabled();
+	await editor.getByRole("button", { name: "Cancel", exact: true }).click();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	const planning = dialog.getByRole("group", { name: "Planning agent settings", exact: true });
+	const implementation = dialog.getByRole("group", { name: "Implementing agent settings", exact: true });
+	await expect(planning.getByRole("combobox", { name: "Model", exact: true })).toContainText("Provider default");
+	await expect(
+		implementation.getByRole("combobox", { name: "Inherited planning agent", exact: true }),
+	).toBeDisabled();
+	await chooseDropdown(planning.getByRole("combobox", { name: "Model", exact: true }), "test-model");
+	await expect.poll(() => f.tickets()[0]!.executionSettings?.model).toBe("test-model");
+	await expect(implementation.getByRole("combobox", { name: "Model", exact: true })).toHaveText("Test model");
+	await expect(implementation.getByRole("combobox", { name: "Thinking level", exact: true })).toBeDisabled();
+	await chooseDropdown(implementation.getByRole("combobox", { name: "Implementing agent", exact: true }), projectId);
+	await expect
+		.poll(() => f.tickets()[0]!.executionSettings?.implementation)
+		.toEqual({ mode: "custom", providerId: projectId });
+	await expect(implementation.getByRole("combobox", { name: "Model", exact: true })).toBeEnabled();
+	await expect(implementation.getByRole("combobox", { name: "Model", exact: true })).toContainText(
+		"Provider default",
+	);
+	await chooseDropdown(implementation.getByRole("combobox", { name: "Model", exact: true }), "other-model");
+	await expect
+		.poll(() => f.tickets()[0]!.executionSettings?.implementation)
+		.toMatchObject({ mode: "custom", model: "other-model" });
+	expect(f.tickets()[0]!.executionSettings?.model).toBe("test-model");
+	await dialog.getByRole("button", { name: "Close ticket" }).click();
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	await expectDropdownValue(implementation.getByRole("combobox", { name: "Model", exact: true }), "other-model");
+	await chooseDropdown(implementation.getByRole("combobox", { name: "Implementing agent", exact: true }), "");
+	await expect.poll(() => f.tickets()[0]!.executionSettings?.implementation).toEqual({ mode: "same-as-planner" });
+	await expectDropdownValue(planning.getByRole("combobox", { name: "Model", exact: true }), "test-model");
+	await expect(implementation.getByRole("combobox", { name: "Model", exact: true })).toHaveText("Test model");
+});
+
+test("Chat switches to implementation controls and preserves planning overrides", async ({ page }) => {
+	const f = await setup(page, false, true);
+	f.tickets()[0]!.executionSettings = {
+		providerId: projectId,
+		model: "test-model",
+		implementation: { mode: "custom", providerId: projectId },
+	};
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	const chat = dialog.getByRole("tabpanel", { name: "Chat", exact: true });
+	await expect(chat.getByRole("combobox", { name: "Planning agent", exact: true })).toBeVisible();
+	f.setWorkflow({
+		phase: "implementation",
+		implementerId: "123e4567-e89b-42d3-a456-426614174010",
+		state: "running",
+		planningProvider: { providerId: projectId, providerName: "OpenAI", providerLocked: true },
+		implementationProvider: { providerId: projectId, providerName: "OpenAI", providerLocked: true },
+	});
+	await expect(chat.getByRole("combobox", { name: "Implementing agent", exact: true })).toBeVisible();
+	await expect(chat.getByRole("combobox", { name: "Implementing agent", exact: true })).toBeDisabled();
+	await chooseDropdown(chat.getByRole("combobox", { name: "Model", exact: true }), "other-model");
+	await expect.poll(() => f.tickets()[0]!.executionSettings?.implementation).toMatchObject({ model: "other-model" });
+	expect(f.tickets()[0]!.executionSettings?.model).toBe("test-model");
+});
+
+test("inherited implementation Chat keeps model and thinking read-only with shared permissions", async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await setup(page, false, true, true);
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const chat = page.getByRole("tabpanel", { name: "Chat", exact: true });
+	await expect(chat.getByRole("combobox", { name: "Implementing agent", exact: true })).toHaveText("Same as planner");
+	await expect(chat.getByRole("combobox", { name: "Model", exact: true })).toBeDisabled();
+	await expect(chat.getByRole("combobox", { name: "Thinking level", exact: true })).toBeDisabled();
+	await expect(chat.getByRole("combobox", { name: "Permissions", exact: true })).toBeEnabled();
 });
 
 test("running ticket provider selection stays locked in Details and Chat", async ({ page }) => {
 	await setup(page, false, true);
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
-	await expect(dialog.getByRole("combobox", { name: "Model provider" })).toBeDisabled();
+	await expect(dialog.getByRole("combobox", { name: "Planning agent", exact: true })).toBeDisabled();
 	await dialog.getByRole("tab", { name: "Chat", exact: true }).click();
 	await expect(
-		dialog.getByRole("tabpanel", { name: "Chat", exact: true }).getByRole("combobox", { name: "Model provider" }),
+		dialog
+			.getByRole("tabpanel", { name: "Chat", exact: true })
+			.getByRole("combobox", { name: "Planning agent", exact: true }),
 	).toBeDisabled();
 });
 
@@ -857,6 +947,9 @@ const setup = async (
 	await page.goto("/");
 	await expect(page).toHaveURL("/tasks");
 	return {
+		setWorkflow: (value: Partial<TicketWorkflow>) => {
+			workflowOverride = value;
+		},
 		finishReset: () => {
 			delete tickets.find((ticket) => ticket.id === "TASK-1")!.resetting;
 			workflowOverride = { state: "idle", phase: "planning", plannerId: undefined, implementerId: undefined };
@@ -1738,7 +1831,7 @@ test("dropdowns retain unavailable models, skip disabled permissions and do not 
 	});
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
-	const model = dialog.getByRole("combobox", { name: "Model", exact: true });
+	const model = dialog.getByRole("combobox", { name: "Model", exact: true }).first();
 	await expect(model).toHaveText("retired-model");
 	const permissions = dialog.getByRole("combobox", { name: "Permissions", exact: true });
 	await permissions.press("Space");
@@ -1771,13 +1864,13 @@ test("inline ticket title saves independently and supports keyboard save and but
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 	const details = dialog.getByRole("tabpanel", { name: "Details" });
-	const settings = details.getByRole("group", { name: "Agent Settings" });
+	const settings = details.getByRole("group", { name: "Agent Settings", exact: true });
 	const description = details.getByLabel("Description", { exact: true });
 	const edit = dialog.getByRole("button", { name: /^Edit title:/ });
 	const title = dialog.getByRole("textbox", { name: "Title", exact: true });
 	await expect(edit).toHaveText("First task");
 	await expect(title).toHaveCount(0);
-	const model = settings.getByRole("combobox", { name: "Model", exact: true });
+	const model = settings.getByRole("combobox", { name: "Model", exact: true }).first();
 	const repositories = settings.getByRole("button", { name: "Repositories", exact: true });
 	await expect(model).toBeVisible();
 	await expect(repositories).toBeVisible();
@@ -1844,7 +1937,7 @@ test("backlog creation and scope saves retain failed drafts and share changes wi
 	await dialog.getByLabel("Title", { exact: true }).press("Enter");
 	await expect(dialog.getByRole("button", { name: /^Edit title:/ })).toHaveText("Updated task");
 	const editDescription = dialog.getByRole("button", { name: "Edit description" });
-	const settings = dialog.getByRole("group", { name: "Agent Settings" });
+	const settings = dialog.getByRole("group", { name: "Agent Settings", exact: true });
 	const settingsTop = (await settings.boundingBox())!.y;
 	await editDescription.click();
 	await expect(dialog.getByLabel("Description", { exact: true })).toBeFocused();
@@ -2200,14 +2293,14 @@ test("Backlog execution settings save before moving to Ready and survive reopeni
 	await expect(recommendations).toBeChecked();
 	await skip.check();
 	await expect(skip).toBeEnabled();
-	await chooseDropdown(panel.getByRole("combobox", { name: "Model", exact: true }), "test-model");
-	await chooseDropdown(panel.getByRole("combobox", { name: "Thinking level", exact: true }), "high");
+	await chooseDropdown(panel.getByRole("combobox", { name: "Model", exact: true }).first(), "test-model");
+	await chooseDropdown(panel.getByRole("combobox", { name: "Thinking level", exact: true }).first(), "high");
 	await chooseDropdown(panel.getByRole("combobox", { name: "Permissions", exact: true }), "approve-for-me");
 	await dragToReady(page);
 	await panel.getByRole("button", { name: "Close ticket" }).click();
 	await open.click();
-	await expectDropdownValue(panel.getByRole("combobox", { name: "Model", exact: true }), "test-model");
-	await expectDropdownValue(panel.getByRole("combobox", { name: "Thinking level", exact: true }), "high");
+	await expectDropdownValue(panel.getByRole("combobox", { name: "Model", exact: true }).first(), "test-model");
+	await expectDropdownValue(panel.getByRole("combobox", { name: "Thinking level", exact: true }).first(), "high");
 	await expect(skip).toBeChecked();
 	await expect(recommendations).toBeChecked();
 });
@@ -2216,17 +2309,21 @@ test("ticket Details and chat share settings and support skill and file completi
 	await setup(page, false, true);
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const panel = page.getByRole("dialog");
+	const chat = panel.getByRole("tabpanel", { name: "Chat", exact: true });
+	const planning = panel
+		.getByRole("tabpanel", { name: "Details", exact: true })
+		.getByRole("group", { name: "Planning agent settings", exact: true });
 	await expect(panel.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
-	await chooseDropdown(panel.getByRole("combobox", { name: "Thinking level", exact: true }), "high");
+	await chooseDropdown(chat.getByRole("combobox", { name: "Thinking level", exact: true }), "high");
 	await panel.getByRole("tab", { name: "Details", exact: true }).click();
 	await panel.getByRole("checkbox", { name: "Skip planning", exact: true }).check();
 	await expect(panel.getByRole("checkbox", { name: "Skip planning", exact: true })).toBeEnabled();
 	await panel.getByRole("checkbox", { name: "Accept recommendations", exact: true }).check();
 	await expect(panel.getByRole("checkbox", { name: "Accept recommendations", exact: true })).toBeEnabled();
-	await expectDropdownValue(panel.getByRole("combobox", { name: "Thinking level", exact: true }), "high");
-	await chooseDropdown(panel.getByRole("combobox", { name: "Model", exact: true }), "other-model");
+	await expectDropdownValue(planning.getByRole("combobox", { name: "Thinking level", exact: true }), "high");
+	await chooseDropdown(planning.getByRole("combobox", { name: "Model", exact: true }), "other-model");
 	await panel.getByRole("tab", { name: "Chat", exact: true }).click();
-	await expectDropdownValue(panel.getByRole("combobox", { name: "Thinking level", exact: true }), "");
+	await expectDropdownValue(chat.getByRole("combobox", { name: "Thinking level", exact: true }), "");
 	await chooseDropdown(panel.getByRole("combobox", { name: "Permissions", exact: true }), "full-access");
 	await expect(panel.getByRole("combobox", { name: "Permissions", exact: true })).toBeEnabled();
 	const message = panel.getByRole("textbox", { name: "Message", exact: true });
@@ -2245,7 +2342,7 @@ test("ticket Details and chat share settings and support skill and file completi
 		await pendingSave;
 		await route.fulfill({ status: 400, json: { error: "unsupported-settings" } });
 	});
-	await chooseDropdown(panel.getByRole("combobox", { name: "Model", exact: true }), "test-model");
+	await chooseDropdown(chat.getByRole("combobox", { name: "Model", exact: true }), "test-model");
 	await expect(panel.getByRole("button", { name: "Send message", exact: true })).toBeDisabled();
 	releaseSave();
 	await expect(page.getByRole("alert")).toContainText("selected model or thinking level is unavailable");
@@ -3371,6 +3468,7 @@ test("docked ticket switching guards drafts, retains one owner and restores the 
 	await page.goBack();
 	await expect(ticket).toBeVisible();
 	await page.goForward();
+	await expect(page.getByRole("dialog", { name: "TASK-2", exact: true })).toBeVisible();
 	await page.keyboard.press("Escape");
 	await expect(page).toHaveURL("/tasks");
 	await expect(first).toBeFocused();

@@ -68,6 +68,8 @@ export const AgentComposer = ({
 	completions = true,
 	settingsChanged,
 	settingsDisabled = false,
+	selectionDisabled = false,
+	providerDefault = false,
 }: {
 	id: string;
 	api: IWorkspaceApi;
@@ -83,6 +85,8 @@ export const AgentComposer = ({
 	completions?: boolean;
 	settingsChanged?: (settings: AgentSettings) => void;
 	settingsDisabled?: boolean;
+	selectionDisabled?: boolean;
+	providerDefault?: boolean;
 }) => {
 	const inputId = useId();
 	const listId = useId();
@@ -311,6 +315,8 @@ export const AgentComposer = ({
 						settings={selection}
 						options={options}
 						disabled={disabled || settingsDisabled}
+						selectionDisabled={selectionDisabled}
+						providerDefault={providerDefault}
 						change={selectSettings}
 					/>
 				) : (

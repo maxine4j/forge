@@ -405,6 +405,16 @@ node ollama-relay/tests/image-smoke.mjs
 
 ## Named-provider upgrades
 
+TASK-39 keeps planner selections in the existing top-level execution settings and
+adds optional implementation selections in the same JSON column. Missing settings
+inherit the planner. Workflow reads normalize legacy attempt-wide provider snapshots
+to both phase snapshots before recovery and subsequent saves. Existing agent
+records and inference routing remain unchanged; no turns are replayed. New phases
+pin independently, while linked implementation reuses pinned planner routing.
+See [ticket settings](tickets.md#ticket-execution-settings),
+[default resolution](agents.md#codex-harness-and-lifecycle) and
+[architecture](architecture.md#persistent-resources).
+
 TASK-34 adds `model_providers` and the versioned
 `named-model-providers-v1` migration. Startup initializes legacy tables, runs the
 migration transaction, then begins scheduler recovery. Fresh databases stay empty.

@@ -76,6 +76,22 @@ test("workflow intent and board movement are atomic, durable, and scheduled in b
 		expect(await jobs.pendingCleanup()).toEqual([done]);
 		await jobs.save({ ...done, workspaceCleaned: true });
 		expect(await jobs.pendingCleanup()).toEqual([]);
+
+		const legacySnapshot = { configuration: { kind: "ollama", endpoint: "http://original/v1", model: "original" } };
+		await db.run("UPDATE ticket_workflows SET record=? WHERE ticketId=?", [
+			JSON.stringify({ ...job, providerSnapshot: legacySnapshot }),
+			one.id,
+		]);
+		await db.close();
+		db = new SqliteDatabase(join(root, "db.sqlite"));
+		await db.initialize();
+		jobs = new TicketWorkflowStore(db);
+		const normalized = (await jobs.get(one.id))!;
+		expect(normalized.planningProviderSnapshot).toEqual(legacySnapshot);
+		expect(normalized.implementationProviderSnapshot).toEqual(legacySnapshot);
+		expect(normalized).not.toHaveProperty("providerSnapshot");
+		await jobs.save(normalized);
+		expect(await jobs.get(one.id)).toEqual(normalized);
 	} finally {
 		await db.close();
 		await rm(root, { recursive: true, force: true });

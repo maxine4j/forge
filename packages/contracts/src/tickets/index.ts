@@ -4,10 +4,28 @@ import { agentSettingsSchema, agentRequestSchema } from "../agents/index.ts";
 
 export const ticketExecutionSettingsSchema = agentSettingsSchema.extend({
 	providerId: z.uuid().optional(),
+	implementation: z
+		.discriminatedUnion("mode", [
+			z.strictObject({ mode: z.literal("same-as-planner") }),
+			agentSettingsSchema.omit({ permissions: true }).extend({ mode: z.literal("custom"), providerId: z.uuid() }),
+		])
+		.optional(),
 	skipPlanning: z.boolean().optional(),
 	acceptRecommendations: z.boolean().optional(),
 });
 export type TicketExecutionSettings = z.infer<typeof ticketExecutionSettingsSchema>;
+export type TicketAgentPhase = "planning" | "implementation";
+/** Preserve omitted overrides so dispatch can inherit current provider defaults. */
+export function ticketPhaseSettings(settings: TicketExecutionSettings = {}, phase: TicketAgentPhase) {
+	const selection =
+		phase === "implementation" && settings.implementation?.mode === "custom" ? settings.implementation : settings;
+	return {
+		providerId: selection.providerId,
+		model: selection.model,
+		reasoningEffort: selection.reasoningEffort,
+		permissions: settings.permissions,
+	};
+}
 
 export const ticketStatuses = ["backlog", "todo", "in-progress", "done"] as const;
 export const ticketStatusSchema = z.enum(ticketStatuses);
@@ -110,9 +128,20 @@ export type EditEpic = z.input<typeof editEpicSchema>;
 export type EpicSummary = z.infer<typeof epicSummarySchema>;
 export type EpicDetail = z.infer<typeof epicDetailSchema>;
 export const ticketWorkflowSchema = z.strictObject({
-	providerId: z.uuid().optional(),
-	providerName: z.string().optional(),
-	providerLocked: z.literal(true).optional(),
+	planningProvider: z
+		.strictObject({
+			providerId: z.uuid().optional(),
+			providerName: z.string().optional(),
+			providerLocked: z.literal(true),
+		})
+		.optional(),
+	implementationProvider: z
+		.strictObject({
+			providerId: z.uuid().optional(),
+			providerName: z.string().optional(),
+			providerLocked: z.literal(true),
+		})
+		.optional(),
 	providerSelectionError: z.boolean().optional(),
 	ticketId: ticketIdSchema,
 	executionRepositoryId: z.uuid().optional(),

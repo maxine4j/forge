@@ -31,6 +31,7 @@ export const Conversation = ({
 	executionSettings,
 	settingsChanged,
 	settingsDisabled,
+	selectionDisabled = false,
 	blocked = false,
 	readOnly = false,
 	drafts,
@@ -54,6 +55,7 @@ export const Conversation = ({
 	executionSettings?: import("@forge/contracts/agents").AgentSettings;
 	settingsChanged?: (settings: import("@forge/contracts/agents").AgentSettings) => void;
 	settingsDisabled?: boolean;
+	selectionDisabled?: boolean;
 	blocked?: boolean;
 	readOnly?: boolean;
 	drafts?: Map<string, string>;
@@ -421,6 +423,8 @@ export const Conversation = ({
 					settings={executionSettings ?? view.thread}
 					settingsChanged={settingsChanged}
 					settingsDisabled={settingsDisabled}
+					selectionDisabled={selectionDisabled}
+					providerDefault={!!messagePath}
 					completions={!readOnly}
 					contextWindow={messagePath ? view.contextWindow : undefined}
 					configurable={!readOnly}

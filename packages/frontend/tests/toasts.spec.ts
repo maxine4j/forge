@@ -134,6 +134,10 @@ test("request retries count once each and toasts survive application route chang
 	await page.getByRole("button", { name: "Create repository", exact: true }).click();
 	await expect(page.getByRole("alert")).toHaveText(`2x ${message}`);
 	await page.getByRole("button", { name: "Close repository form" }).click();
+	await page
+		.getByRole("dialog", { name: "Unsaved changes" })
+		.getByRole("button", { name: "Discard changes" })
+		.click();
 	await page.getByRole("link", { name: "Tasks", exact: true }).click();
 	await expect(page.getByRole("alert")).toHaveText(`2x ${message}`);
 });

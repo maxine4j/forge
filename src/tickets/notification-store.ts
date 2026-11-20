@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
-import { ticketWorkflowRecordSchema, type TicketWorkflowRecord } from "./types.ts";
+import { normalizeTicketWorkflow, type TicketWorkflowRecord } from "./types.ts";
 
 export function workflowNotificationKeys(job: TicketWorkflowRecord, status = "in-progress"): string[] {
 	const attempt = `${job.plannerId ?? ""}:${job.implementerId ?? ""}:${job.turnId ?? ""}`;
@@ -100,7 +100,7 @@ export class NotificationStore implements INotificationStore {
 			);
 			result.push(
 				...rows.map((row) =>
-					ticketWorkflowRecordSchema.parse(JSON.parse(z.object({ record: z.string() }).parse(row).record)),
+					normalizeTicketWorkflow(JSON.parse(z.object({ record: z.string() }).parse(row).record)),
 				),
 			);
 			if (rows.length < 500) return result;

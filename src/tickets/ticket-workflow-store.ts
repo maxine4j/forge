@@ -7,7 +7,7 @@ import { TicketError } from "./errors.ts";
 import type { INotificationStore } from "./notification-store.ts";
 import { historyMilestoneStatements, workflowMilestones } from "./ticket-history-store.ts";
 import { boardMoveStatements } from "./ticket-store.ts";
-import { ticketWorkflowRecordSchema, type TicketWorkflowRecord } from "./types.ts";
+import { normalizeTicketWorkflow, ticketWorkflowRecordSchema, type TicketWorkflowRecord } from "./types.ts";
 
 export interface ITicketWorkflowStore {
 	get(id: string): Promise<TicketWorkflowRecord | undefined>;
@@ -136,7 +136,7 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 	private async read(sql: string, parameters: string[]): Promise<TicketWorkflowRecord[]> {
 		try {
 			return (await this.database.all(sql, parameters)).map((row) =>
-				ticketWorkflowRecordSchema.parse(JSON.parse(z.object({ record: z.string() }).parse(row).record)),
+				normalizeTicketWorkflow(JSON.parse(z.object({ record: z.string() }).parse(row).record)),
 			);
 		} catch (cause) {
 			throw new TicketError("ticket-unavailable", { cause });

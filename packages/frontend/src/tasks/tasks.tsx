@@ -5,6 +5,7 @@ import {
 	type EpicSummary,
 	type CreateTicket,
 	type Ticket,
+	type TicketExecutionSettings,
 } from "@forge/contracts/tickets";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation, useSearchParams, useNavigate } from "react-router";
@@ -20,7 +21,6 @@ import {
 } from "../navigation/controller.tsx";
 import { InterfaceIcon } from "../navigation/interface-icon.tsx";
 import { SectionTabs, SectionTab } from "../section-tabs.tsx";
-import { ProviderSelection } from "../settings/model-providers.tsx";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { ToolbarButton } from "../toolbar-button.tsx";
 import { backlogFiltersKey, readBacklogFilters, type BacklogFilters } from "./backlog-filters.ts";
@@ -30,6 +30,7 @@ import { RepositorySelection } from "./repository-selection.tsx";
 import { TaskBacklog } from "./task-backlog.tsx";
 import { TaskBoard } from "./task-board.tsx";
 import { TaskNotifications } from "./task-notifications.tsx";
+import { TicketAgentSettings } from "./ticket-agent-settings.tsx";
 import { useTickets } from "./ticket-controller.tsx";
 const TicketEditor = ({
 	api,
@@ -53,10 +54,10 @@ const TicketEditor = ({
 	const [description, setDescription] = useState("");
 	const [repositoryIds, setRepositoryIds] = useState<string[]>([]);
 	const [epicId, setEpicId] = useState(initialEpic);
-	const [providerId, setProviderId] = useState("");
+	const [agentSettings, setAgentSettings] = useState<TicketExecutionSettings>({});
 	const [, setError] = useErrorState();
 	const release = useModalDraft(
-		!!(title || description || providerId || repositoryIds.length || epicId !== initialEpic),
+		!!(title || description || Object.keys(agentSettings).length || repositoryIds.length || epicId !== initialEpic),
 		busy,
 	);
 	const dismissal = useDialogDismissal(busy);
@@ -68,7 +69,7 @@ const TicketEditor = ({
 			description,
 			repositoryIds,
 			epicId,
-			executionSettings: { providerId: providerId || undefined },
+			executionSettings: agentSettings,
 		});
 		if (!input.success) {
 			setError("Enter a title up to 120 characters and a description up to 4000 characters.");
@@ -92,7 +93,21 @@ const TicketEditor = ({
 				</button>
 			</div>
 			<form onSubmit={(event) => void submit(event)}>
-				<ProviderSelection api={api} value={providerId} change={setProviderId} disabled={busy} />
+				<TicketAgentSettings
+					api={api}
+					phase='planning'
+					settings={agentSettings}
+					change={setAgentSettings}
+					disabled={busy}
+					permissions
+				/>
+				<TicketAgentSettings
+					api={api}
+					phase='implementation'
+					settings={agentSettings}
+					change={setAgentSettings}
+					disabled={busy}
+				/>
 				<label>
 					Title
 					<input

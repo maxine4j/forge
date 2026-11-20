@@ -47,6 +47,7 @@ test("SQLite allocates global sequential ticket keys, preserves global order and
 		model: "catalog-model",
 		reasoningEffort: "high",
 		permissions: "approve-for-me",
+		implementation: { mode: "custom", providerId: otherId, model: "implementation-model", reasoningEffort: "low" },
 	});
 	await db.close();
 	const reopened = new SqliteDatabase(path);
@@ -57,6 +58,7 @@ test("SQLite allocates global sequential ticket keys, preserves global order and
 	expect(await persisted.get(b.id)).toMatchObject({ status: "done", repositoryIds: [projectId] });
 	expect(await persisted.get(a.id)).toMatchObject({ title: "Edited", description: "Updated", status: "backlog" });
 	expect((await persisted.get(a.id))?.executionSettings).toEqual({
+		implementation: { mode: "custom", providerId: otherId, model: "implementation-model", reasoningEffort: "low" },
 		skipPlanning: true,
 		acceptRecommendations: true,
 		model: "catalog-model",

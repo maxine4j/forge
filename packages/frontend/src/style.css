@@ -1667,6 +1667,12 @@
 	width: 100%;
 	max-width: none;
 }
+.ticket-agent-selection {
+	min-width: 0;
+}
+.ticket-chat > .ticket-agent-selection {
+	flex-shrink: 0;
+}
 .ticket-agent-settings .ticket-repositories {
 	margin: 10px 0 0;
 }

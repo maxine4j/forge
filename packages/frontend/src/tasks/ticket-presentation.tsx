@@ -69,7 +69,8 @@ export const useDockedDismissal = (presentation: TicketPresentation, busy: boole
 			// Resolve the current owner at action time so Escape consumes only that surface.
 			navigation.dismiss();
 		};
-		document.addEventListener("keydown", escape, true);
-		return () => document.removeEventListener("keydown", escape, true);
+		// Nested controls consume Escape before the docked surface dismisses.
+		document.addEventListener("keydown", escape);
+		return () => document.removeEventListener("keydown", escape);
 	}, [presentation, busy, navigation]);
 };

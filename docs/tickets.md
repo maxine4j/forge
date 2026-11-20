@@ -335,21 +335,21 @@ readable through Codex.
 
 Browser contracts are exported from `@forge/contracts/tickets`:
 
-| Route                                | Contract                                                                                                                              |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET/POST /api/tickets`              | Ordered active tickets with attention flags and optional derived `agentStatus` / create scope and ordered repository references.      |
-| `GET/PATCH /api/tickets/:id`         | Read by ticket ID / edit scope and references in Backlog.                                                                             |
-| `POST /api/tickets/:id/archive`      | Archive an eligible ticket and return it with `archivedAt`. Safe to retry.                                                            |
-| `POST /api/tickets/:id/move`         | Reorder, start Backlog, return Ready/In progress to Backlog, or abandon In progress to Ready, with optional beforeId.                 |
-| `POST /api/tickets/:id/clear-plan`   | Clear plan and approval on a settled Backlog ticket; returns workflow. Idempotent.                                                    |
-| `GET /api/tickets/:id/model-options` | Catalog for the current phase's pinned provider, or the global selection before an agent exists. Independent of repository readiness. |
-| `GET /api/tickets/:id/workflow`      | Current plan revision, phase, execution state and Forge conversation/workspace IDs.                                                   |
-| `POST /api/tickets/:id/approve`      | Approve the current idle plan with `{revision}`.                                                                                      |
-| `POST /api/tickets/:id/messages`     | Queue feedback, or steer implementation/rebase with `{text,expectedTurnId}`.                                                          |
-| `POST /api/tickets/:id/merge`        | Queue a legacy review candidate or retry a failed merge.                                                                              |
-| `POST /api/tickets/:id/reconcile`    | Reconcile uncertain execution, retry failed setup, or retry pending abandonment cleanup.                                              |
-| `GET/PATCH /api/board/settings`      | Read settings or update `maxAgents` and ticket dispatch (`running` or `paused`).                                                      |
-| `POST /api/board/settings/stop`      | Stop ticket dispatch and return interruption request and failure counts.                                                              |
+| Route                                                               | Contract                                                                                                                                                   |
+| ------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET/POST /api/tickets`                                             | Ordered active tickets with attention flags and optional derived `agentStatus` / create scope and ordered repository references.                           |
+| `GET/PATCH /api/tickets/:id`                                        | Read by ticket ID / edit scope and references in Backlog.                                                                                                  |
+| `POST /api/tickets/:id/archive`                                     | Archive an eligible ticket and return it with `archivedAt`. Safe to retry.                                                                                 |
+| `POST /api/tickets/:id/move`                                        | Reorder, start Backlog, return Ready/In progress to Backlog, or abandon In progress to Ready, with optional beforeId.                                      |
+| `POST /api/tickets/:id/clear-plan`                                  | Clear plan and approval on a settled Backlog ticket; returns workflow. Idempotent.                                                                         |
+| `GET /api/tickets/:id/model-options?phase=planning\|implementation` | Optional phase selects that phase's thread, routing snapshot or configured provider. Omission uses the current phase. Independent of repository readiness. |
+| `GET /api/tickets/:id/workflow`                                     | Current plan revision, phase, execution state and Forge conversation/workspace IDs.                                                                        |
+| `POST /api/tickets/:id/approve`                                     | Approve the current idle plan with `{revision}`.                                                                                                           |
+| `POST /api/tickets/:id/messages`                                    | Queue feedback, or steer implementation/rebase with `{text,expectedTurnId}`.                                                                               |
+| `POST /api/tickets/:id/merge`                                       | Queue a legacy review candidate or retry a failed merge.                                                                                                   |
+| `POST /api/tickets/:id/reconcile`                                   | Reconcile uncertain execution, retry failed setup, or retry pending abandonment cleanup.                                                                   |
+| `GET/PATCH /api/board/settings`                                     | Read settings or update `maxAgents` and ticket dispatch (`running` or `paused`).                                                                           |
+| `POST /api/board/settings/stop`                                     | Stop ticket dispatch and return interruption request and failure counts.                                                                                   |
 
 Ticket conversations reuse the private agent read, resume, interrupt, reply and
 SSE APIs. Idle and failed ticket messages dispatch through the scheduler, and ticket threads stay
@@ -529,7 +529,7 @@ ticket cleanup.
 Tickets use the exported `TicketExecutionSettings` type and
 `ticketExecutionSettingsSchema`, extending agent settings with optional boolean
 `skipPlanning` and `acceptRecommendations`. Missing flags mean false.
-Tickets accept optional `executionSettings: {providerId?, model?, reasoningEffort?, permissions?, skipPlanning?, acceptRecommendations?}`
+Tickets accept optional `executionSettings: {providerId?, model?, reasoningEffort?, implementation?, permissions?, skipPlanning?, acceptRecommendations?}`
 on creation and return the saved selection on reads. Owner-authorized
 `PATCH /api/tickets/:id/settings` replaces that selection independently of Backlog
 scope editing, with exact-origin checks. The title above the ticket tabs saves
@@ -542,8 +542,15 @@ with checkboxes, chips in selection order, Clear repositories, and loading and
 retryable error states. Toggling or clearing keeps the popup open; Escape, Tab or
 an outside click dismisses it. Keyboard navigation and typeahead match repository
 names. Busy controls and disabled fieldsets prevent changes.
-Model, thinking and permissions are shared with the chat composer. Changes save immediately and
-remain shared across polling, reopening and planner-to-implementer transitions.
+The top-level provider, model and reasoning effort select the **Planning agent**.
+Optional `implementation` is `{mode: "same-as-planner"}` or
+`{mode: "custom", providerId, model?, reasoningEffort?}`. Missing implementation
+means Same as planner, preserving legacy tickets. **Implementing agent** starts
+linked and shows inherited selections read-only; choosing a named provider enables
+independent overrides, initially **Provider default**. Planning overrides also
+start at Provider default. Permissions remain shared across both phases.
+Details and Chat save immediately through the same settings endpoint and retain
+selections across polling and reopening. Chat edits target the active phase.
 Two independent checkboxes beneath the repository picker save immediately:
 **Skip planning** starts implementation with a saved plan when available or the
 current scope otherwise. **Accept recommendations** instructs every dispatched
@@ -551,8 +558,8 @@ ticket turn, including feedback and rebase, to choose the recommended
 option, make reasonable assumptions and continue without preference or
 clarification questions. Manual plan approval and tool permissions still apply.
 Controls are disabled while saving, resetting, Done or archived; failures show the
-existing save error. Details and Chat updates preserve all five settings.
-Both flags persist in the existing executionSettings JSON column; existing records
+existing save error. Details and Chat updates preserve the other phase's settings.
+All selections persist in the existing executionSettings JSON column; existing records
 need no database migration. Standalone chat settings remain unchanged.
 
 Initial phase selection uses implementation when a saved plan exists or Skip
@@ -569,18 +576,30 @@ Creation, Details and Chat use the shared provider dropdown and selected provide
 model catalog. Switching providers clears explicit model/thinking overrides while
 preserving flags and validating permission compatibility.
 
-Selection can change before execution begins. First dispatch persists an internal
-attempt snapshot of provider identity and inference configuration, shared by
-planning, implementation, feedback, rebase and recovery. Provider edits/retirement
-cannot reroute an existing attempt. Selection locks until the existing return to
-Backlog/reset flow completes. Public workflow summaries expose identity/name and
-the lock, never endpoint configuration. Legacy running attempts are seeded from
-their existing agent, preserving implicit OpenAI and unmapped historical routing;
+Each phase pins provider identity and inference configuration immediately before
+its first thread creation, under workflow serialization, persisting before external
+setup. Implementation selection can change until its own snapshot exists.
+Changes that reroute a pinned phase conflict; model/thinking edits still apply to
+subsequent turns. Linked implementation reuses pinned planner routing when available.
+Skip planning resolves planner configuration without creating a planner thread and
+pins it for implementation, preventing later planner-provider edits from rerouting it.
+Planning feedback uses planner settings; implementation feedback and rebases use
+implementer settings. Provider edits/retirement cannot reroute a pinned phase.
+Public summaries expose only `planningProvider` and `implementationProvider`
+identity/name/lock metadata, never endpoint configuration. Legacy attempt-wide
+snapshots normalize to both phases before recovery, preserving implicit OpenAI
+and unmapped historical routing;
 see [upgrade](development.md#named-provider-upgrades).
 
 Other model, reasoning, permission and ticket flag changes retain their next-turn
 behavior. OpenAI defaults live in its provider editor; Ollama inherits its single
-configured tag. Explicit settings are validated against the attempt's provider.
+configured tag. Same as planner resolves the saved planner selection on every turn;
+unset overrides remain unset through dispatch so current provider defaults resolve
+on every turn in either phase. Explicit overrides remain fixed. Provider-default
+edits refresh both UI catalogs without materializing inherited selections. See
+[agent default resolution](agents.md#codex-harness-and-lifecycle) and
+[persistence architecture](architecture.md#persistent-resources).
+Explicit settings are validated against each phase's provider.
 Unsupported settings require choosing Default or a compatible permission mode.
 Only model, reasoning effort and permissions reach the runtime. Capacity,
 reservations, pause/stop and standalone concurrency remain unchanged.

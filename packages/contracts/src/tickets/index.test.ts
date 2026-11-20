@@ -8,7 +8,36 @@ import {
 	ticketsSchema,
 	ticketStatuses,
 	ticketExecutionSettingsSchema,
+	ticketPhaseSettings,
 } from "./index.ts";
+
+test("phase selections parse strictly and legacy tickets inherit without materializing defaults", () => {
+	const providerId = "123e4567-e89b-42d3-a456-426614174001";
+	const legacy = ticketExecutionSettingsSchema.parse({ providerId, permissions: "ask" });
+	expect(ticketPhaseSettings(legacy, "implementation")).toEqual(ticketPhaseSettings(legacy, "planning"));
+	expect(ticketPhaseSettings(legacy, "implementation").model).toBeUndefined();
+	const settings = ticketExecutionSettingsSchema.parse({
+		...legacy,
+		implementation: { mode: "custom", providerId, model: "other", reasoningEffort: "high" },
+	});
+	expect(ticketPhaseSettings(settings, "implementation")).toMatchObject({
+		providerId,
+		model: "other",
+		reasoningEffort: "high",
+		permissions: "ask",
+	});
+	expect(ticketPhaseSettings(settings, "planning").model).toBeUndefined();
+	for (const implementation of [
+		{ mode: "custom" },
+		{ mode: "same-as-planner", model: "other" },
+		{ mode: "custom", providerId, permissions: "full-access" },
+		{ mode: "unknown" },
+	])
+		expect(ticketExecutionSettingsSchema.safeParse({ implementation }).success).toBe(false);
+	expect(
+		ticketPhaseSettings({ ...settings, implementation: { mode: "same-as-planner" } }, "implementation").model,
+	).toBeUndefined();
+});
 
 test("ticket collections can include retained archives beyond active board capacity", () => {
 	const archived = Array.from({ length: 1001 }, (_, index) => ({

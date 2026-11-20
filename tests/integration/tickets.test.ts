@@ -161,6 +161,10 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	expect(unassigned).toMatchObject({ repositoryIds: [] });
 	expect((await request(`tickets/${unassigned.id}/move`, "POST", { status: "todo" })).status).toBe(409);
 	expect((await request(`tickets/${unassigned.id}/model-options`)).status).toBe(200);
+	for (const phase of ["planning", "implementation"])
+		expect((await request(`tickets/${unassigned.id}/model-options?phase=${phase}`)).status).toBe(200);
+	for (const phase of ["", "review", "rebase", "planning&phase=implementation"])
+		expect((await request(`tickets/${unassigned.id}/model-options?phase=${phase}`)).status).toBe(400);
 	await request(`tickets/${unassigned.id}/archive`, "POST");
 	expect(await (await request("tickets")).json()).toEqual([]);
 	expect(await (await request("tickets?includeArchived=false")).json()).toEqual([]);

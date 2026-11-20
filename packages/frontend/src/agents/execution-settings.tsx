@@ -11,12 +11,18 @@ export const ExecutionSettings = ({
 	change,
 	disabled = false,
 	configureDefaults = false,
+	hidePermissions = false,
+	providerDefault = false,
+	selectionDisabled = false,
 }: {
 	settings: AgentSettings;
 	options?: AgentOptions;
 	change: (settings: AgentSettings) => void;
 	disabled?: boolean;
 	configureDefaults?: boolean;
+	hidePermissions?: boolean;
+	providerDefault?: boolean;
+	selectionDisabled?: boolean;
 }) => {
 	const defaults = options && resolveAgentSettings(options, {});
 	const effective = options && resolveAgentSettings(options, { model: settings.model });
@@ -30,7 +36,7 @@ export const ExecutionSettings = ({
 				<Dropdown
 					aria-label={configureDefaults ? "Default model" : "Model"}
 					value={settings.model ?? ""}
-					disabled={disabled || (!options && !configureDefaults)}
+					disabled={disabled || selectionDisabled || (!options && !configureDefaults)}
 					onChange={(value) => {
 						const model = value || undefined;
 						const updated = { ...settings, model };
@@ -44,7 +50,7 @@ export const ExecutionSettings = ({
 					}}
 				>
 					<DropdownOption value=''>
-						{configureDefaults ? "Codex default" : "Default model"}
+						{configureDefaults ? "Codex default" : providerDefault ? "Provider default" : "Default model"}
 						{defaults?.model ? ` (${defaults.model.name})` : ""}
 					</DropdownOption>
 					{settings.model && !options?.models.some((value) => value.id === settings.model) && (
@@ -62,11 +68,15 @@ export const ExecutionSettings = ({
 				<Dropdown
 					aria-label={configureDefaults ? "Default thinking" : "Thinking level"}
 					value={settings.reasoningEffort ?? ""}
-					disabled={disabled || (!options && !configureDefaults)}
+					disabled={disabled || selectionDisabled || (!options && !configureDefaults)}
 					onChange={(value) => change({ ...settings, reasoningEffort: value || undefined })}
 				>
 					<DropdownOption value=''>
-						{configureDefaults ? "Codex default" : "Default thinking"}
+						{configureDefaults
+							? "Codex default"
+							: providerDefault
+								? "Provider default"
+								: "Default thinking"}
 						{thinking ? ` (${thinking})` : ""}
 					</DropdownOption>
 					{settings.reasoningEffort
@@ -82,7 +92,7 @@ export const ExecutionSettings = ({
 					))}
 				</Dropdown>
 			</Field>
-			{!configureDefaults && (
+			{!configureDefaults && !hidePermissions && (
 				<Dropdown
 					aria-label='Permissions'
 					value={settings.permissions ?? "ask"}

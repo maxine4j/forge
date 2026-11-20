@@ -269,9 +269,14 @@ and a configuration snapshot precede workspace allocation. The creation selector
 starts unselected. Existing chats retain their saved inference configuration.
 Public agent summaries expose provider ID/name, never inference endpoints.
 
-Tickets snapshot provider identity and configuration at their first dispatch.
-Planning, implementation, follow-ups, rebase and recovery use that attempt snapshot,
-including after provider edits or retirement. There is no provider fallback.
+Tickets snapshot provider identity and configuration separately before each phase's
+first thread creation. Planning and plan feedback use planner settings;
+implementation, implementation feedback and rebase use implementer settings.
+Same as planner inherits the saved planner selection on every turn and reuses its
+pinned routing. Skip planning creates only an implementation thread. Omitted model
+and thinking overrides reach the agent service unchanged, inheriting current
+provider defaults each turn; explicit overrides remain fixed. Routing snapshots
+survive provider edits, retirement, setup retries and recovery. There is no provider fallback.
 Legacy agent records without a provider still mean OpenAI; upgrade never rewrites
 their inference snapshots or replays dispatched turns. See
 [ticket selection and reset](tickets.md#ticket-execution-settings) and

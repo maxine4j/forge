@@ -22,12 +22,16 @@ export function ProviderSelection({
 	change,
 	disabled = false,
 	name,
+	label = "Model provider",
+	emptyLabel = "Select a provider",
 }: {
 	api: IWorkspaceApi;
 	value?: string;
 	change: (id: string) => void;
 	disabled?: boolean;
 	name?: string;
+	label?: string;
+	emptyLabel?: string;
 }) {
 	const [providers, setProviders] = useState<ModelProvider[]>([]);
 	const revision = useContext(AgentOptionsRevision);
@@ -48,9 +52,9 @@ export function ProviderSelection({
 	}, [api, notify, revision]);
 	return (
 		<label>
-			Model provider
-			<Dropdown aria-label='Model provider' value={value ?? ""} disabled={disabled} onChange={change}>
-				<DropdownOption value=''>{disabled && name ? name : "Select a provider"}</DropdownOption>
+			{label}
+			<Dropdown aria-label={label} value={value ?? ""} disabled={disabled} onChange={change}>
+				<DropdownOption value=''>{disabled && name ? name : emptyLabel}</DropdownOption>
 				{value && !providers.some((p) => p.id === value) && (
 					<DropdownOption value={value} disabled>
 						{name ?? "Unavailable provider"}

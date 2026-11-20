@@ -1,4 +1,4 @@
-import { ticketNotificationsSchema, ticketWorkflowSchema, type TicketNotification } from "@forge/contracts/tickets";
+import { ticketNotificationsSchema, type TicketNotification } from "@forge/contracts/tickets";
 
 import type { IAgentThreadStore } from "../agents/agent-thread-store.ts";
 import type { IAccessService } from "../auth/access-service.ts";
@@ -6,6 +6,7 @@ import type { Actor } from "../auth/types.ts";
 import type { IEpicStore } from "../epics/epic-store.ts";
 import { workflowNotificationKeys, type INotificationStore } from "./notification-store.ts";
 import type { ITicketService } from "./ticket-service.ts";
+import { ticketWorkflowSummary } from "./types.ts";
 
 export class NotificationService {
 	constructor(
@@ -42,7 +43,7 @@ export class NotificationService {
 			const ticket = tickets.find((ticket) => ticket.id === job.ticketId);
 			if (!ticket || ticket.archivedAt) continue;
 			const epic = epics.find((epic) => epic.id === ticket.epicId);
-			const workflow = ticketWorkflowSchema.strip().parse(job);
+			const workflow = ticketWorkflowSummary(job);
 			const context = { ticket: { ...ticket, needsAttention: true as const }, epic, workflow };
 			const keys = workflowNotificationKeys(job, ticket.status);
 			for (const item of metadata.filter(

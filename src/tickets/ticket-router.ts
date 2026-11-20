@@ -48,7 +48,10 @@ export class TicketRouter implements IHttpRouter {
 		});
 		router.get("/api/tickets/:id/model-options", async (ctx) => {
 			await this.service.get(ctx.state.actor, ctx.params["id"]!);
-			ctx.body = agentOptionsSchema.parse(await this.workflow.options(ctx.state.actor, ctx.params["id"]!));
+			const phase = ctx.query["phase"];
+			if (phase !== undefined && phase !== "planning" && phase !== "implementation")
+				throw new TicketError("invalid-request");
+			ctx.body = agentOptionsSchema.parse(await this.workflow.options(ctx.state.actor, ctx.params["id"]!, phase));
 		});
 		router.patch("/api/tickets/:id/settings", async (ctx) => {
 			const settings = ticketExecutionSettingsSchema.safeParse(ctx.request.body);

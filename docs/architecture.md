@@ -124,8 +124,11 @@ DTOs and excludes archived tickets and abandoned/superseded attempts. See
   are stored locally on the mounted volume.
 - SQLite also stores named model providers with stable IDs, immutable kinds and
   retirement records. Partial unique indexes enforce active names and one OpenAI
-  provider. Versioned migration runs before scheduler recovery; attempt snapshots
-  keep inference routing private and immutable across ticket phases. See
+  provider. Versioned migration runs before scheduler recovery; phase-specific
+  snapshots keep inference routing private and immutable once each phase starts.
+  Legacy attempt snapshots normalize to both phases before recovery. Selections
+  remain in the ticket execution-settings JSON, with linked implementation resolving
+  planner overrides per turn. See [ticket settings](tickets.md#ticket-execution-settings),
   [provider APIs](foundation.md#model-providers), [execution](agents.md#codex-harness-and-lifecycle)
   and [upgrades](development.md#named-provider-upgrades).
 - SQLite holds repositories (internally `projects`), board-owned tickets and ordered
