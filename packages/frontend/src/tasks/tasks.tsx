@@ -5,7 +5,6 @@ import {
 	type EpicSummary,
 	type CreateTicket,
 	type Ticket,
-	type TicketExecutionSettings,
 } from "@forge/contracts/tickets";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation, useSearchParams, useNavigate } from "react-router";
@@ -30,7 +29,6 @@ import { RepositorySelection } from "./repository-selection.tsx";
 import { TaskBacklog } from "./task-backlog.tsx";
 import { TaskBoard } from "./task-board.tsx";
 import { TaskNotifications } from "./task-notifications.tsx";
-import { TicketAgentSettings } from "./ticket-agent-settings.tsx";
 import { useTickets } from "./ticket-controller.tsx";
 const TicketEditor = ({
 	api,
@@ -50,18 +48,18 @@ const TicketEditor = ({
 	initialEpic: string | null;
 }) => {
 	const dialog = useRef<HTMLDialogElement>(null);
+	const titleInput = useRef<HTMLInputElement>(null);
 	const [title, setTitle] = useState("");
 	const [description, setDescription] = useState("");
 	const [repositoryIds, setRepositoryIds] = useState<string[]>([]);
 	const [epicId, setEpicId] = useState(initialEpic);
-	const [agentSettings, setAgentSettings] = useState<TicketExecutionSettings>({});
 	const [, setError] = useErrorState();
-	const release = useModalDraft(
-		!!(title || description || Object.keys(agentSettings).length || repositoryIds.length || epicId !== initialEpic),
-		busy,
-	);
+	const release = useModalDraft(!!(title || description || repositoryIds.length || epicId !== initialEpic), busy);
 	const dismissal = useDialogDismissal(busy);
 	useModalDialog(dialog, visible);
+	useEffect(() => {
+		if (visible) titleInput.current?.focus();
+	}, [visible]);
 	const submit = async (event: FormEvent) => {
 		event.preventDefault();
 		const input = createTicketSchema.safeParse({
@@ -69,7 +67,6 @@ const TicketEditor = ({
 			description,
 			repositoryIds,
 			epicId,
-			executionSettings: agentSettings,
 		});
 		if (!input.success) {
 			setError("Enter a title up to 120 characters and a description up to 4000 characters.");
@@ -93,24 +90,10 @@ const TicketEditor = ({
 				</button>
 			</div>
 			<form onSubmit={(event) => void submit(event)}>
-				<TicketAgentSettings
-					api={api}
-					phase='planning'
-					settings={agentSettings}
-					change={setAgentSettings}
-					disabled={busy}
-					permissions
-				/>
-				<TicketAgentSettings
-					api={api}
-					phase='implementation'
-					settings={agentSettings}
-					change={setAgentSettings}
-					disabled={busy}
-				/>
 				<label>
 					Title
 					<input
+						ref={titleInput}
 						autoFocus
 						required
 						maxLength={120}

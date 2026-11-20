@@ -376,9 +376,7 @@ for (const width of [1280, 390]) {
 	});
 }
 
-test("ticket creation selects a named provider and switching clears overrides while retaining ticket flags", async ({
-	page,
-}) => {
+test("ticket creation omits agent settings and provider switching retains ticket flags", async ({ page }) => {
 	const f = await setup(page);
 	const other = "123e4567-e89b-42d3-a456-426614174099";
 	await page.route("**/api/model-providers", (route) =>
@@ -407,12 +405,26 @@ test("ticket creation selects a named provider and switching clears overrides wh
 	);
 	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
 	const editor = page.getByRole("dialog", { name: "Create ticket", exact: true });
-	await expectDropdownValue(editor.getByRole("combobox", { name: "Planning agent", exact: true }), "");
-	await chooseDropdown(editor.getByRole("combobox", { name: "Planning agent", exact: true }), projectId);
+	const fields = [
+		editor.getByLabel("Title", { exact: true }),
+		editor.getByLabel("Description", { exact: true }),
+		editor.getByRole("button", { name: "Repositories", exact: true }),
+		editor.getByRole("combobox", { name: "Epic", exact: true }),
+	];
+	for (const field of fields) await expect(field).toBeVisible();
+	await expect(fields[0]!).toBeFocused();
+	const positions = await Promise.all(fields.map(async (field) => (await field.boundingBox())!.y));
+	expect(positions).toEqual([...positions].sort((a, b) => a - b));
+	await expect(editor.getByRole("group", { name: /agent settings/ })).toHaveCount(0);
 	await editor.getByLabel("Title", { exact: true }).fill("Named ticket");
+	const request = page.waitForRequest(
+		(request) => new URL(request.url()).pathname === "/api/tickets" && request.method() === "POST",
+	);
 	await editor.getByRole("button", { name: "Create", exact: true }).click();
+	expect((await request).postDataJSON()).not.toHaveProperty("executionSettings");
 	await expect(editor).toHaveCount(0);
-	expect(f.tickets().at(-1)?.executionSettings?.providerId).toBe(projectId);
+	expect(f.tickets().at(-1)).toMatchObject({ title: "Named ticket", status: "backlog" });
+	expect(f.tickets().at(-1)?.executionSettings).toBeUndefined();
 	f.tickets()[0]!.executionSettings = {
 		providerId: projectId,
 		model: "test-model",
@@ -449,15 +461,7 @@ test("ticket phases start inherited, unlink independently, save immediately and 
 	const f = await setup(page);
 	await page.getByRole("button", { name: "Create ticket", exact: true }).click();
 	const editor = page.getByRole("dialog", { name: "Create ticket", exact: true });
-	await expectDropdownValue(editor.getByRole("combobox", { name: "Planning agent", exact: true }), "");
-	await expect(editor.getByRole("combobox", { name: "Implementing agent", exact: true })).toHaveText(
-		"Same as planner",
-	);
-	await expect(
-		editor
-			.getByRole("group", { name: "Implementing agent settings", exact: true })
-			.getByRole("combobox", { name: "Model", exact: true }),
-	).toBeDisabled();
+	await expect(editor.getByRole("group", { name: /agent settings/ })).toHaveCount(0);
 	await editor.getByRole("button", { name: "Cancel", exact: true }).click();
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });

@@ -133,7 +133,9 @@ titles and hover text, and status hover text exposes the full label. Indicators
 align to the right edge of the title column before the status pill, stay vertically
 centered and do not shrink. Arrow keys, Home and End
 select views; ticket-open buttons and dialog tabs support keyboard navigation.
-Creation starts in Backlog. Scope and repository selection remain editable only
+The creation form contains Title, Description, Repositories and Epic, in that order.
+Creation starts in Backlog with unset execution settings; configure agents in ticket
+details before execution. Scope and repository selection remain editable only
 in Backlog status, regardless of selected view; Ready and In progress retain
 their chat workflow. Inline editing, search, table reordering, bulk
 actions, sprints, priorities and assignees are deferred.
@@ -572,7 +574,7 @@ not approve a pending plan or interrupt work.
 Draft tickets may omit `providerId`. Moving to Todo requires a valid active
 [named provider](foundation.md#model-providers), and dispatch rechecks selection.
 Missing/retired selections produce an actionable error without falling back.
-Creation, Details and Chat use the shared provider dropdown and selected provider's
+Details and Chat use the shared provider dropdown and selected provider's
 model catalog. Switching providers clears explicit model/thinking overrides while
 preserving flags and validating permission compatibility.
 
