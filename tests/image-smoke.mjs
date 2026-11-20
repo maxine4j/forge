@@ -62,6 +62,27 @@ try {
 	for (const command of ["git", "gh", "python3", "go", "uv", "tini", "bash"])
 		assert.ok(docker("exec", name, "/bin/bash", "-c", `command -v ${command}`));
 	assert.match(docker("exec", name, "codex", "--version"), /0\.164\.0/);
+	assert.equal(
+		execute(`
+		import assert from 'node:assert/strict';
+		import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+		import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+		const transport = new StdioClientTransport({command:process.execPath,args:['/app/dist/typescript-lsp/main.js','/opt/forge-lsp-fixture'],cwd:'/opt/forge-lsp-fixture'});
+		const client = new Client({name:'forge-image-smoke',version:'1'});
+		try {
+			await client.connect(transport);
+			assert.equal((await client.listTools()).tools.length,6);
+			const hover = await client.callTool({name:'hover',arguments:{path:'index.ts',line:0,character:14}});
+			assert.ok(!hover.isError,JSON.stringify(hover));
+			assert.match(JSON.stringify(hover),/string/);
+			const diagnostics = await client.callTool({name:'diagnostics',arguments:{path:'index.ts'}});
+			assert.ok(!diagnostics.isError,JSON.stringify(diagnostics));
+			assert.deepEqual(diagnostics.structuredContent.result,[]);
+			console.log('typescript-lsp-ok');
+		} finally { await client.close(); }
+	`),
+		"typescript-lsp-ok",
+	);
 	assert.equal(Object.keys(inspect.HostConfig.PortBindings ?? {}).length, 0);
 	const nested = (...args) => docker("exec", name, "docker", "--host", "unix:///run/forge/docker.sock", ...args);
 	await waitFor(() => assert.equal(nested("info", "--format", "{{.Driver}}"), "vfs"));

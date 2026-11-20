@@ -30,7 +30,7 @@ afterEach(async () => {
 	for (const fn of cleanup.splice(0).reverse()) await fn();
 });
 const owner = { username: "owner" };
-const setup = async () => {
+const setup = async (release?: (path: string) => Promise<void>) => {
 	const root = await files.mkdtemp(join(tmpdir(), "forge-workspaces-"));
 	cleanup.push(() => files.rm(root, { recursive: true, force: true }));
 	const db = new SqliteDatabase(join(root, "forge.sqlite"));
@@ -46,7 +46,7 @@ const setup = async () => {
 	const project = await projects.create(owner, { name: "Example" });
 	const store = new WorkspaceStore(db);
 	await store.initialize();
-	const client = new WorkspaceClient(root, files, git, repositories);
+	const client = new WorkspaceClient(root, files, git, repositories, release);
 	const service = new WorkspaceService(
 		store,
 		client,
@@ -58,6 +58,26 @@ const setup = async () => {
 	);
 	return { root, db, git, store, client, service, project, projects, access };
 };
+
+test("cleanup awaits runtime release and retains the checkout if closure fails", async () => {
+	let fail = true;
+	let released = "";
+	const { service, project, store } = await setup(async (path) => {
+		expect((await files.stat(path)).isDirectory()).toBe(true);
+		released = path;
+		if (fail) throw new Error("Runtime still closing");
+	});
+	const workspace = await service.create(owner, project.id, { name: "Ticket" });
+	const { path } = await service.resolve(owner, workspace.id);
+	await expect(service.cleanupAbandoned(owner, workspace.id)).rejects.toThrow();
+	expect(released).toBe(await files.realpath(path));
+	expect((await files.stat(path)).isDirectory()).toBe(true);
+	expect((await store.get(workspace.id))?.status).toBe("ready");
+	fail = false;
+	await service.cleanupAbandoned(owner, workspace.id);
+	expect((await store.get(workspace.id))?.status).toBe("archived");
+	await expect(files.stat(path)).rejects.toThrow();
+});
 
 test("abandonment discards dirty unmerged work and retries branch deletion without losing metadata", async () => {
 	const { service, project, git, root, store, client } = await setup();

@@ -4,7 +4,7 @@ import type { ICodexAgentConnection } from "../accounts/codex-connection.ts";
 import { CodexRpcError } from "../accounts/codex-connection.ts";
 import { CodexAgentClient } from "./codex-agent-client.ts";
 
-const setup = (tracker?: { track: ReturnType<typeof vi.fn> }) => {
+const setup = (tracker?: { track: ReturnType<typeof vi.fn> }, typescriptMcp?: { command: string; bridge: string }) => {
 	let notify: (method: string, params: unknown) => void = () => {};
 	let request: (id: string | number, method: string, params: unknown) => boolean = () => false;
 	let sequence = 0;
@@ -78,6 +78,7 @@ const setup = (tracker?: { track: ReturnType<typeof vi.fn> }) => {
 			async (path) => path,
 			() => `request-${++requestSequence}`,
 			tracker,
+			typescriptMcp,
 		),
 		rpc,
 		respond,
@@ -88,6 +89,113 @@ const setup = (tracker?: { track: ReturnType<typeof vi.fn> }) => {
 		request: (id: string | number, method: string, params: unknown) => request(id, method, params),
 	};
 };
+
+test("reserved worktree MCP options accompany start, resume and recovery", async () => {
+	const { client, rpc, notify } = setup(undefined, {
+		command: "/runtime/node",
+		bridge: "/app/dist/typescript-lsp/main.js",
+	});
+	const path = "/data/worktrees/one";
+	const expected = {
+		cwd: path,
+		config: expect.objectContaining({
+			"mcp_servers.forge_typescript": {
+				command: "/runtime/node",
+				args: ["/app/dist/typescript-lsp/main.js", path],
+				cwd: path,
+				enabled: true,
+				required: false,
+				startup_timeout_sec: 30,
+				tool_timeout_sec: 35,
+			},
+		}),
+	};
+	const id = await client.start(path);
+	expect(rpc).toHaveBeenCalledWith("thread/start", expect.objectContaining(expected));
+	await client.resume(id, path);
+	notify("connection/lost", {});
+	await client.reconcile(id, path);
+	const resumes = rpc.mock.calls.filter(([method]) => method === "thread/resume");
+	expect(resumes).toHaveLength(2);
+	for (const [, options] of resumes) expect(options).toMatchObject(expected);
+});
+
+test("MCP activity includes tool identity, completion and bounded errors", async () => {
+	const { client, notify } = setup();
+	const id = await client.start("/data/worktrees/one");
+	notify("item/completed", {
+		threadId: id,
+		item: {
+			id: "tool",
+			type: "mcpToolCall",
+			server: "forge_typescript",
+			tool: "hover",
+			status: "failed",
+			error: { message: "Compiler missing" },
+		},
+	});
+	expect(client.read(id).items).toContainEqual(
+		expect.objectContaining({
+			title: "forge_typescript/hover",
+			status: "failed",
+			text: "forge_typescript/hover: failed\nCompiler missing",
+		}),
+	);
+	notify("item/completed", {
+		threadId: id,
+		item: {
+			id: "unavailable",
+			type: "mcpToolCall",
+			server: "forge_typescript",
+			tool: "diagnostics",
+			status: "completed",
+			result: {
+				content: [],
+				structuredContent: { status: "unavailable", message: "Install package dependencies" },
+			},
+		},
+	});
+	expect(client.read(id).items).toContainEqual(
+		expect.objectContaining({
+			id: "unavailable",
+			status: "failed",
+			text: "forge_typescript/diagnostics: failed\nInstall package dependencies",
+		}),
+	);
+});
+
+test("worktree release blocks racing runtime requests while preserving history and unrelated checkouts", async () => {
+	const { client, rpc } = setup();
+	const original = rpc.getMockImplementation()!;
+	let started = () => {};
+	let finish = () => {};
+	const starting = new Promise<void>((resolve) => {
+		started = resolve;
+	});
+	const pending = new Promise<void>((resolve) => {
+		finish = resolve;
+	});
+	rpc.mockImplementation(async (method, params) => {
+		if (method === "thread/start") {
+			started();
+			await pending;
+		}
+		return original(method, params);
+	});
+	const start = client.start("/data/worktrees/one");
+	await starting;
+	const release = vi.fn(async () => {});
+	const released = client.releaseWorktree("/data/worktrees/one", release);
+	expect(release).not.toHaveBeenCalled();
+	finish();
+	const id = await start;
+	await released;
+	expect(release).toHaveBeenCalledOnce();
+	await expect(client.resume(id, "/data/worktrees/one")).rejects.toThrow("agent-unavailable");
+	await expect(client.start("/data/worktrees/one")).rejects.toThrow("agent-unavailable");
+	await expect(client.start("/data/worktrees/two")).resolves.toBeTruthy();
+	await expect(client.loadHistory(id)).resolves.toMatchObject({ items: expect.any(Array) });
+});
 
 test("routes Ollama start and resume overrides, rejects mismatched reconciliation, and keeps OpenAI requests compatible", async () => {
 	const { client, rpc } = setup();

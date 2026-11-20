@@ -61,6 +61,18 @@ HTTP / WebSocket / Git protocol adapters / background tasks
 
 ## Persistence and recovery
 
+### Worktree TypeScript intelligence
+
+Forge owns a read-only stdio MCP bridge under `src/typescript-lsp`, with separate
+MCP, language-client, runtime-resolution and process adapters. `main.ts`/`start.ts`
+own construction and lifecycle; filesystem, timers and process boundaries are
+injected. No shared language-server state or new persistence/API is introduced.
+Each bridge verifies its canonical root against process cwd. Every compiler uses
+that cwd and that exact LSP root/workspace folder, even when its installation is
+symlinked into a package-manager store. See [tools and lifecycle](agents.md#worktree-typescript-tools),
+[workspace release](workspaces.md#language-server-release) and
+[verification/packaging](development.md#typescript-mcp-verification).
+
 ### Private request telemetry
 
 Forge owns a separate ephemeral-port HTTP listener bound exclusively to

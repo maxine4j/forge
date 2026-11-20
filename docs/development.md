@@ -2,6 +2,32 @@
 
 ## Development checks
 
+### TypeScript MCP verification
+
+The production dependency set pins `@modelcontextprotocol/sdk@1.32.2`,
+`vscode-jsonrpc@10.0.0`, `vscode-languageserver-protocol@3.18.5` and
+`typescript-language-server@6.1.0`. The image ships the compiled
+`dist/typescript-lsp/main.js` bridge and those dependencies. Startup performs no
+downloads. A separate installed TypeScript 7.0.2 fixture under
+`/opt/forge-lsp-fixture` is used by the image smoke; it is outside project resolution
+and is never a fallback compiler.
+
+Unit tests cover resolution boundaries, compiler selection, protocol initialization,
+document versions, stale diagnostic rejection, unsupported operations, crashes,
+timeouts and read-only edit refusal. A test-only alias of the existing TypeScript
+dependency pins 6.0.3 for the legacy adapter fixture. Credential-free integration
+tests use real native and tsserver-based language servers in two checkouts with
+identical source paths and different types, checking hover, references and
+diagnostics before/after edits and config
+changes. The pinned Codex test uses controlled local inference to persist history,
+then repeats MCP isolation across thread resume and app-server restart and verifies
+immediate unsubscribe closure without disturbing the other checkout. Run `pnpm build`
+before integration tests that launch the compiled bridge. Image smoke connects to
+the shipped MCP bridge, lists all six tools and checks real hover/diagnostics.
+See [tool contract](agents.md#worktree-typescript-tools),
+[cleanup ordering](workspaces.md#language-server-release) and
+[architecture](architecture.md#worktree-typescript-intelligence).
+
 ### Request telemetry verification
 
 `src/codex/request-performance.test.ts` covers deterministic request aggregation,

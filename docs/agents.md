@@ -1,5 +1,53 @@
 # Codex and interactive agents
 
+## Worktree TypeScript tools
+
+Planning, implementation and standalone threads receive the reserved
+`forge_typescript` MCP server on start, resume and recovery. Its absolute Node
+launcher and compiled bridge receive an explicit canonical worktree argument and
+MCP cwd. Dotted per-server configuration preserves other MCP entries and provider
+settings. Tool failures are bounded activity errors; agents can continue with
+their existing tools. MCP activity includes server/tool names and completion state.
+
+The six read-only tools are `diagnostics`, `hover`, `definition`, `references`,
+`document_symbols` and `workspace_symbols`. Every call takes `path`, a
+worktree-relative TS/TSX/JS/JSX file; for workspace symbols it identifies package
+context. Position tools require `line` and `character`, both zero-based, with
+character measured in UTF-16 code units. Workspace symbols accept `query`.
+Traversal and source symlinks outside the canonical checkout are rejected.
+
+Resolution walks the queried file's package hierarchy only as far as the checkout
+root, allowing package-manager dependency-store symlinks. Each distinct compiler
+installation/version has its own serialized server. TypeScript 7 runs its local
+`tsc --lsp --stdio`; versions 4–6 use the pinned language-server adapter with that
+installation's exact `tsserver.js`. Missing, unsupported or broken installations
+report the package and expected installation; Forge never downloads or substitutes
+a compiler. Install repository dependencies through the normal project workflow.
+
+Results identify `compilerVersion`, package context, bounded `result` and explicit
+`truncated`. Successful empty results remain distinct from `unavailable`,
+`unsupported`, `timeout`, `invalid_input` and `changed` errors. Location paths are
+relative to the checkout; dependency locations outside it are explicitly external.
+Responses limit arrays to 100 entries, strings to 8,000 characters, total strings
+to 48,000 characters, and recursive processing to 2,000 nodes. Source files are
+limited to 1 MiB. Diagnostics check only the requested file.
+
+The bridge reads disk before each query and sends versioned document updates.
+Filesystem changes invalidate cached state and forward watched-file notifications;
+subsequent queries recreate affected servers, including configuration/import changes.
+Diagnostic checks use a fresh server to prevent legacy unversioned pushes from
+being mistaken for current diagnostics. The legacy adapter also awaits fixed
+read-only syntax, semantic and suggestion diagnostic requests, so an early empty
+push cannot be mistaken for a completed clean check. Changes during a query return
+`changed`
+for explicit retry. Initialization and protocol queries have 30-second deadlines;
+servers start lazily and stop after 60 seconds idle. Workspace edits requested by
+the server are rejected; rename, code actions and command execution are not tools.
+EOF/shutdown closes children within Codex's owned process group. No agent turn is
+replayed after failure. See [architecture](architecture.md#worktree-typescript-intelligence),
+[worktree release](workspaces.md#language-server-release) and
+[runtime verification](development.md#typescript-mcp-verification).
+
 ## Latest-turn inference performance
 
 `AgentView.performance` is an optional validated latest-turn snapshot shared by

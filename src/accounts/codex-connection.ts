@@ -85,6 +85,17 @@ const methods = new Map<string, z.ZodType>([
 	],
 	["thread/read", z.strictObject({ threadId: z.string().min(1), includeTurns: z.boolean() })],
 	["thread/compact/start", z.strictObject({ threadId: z.string().min(1) })],
+	["thread/unsubscribe", z.strictObject({ threadId: z.string().min(1) })],
+	["thread/loaded/list", z.strictObject({ limit: z.literal(100), cursor: z.string().optional() })],
+	[
+		"mcpServer/tool/call",
+		z.strictObject({
+			threadId: z.string().min(1),
+			server: z.literal("forge_typescript"),
+			tool: z.enum(["diagnostics", "hover", "definition", "references", "document_symbols", "workspace_symbols"]),
+			arguments: z.record(z.string(), z.unknown()),
+		}),
+	],
 	[
 		"thread/turns/list",
 		z.strictObject({
@@ -231,7 +242,15 @@ export class CodexConnection implements ICodexAgentConnection {
 			if (this.closed) throw new CodexConnectionError();
 			const handle = this.processes.spawn({
 				program: "codex",
-				arguments: ["app-server", "-c", 'cli_auth_credentials_store="file"', "-c", 'model_provider="openai"'],
+				arguments: [
+					"app-server",
+					"-c",
+					'cli_auth_credentials_store="file"',
+					"-c",
+					'model_provider="openai"',
+					"-c",
+					"thread_unload_delay_secs=0",
+				],
 				onOutput: (chunk) => {
 					if (this.handle === handle) this.receive(chunk);
 				},

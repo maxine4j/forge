@@ -24,6 +24,7 @@ import { CodexUsageClient } from "./codex/codex-usage-client.ts";
 import { PerformanceStore } from "./codex/performance-store.ts";
 import { PerformanceTelemetry } from "./codex/performance-telemetry.ts";
 import { TelemetryReceiver, telemetryArguments } from "./codex/telemetry-receiver.ts";
+import { releaseWorktree } from "./codex/worktree-release.ts";
 import { Configuration } from "./config/configuration.ts";
 import { CostRouter } from "./cost/cost-router.ts";
 import { CostService } from "./cost/cost-service.ts";
@@ -188,7 +189,10 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		() => collector.sample(),
 	);
 	lifecycle.register(() => usage.close());
-	const agentClient = new CodexAgentClient(connection, files.realpath, randomUUID, usage);
+	const agentClient = new CodexAgentClient(connection, files.realpath, randomUUID, usage, {
+		command: process.execPath,
+		bridge: fileURLToPath(new URL("../dist/typescript-lsp/main.js", import.meta.url)),
+	});
 	const settingsStore = new SettingsStore(database);
 	await settingsStore.initialize();
 	const settings = new SettingsService(
@@ -236,7 +240,9 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	if (!lifecycle.isOpen()) return;
 	const workspaceStore = new WorkspaceStore(database);
 	await workspaceStore.initialize();
-	const workspaceClient = new WorkspaceClient(config.dataDirectory, files, git, repositories);
+	const workspaceClient = new WorkspaceClient(config.dataDirectory, files, git, repositories, (path) =>
+		agentClient.releaseWorktree(path, () => releaseWorktree(connection, path, sleep)),
+	);
 	const workspaces = new WorkspaceService(
 		workspaceStore,
 		workspaceClient,

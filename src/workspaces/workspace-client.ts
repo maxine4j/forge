@@ -42,6 +42,7 @@ export class WorkspaceClient implements IWorkspaceClient {
 		private readonly files: IWorkspaceFiles,
 		private readonly git: IGitTransport,
 		private readonly repositories: IRepositoryClient,
+		private readonly releaseWorktree?: (path: string) => Promise<void>,
 	) {}
 	async prepare(record: WorkspaceRecord): Promise<string> {
 		return this.boundary(async () => {
@@ -237,6 +238,8 @@ export class WorkspaceClient implements IWorkspaceClient {
 						throw new Error("Merged worktree has local changes");
 				}
 				const locked = entry.some((field) => field === "locked" || field.startsWith("locked "));
+				// Settlement and ownership checks precede runtime release. Failure preserves files for retry.
+				await this.releaseWorktree?.(registeredPath);
 				if (locked) await this.git.run([...repo, "worktree", "unlock", path]);
 				try {
 					await this.git.run([...repo, "worktree", "remove", ...(!candidate ? ["--force"] : []), path]);

@@ -18,6 +18,8 @@ COPY packages packages
 COPY ollama-relay ollama-relay
 COPY src src
 RUN pnpm build
+COPY tests/install-lsp-fixture.mjs tests/install-lsp-fixture.mjs
+RUN node tests/install-lsp-fixture.mjs /tmp/forge-lsp-fixture
 
 FROM manifests AS installer
 RUN --mount=type=cache,id=forge-pnpm,target=/pnpm/store pnpm install --prod --frozen-lockfile --filter @forge/app... --store-dir /pnpm/store
@@ -78,6 +80,7 @@ COPY --from=installer /app/packages/contracts/node_modules packages/contracts/no
 COPY --from=builder /app/packages/contracts/dist packages/contracts/dist
 COPY --from=builder /app/packages/frontend/dist packages/frontend/dist
 COPY --from=builder /app/dist dist
+COPY --from=builder /tmp/forge-lsp-fixture /opt/forge-lsp-fixture
 RUN mkdir -p /data && chown agent:agent /data && chmod 0700 /data && \
     install -d -m 0755 -o agent -g agent /run/forge && \
     git config --system --add include.path /run/forge/gitconfig

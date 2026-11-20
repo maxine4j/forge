@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
+import { watch as watchFiles } from "node:fs";
 import fs from "node:fs/promises";
+
+/** Recursive checkout notifications; watcher errors invalidate the consumer's state. */
+export const watch = (path: string, changed: (path?: string) => void): (() => void) => {
+	const watcher = watchFiles(path, { recursive: true }, (_event, file) => changed(file ?? undefined));
+	watcher.on("error", () => changed());
+	return () => watcher.close();
+};
 
 export interface FileWriteOptions {
 	mode?: number;

@@ -1,5 +1,21 @@
 # Forge workspaces and PR review
 
+## Language-server release
+
+Merged and abandoned workspace cleanup preserves the existing execution-settlement,
+ownership and Git checks. Immediately before removing a registered worktree, an
+internal release operation lists loaded Codex threads, selects the exact canonical
+cwd, requires idle execution, unsubscribes each associated thread and awaits
+`thread/closed`. The pinned app-server uses `thread_unload_delay_secs=0` so idle,
+unsubscribed threads unload immediately, closing their MCP bridge and language
+servers. Persistent Codex rollout history remains available for later reads.
+The client blocks new runtime operations for a releasing checkout and drains
+in-flight starts/resumes before listing threads, preventing removal races.
+Unrelated worktrees are not unsubscribed or interrupted. Closure errors/timeouts
+leave files and metadata for cleanup retry. See [agent tools](agents.md#worktree-typescript-tools),
+[architecture](architecture.md#worktree-typescript-intelligence) and
+[verification](development.md#typescript-mcp-verification).
+
 ## Navigation history
 
 Global destinations, repository sections, editor file tabs, commit details and

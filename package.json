@@ -24,10 +24,14 @@
 		"@forge/contracts": "workspace:*",
 		"@koa/bodyparser": "6.1.0",
 		"@koa/router": "15.7.0",
+		"@modelcontextprotocol/sdk": "1.32.2",
 		"@openai/codex": "0.164.0",
 		"koa": "3.2.1",
 		"node-pty": "1.1.0",
 		"pino": "10.4.0",
+		"typescript-language-server": "6.1.0",
+		"vscode-jsonrpc": "10.0.0",
+		"vscode-languageserver-protocol": "3.18.5",
 		"ws": "8.22.1",
 		"zod": "4.6.7"
 	},
@@ -38,6 +42,7 @@
 		"oxfmt": "0.73.0",
 		"oxlint": "1.88.0",
 		"typescript": "7.0.2",
+		"typescript-legacy": "npm:typescript@6.0.3",
 		"vitest": "3.2.4"
 	},
 	"engines": {

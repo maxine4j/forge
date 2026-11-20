@@ -46,12 +46,15 @@ export class CodexAgentClient implements ICodexAgentClient {
 	private readonly ollamaThreads = new Set<string>();
 	private readonly creations = new Map<object, number>();
 	private readonly settled = new Set<string>();
+	private readonly releasedWorktrees = new Set<string>();
+	private readonly runtimeRequests = new Map<string, Set<Promise<unknown>>>();
 	private readonly initialEpoch: number;
 	constructor(
 		private readonly connection: ICodexAgentConnection,
 		private readonly realpath: (path: string) => Promise<string>,
 		private readonly generateId: () => string,
 		private readonly usageTracker?: ICodexUsageTracker,
+		private readonly typescriptMcp?: { command: string; bridge: string },
 	) {
 		this.initialEpoch = connection.executionEpoch();
 		connection.subscribe((method, params) => this.notification(method, params));
@@ -64,7 +67,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			const creation = {};
 			this.creations.set(creation, this.connection.executionEpoch());
 			const result = threadResponse.parse(
-				await this.connection.request("thread/start", this.runtimeOptions(path, provider)),
+				await this.runtimeRequest(path, "thread/start", this.runtimeOptions(path, provider)),
 			);
 			if (result.thread.cwd !== path) throw new Error("Codex workspace identity mismatch");
 			this.rememberRouting(result, provider);
@@ -90,7 +93,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			let thread: z.infer<typeof threadSchema>;
 			try {
 				const result = threadResponse.parse(
-					await this.connection.request("thread/resume", {
+					await this.runtimeRequest(path, "thread/resume", {
 						threadId: id,
 						...this.runtimeOptions(path, provider),
 						excludeTurns: true,
@@ -159,7 +162,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			path = await this.realpath(path);
 			await this.connection.initialize();
 			const result = threadResponse.parse(
-				await this.connection.request("thread/resume", {
+				await this.runtimeRequest(path, "thread/resume", {
 					threadId: id,
 					...this.runtimeOptions(path, provider),
 					excludeTurns: true,
@@ -328,7 +331,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			try {
 				if (usage && !ollama) await this.usageTracker?.track(id, usage, model);
 				const result = z.object({ turn: turnSchema }).parse(
-					await this.connection.request("turn/start", {
+					await this.runtimeRequest(path, "turn/start", {
 						threadId: id,
 						cwd: path,
 						...(usage?.phase === "planning"
@@ -472,6 +475,20 @@ export class CodexAgentClient implements ICodexAgentClient {
 			...(provider?.kind === "ollama" ? { model: provider.model, modelProvider: ollamaProviderId } : {}),
 			config: {
 				features: { multi_agent: false },
+				...(this.typescriptMcp
+					? {
+							"mcp_servers.forge_typescript": {
+								command: this.typescriptMcp.command,
+								args: [this.typescriptMcp.bridge, path],
+								cwd: path,
+								enabled: true,
+								required: false,
+								startup_timeout_sec: 30,
+								// The bridge enforces 30 seconds; leave transport time to deliver its structured timeout.
+								tool_timeout_sec: 35,
+							},
+						}
+					: {}),
 				...(provider?.kind === "ollama"
 					? {
 							web_search: "disabled",
@@ -487,6 +504,25 @@ export class CodexAgentClient implements ICodexAgentClient {
 					: {}),
 			},
 		};
+	}
+	/** Prevents a new start/resume/turn from racing a verified worktree's removal. */
+	async releaseWorktree(path: string, release: () => Promise<void>): Promise<void> {
+		this.releasedWorktrees.add(path);
+		await Promise.allSettled([...(this.runtimeRequests.get(path) ?? [])]);
+		await release();
+	}
+	private async runtimeRequest(path: string, method: string, params: unknown): Promise<unknown> {
+		if (this.releasedWorktrees.has(path)) throw new AgentError("agent-unavailable");
+		const pending = this.runtimeRequests.get(path) ?? new Set<Promise<unknown>>();
+		this.runtimeRequests.set(path, pending);
+		const request = this.connection.request(method, params);
+		pending.add(request);
+		try {
+			return await request;
+		} finally {
+			pending.delete(request);
+			if (!pending.size) this.runtimeRequests.delete(path);
+		}
 	}
 	private rememberRouting(result: z.infer<typeof threadResponse>, provider?: InferenceProvider): void {
 		const { id, modelProvider } = result.thread;
@@ -615,9 +651,27 @@ export class CodexAgentClient implements ICodexAgentClient {
 				command: z.string().optional(),
 				aggregatedOutput: z.string().nullish(),
 				status: z.string().optional(),
+				server: z.string().optional(),
+				tool: z.string().optional(),
+				error: z.object({ message: z.string() }).nullish(),
+				result: z.unknown().optional(),
 				content: z.array(z.object({ type: z.string(), text: z.string().optional() })).optional(),
 			})
 			.parse(raw);
+		const tooling =
+			item.type === "mcpToolCall" && item.server === "forge_typescript"
+				? z
+						.object({
+							structuredContent: z.object({
+								status: z.enum(["unavailable", "timeout", "unsupported", "invalid_input", "changed"]),
+								message: z.string(),
+							}),
+						})
+						.safeParse(item.result)
+				: undefined;
+		const toolFailure =
+			item.error?.message ?? (tooling?.success ? tooling.data.structuredContent.message : undefined);
+		if (item.type === "mcpToolCall" && toolFailure) item.status = "failed";
 		if (capturePlan && item.type === "plan" && item.text?.trim() && item.text.length <= 32000)
 			view.plan = item.text.trim();
 		const role: AgentItem["role"] =
@@ -632,7 +686,9 @@ export class CodexAgentClient implements ICodexAgentClient {
 				: (item.text
 					?? (item.type === "commandExecution"
 						? `${item.command ?? "Command"}\n${item.aggregatedOutput ?? item.status ?? ""}`
-						: `${item.type}${item.status ? `: ${item.status}` : ""}`));
+						: item.type === "mcpToolCall"
+							? `${item.server ?? "MCP"}/${item.tool ?? "tool"}: ${item.status ?? "running"}${toolFailure ? `\n${toolFailure.slice(0, 1000)}` : ""}`
+							: `${item.type}${item.status ? `: ${item.status}` : ""}`));
 		this.put(view, {
 			id: item.id,
 			role,
@@ -640,7 +696,12 @@ export class CodexAgentClient implements ICodexAgentClient {
 			text,
 			...(role === "activity"
 				? {
-						title: (item.command ?? item.type.replace(/([a-z])([A-Z])/g, "$1 $2")).slice(0, 256),
+						title: (
+							item.command
+							?? (item.type === "mcpToolCall"
+								? `${item.server}/${item.tool}`
+								: item.type.replace(/([a-z])([A-Z])/g, "$1 $2"))
+						).slice(0, 256),
 						...(item.status
 							? {
 									status:
