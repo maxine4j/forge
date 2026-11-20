@@ -435,7 +435,10 @@ test("ticket creation selects a named provider and switching clears overrides wh
 	expect(f.tickets()[0]!.executionSettings?.reasoningEffort).toBeUndefined();
 	await expect(dialog.getByRole("combobox", { name: "Model", exact: true })).toContainText("Local model");
 	await dialog.getByRole("tab", { name: "Chat", exact: true }).click();
-	await expectDropdownValue(dialog.getByRole("tabpanel", { name: "Chat", exact: true }).getByRole("combobox", { name: "Model provider" }), other);
+	await expectDropdownValue(
+		dialog.getByRole("tabpanel", { name: "Chat", exact: true }).getByRole("combobox", { name: "Model provider" }),
+		other,
+	);
 });
 
 test("running ticket provider selection stays locked in Details and Chat", async ({ page }) => {
@@ -444,7 +447,9 @@ test("running ticket provider selection stays locked in Details and Chat", async
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 	await expect(dialog.getByRole("combobox", { name: "Model provider" })).toBeDisabled();
 	await dialog.getByRole("tab", { name: "Chat", exact: true }).click();
-	await expect(dialog.getByRole("tabpanel", { name: "Chat", exact: true }).getByRole("combobox", { name: "Model provider" })).toBeDisabled();
+	await expect(
+		dialog.getByRole("tabpanel", { name: "Chat", exact: true }).getByRole("combobox", { name: "Model provider" }),
+	).toBeDisabled();
 });
 
 test("busy creation blocks Back and rapid Back unwinds ticket entries", async ({ page }) => {

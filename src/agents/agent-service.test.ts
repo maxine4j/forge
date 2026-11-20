@@ -265,13 +265,13 @@ test("named OpenAI and multiple Ollama providers share the existing concurrency 
 	const chats = await Promise.all(configured.map((p) => f.service.create(owner, projectId, p.name, p.id)));
 	await Promise.all(chats.map((chat) => f.service.send(owner, chat.thread.id, "Hello")));
 	expect(f.pool.activeIds()).toHaveLength(3);
-	expect(f.client.start.mock.calls.map((call) => call[1])).toEqual(
-		expect.arrayContaining([
-			{ kind: "openai" },
-			{ kind: "ollama", endpoint: "http://a/v1", model: "a" },
-			{ kind: "ollama", endpoint: "http://b/v1", model: "b" },
-		]),
-	);
+	expect(f.client.start).toHaveBeenCalledTimes(3);
+	for (const configuration of [
+		{ kind: "openai" },
+		{ kind: "ollama", endpoint: "http://a/v1", model: "a" },
+		{ kind: "ollama", endpoint: "http://b/v1", model: "b" },
+	])
+		expect(f.client.start).toHaveBeenCalledWith(expect.any(String), configuration);
 	await f.service.shutdown();
 });
 
