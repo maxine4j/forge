@@ -21,8 +21,9 @@ identical source paths and different types, checking hover, references and
 diagnostics before/after edits and config
 changes. The pinned Codex test uses controlled local inference to persist history,
 then repeats MCP isolation across thread resume and app-server restart and verifies
-immediate unsubscribe closure without disturbing the other checkout. Run `pnpm build`
-before integration tests that launch the compiled bridge. Image smoke connects to
+immediate unsubscribe closure without disturbing the other checkout. The integration
+config compiles the bridge before its tests, so a manual `pnpm build` is no longer
+required. Image smoke connects to
 the shipped MCP bridge, lists all six tools and checks real hover/diagnostics.
 See [tool contract](agents.md#worktree-typescript-tools),
 [cleanup ordering](workspaces.md#language-server-release) and
