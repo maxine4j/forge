@@ -1197,10 +1197,9 @@
 .ticket-dialog {
 	width: min(600px, calc(100vw - 24px));
 	max-height: calc(var(--forge-viewport-height, 100dvh) - 32px);
-	top: calc(var(--forge-viewport-top, 0px) + var(--forge-viewport-height, 100dvh) / 2);
-	bottom: auto;
-	margin: 0 auto;
-	transform: translateY(-50%);
+	top: var(--forge-viewport-top, 0px);
+	bottom: calc(100dvh - var(--forge-viewport-top, 0px) - var(--forge-viewport-height, 100dvh));
+	margin: auto;
 	padding: 24px;
 	color: #e6edf3;
 	background: #161b22;
@@ -1262,10 +1261,11 @@
 	gap: 8px;
 }
 .ticket-dialog.ticket-centred {
-	top: calc(var(--forge-viewport-top, 0px) + var(--forge-viewport-height, 100dvh) / 2);
-	left: 50%;
-	right: auto;
-	transform: translate(-50%, -50%);
+	top: var(--forge-viewport-top, 0px);
+	bottom: calc(100dvh - var(--forge-viewport-top, 0px) - var(--forge-viewport-height, 100dvh));
+	left: 0;
+	right: 0;
+	margin: auto;
 	max-height: calc(var(--forge-viewport-height, 100dvh) - 32px);
 	border-radius: 10px;
 }

@@ -1750,6 +1750,14 @@ for (const width of [1280, 390]) {
 		await expect(epic.locator("svg")).toHaveCount(0);
 		await epic.press("Enter");
 		await expect(list.getByRole("option")).toHaveCount(25);
+		const triggerBox = (await epic.boundingBox())!;
+		const listBox = (await list.boundingBox())!;
+		expect(
+			Math.min(
+				Math.abs(listBox.y - (triggerBox.y + triggerBox.height)),
+				Math.abs(triggerBox.y - (listBox.y + listBox.height)),
+			),
+		).toBeLessThanOrEqual(5);
 		await expect(
 			list.getByRole("option", { name: "EPIC-1 · Alpha", exact: true }).locator("svg[aria-hidden=true]"),
 		).toHaveCount(1);

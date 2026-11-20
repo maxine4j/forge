@@ -138,6 +138,14 @@ for (const width of [1280, 390]) {
 		await page.getByRole("button", { name: "Add provider", exact: true }).click();
 		const type = dialog.getByRole("combobox", { name: "Provider type" });
 		await type.click();
+		const triggerBox = (await type.boundingBox())!;
+		const listBox = (await dialog.getByRole("listbox", { name: "Provider type" }).boundingBox())!;
+		expect(
+			Math.min(
+				Math.abs(listBox.y - (triggerBox.y + triggerBox.height)),
+				Math.abs(triggerBox.y - (listBox.y + listBox.height)),
+			),
+		).toBeLessThanOrEqual(5);
 		await expect(page.getByRole("option", { name: "OpenAI account", exact: true })).toHaveAttribute(
 			"aria-disabled",
 			"true",

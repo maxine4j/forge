@@ -52,8 +52,8 @@ project-independent. See [cost settings](development.md#cost-settings) and
 
 All selection dropdowns use the shared frontend `Dropdown` and `DropdownSurface`
 primitives, browser auto popovers and CSS anchor positioning. The dark surfaces
-appear above dialogs, flip around their triggers, stay within the viewport and
-scroll long lists. Form triggers fill their fields; composer and toolbar triggers
+appear adjacent to their triggers in dialogs as well as on the page, flip when
+needed, stay within the viewport and scroll long lists. Form triggers fill their fields; composer and toolbar triggers
 remain compact. Composer autocomplete and disclosure controls are separate.
 
 Single selects are controlled labelled comboboxes with listboxes exposing selected
