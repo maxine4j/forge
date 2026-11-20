@@ -1,20 +1,14 @@
 import {
 	createTicketSchema,
 	ticketSchema,
-	ticketsSchema,
-	epicsSchema,
-	ticketNotificationsSchema,
-	type TicketNotification,
 	epicDetailSchema,
 	type EpicSummary,
 	type CreateTicket,
-	type MoveTicket,
 	type Ticket,
 } from "@forge/contracts/tickets";
-import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import { useLocation, useSearchParams, useNavigate } from "react-router";
 
-import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import {
 	directModalParent,
@@ -36,7 +30,7 @@ import { RepositorySelection } from "./repository-selection.tsx";
 import { TaskBacklog } from "./task-backlog.tsx";
 import { TaskBoard } from "./task-board.tsx";
 import { TaskNotifications } from "./task-notifications.tsx";
-import { TicketDetails, ticketLabels as labels, type TicketReadingState } from "./ticket-details.tsx";
+import { useTickets } from "./ticket-controller.tsx";
 const TicketEditor = ({
 	api,
 	visible,
@@ -144,12 +138,11 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 	const initializing = useRef(false);
 	const linkedId = location.pathname === "/tasks" ? search.get("ticket") : null;
 	const epicLink = location.pathname === "/tasks" ? search.get("epic") : null;
-	const [epics, setEpics] = useState<EpicSummary[]>([]);
 	const creatingEpic = visible && navigation.modal?.owner === "create-epic";
 	const creating = visible && navigation.modal?.owner === "create-ticket";
 	const initialEpic = navigation.modal?.selection ?? null;
 	useEffect(() => {
-		if (!visible || (!linkedId && !epicLink) || navigation.modal || initializing.current) return;
+		if (!visible || linkedId || !epicLink || navigation.modal || initializing.current) return;
 		initializing.current = true;
 		const base = directModalParent(location);
 		if (!base) {
@@ -157,9 +150,9 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 			return;
 		}
 		void (async () => {
-			await navigate(base.pathname + base.search, { replace: true, state: null });
-			await navigate(location.pathname + location.search, {
-				state: nextModal(base, linkedId ? "ticket" : "epic"),
+			await navigate(base.pathname + base.search + base.hash, { replace: true, state: null });
+			await navigate(location.pathname + location.search + location.hash, {
+				state: nextModal(base, "epic"),
 			});
 			initializing.current = false;
 		})();
@@ -206,168 +199,37 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		next.set("epic", id);
 		navigation.open("epic", `/tasks?${next}`);
 	};
-	const [linked, setLinked] = useState<{ id: string; ticket?: Ticket; error?: string }>();
-	const closeTicket = () => {
-		if (creating) navigation.dismiss();
-		else navigation.dismissOwner("ticket");
-	};
-	const [tickets, setTickets] = useState<Ticket[]>([]);
-	useEffect(() => {
-		if (!linkedId) return;
-		let current = true;
-		void api.read(`tickets/${encodeURIComponent(linkedId)}`, ticketSchema).then(
-			(ticket) => {
-				if (current) setLinked({ id: linkedId, ticket });
-			},
-			() => {
-				if (current) setLinked({ id: linkedId, error: "Ticket unavailable." });
-			},
-		);
-		return () => {
-			current = false;
-		};
-	}, [api, linkedId]);
-	const [loading, setLoading] = useState(true);
-	const [busy, setBusy] = useState(false);
-	useFailureToast(linked?.id === linkedId ? linked.error : undefined, linkedId ?? undefined);
-	const [error, setError] = useErrorState();
+	const {
+		tickets,
+		setTickets,
+		epics,
+		setEpics,
+		loading,
+		setLoading,
+		busy,
+		error,
+		setError,
+		notice,
+		setNotice,
+		drafts,
+		notifications,
+		notificationError,
+		notificationsLoaded,
+		pulse,
+		setPulse,
+		load,
+		mutate,
+		move,
+	} = useTickets();
+	const showSettings = visible && navigation.modal?.owner === "board-settings";
+	const board = useBoardSettings(api, visible);
+	const closeTicket = () => navigation.dismiss();
 	useFailureToast(
 		epicLink && !creatingEpic && !loading && !error && !epics.some((epic) => epic.id === epicLink)
 			? "Epic unavailable."
 			: undefined,
 		epicLink ?? undefined,
 	);
-	const [notice, setNotice] = useState("");
-	const selectedTicket = linkedId && linked?.id === linkedId ? linked.ticket : undefined;
-	useEffect(() => {
-		if (!linkedId || tickets.some((ticket) => ticket.id === linkedId)) return;
-		let current = true;
-		void api.read(`tickets/${encodeURIComponent(linkedId)}`, ticketSchema).then(
-			(ticket) => {
-				if (current) setLinked({ id: ticket.id, ticket });
-			},
-			() => {
-				if (current)
-					setLinked((previous) =>
-						previous?.id === linkedId && previous.ticket
-							? previous
-							: { id: linkedId, error: "Ticket unavailable." },
-					);
-			},
-		);
-		return () => {
-			current = false;
-		};
-	}, [api, linkedId, tickets]);
-	const showSettings = visible && navigation.modal?.owner === "board-settings";
-	const board = useBoardSettings(api, visible);
-	const active = useRef(true);
-	const locked = useRef(false);
-	const [drafts] = useState(() => new Map<string, string>());
-	const [reading] = useState(() => new Map<string, TicketReadingState>());
-	const [notifications, setNotifications] = useState<TicketNotification[]>([]);
-	const [notificationError, setNotificationError] = useState("");
-	const [notificationsLoaded, setNotificationsLoaded] = useState(false);
-	const identities = useRef<Set<string> | undefined>(undefined);
-	const [pulse, setPulse] = useState(0);
-	useEffect(() => {
-		if (!pulse) return;
-		const timer = setTimeout(() => setPulse(0), 2000);
-		return () => clearTimeout(timer);
-	}, [pulse]);
-	type Collection = {
-		tickets: Ticket[];
-		epics: EpicSummary[];
-		notifications?: TicketNotification[];
-		notificationError?: string;
-	};
-	const poller = useRef<ResourcePoller<Collection> | undefined>(undefined);
-	const readCollection = useCallback(async (): Promise<Collection> => {
-		const [tickets, epics, feed] = await Promise.all([
-			api.read("tickets?includeArchived=true", ticketsSchema),
-			api.read("epics", epicsSchema),
-			api.read("tickets/notifications", ticketNotificationsSchema).then(
-				(notifications) => ({ notifications }),
-				(cause: unknown) => ({
-					notificationError: cause instanceof Error ? cause.message : "Cannot load notifications.",
-				}),
-			),
-		]);
-		return { tickets, epics, ...feed };
-	}, [api]);
-	const load = () => poller.current?.refresh();
-	useEffect(() => {
-		active.current = true;
-		const polling = new ResourcePoller(
-			readCollection,
-			({ tickets: values, epics, notifications, notificationError }) => {
-				setNotificationError(notificationError ?? "");
-				if (notifications) {
-					const next = new Set(notifications.map((item) => item.id));
-					if (identities.current && notifications.some((item) => !identities.current!.has(item.id)))
-						setPulse((value) => value + 1);
-					identities.current = next;
-					setNotifications(notifications);
-					setNotificationsLoaded(true);
-				}
-				setEpics(epics);
-				setTickets(values);
-				setLinked((current) => {
-					const ticket = values.find((value) => value.id === current?.id);
-					return ticket ? { id: ticket.id, ticket } : current;
-				});
-				setError("");
-				setLoading(false);
-			},
-			(message) => {
-				setError(message);
-				setLoading(false);
-			},
-			1000,
-		);
-		poller.current = polling;
-		polling.refresh();
-		return () => {
-			polling.stop();
-			poller.current = undefined;
-			active.current = false;
-		};
-	}, [api, readCollection, setError]);
-	const mutate = async (operation: () => Promise<void>) => {
-		if (locked.current) throw new Error("A ticket change is still saving.");
-		locked.current = true;
-		setBusy(true);
-		setError("");
-		setNotice("");
-		try {
-			let failure: unknown;
-			await poller.current?.mutate(async () => {
-				try {
-					await operation();
-					return await readCollection();
-				} catch (error) {
-					failure = error;
-					return await readCollection();
-				}
-			});
-			if (failure) throw failure;
-		} finally {
-			locked.current = false;
-			if (active.current) setBusy(false);
-		}
-	};
-	const move = async (id: string, input: MoveTicket) =>
-		mutate(async () => {
-			const updated = await api.read(`tickets/${id}/move`, ticketSchema, "POST", input);
-			if (!active.current) return;
-			setTickets((current) => {
-				const values = current.filter((ticket) => ticket.id !== id);
-				const index = values.findIndex((ticket) => ticket.id === input.beforeId);
-				values.splice(index < 0 ? values.length : index, 0, updated);
-				return values;
-			});
-			setNotice(`${id} moved to ${labels[updated.status]}.`);
-		});
 
 	const view =
 		search.get("view") === "notifications"
@@ -394,13 +256,13 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		opener.current = document.activeElement as HTMLElement;
 	};
 	const open = (ticket: Ticket) => {
-		rememberFocus();
+		if (!linkedId) rememberFocus();
 		const next = new URLSearchParams(search);
 		next.set("ticket", ticket.id);
 		next.delete("epic");
 		next.delete("tab");
 		if (view === "notifications") next.set("tab", "chat");
-		navigation.open("ticket", `/tasks?${next}`);
+		navigation.open("ticket", `/tasks?${next}${location.hash}`);
 	};
 	const create = () => {
 		rememberFocus();
@@ -568,59 +430,6 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 				</div>
 			))}
 			{showSettings && <BoardSettingsDialog api={api} board={board} close={navigation.dismiss} />}
-			{linkedId && linked?.id !== linkedId && <p role='status'>Loading ticket…</p>}
-			{linkedId && linked?.id === linkedId && linked.error && (
-				<p>
-					<button onClick={closeTicket}>Close ticket</button>
-				</p>
-			)}
-			{visible && selectedTicket && navigation.modal && (
-				<TicketDetails
-					epics={epics}
-					openEpic={openEpic}
-					key={selectedTicket.id}
-					ticket={
-						selectedTicket.archivedAt
-							? selectedTicket
-							: (tickets.find((ticket) => ticket.id === selectedTicket.id) ?? selectedTicket)
-					}
-					api={api}
-					busy={busy}
-					drafts={drafts}
-					reading={reading}
-					close={closeTicket}
-					archive={() =>
-						mutate(async () => {
-							const archived = await api.read(
-								`tickets/${selectedTicket.id}/archive`,
-								ticketSchema,
-								"POST",
-							);
-							if (!active.current) return;
-							setTickets((current) =>
-								current.map((ticket) => (ticket.id === archived.id ? archived : ticket)),
-							);
-							setLinked({ id: archived.id, ticket: archived });
-							setNotice(`${selectedTicket.id} archived.`);
-						})
-					}
-					move={move}
-					refreshBoard={() => poller.current?.refresh()}
-					save={(input) =>
-						mutate(async () => {
-							const updated = await api.read(
-								`tickets/${selectedTicket.id}`,
-								ticketSchema,
-								"PATCH",
-								input,
-							);
-							setTickets((current) =>
-								current.map((ticket) => (ticket.id === updated.id ? updated : ticket)),
-							);
-						})
-					}
-				/>
-			)}
 			{creating && (
 				<TicketEditor
 					epics={epics}
@@ -633,10 +442,8 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 					save={(input) =>
 						mutate(async () => {
 							const updated = await api.read("tickets", ticketSchema, "POST", input);
-							if (active.current) {
-								setTickets((current) => [...current, updated]);
-								setNotice(`${updated.id} saved.`);
-							}
+							setTickets((current) => [...current, updated]);
+							setNotice(`${updated.id} saved.`);
 						})
 					}
 				/>

@@ -45,8 +45,12 @@ and [metadata persistence](architecture.md#notification-metadata).
 
 ## Task navigation
 
-Tasks retains `view=backlog|notifications`, `ticket=TASK-n` and `epic=EPIC-n` links. Tickets
-also accept `tab=details|chat|history|cost`. The opening entry resolves the
+Tasks retains `view=backlog|notifications` and `epic=EPIC-n` links. Every page accepts
+`ticket=TASK-n` and `tab=details|chat|history|cost`, including repository sections.
+The application owns ticket selection, mutations, draft/reading caches and one
+shared ticket/epic/notification collection poller. Its details host sits outside
+retained hidden pages, with agent options and visible error notifications.
+The opening entry resolves the
 remembered/default section in place, without another Back step; subsequent
 polling cannot override an explicit section. Back/Forward and reload restore
 that section. Modal ownership, parent location and section depth live in typed
@@ -60,8 +64,28 @@ ticket preserve their parent location and reading state. Navigation that would
 unmount unsaved edits requires the [application draft guard](foundation.md#navigation).
 Successful actions retire their confirmation entry; Forward restores a view
 without replaying a mutation. Direct ticket and epic links first establish a
-Tasks view parent, once; reload preserves this ancestry without adding entries.
+page parent, once, preserving pathname, unrelated query parameters and hash;
+reload preserves this ancestry without adding entries. Selecting another ticket
+in an open panel records a selection in the same owner's history. Closing skips
+all ticket selections and sections to return to the original parent. Unsaved
+scope/title edits and busy actions also guard ticket switching.
 See [browser and gesture verification](development.md#android-back-verification).
+
+At viewport widths of at least 1024px, Board and Backlog allocate a fixed 580px
+right column below the usable global header. The ticket slides in from the right
+(without animation under reduced motion). Its non-modal dialog has no backdrop
+or focus trap; outside clicks leave it open. Toolbars wrap, board columns retain
+horizontal scrolling, and backlog overflow stays inside the reduced task area.
+On other pages, including Notifications, a native 580px modal is centred in both
+axes with a maximum height of the visible viewport minus 32px. Below 1024px,
+every page uses a native full-screen modal covering navigation, with safe-area
+padding and visual viewport keyboard adjustments. Resizing changes the existing
+surface without remounting the ticket, preserving drafts, section and chat scroll.
+Initial focus enters the ticket and dismissal restores its opener; Escape respects
+dropdown priority. Archive, return and unsaved-change confirmations remain modal
+above every presentation. Loading and unavailable tickets use the same chosen
+surface with a close action. Ticket creation and epic details keep their existing
+presentation. See [site-wide navigation](foundation.md#navigation).
 
 ## Agentic ticket board
 
@@ -582,9 +606,10 @@ ticket’s summary, phase summaries and tracking start date. Archived tickets, t
 without repositories, and zero-usage tickets remain queryable. Invalid IDs return
 400 and missing tickets return 404.
 
-Costs links to `/tasks?ticket=:ticketId`. The panel loads the
+Costs links to `/costs?ticket=:ticketId`, opening over Costs; existing
+`/tasks?ticket=:ticketId` links remain valid. The details surface loads the
 ticket by ID independently of the active board, including archived tickets.
-Closing clears the query parameter; reload and Back/Forward restore selection.
+Closing returns to the original page URL; reload and Back/Forward restore selection.
 Missing tickets show errors. Archived panels retain
 Details, Chat, History and Cost, with editing and execution controls read-only.
 

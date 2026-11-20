@@ -1,9 +1,10 @@
 import { costsSchema, type Costs } from "@forge/contracts";
 import { useEffect, useState } from "react";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
+import { nextModal } from "../navigation/controller.tsx";
 import { useToast } from "../toasts/toasts.tsx";
 import { CostMetrics, Money, PhaseCosts, WeeklyUsage, formatPercent } from "./cost-metrics.tsx";
 import { WeeklyBudgetChart } from "./weekly-budget.tsx";
@@ -171,6 +172,13 @@ const Quotas = ({ limits }: { limits: Costs["limits"] }) => (
 );
 
 const TicketCosts = ({ cost }: { cost: Costs }) => {
+	const location = useLocation();
+	const ticketUrl = (id: string) => {
+		const query = new URLSearchParams(location.search);
+		query.set("ticket", id);
+		query.delete("tab");
+		return `${location.pathname}?${query}${location.hash}`;
+	};
 	const [sort, setSort] = useState("tokens");
 	const tickets = [...cost.tickets].sort((a, b) =>
 		sort === "ticket"
@@ -221,7 +229,7 @@ const TicketCosts = ({ cost }: { cost: Costs }) => {
 							{tickets.map((ticket) => (
 								<tr key={ticket.id}>
 									<th>
-										<Link to={`/tasks?ticket=${encodeURIComponent(ticket.id)}`}>
+										<Link to={ticketUrl(ticket.id)} state={nextModal(location, "ticket")}>
 											{ticket.id} {ticket.title}
 										</Link>
 										{ticket.archivedAt && <small>Archived</small>}

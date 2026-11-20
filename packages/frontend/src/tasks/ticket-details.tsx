@@ -19,7 +19,7 @@ import { PlanReviewControls } from "../agents/plan-review-controls.tsx";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown } from "../dropdown.tsx";
-import { useDialogDismissal, useModalDialog, useModalDraft, useModalNavigation } from "../navigation/controller.tsx";
+import { useDialogDismissal, useModalDraft, useModalNavigation } from "../navigation/controller.tsx";
 import { ProviderSelection } from "../settings/model-providers.tsx";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { EpicIcon } from "./epic-icon.tsx";
@@ -28,6 +28,7 @@ import { RepositorySelection } from "./repository-selection.tsx";
 import { TicketCost } from "./ticket-cost.tsx";
 import { TicketHistoryTimeline } from "./ticket-history.tsx";
 import { ticketLabels } from "./ticket-labels.ts";
+import { useTicketDialog, useDockedDismissal, type TicketPresentation } from "./ticket-presentation.tsx";
 
 export { ticketLabels } from "./ticket-labels.ts";
 
@@ -48,6 +49,7 @@ export interface TicketReadingState {
 }
 
 export const TicketDetails = ({
+	presentation,
 	ticket,
 	api,
 	busy,
@@ -61,6 +63,7 @@ export const TicketDetails = ({
 	epics,
 	openEpic,
 }: {
+	presentation: TicketPresentation;
 	ticket: Ticket;
 	api: IWorkspaceApi;
 	busy: boolean;
@@ -104,7 +107,7 @@ export const TicketDetails = ({
 		if (tab === nextTab) return;
 		const next = new URLSearchParams(location.search);
 		next.set("tab", nextTab);
-		navigation.select(`${location.pathname}?${next}`);
+		navigation.select(`${location.pathname}?${next}${location.hash}`);
 	};
 	const [acting, setActing] = useState(false);
 	const dismissal = useDialogDismissal(busy || acting || returnPending);
@@ -126,6 +129,7 @@ export const TicketDetails = ({
 			setDescriptionDraft(undefined);
 			Object.assign(state, { descriptionDraft: undefined });
 		},
+		"ticket",
 	);
 	useEffect(() => {
 		if (navigation.modal?.owner === "archive") archiveDialog.current?.showModal();
@@ -299,7 +303,8 @@ export const TicketDetails = ({
 	const [, setArchiveError] = useErrorState();
 	const [refresh] = useState(() => () => poller.current?.refresh());
 	useEffect(refresh, [refresh, ticket.status, ticket.canReturnToBacklog]);
-	useModalDialog(dialog);
+	useTicketDialog(dialog, presentation);
+	useDockedDismissal(presentation, busy || acting || returnPending);
 	useEffect(() => {
 		const resource = new ResourcePoller(
 			() => api.read(`tickets/${ticket.id}/workflow`, ticketWorkflowSchema),
@@ -329,8 +334,8 @@ export const TicketDetails = ({
 		if (section || !job || navigation.modal?.owner !== "ticket") return;
 		const next = new URLSearchParams(location.search);
 		next.set("tab", tab);
-		navigation.select(`${location.pathname}?${next}`, true, location.key);
-	}, [section, job, tab, location.pathname, location.search, location.key, navigation]);
+		navigation.select(`${location.pathname}?${next}${location.hash}`, true, location.key);
+	}, [section, job, tab, location.pathname, location.search, location.hash, location.key, navigation]);
 	const selectTab = (next: TicketTab) => {
 		setTab(next);
 		document.getElementById(`${fieldId}-tab-${next}`)?.focus();
@@ -407,7 +412,7 @@ export const TicketDetails = ({
 	return (
 		<dialog
 			ref={dialog}
-			className='ticket-details ticket-dialog'
+			className={`ticket-details ticket-dialog ticket-${presentation}`}
 			aria-labelledby='ticket-details-title'
 			{...dismissal}
 		>

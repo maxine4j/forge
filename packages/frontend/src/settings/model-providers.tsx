@@ -88,6 +88,7 @@ export function ModelProviders({
 	const navigation = useModalNavigation();
 	const { notify } = useToast();
 	useEffect(() => {
+		if (!query.has("provider") || query.has("ticket")) return;
 		const base = directModalParent(location);
 		if (!base || initializing.current) return;
 		initializing.current = true;

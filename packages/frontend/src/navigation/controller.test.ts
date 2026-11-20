@@ -20,6 +20,74 @@ const location = (search = "", state: unknown = null): Location => ({
 });
 
 describe("modal history", () => {
+	it("keeps unrelated Config selection parameters beneath a direct ticket", () => {
+		const linked = {
+			...location("?provider=example&remove=1&ticket=TASK-1&tab=cost"),
+			pathname: "/config",
+			hash: "#settings",
+		};
+		expect(directModalParent(linked)).toMatchObject({
+			pathname: "/config",
+			search: "?provider=example&remove=1",
+			hash: "#settings",
+		});
+	});
+	it.each([
+		"/tasks",
+		"/costs",
+		"/config",
+		"/repos",
+		"/repos/example/code",
+		"/repos/example/agents/chat",
+		"/repos/example/pipelines",
+		"/repos/example/terminals",
+	])("preserves the site-wide direct link parent at %s through reload and dismissal", async (pathname) => {
+		const linked = { ...location("?filter=kept&ticket=TASK-1&tab=history"), pathname, hash: "#reading" };
+		const parent = directModalParent(linked)!;
+		expect(parent).toMatchObject({ pathname, search: "?filter=kept", hash: "#reading" });
+		const parentUrl = pathname + parent.search + parent.hash;
+		const linkedUrl = pathname + linked.search + linked.hash;
+		const state = nextModal(parent, "ticket");
+		expect(directModalParent({ ...linked, state })).toBeUndefined();
+		const router = createMemoryRouter([{ path: "*", element: null }], {
+			initialEntries: [parentUrl, { pathname, search: linked.search, hash: linked.hash, state }],
+			initialIndex: 1,
+		});
+		const navigation = createModalNavigation(() => router.state.location, router.navigate);
+		navigation.select(pathname + "?filter=kept&ticket=TASK-1&tab=chat#reading");
+		navigation.dismissOwner("ticket");
+		expect(router.state.location.pathname + router.state.location.search + router.state.location.hash).toBe(
+			parentUrl,
+		);
+		await router.navigate(1);
+		expect(router.state.location.pathname + router.state.location.search + router.state.location.hash).toBe(
+			linkedUrl,
+		);
+		router.dispose();
+	});
+
+	it("records ticket switching in one owner and closes to the original parent", async () => {
+		const router = createMemoryRouter([{ path: "*", element: null }], {
+			initialEntries: ["/tasks?view=backlog#list"],
+		});
+		const navigation = createModalNavigation(() => router.state.location, router.navigate);
+		navigation.open("ticket", "/tasks?view=backlog&ticket=TASK-1#list");
+		const id = navigationState(router.state.location).modal?.id;
+		navigation.open("ticket", "/tasks?view=backlog&ticket=TASK-2#list");
+		expect(navigationState(router.state.location).modal).toMatchObject({
+			id,
+			depth: 2,
+			parent: { url: "/tasks?view=backlog#list" },
+		});
+		await router.navigate(-1);
+		expect(router.state.location.search).toContain("ticket=TASK-1");
+		await router.navigate(1);
+		navigation.dismissOwner("ticket");
+		expect(router.state.location.search).toBe("?view=backlog");
+		expect(router.state.location.hash).toBe("#list");
+		router.dispose();
+	});
+
 	it("ignores delayed tab initialization after Back restores a modal parent", async () => {
 		const router = createMemoryRouter([{ path: "*", element: null }], { initialEntries: ["/tasks?view=backlog"] });
 		const navigation = createModalNavigation(() => router.state.location, router.navigate);

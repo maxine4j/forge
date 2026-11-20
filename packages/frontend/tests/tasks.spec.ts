@@ -1068,7 +1068,7 @@ for (const width of [1280, 768, 600, 390, 320]) {
 		const row = details.locator(".ticket-details-heading");
 		const status = row.getByRole("status");
 		await status.evaluate((el) => {
-			el.textContent = "A very long execution label that must truncate within its own available space";
+			el.textContent = "A very long execution label that must truncate within its own available space ".repeat(3);
 		});
 		await expect(status).toHaveCSS("text-align", "right");
 		await expect(status).toHaveCSS("white-space", "nowrap");
@@ -1118,7 +1118,7 @@ for (const width of [1280, 390]) {
 		await expect(dialog.getByRole("button", { name: "Archive ticket", exact: true })).toBeDisabled();
 		f.failReset();
 		await expect(dialog.getByText("Removing abandoned work…", { exact: true })).toBeVisible();
-		await expect(dialog.getByRole("alert")).toContainText("Cleanup failed");
+		await expect(page.getByRole("alert")).toContainText("Cleanup failed");
 		await dialog.getByRole("button", { name: "Retry cleanup", exact: true }).click();
 		await expect.poll(() => f.operations).toContain("reconcile");
 		f.finishReset();
@@ -1797,11 +1797,11 @@ test("inline ticket title saves independently and supports keyboard save and but
 	await edit.click();
 	await title.fill("   ");
 	await title.press("Enter");
-	await expect(dialog.getByRole("alert")).toContainText("Enter a title");
+	await expect(page.getByRole("alert")).toContainText("Enter a title");
 	await title.fill("Updated via keyboard");
 	f.failSaves(true);
 	await title.press("Enter");
-	await expect(dialog.getByRole("alert")).toBeVisible();
+	await expect(page.getByRole("alert")).toBeVisible();
 	await expect(title).toHaveValue("Updated via keyboard");
 	f.failSaves(false);
 	await title.press("Enter");
@@ -1853,9 +1853,9 @@ test("backlog creation and scope saves retain failed drafts and share changes wi
 	await expect(dialog.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
 	f.failSaves(true);
 	await dialog.getByRole("button", { name: "Save description", exact: true }).click();
-	await expect(dialog.getByRole("alert")).toBeVisible();
+	await expect(page.getByRole("alert")).toBeVisible();
 	await page.waitForTimeout(1200);
-	await expect(dialog.getByRole("alert")).toBeVisible();
+	await expect(page.getByRole("alert")).toBeVisible();
 	await expect(dialog.getByLabel("Description", { exact: true })).toHaveValue("Updated scope");
 	f.failSaves(false);
 	await dialog.getByRole("button", { name: "Save description", exact: true }).click();
@@ -2816,7 +2816,7 @@ for (const size of [
 		const composer = panel.getByRole("button", { name: "Send message", exact: true });
 		expect((await composer.boundingBox())!.y + (await composer.boundingBox())!.height).toBeLessThanOrEqual(440);
 		const bounds = (await panel.boundingBox())!;
-		if (size.width > 600) expect(bounds.x).toBeGreaterThan(0);
+		if (size.width >= 1024) expect(bounds.x).toBeGreaterThan(0);
 		else expect(bounds.width).toBe(size.width);
 		expect(await page.evaluate(() => scrollY === 0 && document.documentElement.scrollHeight <= innerHeight)).toBe(
 			true,
@@ -3008,7 +3008,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	await expect(modal.getByRole("button", { name: "Allow once" })).toHaveCount(0);
 	reject = true;
 	await send.click();
-	await expect(modal.getByRole("alert")).toBeVisible();
+	await expect(page.getByRole("alert")).toBeVisible();
 	await expect(message).toHaveValue("Retain this draft across approval");
 	await modal.getByRole("button", { name: "Close ticket" }).click();
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
@@ -3284,6 +3284,223 @@ test("a plan needs attention on the four-column board and approval submits the d
 	await expect(dot).toHaveCount(0);
 	await expect(card.getByRole("img", { name: "Agent queued" })).toBeVisible();
 	await expect(card).not.toHaveClass(/needs-attention/);
+});
+
+for (const width of [390, 690, 820, 1023, 1024, 1280]) {
+	for (const view of ["board", "backlog", "notifications"]) {
+		test(`responsive ticket geometry on ${view} at ${width}px`, async ({ page }) => {
+			await page.setViewportSize({ width, height: 900 });
+			await setup(page);
+			await page.goto(`/tasks?view=${view}&ticket=TASK-1&tab=details`);
+			const ticket = page.getByRole("dialog", { name: "TASK-1", exact: true });
+			await expect(ticket).toBeVisible();
+			await ticket.evaluate((element) =>
+				Promise.all(element.getAnimations().map((animation) => animation.finished)),
+			);
+			const rect = (await ticket.boundingBox())!;
+			if (width < 1024) {
+				expect(rect).toMatchObject({ x: 0, y: 0, width, height: 900 });
+				expect(await ticket.evaluate((element) => element.matches(":modal"))).toBe(true);
+			} else {
+				expect(rect.width).toBe(580);
+				if (view === "notifications") {
+					expect(rect.x).toBe((width - 580) / 2);
+					expect(rect.y).toBe(16);
+					expect(rect.height).toBe(868);
+				} else {
+					const header = (await page.locator(".shell > header").boundingBox())!;
+					expect(rect.y).toBe(header.y + header.height);
+					expect(rect.x).toBe(width - 580);
+					expect(await ticket.evaluate((element) => element.matches(":modal"))).toBe(false);
+					const tasks = (await page.locator(".tasks-view").boundingBox())!;
+					expect(tasks.x + tasks.width).toBeLessThanOrEqual(rect.x);
+					await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+					await expect(ticket).toBeVisible();
+				}
+			}
+			await ticket.getByRole("button", { name: "Close ticket", exact: true }).click();
+			await expect(ticket).toHaveCount(0);
+		});
+	}
+}
+
+for (const pathname of [
+	"/costs",
+	"/config",
+	"/repos",
+	`/repos/${projectId}/code`,
+	`/repos/${projectId}/agents`,
+	`/repos/${projectId}/pipelines`,
+	`/repos/${projectId}/terminals`,
+]) {
+	test(`site-wide ticket links retain the parent on ${pathname}`, async ({ page }) => {
+		await setup(page);
+		await page.goto(`${pathname}?filter=kept&ticket=TASK-1&tab=details#reading`);
+		const ticket = page.getByRole("dialog", { name: "TASK-1", exact: true });
+		await expect(ticket).toBeVisible();
+		const rect = (await ticket.boundingBox())!;
+		expect(rect).toMatchObject({ x: 350, y: 16, width: 580, height: 868 });
+		await ticket.getByRole("tab", { name: "Chat", exact: true }).click();
+		await expect(page).toHaveURL(`${pathname}?filter=kept&ticket=TASK-1&tab=chat#reading`);
+		await page.reload();
+		await expect(ticket).toBeVisible();
+		await page.keyboard.press("Escape");
+		await expect(page).toHaveURL(`${pathname}?filter=kept#reading`);
+		await page.goForward();
+		await expect(ticket).toBeVisible();
+	});
+}
+
+test("docked ticket switching guards drafts, retains one owner and restores the original parent", async ({ page }) => {
+	await setup(page);
+	const first = page.getByRole("button", { name: "TASK-1 First task", exact: true });
+	const second = page.getByRole("button", { name: "TASK-2 Second task", exact: true });
+	await first.click();
+	const ticket = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await expect(ticket).toBeVisible();
+	await ticket.getByRole("button", { name: "Edit description" }).click();
+	await ticket.getByRole("textbox", { name: "Description", exact: true }).fill("Keep draft");
+	await second.click();
+	const guard = page.getByRole("dialog", { name: "Unsaved changes" });
+	await expect(guard).toBeVisible();
+	await guard.getByRole("button", { name: "Keep editing" }).click();
+	await expect(ticket.getByRole("textbox", { name: "Description", exact: true })).toHaveValue("Keep draft");
+	await second.click();
+	await guard.getByRole("button", { name: "Discard changes" }).click();
+	await expect(page.getByRole("dialog", { name: "TASK-2", exact: true })).toBeVisible();
+	await page.goBack();
+	await expect(ticket).toBeVisible();
+	await page.goForward();
+	await page.keyboard.press("Escape");
+	await expect(page).toHaveURL("/tasks");
+	await expect(first).toBeFocused();
+});
+
+test("docked tickets leave board scrolling and keyboard navigation usable, with dropdown dismissal priority", async ({
+	page,
+}) => {
+	await setup(page);
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const ticket = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await expect(ticket).toBeVisible();
+	await expect.poll(() => ticket.evaluate((element) => element.contains(document.activeElement))).toBe(true);
+	const columns = page.locator(".kanban-columns");
+	await columns.evaluate((element) => {
+		element.scrollLeft = element.scrollWidth;
+	});
+	await expect.poll(() => columns.evaluate((element) => element.scrollLeft)).toBeGreaterThan(0);
+	const boardTab = page.getByRole("tab", { name: "Board", exact: true });
+	await boardTab.focus();
+	await page.keyboard.press("Tab");
+	await expect(page.getByRole("button", { name: "Board settings", exact: true })).toBeFocused();
+	await ticket.getByRole("combobox", { name: "Add epic", exact: true }).click();
+	await page.keyboard.press("Escape");
+	await expect(ticket).toBeVisible();
+	await expect(ticket.getByRole("combobox", { name: "Add epic", exact: true })).toHaveAttribute(
+		"aria-expanded",
+		"false",
+	);
+	await boardTab.click();
+	await expect(ticket).toBeVisible();
+	await page.keyboard.press("Escape");
+	await expect(ticket).toHaveCount(0);
+});
+
+test("confirmations and their toast host remain above tickets across responsive modes", async ({ page }) => {
+	const fixture = await setup(page);
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const ticket = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await ticket.getByRole("button", { name: "Archive ticket", exact: true }).click();
+	const confirmation = page.getByRole("dialog", { name: "Archive TASK-1?", exact: true });
+	await expect(confirmation).toBeVisible();
+	await page.setViewportSize({ width: 690, height: 900 });
+	await expect
+		.poll(() =>
+			confirmation.evaluate((element) => element.matches(":modal") && element.contains(document.activeElement)),
+		)
+		.toBe(true);
+	fixture.setArchiveFailure(true);
+	await confirmation.getByRole("button", { name: "Archive", exact: true }).click();
+	await expect(confirmation.getByRole("alert")).toBeVisible();
+	await page.setViewportSize({ width: 1024, height: 900 });
+	await expect(confirmation.getByRole("alert")).toBeVisible();
+	await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
+	await expect(ticket).toBeVisible();
+	await expect
+		.poll(() =>
+			page
+				.locator(".forge-toast-viewport:popover-open")
+				.evaluate((element) => element.closest("dialog") === null),
+		)
+		.toBe(true);
+	await ticket.getByRole("button", { name: "Edit description" }).click();
+	await ticket.getByRole("textbox", { name: "Description", exact: true }).fill("Keep responsive draft");
+	await ticket.getByRole("button", { name: "Close ticket", exact: true }).click();
+	const guard = page.getByRole("dialog", { name: "Unsaved changes", exact: true });
+	await expect(guard).toBeVisible();
+	await page.setViewportSize({ width: 390, height: 900 });
+	await expect
+		.poll(() => guard.evaluate((element) => element.matches(":modal") && element.contains(document.activeElement)))
+		.toBe(true);
+	await guard.getByRole("button", { name: "Keep editing" }).click();
+	await expect(ticket.getByRole("textbox", { name: "Description", exact: true })).toHaveValue(
+		"Keep responsive draft",
+	);
+});
+
+test("resizing retains mounted ticket drafts, active section and chat reading state", async ({ page }) => {
+	await setup(page, false, true);
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const ticket = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await ticket.getByRole("tab", { name: "Chat", exact: true }).click();
+	await ticket.getByRole("textbox", { name: "Message", exact: true }).fill("Keep chat draft");
+	await ticket.locator(".agent-messages").evaluate((element) => {
+		element.scrollTop = 40;
+	});
+	const timeline = await ticket.locator(".agent-messages").evaluate((element) => element.scrollTop);
+	await ticket.evaluate((element) => {
+		element.setAttribute("data-resize-marker", "same-node");
+	});
+	for (const width of [1023, 390, 690, 1024, 1280]) {
+		await page.setViewportSize({ width, height: 900 });
+		await expect(ticket).toHaveAttribute("data-resize-marker", "same-node");
+		await expect(ticket.getByRole("textbox", { name: "Message", exact: true })).toHaveValue("Keep chat draft");
+		await expect(ticket.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
+		await expect
+			.poll(() => ticket.locator(".agent-messages").evaluate((element) => element.scrollTop))
+			.toBe(timeline);
+	}
+	await page.setViewportSize({ width: 690, height: 900 });
+	await page.evaluate(() => {
+		Object.defineProperties(window.visualViewport, {
+			height: { configurable: true, value: 400 },
+			offsetTop: { configurable: true, value: 100 },
+		});
+		window.visualViewport!.dispatchEvent(new Event("resize"));
+	});
+	await expect.poll(() => ticket.boundingBox()).toMatchObject({ x: 0, y: 100, width: 690, height: 400 });
+	await expect(ticket.getByRole("textbox", { name: "Message", exact: true })).toHaveValue("Keep chat draft");
+});
+
+test("unavailable and loading tickets use a closable surface on every presentation", async ({ page }) => {
+	await setup(page);
+	let release = () => {};
+	const held = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	await page.route("**/api/tickets/TASK-999", async (route) => {
+		await held;
+		await route.fulfill({ status: 404, json: {} });
+	});
+	await page.goto("/config?ticket=TASK-999");
+	const ticket = page.getByRole("dialog", { name: "Ticket", exact: true });
+	await expect(ticket.getByRole("status")).toHaveText("Loading ticket…");
+	release();
+	await expect(ticket.getByRole("status")).toHaveText("Ticket unavailable.");
+	await page.setViewportSize({ width: 690, height: 900 });
+	await expect(ticket).toHaveClass(/ticket-full-screen/);
+	await ticket.getByRole("button", { name: "Close ticket" }).click();
+	await expect(page).toHaveURL("/config");
 });
 
 for (const archived of [false, true]) {

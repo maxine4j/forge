@@ -20,6 +20,8 @@ import { InterfaceIcon } from "./navigation/interface-icon.tsx";
 import { resolveRoute } from "./navigation/routes.ts";
 import { ForgeSettingsForm } from "./settings/settings-form.tsx";
 import { Tasks } from "./tasks/tasks.tsx";
+import { TicketProvider, TicketHost } from "./tasks/ticket-controller.tsx";
+import { useTicketPresentation } from "./tasks/ticket-presentation.tsx";
 import { useErrorState, useFailureToast, ToastVisibility } from "./toasts/toasts.tsx";
 import { Workbench } from "./workspace/workbench.tsx";
 
@@ -120,7 +122,9 @@ const AccountCard = ({
 
 export const App = (props: { api: IApiClient; workspaceApi: IWorkspaceApi }) => (
 	<NavigationProvider>
-		<Application {...props} />
+		<TicketProvider api={props.workspaceApi}>
+			<Application {...props} />
+		</TicketProvider>
 	</NavigationProvider>
 );
 
@@ -128,10 +132,11 @@ const Application = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWo
 	const location = useLocation();
 	const navigation = useModalNavigation();
 	const route = resolveRoute(location.pathname);
+	const presentation = useTicketPresentation();
+	const docked = new URLSearchParams(location.search).has("ticket") && presentation === "docked";
 	const constrained = route.page === "tasks" || (route.page === "repo" && route.section === "agents");
 	const [viewport, setViewport] = useState({ height: window.visualViewport?.height ?? window.innerHeight, top: 0 });
 	useEffect(() => {
-		if (!constrained) return;
 		const update = () =>
 			setViewport({
 				height: window.visualViewport?.height ?? window.innerHeight,
@@ -146,7 +151,7 @@ const Application = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWo
 			window.visualViewport?.removeEventListener("scroll", update);
 			window.removeEventListener("resize", update);
 		};
-	}, [constrained]);
+	}, []);
 	const config = route.page === "config";
 	const global = config || route.page === "costs" || route.page === "tasks";
 	const [retained, setRetained] = useState<Project>();
@@ -280,9 +285,7 @@ const Application = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWo
 	};
 	return (
 		<div className={`shell${constrained ? " shell-constrained" : ""}`}>
-			{constrained && (
-				<style>{`.shell-constrained { height: ${viewport.height}px; top: ${viewport.top}px; --forge-viewport-height: ${viewport.height}px; --forge-viewport-top: ${viewport.top}px; }`}</style>
-			)}
+			<style>{`.shell { --forge-viewport-height: ${viewport.height}px; --forge-viewport-top: ${viewport.top}px; } .shell-constrained { height: ${viewport.height}px; top: ${viewport.top}px; }`}</style>
 			{location.pathname === "/" && <Navigate to='/tasks' replace />}
 			<header>
 				<Link className='brand' to='/tasks' aria-label='Forge home'>
@@ -311,7 +314,7 @@ const Application = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWo
 					</Link>
 				</nav>
 			</header>
-			<main>
+			<main className={docked ? "ticket-docked-layout" : undefined}>
 				<div className='tasks-view' hidden={route.page !== "tasks"}>
 					<AgentOptionsRevision.Provider value={agentOptionsRevision}>
 						<ToastVisibility value={route.page === "tasks"}>
@@ -526,6 +529,9 @@ const Application = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWo
 						defaultsSaved={() => setAgentOptionsRevision((revision) => revision + 1)}
 					/>
 				)}
+				<AgentOptionsRevision.Provider value={agentOptionsRevision}>
+					<TicketHost />
+				</AgentOptionsRevision.Provider>
 			</main>
 		</div>
 	);

@@ -128,7 +128,7 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	await chooseDropdown(page.getByRole("combobox", { name: "Sort tickets", exact: true }), "ticket");
 	await expect(page.getByRole("row").nth(1)).toContainText("TASK-1");
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
-	await expect(ticket.getByRole("link")).toHaveAttribute("href", `/tasks?ticket=TASK-2`);
+	await expect(ticket.getByRole("link")).toHaveAttribute("href", `/costs?ticket=TASK-2`);
 	const previousReads = costReads;
 	await page.clock.fastForward(300_000);
 	await expect.poll(() => costReads).toBeGreaterThan(previousReads);
@@ -189,17 +189,17 @@ test("Costs links open archived tickets outside the active board", async ({ page
 		.getByRole("row", { name: /TASK-1 Cleanup/ })
 		.getByRole("link")
 		.click();
-	await expect(page).toHaveURL(/\/tasks\?ticket=TASK-1(?:&tab=details)?$/);
+	await expect(page).toHaveURL(/\/costs\?ticket=TASK-1(?:&tab=details)?$/);
 	const panel = page.getByRole("dialog", { name: "TASK-1" });
 	await expect(panel).toBeVisible();
 	await expect(panel.getByText("Archived scope", { exact: true })).toBeVisible();
 	await panel.getByRole("button", { name: "Close ticket" }).click();
 	await expect(panel).toHaveCount(0);
-	await page.goBack();
+	await expect(page).toHaveURL("/costs");
 	await expect(page.getByRole("heading", { name: "Costs", exact: true })).toBeVisible();
 	await page.goForward();
-	await expect(page).toHaveURL("/tasks");
-	await expect(panel).toHaveCount(0);
-	await page.goForward();
 	await expect(panel).toBeVisible();
+	await page.goBack();
+	await expect(page).toHaveURL("/costs");
+	await expect(panel).toHaveCount(0);
 });

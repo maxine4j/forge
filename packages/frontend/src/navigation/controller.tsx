@@ -52,19 +52,23 @@ export const dismissalDepth = (state: NavigationState, owner: string | undefined
 
 export const directModalParent = (location: Location): Location | undefined => {
 	const query = new URLSearchParams(location.search);
-	if (location.pathname === "/config" && query.has("provider") && !navigationState(location).modal) {
+	if (
+		location.pathname === "/config"
+		&& query.has("provider")
+		&& !query.has("ticket")
+		&& !navigationState(location).modal
+	) {
 		query.delete("provider");
 		query.delete("remove");
 		return { ...location, search: query.size ? `?${query}` : "", state: null };
 	}
 	if (
-		location.pathname !== "/tasks"
-		|| navigationState(location).modal
-		|| (!query.has("ticket") && !query.has("epic"))
+		navigationState(location).modal
+		|| (!query.has("ticket") && !(location.pathname === "/tasks" && query.has("epic")))
 	)
 		return;
 	query.delete("ticket");
-	query.delete("epic");
+	if (location.pathname === "/tasks") query.delete("epic");
 	query.delete("tab");
 	return { ...location, search: query.size ? `?${query}` : "", state: null };
 };
@@ -175,11 +179,20 @@ export const createModalNavigation = (currentLocation: () => Location, navigate:
 	return {
 		open: (owner: ModalOwner, url?: string, selection?: string) => {
 			const current = currentLocation();
-			const target = url ?? current.pathname + current.search;
+			const target = url ?? current.pathname + current.search + current.hash;
 			const modal = navigationState(current).modal;
-			if (target === current.pathname + current.search && modal?.owner === owner && modal.selection === selection)
+			if (
+				target === current.pathname + current.search + current.hash
+				&& modal?.owner === owner
+				&& modal.selection === selection
+			)
 				return;
-			void navigate(target, { state: nextModal(current, owner, selection) });
+			void navigate(target, {
+				state:
+					owner === "ticket" && modal?.owner === "ticket"
+						? advanceModal(navigationState(current))
+						: nextModal(current, owner, selection),
+			});
 		},
 		select: (url: string, replace = false, expectedKey?: string) => {
 			const current = currentLocation();
@@ -259,10 +272,11 @@ export const useDialogDismissal = (busy: boolean) => {
 };
 
 // Tabs and confirmations retain the form. Other modal transitions may unmount it.
-export const useModalDraft = (dirty: boolean, busy: boolean, discard?: () => void) => {
+export const useModalDraft = (dirty: boolean, busy: boolean, discard?: () => void, requestedOwner?: ModalOwner) => {
 	const location = useLocation();
 	let owner = navigationState(location).modal;
-	while (owner && ["archive", "return"].includes(owner.owner)) owner = owner.parent.state.modal;
+	while (owner && (requestedOwner ? owner.owner !== requestedOwner : ["archive", "return"].includes(owner.owner)))
+		owner = owner.parent.state.modal;
 	const id = owner?.id;
 	const released = useRef<"all" | "busy" | undefined>(undefined);
 	useEffect(() => {
@@ -276,9 +290,20 @@ export const useModalDraft = (dirty: boolean, busy: boolean, discard?: () => voi
 			const modal = navigationState(next).modal;
 			const retained =
 				modal?.id === id
-				|| (!!modal && ["archive", "return"].includes(modal.owner) && !!id && retainsModal(next, id));
+				|| (!!modal
+					&& (requestedOwner || ["archive", "return"].includes(modal.owner))
+					&& !!id
+					&& retainsModal(next, id));
 			const busyExit = busy && navigationState(location).modal?.id !== modal?.id;
-			return !!id && ((released.current !== "all" && dirty && !retained) || (!released.current && busyExit));
+			const ticketChanged =
+				owner?.owner === "ticket"
+				&& new URLSearchParams(location.search).get("ticket")
+					!== new URLSearchParams(next.search).get("ticket");
+			return (
+				!!id
+				&& ((released.current !== "all" && dirty && (!retained || ticketChanged))
+					|| (!released.current && (busyExit || (busy && ticketChanged))))
+			);
 		},
 		hard: busy,
 		discard,

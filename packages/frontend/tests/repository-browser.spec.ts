@@ -162,7 +162,7 @@ for (const width of [1280, 820, 390]) {
 		await page.goto("/tasks");
 		const tasks = await metrics("Task views");
 		await page.getByRole("tab", { name: "Board", exact: true }).press("End");
-		await expect(page.getByRole("tab", { name: "Backlog", exact: true })).toBeFocused();
+		await expect(page.getByRole("tab", { name: /^Notifications/ })).toBeFocused();
 		await page.screenshot({ path: `../../artifacts/forge/tasks-toolbar-${width}.png` });
 		await page.goto(`/repos/${projectId}/code`);
 		await expect(page.getByRole("combobox", { name: "Branch" })).toBeVisible();

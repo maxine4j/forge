@@ -13,6 +13,18 @@ are exhausted, Back follows normal browser history. Native dialog cancellation
 is prevented and routed through this same controller; native pickers and popovers
 retain their dismissal priority. Hidden retained views have no active dialogs.
 
+Every page accepts `ticket=TASK-n` with `tab=details|chat|history|cost`. Direct
+links establish a dismissible parent preserving the pathname, unrelated query
+parameters and hash. Costs opens tickets over its own `/costs` URL. The shared
+application ticket host stays outside retained page containers and uses one
+collection poller with Tasks. At widths ≥1024px, Board/Backlog shrink beside a
+580px non-modal right panel below navigation; other pages show a centred 580px
+native modal. Below 1024px the native modal fills the visible viewport and covers
+navigation, adapting to safe areas and keyboard changes. Resizing retains the
+mounted ticket and its drafts and reading state. Confirmations remain modal and
+notifications follow the active native modal or the application body when docked.
+See [ticket presentation and history](tickets.md#task-navigation).
+
 One application guard protects unsaved ticket, epic, repository-creation and
 Board-settings edits. Navigation that would lose edits offers **Keep editing**
 and **Discard changes**, including Back, Forward, links and modal dismissal.

@@ -119,6 +119,42 @@ repository/epic pickers, repeated gestures and dirty-form keep/discard. One gest
 must dismiss only the top native surface or traverse one router entry, without
 also closing its surrounding modal. See [navigation](foundation.md#navigation).
 
+## Responsive ticket verification
+
+TASK-36 uses the pinned Node 24.22.0 and pnpm 10.34.7 toolchain. Chromium checks
+cover Board, Backlog, Notifications, Costs, Config, Repos and repository sections
+at 390, 690, 820, 1023, 1024 and 1280px. Geometry assertions check full-screen
+coverage, centred placement, the 580px panel below navigation and the reduced
+task area. Interaction checks cover board scrolling, keyboard traversal, dropdown
+Escape priority, ticket switching, draft guards, archived/unavailable tickets,
+reload/history, nested confirmations and toast rehosting. Resizing retains the
+same ticket DOM node, chat draft, section and reading position; simulated keyboard
+height and visual viewport offset are also checked.
+
+The final serial responsive run passed all 31 cases, including archive behavior,
+every geometry/page case, ticket switching, keyboard interaction, confirmations,
+toast hosting, resize preservation and loading failures. It used one worker,
+90-second test and 30-second assertion timeouts on an isolated server port.
+Formatting, lint, types and the final production build passed.
+
+The initial full browser run passed 183 of 221 tests. It included issues corrected
+during implementation and page-startup/timeouts under concurrent test load, so
+the full suite is not recorded as green. A serial six-case retry passed return
+flows in Board/Backlog, stale eligibility, board scrolling and keyboard traversal,
+responsive confirmations/toast hosting, and draft/section/chat preservation.
+The unit suite passed before the final UI adjustments; a later Git sync timeout
+passed all 17 tests on a one-worker retry with a 30-second test timeout.
+
+The desktop/mobile Board-settings history tests and the toast request-retry test
+also fail on unchanged commit `1458d0a`; they remain separate from ticket
+presentation verification. See the existing [Android Back checks](#android-back-verification)
+and [terminal verification](#terminal-keyboard-device-verification).
+
+Physical target-phone fold/unfold, native keyboard and gesture verification remain
+pending because no device is attached. Chromium simulation does not establish
+those behaviors. See [responsive ticket presentation](tickets.md#task-navigation)
+and [site-wide ticket URLs](foundation.md#navigation).
+
 ## Development databases
 
 SQLite stores cost snapshots, epics, nullable ticket membership and independent
