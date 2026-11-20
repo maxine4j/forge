@@ -28,7 +28,11 @@ export async function migrateModelProviders(database: IDatabase, id: () => strin
 			defaultAgentReasoningEffort: legacy.defaultAgentReasoningEffort,
 		});
 	}
-	const ollama = inferenceProviderSchema.safeParse({ kind: "ollama", endpoint: legacy.ollamaEndpoint, model: legacy.ollamaModel });
+	const ollama = inferenceProviderSchema.safeParse({
+		kind: "ollama",
+		endpoint: legacy.ollamaEndpoint,
+		model: legacy.ollamaModel,
+	});
 	if (ollama.success && ollama.data.kind === "ollama")
 		providers.push({
 			id: id(),

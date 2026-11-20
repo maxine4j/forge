@@ -14,7 +14,7 @@ import {
 	useModalDraft,
 	useModalNavigation,
 } from "../navigation/controller.tsx";
-import { useToast } from "../toasts/toasts.tsx";
+import { ToastVisibility, useToast } from "../toasts/toasts.tsx";
 
 export function ProviderSelection({
 	api,
@@ -103,10 +103,17 @@ export function ModelProviders({
 		let active = true;
 		void api.read("model-providers", modelProvidersSchema).then(
 			(values) => {
-				if (active) { setProviders(values); setLoaded(true); setLoadError(false); }
+				if (active) {
+					setProviders(values);
+					setLoaded(true);
+					setLoadError(false);
+				}
 			},
 			() => {
-				if (active) { setLoadError(true); notify("Could not load model providers."); }
+				if (active) {
+					setLoadError(true);
+					notify("Could not load model providers.");
+				}
 			},
 		);
 		return () => {
@@ -123,7 +130,7 @@ export function ModelProviders({
 					<h3>{p.name}</h3>
 					<p>{p.kind === "openai" ? "OpenAI account" : "Ollama"}</p>
 					{p.kind === "openai" ? (
-						account
+						<ToastVisibility value={!selected}>{account}</ToastVisibility>
 					) : (
 						<p>
 							{p.endpoint}
@@ -149,8 +156,16 @@ export function ModelProviders({
 			))}
 			{loaded && !providers.length && <p>No model providers. Add one to run tickets or create chats.</p>}
 			{!loaded && !loadError && <p role='status'>Loading model providers…</p>}
-			{loadError && <button type='button' onClick={() => setRevision((v) => v + 1)}>Retry loading providers</button>}
-			<button type='button' disabled={!loaded} onClick={() => navigation.open("model-provider", "/config?provider=new")}>
+			{loadError && (
+				<button type='button' onClick={() => setRevision((v) => v + 1)}>
+					Retry loading providers
+				</button>
+			)}
+			<button
+				type='button'
+				disabled={!loaded}
+				onClick={() => navigation.open("model-provider", "/config?provider=new")}
+			>
 				Add provider
 			</button>
 			{selected && (selected === "new" || current) && (
