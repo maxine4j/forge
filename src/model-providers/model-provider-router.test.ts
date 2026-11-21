@@ -64,11 +64,17 @@ test("provider HTTP routes require owner/origin, expose safe records and return 
 			endpoint: "http://ollama/v1",
 			comparisonModel: "gpt-5.4",
 			retired: false,
+			maxConcurrentAgents: 1,
 		});
+		for (const maxConcurrentAgents of [0, -1, 1.5, "2"])
+			expect((await request(`/${provider.id}`, "PATCH", { maxConcurrentAgents })).status).toBe(400);
 		expect((await request(`/${provider.id}`, "PATCH", { kind: "openai" })).status).toBe(400);
-		expect(await (await request(`/${provider.id}`, "PATCH", { name: "Renamed" })).json()).toMatchObject({
+		expect(
+			await (await request(`/${provider.id}`, "PATCH", { name: "Renamed", maxConcurrentAgents: 4 })).json(),
+		).toMatchObject({
 			id: provider.id,
 			name: "Renamed",
+			maxConcurrentAgents: 4,
 		});
 		expect((await request(`/${provider.id}/model-options`)).status).toBe(400);
 		expect((await request(`/${provider.id}`, "DELETE")).status).toBe(204);

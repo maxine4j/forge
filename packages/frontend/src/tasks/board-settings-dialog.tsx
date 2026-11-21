@@ -1,15 +1,13 @@
 import {
 	boardSettingsSchema,
 	boardStopSchema,
-	maxConcurrentAgents,
-	minConcurrentAgents,
 	type BoardSettings,
 	type BoardSettingsUpdate,
 } from "@forge/contracts/tickets";
 import { useEffect, useId, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
-import { useDialogDismissal, useModalDialog, useModalDraft } from "../navigation/controller.tsx";
+import { useDialogDismissal, useModalDialog } from "../navigation/controller.tsx";
 import { useErrorState } from "../toasts/toasts.tsx";
 import { DockerSettings } from "./docker-settings.tsx";
 
@@ -91,11 +89,7 @@ export const BoardSettingsDialog = ({
 }) => {
 	const dialog = useRef<HTMLDialogElement>(null);
 	const titleId = useId();
-	const limitId = useId();
-	const { settings, busy, error, notice, update, stop, dispatchLabel, toggleDispatch, retry } = board;
-	const [limitDraft, setLimitDraft] = useState<number>();
-	const limit = limitDraft ?? settings?.maxAgents;
-	useModalDraft(limit !== settings?.maxAgents, busy);
+	const { settings, busy, error, notice, stop, dispatchLabel, toggleDispatch, retry } = board;
 	const dismissal = useDialogDismissal(busy);
 	useModalDialog(dialog);
 	return (
@@ -106,36 +100,14 @@ export const BoardSettingsDialog = ({
 					✕
 				</button>
 			</div>
-			{settings && limit !== undefined ? (
+			{settings ? (
 				<>
-					<form
-						onSubmit={(event) => {
-							event.preventDefault();
-							void update({ maxAgents: limit }, "Ticket limit saved.");
-						}}
-					>
-						<label htmlFor={limitId}>Max concurrent tickets</label>
-						<input
-							id={limitId}
-							type='range'
-							min={minConcurrentAgents}
-							max={maxConcurrentAgents}
-							value={limit}
-							disabled={busy}
-							onChange={(event) => setLimitDraft(event.currentTarget.valueAsNumber)}
-						/>
-						<span aria-hidden='true'>{limit}</span>
-						<button type='submit' disabled={busy || limit === settings.maxAgents}>
-							Save limit
-						</button>
-					</form>
-					<p>In progress tickets count while awaiting approval. Standalone chats are unrestricted.</p>
 					<p>
 						{settings.dispatch === "stopped"
 							? "Ticket dispatch is stopped."
 							: settings.dispatch === "paused"
 								? "Ready tickets are paused. In-progress tickets can continue."
-								: "Ready tickets start when ticket capacity opens."}
+								: "Ready tickets start when provider capacity opens."}
 					</p>
 					<div className='board-settings-actions'>
 						<button type='button' disabled={busy} onClick={() => void toggleDispatch()}>

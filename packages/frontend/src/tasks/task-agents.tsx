@@ -1,7 +1,7 @@
 import { agentOptionsSchema, type AgentOptions } from "@forge/contracts/agents";
 import { modelProvidersSchema, type ModelProvider } from "@forge/contracts/model-providers";
-import { taskAgentSchema, taskAgentsSchema, type TaskAgent } from "@forge/contracts/task-agents";
-import { useEffect, useState } from "react";
+import { taskAgentSchema, taskAgentsSchema, type TaskAgent, type TaskAgentModel } from "@forge/contracts/task-agents";
+import { useEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 
@@ -19,7 +19,7 @@ export function TaskAgents({ api }: { api: IWorkspaceApi }) {
 			api.read("model-providers", modelProvidersSchema),
 		]).then(
 			([agents, providers]) => {
-				if (active) setCatalog({ agents, providers });
+				if (active) setCatalog({ agents: agents.filter((agent) => !agent.retired), providers });
 			},
 			() => {
 				if (active) setError("Could not load agents and model providers.");
@@ -45,7 +45,9 @@ export function TaskAgents({ api }: { api: IWorkspaceApi }) {
 		setError("");
 		try {
 			await api.read(`task-agents/${agent.id}`, { parse: () => undefined }, "DELETE");
-			saved({ ...agent, retired: true });
+			setCatalog(
+				(current) => current && { ...current, agents: current.agents.filter(({ id }) => id !== agent.id) },
+			);
 			setRetiring(undefined);
 		} catch (error) {
 			setError(error instanceof Error ? error.message : "Could not retire agent.");
@@ -92,57 +94,58 @@ export function TaskAgents({ api }: { api: IWorkspaceApi }) {
 					}}
 				/>
 			)}
-			{catalog.agents.map((agent) => {
-				const provider = catalog.providers.find((entry) => entry.id === agent.providerId);
-				return (
-					<article className='account-card model-provider-card' key={agent.id}>
-						<h3>
-							{agent.name}
-							{agent.retired ? " (retired)" : ""}
-						</h3>
-						<p>
-							{provider?.name ?? "Unavailable provider"} · {agent.model ?? "Codex default"}
-							{agent.reasoningEffort && ` · ${agent.reasoningEffort}`}
-						</p>
-						{!agent.retired && retiring?.id !== agent.id && (
-							<>
-								<button
-									disabled={!!editing || !!retiring}
-									aria-label={`Edit ${agent.name}`}
-									onClick={() => setEditing(agent)}
-								>
-									Edit
-								</button>
-								<button
-									disabled={!!editing || !!retiring}
-									aria-label={`Retire ${agent.name}`}
-									onClick={() => setRetiring(agent)}
-								>
-									Retire
-								</button>
-							</>
-						)}
-						{retiring?.id === agent.id && (
-							<>
-								<p>Retire {agent.name}?</p>
-								{error && <p role='alert'>{error}</p>}
-								<button disabled={busy} onClick={() => void retire(agent)}>
-									Retire agent
-								</button>
-								<button
-									disabled={busy}
-									onClick={() => {
-										setRetiring(undefined);
-										setError("");
-									}}
-								>
-									Cancel
-								</button>
-							</>
-						)}
-					</article>
-				);
-			})}
+			{catalog.agents.map((agent) => (
+				<article className='account-card model-provider-card' key={agent.id}>
+					<h3>{agent.name}</h3>
+					<ol>
+						{agent.models.map((model, index) => (
+							<li key={index}>
+								{catalog.providers.find(({ id }) => id === model.providerId)?.name
+									?? "Unavailable provider"}
+								{" · "}
+								{model.model ?? "Codex default"}
+								{model.reasoningEffort && ` · ${model.reasoningEffort}`}
+							</li>
+						))}
+					</ol>
+					{retiring?.id !== agent.id && (
+						<>
+							<button
+								disabled={!!editing || !!retiring}
+								aria-label={`Edit ${agent.name}`}
+								onClick={() => setEditing(agent)}
+							>
+								Edit
+							</button>
+							<button
+								disabled={!!editing || !!retiring}
+								aria-label={`Retire ${agent.name}`}
+								onClick={() => setRetiring(agent)}
+							>
+								Retire
+							</button>
+						</>
+					)}
+					{retiring?.id === agent.id && (
+						<>
+							<p>Retire {agent.name}?</p>
+							{error && <p role='alert'>{error}</p>}
+							<button disabled={busy} onClick={() => void retire(agent)}>
+								Retire agent
+							</button>
+							<button
+								disabled={busy}
+								onClick={() => {
+									setRetiring(undefined);
+									setError("");
+								}}
+							>
+								Cancel
+							</button>
+						</>
+					)}
+				</article>
+			))}
 		</section>
 	);
 }
@@ -161,32 +164,18 @@ function AgentEditor({
 	cancel: () => void;
 }) {
 	const [name, setName] = useState(agent?.name ?? "");
-	const [providerId, setProviderId] = useState(agent?.providerId ?? "");
-	const [model, setModel] = useState(agent?.model ?? "");
-	const [effort, setEffort] = useState(agent?.reasoningEffort ?? "");
-	const [options, setOptions] = useState<AgentOptions>();
-	const [optionsError, setOptionsError] = useState(false);
-	const [attempt, retry] = useState(0);
+	const [rows, setRows] = useState(() =>
+		(agent?.models ?? [{ providerId: "" }]).map((value, key) => ({ key, value })),
+	);
+	const nextKey = useRef(rows.length);
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
-	const provider = providers.find((entry) => entry.id === providerId);
-	useEffect(() => {
-		if (provider?.kind !== "openai") return;
-		let active = true;
-		void api.read(`model-providers/${provider.id}/model-options`, agentOptionsSchema).then(
-			(value) => {
-				if (active) setOptions(value);
-			},
-			() => {
-				if (active) setOptionsError(true);
-			},
+	const move = (index: number, direction: number) => {
+		const target = index + direction;
+		setRows((current) =>
+			current.map((row, i) => (i === index ? current.at(target)! : i === target ? current.at(index)! : row)),
 		);
-		return () => {
-			active = false;
-		};
-	}, [api, provider, attempt]);
-	const selected = options?.models.find((entry) => entry.id === model);
-	const efforts = selected?.supportedReasoningEfforts ?? [];
+	};
 	const save = async () => {
 		setBusy(true);
 		setError("");
@@ -196,12 +185,7 @@ function AgentEditor({
 					agent ? `task-agents/${agent.id}` : "task-agents",
 					taskAgentSchema,
 					agent ? "PATCH" : "POST",
-					{
-						name,
-						providerId,
-						model,
-						reasoningEffort: efforts.length ? effort || undefined : undefined,
-					},
+					{ name, models: rows.map(({ value }) => value) },
 				),
 			);
 		} catch (error) {
@@ -230,107 +214,87 @@ function AgentEditor({
 						onChange={(event) => setName(event.target.value)}
 					/>
 				</label>
-				<label>
-					Model provider
-					<select
-						required
-						value={providerId}
-						onChange={(event) => {
-							setProviderId(event.target.value);
-							setModel("");
-							setEffort("");
-							setOptions(undefined);
-							setOptionsError(false);
-						}}
-					>
-						<option value=''>Select a provider</option>
-						{providerId && !provider && (
-							<option value={providerId} disabled>
-								Unavailable provider
-							</option>
-						)}
-						{providers.map((entry) => (
-							<option key={entry.id} value={entry.id}>
-								{entry.name}
-							</option>
-						))}
-					</select>
-				</label>
-				{provider?.kind === "ollama" && (
-					<label>
-						Model tag
-						<input
-							required
-							maxLength={256}
-							value={model}
-							onChange={(event) => setModel(event.target.value)}
+				{rows.map(({ key, value }, index) => (
+					<fieldset key={key}>
+						<legend>Model {index + 1}</legend>
+						<label>
+							Model provider
+							<select
+								required
+								value={value.providerId}
+								onChange={(event) => {
+									const providerId = event.target.value;
+									setRows((current) =>
+										current.map((row) => (row.key === key ? { key, value: { providerId } } : row)),
+									);
+								}}
+							>
+								<option value=''>Select a provider</option>
+								{value.providerId && !providers.some(({ id }) => id === value.providerId) && (
+									<option value={value.providerId}>Unavailable provider</option>
+								)}
+								{providers.map((entry) => (
+									<option key={entry.id} value={entry.id}>
+										{entry.name}
+									</option>
+								))}
+							</select>
+						</label>
+						<ModelSelection
+							key={value.providerId}
+							api={api}
+							provider={providers.find(({ id }) => id === value.providerId)}
+							value={value}
+							allowDefault={
+								!!agent?.models.some((model) => model.providerId === value.providerId && !model.model)
+							}
+							change={(value) =>
+								setRows((current) => current.map((row) => (row.key === key ? { key, value } : row)))
+							}
 						/>
-					</label>
-				)}
-				{provider?.kind === "openai" && (
-					<label>
-						Model
-						<select
-							required
-							value={model}
-							disabled={!options}
-							onChange={(event) => {
-								setModel(event.target.value);
-								setEffort("");
-							}}
+						<button
+							type='button'
+							aria-label={`Move model ${index + 1} up`}
+							disabled={index === 0}
+							onClick={() => move(index, -1)}
 						>
-							<option value=''>
-								{options ? "Select a model" : optionsError ? "Models unavailable" : "Loading models…"}
-							</option>
-							{model && !selected && (
-								<option value={model} disabled>
-									{model}
-								</option>
-							)}
-							{options?.models.map((entry) => (
-								<option key={entry.id} value={entry.id}>
-									{entry.name}
-								</option>
-							))}
-						</select>
-					</label>
-				)}
-				{optionsError && (
-					<button
-						type='button'
-						onClick={() => {
-							setOptionsError(false);
-							retry(attempt + 1);
-						}}
-					>
-						Retry loading models
-					</button>
-				)}
-				{efforts.length > 0 && (
-					<label>
-						Thinking level
-						<select value={effort} onChange={(event) => setEffort(event.target.value)}>
-							<option value=''>
-								Model default
-								{selected?.defaultReasoningEffort && ` (${selected.defaultReasoningEffort})`}
-							</option>
-							{effort && !efforts.some((entry) => entry.reasoningEffort === effort) && (
-								<option value={effort} disabled>
-									{effort}
-								</option>
-							)}
-							{efforts.map((entry) => (
-								<option key={entry.reasoningEffort} value={entry.reasoningEffort}>
-									{entry.reasoningEffort}
-								</option>
-							))}
-						</select>
-					</label>
-				)}
+							Move up
+						</button>
+						<button
+							type='button'
+							aria-label={`Move model ${index + 1} down`}
+							disabled={index === rows.length - 1}
+							onClick={() => move(index, 1)}
+						>
+							Move down
+						</button>
+						<button
+							type='button'
+							aria-label={`Remove model ${index + 1}`}
+							disabled={rows.length === 1}
+							onClick={() => setRows((current) => current.filter((row) => row.key !== key))}
+						>
+							Remove
+						</button>
+					</fieldset>
+				))}
+				<button
+					type='button'
+					onClick={() => {
+						const key = nextKey.current++;
+						setRows((current) => [...current, { key, value: { providerId: "" } }]);
+					}}
+				>
+					Add model
+				</button>
 				{error && <p role='alert'>{error}</p>}
 				<button
 					className='primary'
-					disabled={!provider || !model.trim() || (provider.kind === "openai" && !selected)}
+					disabled={rows.some(
+						({ value }) =>
+							!value.model?.trim()
+							&& !agent?.models.some((saved) => saved.providerId === value.providerId && !saved.model),
+					)}
 				>
 					Save agent
 				</button>
@@ -339,5 +303,121 @@ function AgentEditor({
 				</button>
 			</fieldset>
 		</form>
+	);
+}
+
+function ModelSelection({
+	api,
+	provider,
+	value,
+	allowDefault,
+	change,
+}: {
+	api: IWorkspaceApi;
+	provider?: ModelProvider;
+	value: TaskAgentModel;
+	allowDefault: boolean;
+	change: (value: TaskAgentModel) => void;
+}) {
+	const { model, reasoningEffort: effort } = value;
+	const [options, setOptions] = useState<AgentOptions>();
+	const [optionsError, setOptionsError] = useState(false);
+	const [attempt, retry] = useState(0);
+	useEffect(() => {
+		if (provider?.kind !== "openai") return;
+		let active = true;
+		void api.read(`model-providers/${provider.id}/model-options`, agentOptionsSchema).then(
+			(value) => {
+				if (active) setOptions(value);
+			},
+			() => {
+				if (active) setOptionsError(true);
+			},
+		);
+		return () => {
+			active = false;
+		};
+	}, [api, provider, attempt]);
+	const selected = options?.models.find((entry) => entry.id === model);
+	const efforts = selected?.supportedReasoningEfforts ?? [];
+	return (
+		<>
+			{!provider && value.providerId && <p>{model ?? "Codex default"}</p>}
+			{provider?.kind === "ollama" && (
+				<label>
+					Model tag
+					<input
+						required
+						maxLength={256}
+						value={model ?? ""}
+						onChange={(event) => change({ ...value, model: event.target.value })}
+					/>
+				</label>
+			)}
+			{provider?.kind === "openai" && (
+				<label>
+					Model
+					<select
+						required={!allowDefault}
+						value={model ?? ""}
+						disabled={!options}
+						onChange={(event) => {
+							change({ providerId: value.providerId, model: event.target.value || undefined });
+						}}
+					>
+						<option value=''>
+							{optionsError
+								? "Models unavailable"
+								: !options
+									? "Loading models…"
+									: allowDefault
+										? "Codex default"
+										: "Select a model"}
+						</option>
+						{model && !selected && <option value={model}>{model}</option>}
+						{options?.models.map((entry) => (
+							<option key={entry.id} value={entry.id}>
+								{entry.name}
+							</option>
+						))}
+					</select>
+				</label>
+			)}
+			{optionsError && (
+				<button
+					type='button'
+					onClick={() => {
+						setOptionsError(false);
+						retry(attempt + 1);
+					}}
+				>
+					Retry loading models
+				</button>
+			)}
+			{efforts.length > 0 && (
+				<label>
+					Thinking level
+					<select
+						value={effort ?? ""}
+						onChange={(event) => change({ ...value, reasoningEffort: event.target.value || undefined })}
+					>
+						<option value=''>
+							Model default
+							{selected?.defaultReasoningEffort && ` (${selected.defaultReasoningEffort})`}
+						</option>
+						{effort && !efforts.some((entry) => entry.reasoningEffort === effort) && (
+							<option value={effort} disabled>
+								{effort}
+							</option>
+						)}
+						{efforts.map((entry) => (
+							<option key={entry.reasoningEffort} value={entry.reasoningEffort}>
+								{entry.reasoningEffort}
+							</option>
+						))}
+					</select>
+				</label>
+			)}
+		</>
 	);
 }

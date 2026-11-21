@@ -1,6 +1,6 @@
 import type { AgentView } from "@forge/contracts/agents";
 import type { ModelProvider } from "@forge/contracts/model-providers";
-import type { TaskAgent } from "@forge/contracts/task-agents";
+import type { TaskAgent, TaskAgentModel } from "@forge/contracts/task-agents";
 import type { Ticket } from "@forge/contracts/tickets";
 import { expect, test, vi } from "vitest";
 
@@ -16,12 +16,13 @@ import type { TicketWorkflowRecord } from "./types.ts";
 
 const actor = { username: "owner" };
 
-function namedFixture() {
+function namedFixture(dispatchMode?: Parameters<typeof fixture>[0]) {
 	const planner: ModelProvider = {
 		id: "123e4567-e89b-42d3-a456-426614174001",
 		name: "OpenAI",
 		kind: "openai",
 		retired: false,
+		maxConcurrentAgents: 1,
 	};
 	const implementer: ModelProvider = {
 		id: "123e4567-e89b-42d3-a456-426614174002",
@@ -29,6 +30,7 @@ function namedFixture() {
 		kind: "ollama",
 		endpoint: "http://local/v1",
 		retired: false,
+		maxConcurrentAgents: 1,
 	};
 	const records = new Map([planner, implementer].map((p) => [p.id, p]));
 	const providers = new ModelProviderService(
@@ -77,27 +79,34 @@ function namedFixture() {
 		new AccessService({ owner: "owner", origin: "https://forge.example" }),
 		() => `123e4567-e89b-42d3-a456-${String(recordsById.size + 100).padStart(12, "0")}`,
 	);
-	const f = fixture(() => "running", providers, taskAgents);
+	const f = fixture(dispatchMode, providers, taskAgents);
 	f.agents.catalogOptions.mockImplementation(async (_actor, id) => {
 		const call = f.agents.createTicketThread.mock.calls.find((call) => call[2] === f.views.get(id!)?.thread.title);
 		const snapshot = call?.[5];
 		return providers.snapshotOptions(actor, snapshot?.configuration ?? { kind: "openai" });
 	});
-	return { ...f, planner, implementer, providers, taskAgents };
+	const addAgent = (name: string, models: TaskAgentModel[] = [{ providerId: planner.id, model: "test-model" }]) =>
+		taskAgents.save(actor, { name, models });
+	const ready = async (ticket: Ticket, planner: TaskAgent, implementer = planner, skipPlanning = false) => {
+		await f.service.settings(actor, ticket, {
+			plannerAgentId: planner.id,
+			implementerAgentId: implementer.id,
+			skipPlanning,
+		});
+		await f.service.move(actor, ticket, { status: "todo" });
+	};
+	return { ...f, planner, implementer, providers, taskAgents, addAgent, ready };
 }
 
 test("independent assignees pin model and provider for feedback, recovery and rebase", async () => {
 	const f = namedFixture();
 	const planner = await f.taskAgents.save(actor, {
 		name: "Planner",
-		providerId: f.planner.id,
-		model: "test-model",
-		reasoningEffort: "high",
+		models: [{ providerId: f.planner.id, model: "test-model", reasoningEffort: "high" }],
 	});
 	const implementer = await f.taskAgents.save(actor, {
 		name: "Implementer",
-		providerId: f.implementer.id,
-		model: "local",
+		models: [{ providerId: f.implementer.id, model: "local" }],
 	});
 	const ticket = f.create();
 	await f.service.settings(actor, ticket, { plannerAgentId: planner.id, implementerAgentId: planner.id });
@@ -126,7 +135,7 @@ test("independent assignees pin model and provider for feedback, recovery and re
 	});
 	await f.taskAgents.save(
 		actor,
-		{ name: "Implementer", providerId: f.implementer.id, model: "edited" },
+		{ name: "Implementer", models: [{ providerId: f.implementer.id, model: "edited" }] },
 		implementer.id,
 	);
 	f.complete(job.implementerId!);
@@ -141,7 +150,7 @@ test("independent assignees pin model and provider for feedback, recovery and re
 
 test("skip planning needs only an implementer and retirement blocks unpinned dispatch", async () => {
 	const f = namedFixture();
-	const agent = await f.taskAgents.save(actor, { name: "Implementer", providerId: f.implementer.id, model: "local" });
+	const agent = await f.addAgent("Implementer", [{ providerId: f.implementer.id, model: "local" }]);
 	const ticket = f.create();
 	await f.service.settings(actor, ticket, { implementerAgentId: agent.id, skipPlanning: true });
 	await f.service.move(actor, ticket, { status: "todo" });
@@ -149,6 +158,50 @@ test("skip planning needs only an implementer and retirement blocks unpinned dis
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "setup-failed", providerSelectionError: true });
 	expect(f.agents.createTicketThread).not.toHaveBeenCalled();
+	expect(ticket.status).toBe("todo");
+	const replacement = await f.addAgent("Replacement");
+	await f.service.settings(actor, ticket, { implementerAgentId: replacement.id, skipPlanning: true });
+	await f.service.recover(actor, ticket.id);
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "running", reservation: f.planner.id });
+});
+
+test("ordered fallbacks skip full and incompatible providers and the scheduler scans past a busy ticket", async () => {
+	const f = namedFixture();
+	const planner = await f.addAgent("OpenAI only");
+	const local = { providerId: f.implementer.id, model: "first-local" };
+	const fallback = await f.addAgent("With fallback", [...planner.models, local, { ...local, model: "second-local" }]);
+	const holder = f.create();
+	const waiting = f.create("TASK-2");
+	const routed = f.create("TASK-3");
+	await f.ready(holder, planner);
+	await f.ready(waiting, planner);
+	await f.ready(routed, fallback);
+	await f.service.tick(actor);
+	expect(waiting.status).toBe("todo");
+	expect(f.jobs.get(waiting.id)).toMatchObject({ state: "queued" });
+	expect(f.jobs.get(routed.id)).toMatchObject({
+		reservation: f.implementer.id,
+		planningProviderSnapshot: { model: "first-local" },
+	});
+	await f.taskAgents.save(actor, { name: fallback.name, models: [local, ...planner.models] }, fallback.id);
+	const reviewing = f.create("TASK-4");
+	await f.service.settings(actor, reviewing, {
+		plannerAgentId: fallback.id,
+		implementerAgentId: fallback.id,
+		permissions: "approve-for-me",
+	});
+	await f.service.move(actor, reviewing, { status: "todo" });
+	// Free local capacity. The incompatible option must still be skipped.
+	f.complete(f.jobs.get(routed.id)!.plannerId!, "Plan");
+	await f.service.tick(actor);
+	await f.service.archive(actor, routed, "2026-11-14T00:00:00.000Z");
+	await f.service.tick(actor);
+	expect(reviewing.status).toBe("todo");
+	expect(f.jobs.get(reviewing.id)).toMatchObject({ state: "queued" });
+	await f.providers.remove(actor, f.planner.id);
+	await f.service.tick(actor);
+	expect(f.jobs.get(reviewing.id)).toMatchObject({ state: "setup-failed", providerSelectionError: true });
 });
 
 test("plan feedback rejects stale and approved revisions without queuing a turn", async () => {
@@ -220,8 +273,6 @@ test("recommendations use current settings on the next feedback and rebase turns
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
 	await f.service.settings(actor, ticket, { skipPlanning: false, acceptRecommendations: true });
-	f.settings.maxAgents = 1;
-	f.create("TASK-2").status = "in-progress";
 	const job = f.jobs.get(ticket.id)!;
 	await f.service.message(actor, ticket, "Adjust scope", job.turnId);
 	expect(f.agents.steer.mock.calls[0]?.[3]).toBe("Adjust scope");
@@ -247,7 +298,7 @@ test("recommendations use current settings on the next feedback and rebase turns
 });
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const fixture = (
-	dispatchMode: () => "running" | "paused" = () => "running",
+	dispatchMode: () => "running" | "paused" | "stopped" = () => "running",
 	providers?: IModelProviderService,
 	taskAgents?: ITaskAgents,
 ) => {
@@ -256,7 +307,6 @@ const fixture = (
 	const views = new Map<string, AgentView>();
 	const plans = new Map<string, string>();
 	const pool = new AgentExecutionTracker();
-	const settings = { maxAgents: 3 };
 	const agents = {
 		stopTicket: vi.fn<ITicketAgents["stopTicket"]>(async () => true),
 		assertRepositoryReady: vi.fn(async () => {}),
@@ -305,6 +355,8 @@ const fixture = (
 	};
 	const store = {
 		boardSummary: async () => [...jobs.values()],
+		countReservations: async (id: string) =>
+			[...jobs.values()].filter((job) => job.reservation === id && !tickets.get(job.ticketId)?.archivedAt).length,
 		get: async (id: string) => structuredClone(jobs.get(id)),
 		list: async () => [...jobs.values()].map((job) => structuredClone(job)),
 		pendingCleanup: async () =>
@@ -344,7 +396,6 @@ const fixture = (
 			store,
 			ticketStore,
 			agents,
-			() => settings.maxAgents,
 			merges,
 			{ cleanupMerged: cleanup },
 			new TicketPrompts(),
@@ -377,7 +428,6 @@ const fixture = (
 	};
 	return {
 		service,
-		settings,
 		makeService,
 		jobs,
 		tickets,
@@ -409,50 +459,42 @@ test("Ready requires a first ready repository and dispatch revalidates it", asyn
 	expect(f.agents.createTicketThread).not.toHaveBeenCalled();
 });
 
-test.each(["paused", "capacity"] as const)(
-	"unclaimed Ready returns during %s and revalidates edited scope",
-	async (mode) => {
-		let paused = mode === "paused";
-		const f = fixture(() => (paused ? "paused" : "running"));
-		if (mode === "capacity") {
-			f.settings.maxAgents = 1;
-			f.create("other").status = "in-progress";
-		}
-		const ticket = f.create();
-		ticket.epicId = "EPIC-1";
-		ticket.executionSettings = { permissions: "full-access" };
-		await f.service.move(actor, ticket, { status: "todo" });
-		await f.service.tick(actor);
-		expect(f.agents.createTicketThread).not.toHaveBeenCalled();
-		expect(await f.service.capabilities(actor, ticket)).toEqual({ canReturnToBacklog: true });
-		await f.service.move(actor, ticket, { status: "backlog" });
-		expect(f.jobs.get(ticket.id)).toMatchObject({ phase: "planning", state: "idle" });
-		expect(ticket).toMatchObject({ epicId: "EPIC-1", executionSettings: { permissions: "full-access" } });
-		const repositoryIds = ["123e4567-e89b-42d3-a456-426614174099", projectId];
-		await f.service.update(actor, ticket.id, {
-			title: "Updated scope",
-			description: "New description",
-			repositoryIds,
-			epicId: null,
-		});
-		f.agents.assertRepositoryReady.mockRejectedValueOnce(new Error("Unavailable"));
-		await expect(f.service.move(actor, ticket, { status: "todo" })).rejects.toThrow("ticket-conflict");
-		await f.service.move(actor, ticket, { status: "todo" });
-		paused = false;
-		if (f.tickets.has("other")) f.tickets.get("other")!.status = "done";
-		await f.service.tick(actor);
-		expect(f.jobs.get(ticket.id)?.executionRepositoryId).toBe(repositoryIds[0]);
-		expect(f.agents.createTicketThread).toHaveBeenCalledWith(
-			actor,
-			repositoryIds[0],
-			`${ticket.id} planning`,
-			undefined,
-			expect.any(Function),
-			undefined,
-		);
-		expect(f.agents.dispatch.mock.calls[0]?.[2]).toContain("Updated scope");
-	},
-);
+test("unclaimed Ready returns while paused and revalidates edited scope", async () => {
+	let paused = true;
+	const f = fixture(() => (paused ? "paused" : "running"));
+	const ticket = f.create();
+	ticket.epicId = "EPIC-1";
+	ticket.executionSettings = { permissions: "full-access" };
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	expect(f.agents.createTicketThread).not.toHaveBeenCalled();
+	expect(await f.service.capabilities(actor, ticket)).toEqual({ canReturnToBacklog: true });
+	await f.service.move(actor, ticket, { status: "backlog" });
+	expect(f.jobs.get(ticket.id)).toMatchObject({ phase: "planning", state: "idle" });
+	expect(ticket).toMatchObject({ epicId: "EPIC-1", executionSettings: { permissions: "full-access" } });
+	const repositoryIds = ["123e4567-e89b-42d3-a456-426614174099", projectId];
+	await f.service.update(actor, ticket.id, {
+		title: "Updated scope",
+		description: "New description",
+		repositoryIds,
+		epicId: null,
+	});
+	f.agents.assertRepositoryReady.mockRejectedValueOnce(new Error("Unavailable"));
+	await expect(f.service.move(actor, ticket, { status: "todo" })).rejects.toThrow("ticket-conflict");
+	await f.service.move(actor, ticket, { status: "todo" });
+	paused = false;
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)?.executionRepositoryId).toBe(repositoryIds[0]);
+	expect(f.agents.createTicketThread).toHaveBeenCalledWith(
+		actor,
+		repositoryIds[0],
+		`${ticket.id} planning`,
+		undefined,
+		expect.any(Function),
+		undefined,
+	);
+	expect(f.agents.dispatch.mock.calls[0]?.[2]).toContain("Updated scope");
+});
 
 test("return winning serialization prevents a concurrent scheduler dispatch", async () => {
 	const f = fixture();
@@ -947,17 +989,11 @@ test("archiving serializes with ticket execution and preserves workflow history"
 	expect(await f.service.get(actor, running.id)).toEqual(idle);
 });
 
-test("ready waits for capacity, starts planning in progress, and approves only the displayed revision", async () => {
+test("planning starts in progress and approves only the displayed revision", async () => {
 	const f = fixture();
 	const ticket = f.create();
-	for (const id of ["one", "two", "three"]) f.create(id).status = "in-progress";
 	await f.service.move(actor, ticket, { status: "todo" });
 	expect(f.wake).toHaveBeenCalledOnce();
-	await f.service.tick(actor);
-	expect(ticket.status).toBe("todo");
-	expect(f.agents.createTicketThread).not.toHaveBeenCalled();
-
-	f.tickets.get("one")!.status = "done";
 	await f.service.tick(actor);
 	expect(ticket.status).toBe("in-progress");
 	const planning = f.jobs.get(ticket.id)!;
@@ -996,37 +1032,56 @@ const implement = async (f: ReturnType<typeof fixture>, ticket: Ticket) => {
 	return f.jobs.get(ticket.id)!.implementerId!;
 };
 
-test("approval waits hold ticket capacity while feedback and implementation continue", async () => {
-	const f = fixture();
-	f.settings.maxAgents = 1;
+test("planning holds capacity through waits, feedback and restart, then approval releases it", async () => {
+	const f = namedFixture();
+	const planner = await f.addAgent("Planner");
+	const implementer = await f.addAgent("Implementer", [{ providerId: f.implementer.id, model: "local" }]);
 	const first = f.create();
 	const second = f.create("TASK-2");
-	await f.service.move(actor, first, { status: "todo" });
-	await f.service.move(actor, second, { status: "todo" });
+	await f.ready(first, planner, implementer);
+	await f.ready(second, planner);
 	await f.service.tick(actor);
-	f.complete(f.jobs.get(first.id)!.plannerId!, "# Plan");
+	const thread = f.jobs.get(first.id)!.plannerId!;
+	f.views.get(thread)!.thread.status = "waiting";
+	const restarted = f.makeService();
+	await restarted.recover(actor);
+	await restarted.tick(actor);
+	expect(second.status).toBe("todo");
+	expect(f.jobs.get(first.id)?.reservation).toBe(f.planner.id);
+	f.complete(thread, "# Plan");
 	await f.service.tick(actor);
 	expect(second.status).toBe("todo");
 	await f.service.message(actor, first, "Revise the plan");
 	await f.service.tick(actor);
-	f.complete(f.jobs.get(first.id)!.plannerId!, "# Revised");
+	f.complete(thread, "# Revised");
 	await f.service.tick(actor);
 	await f.service.approve(actor, first, 2);
+	expect(f.jobs.get(first.id)?.reservation).toBeUndefined();
 	await f.service.tick(actor);
-	expect(f.jobs.get(first.id)).toMatchObject({ phase: "implementation", state: "running" });
-	expect(second.status).toBe("todo");
+	expect(f.jobs.get(first.id)).toMatchObject({
+		phase: "implementation",
+		state: "running",
+		reservation: f.implementer.id,
+	});
+	expect(f.jobs.get(second.id)).toMatchObject({ phase: "planning", state: "running", reservation: f.planner.id });
 });
 
 test.each(["setup-failed", "failed", "uncertain", "idle"] as const)(
-	"persisted %s In progress tickets retain capacity after service restart",
+	"persisted %s reservations retain capacity after service restart",
 	async (state) => {
-		const f = fixture();
-		f.settings.maxAgents = 1;
+		const f = namedFixture();
+		const agent = await f.addAgent("Planner");
 		const first = f.create();
 		first.status = "in-progress";
-		f.jobs.set(first.id, { ticketId: first.id, state, phase: "planning", mergeAttempts: 0 });
+		f.jobs.set(first.id, {
+			ticketId: first.id,
+			state,
+			phase: "planning",
+			mergeAttempts: 0,
+			reservation: f.planner.id,
+		});
 		const second = f.create("TASK-2");
-		await f.service.move(actor, second, { status: "todo" });
+		await f.ready(second, agent);
 		const restarted = f.makeService();
 		await restarted.recover(actor);
 		await restarted.tick(actor);
@@ -1036,62 +1091,99 @@ test.each(["setup-failed", "failed", "uncertain", "idle"] as const)(
 );
 
 test("admission precedes setup, failures hold capacity, and limit changes preserve board order", async () => {
-	const f = fixture();
-	f.settings.maxAgents = 1;
+	const f = namedFixture();
+	const agent = await f.addAgent("Planner");
 	const tickets = [f.create(), f.create("TASK-2"), f.create("TASK-3")];
-	for (const ticket of tickets) await f.service.move(actor, ticket, { status: "todo" });
+	for (const ticket of tickets) await f.ready(ticket, agent);
 	f.agents.createTicketThread.mockImplementationOnce(async () => {
 		expect(tickets[0]!.status).toBe("in-progress");
+		expect(f.jobs.get(tickets[0]!.id)).toMatchObject({
+			reservation: f.planner.id,
+			planningProviderSnapshot: { providerId: f.planner.id, model: "test-model" },
+		});
 		throw new Error("Setup unavailable");
 	});
 	await f.service.tick(actor);
 	expect(tickets.map((ticket) => ticket.status)).toEqual(["in-progress", "todo", "todo"]);
-	f.settings.maxAgents = 2;
+	await f.providers.update(actor, f.planner.id, { maxConcurrentAgents: 2 });
 	await f.service.tick(actor);
 	expect(tickets.map((ticket) => ticket.status)).toEqual(["in-progress", "in-progress", "todo"]);
-	f.settings.maxAgents = 1;
+	await f.providers.update(actor, f.planner.id, { maxConcurrentAgents: 1 });
+	await f.service.tick(actor);
+	expect(f.jobs.get(tickets[1]!.id)?.state).toBe("running");
 	await f.service.archive(actor, tickets[0]!, "2026-11-14T00:00:00.000Z");
 	await f.service.tick(actor);
 	expect(tickets[2]!.status).toBe("todo");
 	f.agents.stopTicket.mockResolvedValue(false);
 	await f.service.move(actor, tickets[1]!, { status: "backlog" });
 	await f.service.tick(actor);
-	expect(tickets[2]!.status).toBe("in-progress");
+	expect(tickets[2]!.status).toBe("todo");
 	expect(f.jobs.get(tickets[1]!.id)?.state).toBe("resetting");
 	expect(f.cleanupAbandoned).not.toHaveBeenCalled();
 	await expect(f.service.move(actor, tickets[1]!, { status: "todo" })).rejects.toThrow("ticket-conflict");
+	f.agents.stopTicket.mockResolvedValue(true);
+	await f.service.recover(actor, tickets[1]!.id);
+	await f.service.tick(actor);
+	expect(tickets[2]!.status).toBe("in-progress");
 });
 
-test.each(["todo", "backlog"] as const)("return to %s frees capacity before cancellation settles", async (status) => {
-	const f = fixture();
-	f.settings.maxAgents = 1;
+test.each(["todo", "backlog"] as const)("return to %s holds capacity until cancellation settles", async (status) => {
+	const f = namedFixture();
+	const agent = await f.addAgent("Implementer");
 	const first = f.create();
-	await implement(f, first);
+	await f.ready(first, agent, agent, true);
+	await f.service.tick(actor);
 	const next = f.create("TASK-2");
-	await f.service.move(actor, next, { status: "todo" });
+	await f.ready(next, agent);
 	f.agents.stopTicket.mockResolvedValue(false);
 	await f.service.move(actor, first, { status });
 	await f.service.tick(actor);
-	expect(next.status).toBe("in-progress");
-	expect(f.jobs.get(first.id)?.state).toBe("resetting");
+	expect(next.status).toBe("todo");
+	expect(f.jobs.get(first.id)).toMatchObject({ state: "resetting", reservation: f.planner.id });
 	expect(f.cleanupAbandoned).not.toHaveBeenCalled();
 });
 
-test("completion admits the next Ready ticket even while standalone executions remain active", async () => {
-	const f = fixture();
+test("failure, stop and rebases retain implementation capacity until Done", async () => {
+	let mode: "running" | "stopped" = "running";
+	const f = namedFixture(() => mode);
+	const agent = await f.addAgent("Implementer");
 	const ticket = f.create();
-	const id = await implement(f, ticket);
-	f.settings.maxAgents = 1;
+	await f.ready(ticket, agent, agent, true);
+	await f.service.tick(actor);
+	const id = f.jobs.get(ticket.id)!.implementerId!;
 	const next = f.create("TASK-2");
-	await f.service.move(actor, next, { status: "todo" });
-	f.complete(id);
+	await f.ready(next, await f.addAgent("Competitor"));
 	for (const slot of ["one", "two", "three"]) f.pool.claim(slot);
+	f.views.get(id)!.thread.status = "failed";
+	mode = "stopped";
+	await f.service.tick(actor);
+	await f.taskAgents.save(
+		actor,
+		{ name: agent.name, models: [{ providerId: f.implementer.id, model: "other-model" }] },
+		agent.id,
+	);
+	await f.service.message(actor, ticket, "Retry");
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "queued", reservation: f.planner.id });
+	mode = "running";
+	await f.service.tick(actor);
+	expect(next.status).toBe("todo");
+	expect(f.agents.dispatch.mock.lastCall?.[5]?.model).toBe("test-model");
+	f.complete(id);
+	await f.service.tick(actor);
+	f.merges.merge.mockResolvedValueOnce("rebase");
+	await f.service.tick(actor);
+	await f.service.tick(actor);
+	expect(next.status).toBe("todo");
+	expect(f.jobs.get(ticket.id)).toMatchObject({ phase: "rebase", state: "running", reservation: f.planner.id });
+	expect(f.agents.dispatch.mock.lastCall?.[5]?.model).toBe("test-model");
+	f.merges.candidate.mockResolvedValueOnce("c".repeat(40));
+	f.complete(id);
 	await f.service.tick(actor);
 	await f.service.tick(actor);
 	expect(ticket.status).toBe("done");
+	expect(f.jobs.get(ticket.id)?.reservation).toBeUndefined();
 	expect(next.status).toBe("in-progress");
-	expect(f.merges.merge).toHaveBeenCalledOnce();
-	expect(f.agents.dispatch).toHaveBeenCalledTimes(3);
 });
 
 test("cleans up after Done and retries interrupted cleanup without replaying the merge", async () => {

@@ -53,7 +53,12 @@ export async function migrateTaskAgents(database: IDatabase, id: () => string): 
 			const ending = ` (${suffix})`;
 			name = base.slice(0, 120 - ending.length).trimEnd() + ending;
 		}
-		const agent = { id: id(), name, providerId: provider.id, model, reasoningEffort: effort, retired: false };
+		const agent = {
+			id: id(),
+			name,
+			models: [{ providerId: provider.id, model, reasoningEffort: effort }],
+			retired: false,
+		};
 		agents.set(key, agent);
 		names.add(name.toLowerCase());
 		return agent.id;

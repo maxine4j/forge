@@ -62,7 +62,6 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 			resume: vi.fn(),
 			plan: vi.fn(),
 		},
-		() => 3,
 		{ isMerged: vi.fn(async () => false), merge: vi.fn(), base: vi.fn(), verify: vi.fn(), candidate: vi.fn() },
 		{ cleanupMerged: vi.fn() },
 		new TicketPrompts(),

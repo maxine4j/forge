@@ -15,7 +15,7 @@ import { BoardSettingsRouter } from "../../src/tickets/board-settings-router.ts"
 import { BoardSettingsService } from "../../src/tickets/board-settings-service.ts";
 import { BoardSettingsStore } from "../../src/tickets/board-settings-store.ts";
 
-test("owner can adjust and persist board dispatch and capacity and stop active agents", async () => {
+test("owner can adjust and persist board dispatch and stop active agents", async () => {
 	const root = await mkdtemp(join(tmpdir(), "forge-board-settings-"));
 	const path = join(root, "forge.sqlite");
 	let db = new SqliteDatabase(path);
@@ -50,38 +50,37 @@ test("owner can adjust and persist board dispatch and capacity and stop active a
 		const request = await listen(await settingsService());
 		const defaults = await request();
 		expect(defaults.status).toBe(200);
-		expect(await defaults.json()).toEqual({ dispatch: "running", maxAgents: 3 });
+		expect(await defaults.json()).toEqual({ dispatch: "running" });
 		expect((await request("", "GET", undefined, undefined, "guest")).status).toBe(403);
 		expect((await request("/stop", "POST", undefined, "https://elsewhere.example")).status).toBe(403);
-		expect((await request("", "PATCH", { maxAgents: 0 })).status).toBe(400);
+		expect((await request("", "PATCH", { maxAgents: 2 })).status).toBe(400);
 		expect((await request("", "PATCH", { dispatch: "stopped" })).status).toBe(400);
 		expect(agents.stopAll).not.toHaveBeenCalled();
-		expect(await (await request("", "PATCH", { dispatch: "paused", maxAgents: 1 })).json()).toEqual({
+		expect(await (await request("", "PATCH", { dispatch: "paused" })).json()).toEqual({
 			dispatch: "paused",
-			maxAgents: 1,
 		});
 		expect(wake).toHaveBeenCalledOnce();
 		expect(await (await request("/stop", "POST")).json()).toEqual({
-			settings: { dispatch: "stopped", maxAgents: 1 },
+			settings: { dispatch: "stopped" },
 			requested: 2,
 			recovered: 1,
 			failed: 1,
 		});
 		expect(agents.stopAll).toHaveBeenCalledWith({ username: "owner" });
 
+		// Reopen the old schema with a persisted dispatch choice.
+		await db.run("ALTER TABLE board_settings ADD COLUMN maxAgents INTEGER NOT NULL DEFAULT 3");
 		await db.close();
 		db = new SqliteDatabase(path);
 		const afterRestart = await listen(await settingsService());
-		expect(await (await afterRestart()).json()).toEqual({ dispatch: "stopped", maxAgents: 1 });
-		expect(await (await afterRestart("", "PATCH", { maxAgents: 2 })).json()).toEqual({
-			dispatch: "stopped",
-			maxAgents: 2,
-		});
-		expect(wake).toHaveBeenCalledTimes(2);
+		expect(await (await afterRestart()).json()).toEqual({ dispatch: "stopped" });
+		expect(await db.all("SELECT name FROM pragma_table_info('board_settings')")).toEqual([
+			{ name: "id" },
+			{ name: "dispatch" },
+		]);
 		wake.mockClear();
 		expect(await (await afterRestart("", "PATCH", { dispatch: "running" })).json()).toEqual({
 			dispatch: "running",
-			maxAgents: 2,
 		});
 		expect(wake).toHaveBeenCalledOnce();
 	} finally {

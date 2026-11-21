@@ -163,12 +163,19 @@ export class MockApi implements IMockApi {
 		this.routes.set("/api/projects", () => projects);
 		this.routes.set("/api/settings", () => defaultForgeSettings);
 		this.routes.set("/api/model-providers", () => [
-			{ id: "123e4567-e89b-42d3-a456-426614174099", name: "OpenAI", kind: "openai", retired: false },
+			{
+				id: "123e4567-e89b-42d3-a456-426614174099",
+				name: "OpenAI",
+				kind: "openai",
+				retired: false,
+				maxConcurrentAgents: 1,
+			},
 			{
 				id: "123e4567-e89b-42d3-a456-426614174098",
 				name: "Local Ollama",
 				kind: "ollama",
 				retired: false,
+				maxConcurrentAgents: 1,
 				endpoint: "http://ollama/v1",
 				comparisonModel: "gpt-5.4",
 			},
@@ -177,15 +184,13 @@ export class MockApi implements IMockApi {
 			{
 				id: "123e4567-e89b-42d3-a456-426614174090",
 				name: "Planner",
-				providerId: "123e4567-e89b-42d3-a456-426614174099",
-				model: "preview-model",
+				models: [{ providerId: "123e4567-e89b-42d3-a456-426614174099", model: "preview-model" }],
 				retired: false,
 			},
 			{
 				id: "123e4567-e89b-42d3-a456-426614174091",
 				name: "Local implementer",
-				providerId: "123e4567-e89b-42d3-a456-426614174098",
-				model: "local:latest",
+				models: [{ providerId: "123e4567-e89b-42d3-a456-426614174098", model: "local:latest" }],
 				retired: false,
 			},
 		]);

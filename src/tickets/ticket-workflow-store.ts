@@ -16,6 +16,7 @@ export interface ITicketWorkflowStore {
 	/** Done tickets with a recorded merge candidate and worktree, including archived tickets. */
 	pendingCleanup(): Promise<TicketWorkflowRecord[]>;
 	boardSummary(): Promise<TicketWorkflowRecord[]>;
+	countReservations(providerId: string): Promise<number>;
 	/** Persists job intent and any board move in one transaction. */
 	save(record: TicketWorkflowRecord, move?: MoveTicket): Promise<void>;
 }
@@ -31,6 +32,10 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 			ticketCompletionsTable,
 			{
 				sql: "CREATE TABLE IF NOT EXISTS ticket_workflows (ticketId TEXT PRIMARY KEY REFERENCES tickets(id), record TEXT NOT NULL)",
+			},
+			{
+				sql: `CREATE INDEX IF NOT EXISTS ticket_workflow_reservations ON ticket_workflows(json_extract(record,'$.reservation'))
+				      WHERE json_extract(record,'$.reservation') IS NOT NULL`,
 			},
 		]);
 	}
@@ -54,6 +59,14 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 			"SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId WHERE t.archivedAt IS NULL AND t.status IN ('todo','in-progress') ORDER BY t.position,t.number",
 			[],
 		);
+	}
+	async countReservations(providerId: string): Promise<number> {
+		const rows = await this.database.all(
+			`SELECT COUNT(*) AS count FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId
+			 WHERE t.archivedAt IS NULL AND json_extract(w.record,'$.reservation')=?`,
+			[providerId],
+		);
+		return z.object({ count: z.int().nonnegative() }).parse(rows.at(0)).count;
 	}
 	async pendingCleanup(): Promise<TicketWorkflowRecord[]> {
 		const jobs: TicketWorkflowRecord[] = [];

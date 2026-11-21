@@ -185,7 +185,7 @@ contains inference routing, singleton Ollama configuration or OpenAI defaults.
 ### Model providers
 
 Fresh installations have no providers. Named cards show the name, type, OpenAI
-account status or Ollama endpoint/model, and Edit/Remove actions. Add and edit use
+account status or Ollama endpoint, the ticket concurrency limit, and Edit/Remove actions. Add and edit use
 routed dialogs at `/config?provider=new|<id>`; removal adds `remove=true` and
 requires confirmation. Dialogs use shared history, dismissal, draft guards,
 dropdowns and toasts. Cancelling OpenAI authentication leaves its saved card
@@ -207,6 +207,12 @@ the restriction transactionally. Any number of Ollama providers can be configure
 each with a container-reachable HTTP(S) Responses API base URL
 ending in `/v1`, without credentials, query or fragment. Saving Ollama performs no
 connection test or model discovery.
+
+Provider create, edit and read contracts include `maxConcurrentAgents`, a
+positive integer that defaults to 1 for new and upgraded providers. Config
+exposes it as **Max concurrent agents**. Lowering it preserves current
+[ticket phase reservations](tickets.md#agentic-ticket-board) and blocks new
+admissions until the count falls below the limit.
 
 OpenAI cards reuse the [account APIs](#account-login-and-application-access) and device-code flow.
 Model and thinking selections live in [Tasks → Agents](tickets.md#named-agents).

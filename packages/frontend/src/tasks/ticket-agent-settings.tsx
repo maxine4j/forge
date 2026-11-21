@@ -38,7 +38,10 @@ export function TicketAgentSettings({
 			active = false;
 		};
 	}, [api, setError]);
-	const choices = catalog?.agents.filter((agent) => !agent.retired && catalog.providers.has(agent.providerId)) ?? [];
+	const choices =
+		catalog?.agents.filter(
+			(agent) => !agent.retired && agent.models.some(({ providerId }) => catalog.providers.has(providerId)),
+		) ?? [];
 	return (
 		<>
 			{(

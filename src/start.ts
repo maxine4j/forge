@@ -87,6 +87,7 @@ import { BoardSettingsService } from "./tickets/board-settings-service.ts";
 import { BoardSettingsStore } from "./tickets/board-settings-store.ts";
 import { NotificationService } from "./tickets/notification-service.ts";
 import { NotificationStore } from "./tickets/notification-store.ts";
+import { migrateProviderReservations } from "./tickets/provider-reservation-migration.ts";
 import { TicketHistoryStore } from "./tickets/ticket-history-store.ts";
 import { TicketPrompts } from "./tickets/ticket-prompts.ts";
 import { TicketRouter } from "./tickets/ticket-router.ts";
@@ -318,15 +319,21 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const providerStore = new ModelProviderStore(database);
 	await providerStore.initialize();
 	const cost = new CostService(access, ticketStore, costStore, usage, () => new Date(), quotas, providerStore);
-	const providers = new ModelProviderService(providerStore, access, randomUUID, (provider) =>
-		agentClient.options(undefined, provider),
-	);
 	let wakeRequested = false;
 	let schedulerWait: AbortController | undefined;
 	const wakeScheduler = () => {
 		wakeRequested = true;
 		schedulerWait?.abort();
 	};
+	const serializeAdmission = <T>(operation: () => Promise<T>): Promise<T> => workflow.serialize(operation);
+	const providers = new ModelProviderService(
+		providerStore,
+		access,
+		randomUUID,
+		(provider) => agentClient.options(undefined, provider),
+		serializeAdmission,
+		wakeScheduler,
+	);
 	const tracker = new AgentExecutionTracker(wakeScheduler);
 	const agents = new AgentService(
 		agentStore,
@@ -353,14 +360,14 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const taskAgentStore = new TaskAgentStore(database);
 	await taskAgentStore.initialize();
 	await migrateTaskAgents(database, randomUUID);
+	await migrateProviderReservations(database);
 	await agentStore.recover();
-	const taskAgents = new TaskAgentService(taskAgentStore, providers, access, randomUUID);
+	const taskAgents = new TaskAgentService(taskAgentStore, providers, access, randomUUID, serializeAdmission);
 	collector.start();
 	const workflow = new TicketWorkflowService(
 		workflowStore,
 		ticketStore,
 		agents,
-		() => boardSettings.maxConcurrentTickets(),
 		new WorkspaceMergeClient(workspaces, git),
 		workspaces,
 		new TicketPrompts(() => settings.current()),

@@ -1878,27 +1878,6 @@ button.ticket-description-text:hover {
 .board-settings {
 	width: min(460px, calc(100vw - 24px));
 }
-.board-settings form {
-	display: grid;
-	grid-template-columns: minmax(0, 1fr) auto auto;
-	align-items: center;
-	gap: 8px 12px;
-	padding-bottom: 16px;
-	border-bottom: 1px solid #30363d;
-}
-.ticket-dialog.board-settings form > label {
-	grid-column: 1 / -1;
-	margin: 0;
-	color: #8b949e;
-	font-weight: 400;
-}
-.board-settings input[type="range"] {
-	margin: 0;
-	padding: 0;
-	border: 0;
-	background: transparent;
-	accent-color: #58a6ff;
-}
 .board-settings-actions {
 	display: flex;
 	flex-wrap: wrap;

@@ -1,19 +1,12 @@
 import { z } from "zod";
 
-export const minConcurrentAgents = 1;
-export const maxConcurrentAgents = 10;
-export const defaultConcurrentAgents = 3;
-
 export const boardSettingsSchema = z.strictObject({
 	dispatch: z.enum(["running", "paused", "stopped"]),
-	/** Maximum non-archived In progress tickets; legacy API and SQLite field name. */
-	maxAgents: z.int().min(minConcurrentAgents).max(maxConcurrentAgents),
 });
 export type BoardSettings = z.infer<typeof boardSettingsSchema>;
 
 export const defaultBoardSettings: Readonly<BoardSettings> = {
 	dispatch: "running",
-	maxAgents: defaultConcurrentAgents,
 };
 
 export const boardSettingsUpdateSchema = boardSettingsSchema.partial().extend({

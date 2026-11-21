@@ -20,11 +20,15 @@ import { CostService } from "../../src/cost/cost-service.ts";
 import { CostStore } from "../../src/cost/cost-store.ts";
 import { SqliteDatabase } from "../../src/database/sqlite-database.ts";
 import { EpicStore } from "../../src/epics/epic-store.ts";
+import { ModelProviderService } from "../../src/model-providers/model-provider-service.ts";
+import { ModelProviderStore } from "../../src/model-providers/model-provider-store.ts";
 import { ProjectService } from "../../src/projects/project-service.ts";
 import { ProjectStore } from "../../src/projects/project-store.ts";
 import { GitDiffClient } from "../../src/repositories/git-diff-client.ts";
 import { GitTransport } from "../../src/repositories/git-transport.ts";
 import { RepositoryClient } from "../../src/repositories/repository-client.ts";
+import { TaskAgentService } from "../../src/task-agents/task-agent-service.ts";
+import { TaskAgentStore } from "../../src/task-agents/task-agent-store.ts";
 import { TicketPrompts } from "../../src/tickets/ticket-prompts.ts";
 import { TicketService } from "../../src/tickets/ticket-service.ts";
 import { TicketStore } from "../../src/tickets/ticket-store.ts";
@@ -117,6 +121,21 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		const cost = new CostService(access, ticketStore, costStore, usage, () => new Date());
 		const jobs = new TicketWorkflowStore(db);
 		await jobs.initialize();
+		const providerStore = new ModelProviderStore(db);
+		await providerStore.initialize();
+		const catalog = makeClient();
+		const providers = new ModelProviderService(providerStore, access, randomUUID, (provider) =>
+			catalog.options(undefined, provider),
+		);
+		const provider = await providers.create(owner, { kind: "openai", name: "OpenAI" });
+		const taskAgentStore = new TaskAgentStore(db);
+		await taskAgentStore.initialize();
+		const taskAgents = new TaskAgentService(taskAgentStore, providers, access, randomUUID);
+		const agent = await taskAgents.save(owner, {
+			name: "Developer",
+			models: [{ providerId: provider.id, model: "gpt-5.4", reasoningEffort: "high" }],
+		});
+		const executionSettings = { plannerAgentId: agent.id, implementerAgentId: agent.id };
 		const merges = new WorkspaceMergeClient(workspaces, git);
 		let dispatch: "running" | "paused" | "stopped" = "running";
 		const workflowService = (service: AgentService) =>
@@ -124,7 +143,6 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				jobs,
 				ticketStore,
 				service,
-				() => 1,
 				merges,
 				workspaces,
 				new TicketPrompts(),
@@ -132,6 +150,8 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				undefined,
 				() => dispatch,
 				workspaces,
+				providers,
+				taskAgents,
 			);
 		let workflow = workflowService(agents);
 		let tickets = new TicketService(
@@ -174,6 +194,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			repositoryIds: [project.id, other.id],
 			title: "Implement search",
 			description: "Find files",
+			executionSettings,
 		});
 		const standalone = await Promise.all([1, 2, 3].map((n) => agents!.create(owner, other.id, `Standalone ${n}`)));
 		for (const view of standalone) await agents.send(owner, view.thread.id, "Keep working");
@@ -207,12 +228,6 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect((await ticketStore.get(ticket.id))?.status).toBe("in-progress");
 		expect((await jobs.get(ticket.id))?.state).toBe("queued");
 		dispatch = "running";
-		await workflow.settings(owner, (await ticketStore.get(ticket.id))!, { reasoningEffort: "medium" });
-		defaults = { defaultModel: "gpt-5.4-mini", defaultReasoningEffort: "low" };
-		await workflow.tick(owner);
-		expect((await jobs.get(ticket.id))?.state).toBe("setup-failed");
-		expect(pool.activeIds()).not.toContain(preparedPlanner);
-		await workflow.settings(owner, (await ticketStore.get(ticket.id))!, {});
 		defaults = { defaultModel: "gpt-5.4", defaultReasoningEffort: "high" };
 		await workflow.recover(owner, ticket.id);
 		await workflow.tick(owner);
@@ -229,6 +244,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			repositoryIds: [project.id],
 			title: "Next",
 			description: "Wait for capacity",
+			executionSettings,
 		});
 		await tickets.move(owner, next.id, { status: "todo" });
 		dispatch = "running";
@@ -263,8 +279,8 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect((await jobs.get(ticket.id))?.plan?.revision).toBe(2);
 		expect(rpc.mock.calls.filter(([method]) => method === "turn/start").at(-1)?.[1]).toMatchObject({
 			model: "gpt-5.4",
-			effort: "medium",
-			collaborationMode: { settings: { model: "gpt-5.4", reasoning_effort: "medium" } },
+			effort: "high",
+			collaborationMode: { settings: { model: "gpt-5.4", reasoning_effort: "high" } },
 		});
 		dispatch = "running";
 		expect((await tickets.list(owner)).at(0)).toMatchObject({
@@ -384,6 +400,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			repositoryIds: [project.id],
 			title: "Restart cleanly",
 			description: "Current scope",
+			executionSettings,
 		});
 		await tickets.move(owner, returning.id, { status: "todo" });
 		await workflow.tick(owner);
@@ -429,6 +446,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				repositoryIds: [project.id],
 				title: `Setup failure ${stage}`,
 				description: "",
+				executionSettings,
 			});
 			vi.spyOn(workspaceClient, "prepare").mockImplementationOnce(async (record) => {
 				if (stage === "after") await prepare(record);

@@ -325,7 +325,7 @@ Full turn output must not be bundled into history metadata responses.
 Pending structured requests are bounded per thread. RPC deadlines remain 15 seconds
 and frames are bounded to 16 MiB, including large individual tool results and
 completion notifications; there is no automatic
-turn timeout. Standalone chats have no board concurrency limit. Failed
+turn timeout. Standalone chats run independently of ticket provider capacity. Failed
 submissions preserve browser drafts for retry. SSE sends 15-second heartbeats,
 disconnects slow consumers and closes on application shutdown. Reconnection reads
 a current snapshot rather than replaying mutations.
@@ -336,6 +336,14 @@ interruption and history reload, not successful authenticated inference. Resumin
 preserves newer live activity observed during the history read; unloaded or
 system-error runtime states remain uncertain. Externally resolved server requests
 invalidate both the transport reply and browser callback.
+
+Ticket recovery uses the persisted phase routing and reservation through
+interruption, ambiguous outcomes and explicit retries. Model fallback happens
+before a phase is reserved. An Ollama outage discovered during inference follows
+the pinned phase's recovery path. Startup restores existing occupancy before the
+scheduler runs, and cancellation holds capacity until execution settles.
+See [reservation behavior](tickets.md#agentic-ticket-board) and
+[startup migration](development.md#named-provider-upgrades).
 
 Opening ticket Chat
 automatically loads persisted history and reconciles recoverable execution state;

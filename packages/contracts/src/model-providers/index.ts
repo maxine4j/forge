@@ -3,6 +3,7 @@ import { z } from "zod";
 import { inferenceProviderSchema } from "../settings/index.ts";
 
 const name = z.string().trim().min(1).max(120);
+const concurrentAgents = z.int().positive();
 const comparisonModel = z.string().trim().min(1).max(256).optional();
 const comparisonInput = z
 	.string()
@@ -15,15 +16,17 @@ export const modelProviderPatchSchema = z.strictObject({
 	kind: z.enum(["openai", "ollama"]).optional(),
 	endpoint: z.string().optional(),
 	comparisonModel: comparisonInput.nullable(),
+	maxConcurrentAgents: concurrentAgents.optional(),
 });
 export const modelProviderInputSchema = z.discriminatedUnion("kind", [
-	z.strictObject({ name, kind: z.literal("openai") }),
+	z.strictObject({ name, kind: z.literal("openai"), maxConcurrentAgents: concurrentAgents.default(1) }),
 	z
 		.strictObject({
 			name,
 			kind: z.literal("ollama"),
 			endpoint: inferenceProviderSchema.options[1].shape.endpoint,
 			comparisonModel: comparisonInput,
+			maxConcurrentAgents: concurrentAgents.default(1),
 		})
 		.refine(
 			(value) => URL.parse(value.endpoint)?.pathname.endsWith("/v1") ?? false,
@@ -37,6 +40,7 @@ export const modelProviderSchema = z.object({
 	endpoint: z.string().optional(),
 	comparisonModel,
 	retired: z.boolean(),
+	maxConcurrentAgents: concurrentAgents.default(1),
 });
 export const modelProvidersSchema = z.array(modelProviderSchema);
 export type ModelProvider = z.infer<typeof modelProviderSchema>;
