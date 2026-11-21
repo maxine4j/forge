@@ -8,6 +8,10 @@ const since = "2026-11-03T00:00:00.000Z";
 const tokens = costFixture({ input: 1800, cached: 600, output: 200, turns: 2 }, 0.0625, 0.123456, 0.015 / 1.44);
 tokens.incomplete.api = 1;
 const cost = {
+	providers: [
+		{ id: "cloud", name: "OpenAI", kind: "openai", current: true, apiAud: 0.125, incomplete: 1 },
+		{ id: "local", name: "Local Ollama", kind: "ollama" },
+	],
 	weeklyBudget: {
 		defaultBucketId: "codex",
 		buckets: ["codex", "other"].map((bucketId) => ({
@@ -38,7 +42,10 @@ const cost = {
 	quotaAttribution: [],
 	totals: tokens,
 	ticketEstimates: tokens,
-	phases: [{ phase: "review", ...tokens }],
+	phases: [
+		{ phase: "review", ...tokens },
+		{ phase: "chat", ...tokens },
+	],
 	days: [{ date: "2026-11-10", input: 1800, cached: 600, output: 200 }],
 	tickets: [
 		{
@@ -103,7 +110,18 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	await expect(page.getByRole("alert")).toHaveText("Cost data is unavailable.");
 	unavailable = false;
 	await page.getByRole("button", { name: "Retry" }).click();
-	await expect(page.getByRole("img", { name: "Daily token usage" })).toBeVisible();
+	const openai = page.getByRole("region", { name: "OpenAI", exact: true });
+	await expect(openai.getByText("AUD $0.125", { exact: true })).toBeVisible();
+	await expect(openai.getByText("33%", { exact: true })).toBeVisible();
+	await expect(page.getByRole("region", { name: "Local Ollama" })).toContainText("Cost tracking is unavailable.");
+	await expect(page.getByText("Account usage including standalone chats")).toHaveCount(0);
+	await expect(page.getByText("Standalone chats", { exact: true })).toHaveCount(0);
+	await expect(page.getByText("Recorded timestamp and remaining allowance")).toHaveCount(0);
+	await expect(page.getByText(/Account-wide budget capacity/)).toHaveCount(0);
+	const tokenChart = page.getByRole("application", { name: "Daily token usage" });
+	await expect(tokenChart).toBeVisible();
+	await tokenChart.press("ArrowRight");
+	await expect(page.getByText("Cached input : 600")).toBeVisible();
 	const period = page.getByRole("combobox", { name: "Cost time range", exact: true });
 	await expect(period).toHaveText("-7d");
 	expect(requestedRange).toBe("-7d");
@@ -122,14 +140,17 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	await custom.fill("-35d");
 	await custom.press("Enter");
 	await expect(page).toHaveURL("/costs?range=-35d");
-	await expect(page.getByRole("img", { name: "Daily token usage" })).toBeVisible();
+	await expect(tokenChart).toBeVisible();
 	expect(requestedRange).toBe("-35d");
 	await chooseDropdown(period, "-7d");
-	await expect(page.getByRole("img", { name: "codex weekly remaining allowance from 100% to 0%" })).toBeVisible();
+	const codexChart = page.getByRole("application", { name: "codex weekly remaining allowance from 100% to 0%" });
+	await expect(codexChart).toBeVisible();
+	await codexChart.press("ArrowRight");
+	await expect(page.getByText("Remaining allowance : 40%")).toBeVisible();
 	await expect(page.getByText(/Estimated additional tickets:.*≈ 8/)).toBeVisible();
 	await chooseDropdown(page.getByRole("combobox", { name: "Weekly bucket", exact: true }), "other");
-	await expect(page.getByRole("img", { name: "other weekly remaining allowance from 100% to 0%" })).toBeVisible();
-	await page.getByText("Recorded timestamp and remaining allowance").click();
+	const otherChart = page.getByRole("application", { name: "other weekly remaining allowance from 100% to 0%" });
+	await expect(otherChart).toBeVisible();
 	cost.weeklyBudget.buckets[1]!.additionalTickets = undefined;
 	Object.assign(cost.weeklyBudget.buckets[1]!, { unavailable: "learning" });
 	await page.getByRole("button", { name: "Refresh", exact: true }).click();
@@ -137,7 +158,7 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	Object.assign(cost.weeklyBudget.buckets[1]!, { unavailable: "stale", fresh: false });
 	await page.getByRole("button", { name: "Refresh", exact: true }).click();
 	await expect(page.getByText(/Unavailable: latest observation/)).toBeVisible();
-	await expect(page.getByRole("img", { name: "Tokens by phase" })).toContainText("Review");
+	await expect(page.getByRole("img", { name: "Ticket tokens by phase" })).toContainText("Review");
 	await expect(page.getByText("5-hour window")).toBeVisible();
 	await expect(page.getByText("Weekly window")).toBeVisible();
 	const ticket = page.getByRole("row", { name: /TASK-2 Search/ });
@@ -154,7 +175,7 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	await page.clock.fastForward(300_000);
 	await expect.poll(() => costReads).toBeGreaterThan(previousReads);
 	await page.setViewportSize({ width: 1280, height: 900 });
-	await expect(page.getByRole("img", { name: "other weekly remaining allowance from 100% to 0%" })).toBeVisible();
+	await expect(otherChart).toBeVisible();
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 });
 

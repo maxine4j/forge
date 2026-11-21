@@ -469,23 +469,26 @@ values return 400. Days are rolling 24-hour periods. The page offers `-28d`,
 `-7d`, `-1d`, `-12hr`, `-1hr`, and custom input in the top-right selector.
 The selection is preserved in the URL and carried into the ticket Cost tab.
 Usage and estimated API costs include whole turns by timestamp of turn start.
-The chart groups those same turns into UTC days, or UTC hours for hour ranges
-of at most 24 hours. The page also shows a phase breakdown and
+The stacked token chart groups those same turns into UTC days, or UTC hours for hour ranges
+of at most 24 hours. The page also shows a ticket phase breakdown and
 [per-ticket estimates](tickets.md#ticket-cost)
 for every board ticket, including archived tickets, tickets with no repository
 references and tickets without usage in the selected range. Ticket rows open
 details on Costs and show no single-repository label. Ticket usage is aggregated
 by ticket ID, independently of a turn's execution repository. See
-[board ownership and execution context](tickets.md#agentic-ticket-board). Summary cards sum known ticket API USD costs, attributed weekly percentage and
-effective USD costs before formatting, with per-metric incomplete-turn counts.
-Account totals and standalone chats are separately identifiable. Historical local
-currency equivalents convert each record using its dispatch snapshot before
-summing, grouping currencies separately. Weekly percentages use three significant
-figures only in presentation; incompatible bucket identities are never added.
+[board ownership and execution context](tickets.md#agentic-ticket-board).
+The provider sections show estimated OpenAI API costs in AUD, including standalone
+chats in the same total. This is the equivalent token cost at API rates. The AUD
+amount uses the saved dispatch exchange rate. Missing AUD rates, pricing or usage
+make the estimate partial or unavailable. Saved provider IDs keep named provider
+totals separate. Legacy records without an ID count toward the sole known OpenAI
+provider, or appear as OpenAI history when attribution is ambiguous. Retired
+OpenAI providers appear only when they have usage in the range. Configured Ollama
+providers show that costs are unavailable. See [model providers](foundation.md#model-providers).
+Per-ticket estimates retain local currency and quota attribution.
 The page retains manual refresh, retry, and five-minute refresh. Legacy project
 Cost URLs and API routes are unknown routes with no redirects.
-Standalone chats contribute to global usage in their own category. Cached
-input is included in input totals, and reasoning is included in output.
+Cached input is included in input totals, and reasoning is included in output.
 
 Forge records `thread/tokenUsage/updated` counters and reported turn duration in
 SQLite. Usage updates replace the previous snapshot for the same turn, with the
@@ -504,8 +507,10 @@ same notification. Context can shrink after compaction. Completed ticket chats
 load stored history without resuming Codex in a removed worktree.
 
 Account-wide quota windows come from `account/rateLimits/read` when available.
-Forge shows the current reported window length, percent used, and reset time as
-a live snapshot. The request is read-only. A quota timeout leaves the shared
+The current OpenAI section shows the live percent remaining for the sole weekly
+window or the `codex` bucket when multiple weekly windows exist. If neither can
+be read, the live figure is unavailable. The account details show reported
+window length, percent used and reset time. A quota timeout leaves the shared
 execution connection open.
 
 #### Quota cost attribution
@@ -555,10 +560,10 @@ hours, three completions and positive consumption are required. Capacity is
 Fresh exhausted allowance shows zero; samples older than fifteen minutes or past
 reset suppress estimates. The response includes sample size and observed period.
 
-The responsive SVG shows recorded current-cycle history, gaps over fifteen minutes,
+The responsive burndown shows recorded current-cycle history, gaps over fifteen minutes,
 and a dashed linear reference from 100% at window start to 0% at reset. It never
-invents a starting observation. Older reset cycles remain separate in expandable
-timestamp/value data. A labelled selector defaults to the lowest remaining bucket.
+invents a starting observation. A labelled selector defaults to the lowest remaining bucket.
+Both time charts use Recharts and expose values on hover and keyboard focus.
 This is budget capacity, not a guarantee of completing work in the remaining time:
 standalone chats, other account activity and changing ticket complexity affect it.
 It imposes no spending cap or scheduler enforcement.

@@ -16,6 +16,7 @@ test("cost route uses owner access, removes project routes and returns browser-s
 		ticketEstimates: summarizeCosts([], []),
 		chats: summarizeCosts([], []),
 		quotaAttribution: [],
+		providers: [],
 		totals: summarizeCosts([], []),
 		phases: [],
 		tickets: [],

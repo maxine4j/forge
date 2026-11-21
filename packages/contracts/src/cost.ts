@@ -61,8 +61,20 @@ export const ticketCostSchema = z.object({
 	phases: z.array(phaseSummary),
 });
 export type TicketCost = z.infer<typeof ticketCostSchema>;
+const costProvider = z.object({ id: z.string(), name: z.string() });
 export const costsSchema = z.object({
 	since: z.iso.datetime(),
+	providers: z.array(
+		z.discriminatedUnion("kind", [
+			costProvider.extend({
+				kind: z.literal("openai"),
+				current: z.boolean(),
+				apiAud: amount.optional(),
+				incomplete: count,
+			}),
+			costProvider.extend({ kind: z.literal("ollama") }),
+		]),
+	),
 	weeklyBudget: weeklyBudgetSchema.optional(),
 	quotaAttribution: z.array(
 		z.object({ bucketId: z.string(), consumption: amount, allocated: amount, unallocated: amount }),

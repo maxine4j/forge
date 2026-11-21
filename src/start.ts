@@ -177,11 +177,15 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		() => new Date(),
 		async () => {
 			const { localCurrency, monthlyPlanLocal } = settings.current();
-			const rate = await exchange.get(localCurrency);
+			const [rate, audRate] = await Promise.all([
+				exchange.get(localCurrency),
+				localCurrency === "AUD" ? undefined : exchange.get("AUD"),
+			]);
 			return {
 				localCurrency,
 				monthlyPlanLocal,
 				usdToLocal: rate?.rate,
+				usdToAud: audRate?.rate,
 				rateDate: rate?.date,
 				fetchedAt: rate?.fetchedAt,
 			};
@@ -298,7 +302,6 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		(err) => log.warn({ err }, "Weekly quota collection failed"),
 	);
 	lifecycle.register(() => collector.close());
-	const cost = new CostService(access, ticketStore, costStore, usage, () => new Date(), quotas);
 	const codex = new CodexAccountClient(connection, attempts);
 	const github = new GithubAccountClient(processes, sleep, attempts);
 	lifecycle.register(() => github.close());
@@ -310,6 +313,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	await agentStore.recover();
 	const providerStore = new ModelProviderStore(database);
 	await providerStore.initialize();
+	const cost = new CostService(access, ticketStore, costStore, usage, () => new Date(), quotas, providerStore);
 	const providers = new ModelProviderService(providerStore, access, randomUUID, (provider) =>
 		agentClient.options(undefined, provider),
 	);

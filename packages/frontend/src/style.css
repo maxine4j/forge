@@ -2425,6 +2425,10 @@ small {
 	--cost-muted: #99a6b4;
 	--cost-border: #30363d;
 	--cost-accent: #79b8ff;
+	--cost-input: #6ba7e7;
+	--cost-cached: #4dc7a2;
+	--cost-output: #c3a4f4;
+	--cost-tooltip: #0d1117;
 	display: grid;
 	gap: 16px;
 	padding-block: 12px 28px;
@@ -2442,6 +2446,11 @@ small {
 }
 .cost-dashboard h3 {
 	font-size: 15px;
+}
+.cost-provider {
+	display: grid;
+	gap: 16px;
+	min-width: 0;
 }
 .cost-heading {
 	display: flex;
@@ -2509,58 +2518,41 @@ small {
 	border-radius: 6px;
 	padding: 5px 8px;
 }
-.cost-trend {
-	display: grid;
-	grid-template-columns: auto minmax(0, 1fr);
-	gap: 8px;
+.cost-chart {
+	width: 100%;
+	min-width: 0;
 	margin-top: 16px;
-	min-height: 140px;
 }
-.cost-axis,
-.cost-dates {
-	display: flex;
-	justify-content: space-between;
-	color: var(--cost-muted);
+.cost-token-chart {
+	height: 200px;
+}
+.cost-budget-chart {
+	height: clamp(210px, 32vw, 340px);
+}
+.cost-chart .recharts-cartesian-axis-tick-value {
+	fill: var(--cost-muted);
 	font-size: 11px;
 }
-.cost-axis {
-	flex-direction: column;
-	text-align: right;
+.cost-chart .recharts-cartesian-axis-line,
+.cost-chart .recharts-cartesian-axis-tick-line {
+	stroke: var(--cost-border);
 }
-.cost-dates {
-	padding-left: 30px;
-	margin-top: 4px;
+.cost-chart .recharts-default-tooltip {
+	border-radius: 6px;
+	font-size: 12px;
 }
-.cost-days {
-	display: flex;
-	border-block: 1px solid var(--cost-border);
-	background: linear-gradient(
-		to bottom,
-		transparent calc(50% - 0.5px),
-		var(--cost-border) 50%,
-		transparent calc(50% + 0.5px)
-	);
-}
-.cost-day {
-	flex: 1;
-	min-width: 0;
-}
-.cost-day-stack {
-	display: flex;
-	flex-direction: column-reverse;
-	height: 100%;
-}
-.cost-day:hover {
-	background: #212936;
+.cost-chart .recharts-surface:focus-visible {
+	outline: 2px solid var(--cost-accent);
+	outline-offset: 2px;
 }
 .cost-uncached {
-	background: #6ba7e7;
+	background: var(--cost-input);
 }
 .cost-cached {
-	background: #4dc7a2;
+	background: var(--cost-cached);
 }
 .cost-output {
-	background: #c3a4f4;
+	background: var(--cost-output);
 }
 .cost-legend,
 .cost-daily-details ul {

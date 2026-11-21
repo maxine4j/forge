@@ -17,6 +17,9 @@ export interface ICostTickets {
 	listForCost(): Promise<{ id: string; title: string; archivedAt?: string }[]>;
 	get(id: string): Promise<{ id: string } | undefined>;
 }
+export interface ICostProviders {
+	list(includeRetired: boolean): Promise<{ id: string; name: string; kind: "openai" | "ollama"; retired: boolean }[]>;
+}
 export interface ICostService {
 	read(actor: Actor, range?: string): Promise<Costs>;
 	readTicket(actor: Actor, ticketId: string, range?: string): Promise<TicketCost>;
@@ -34,6 +37,17 @@ const phases = (turns: UsageTurn[], intervals: QuotaInterval[], chat = false) =>
 			),
 		}));
 
+const openaiCost = (id: string, name: string, current: boolean, turns: UsageTurn[]): Costs["providers"][number] => {
+	let incomplete = 0;
+	let apiAud = turns.length ? undefined : 0;
+	for (const turn of turns) {
+		const rate = turn.billing.localCurrency === "AUD" ? turn.billing.usdToLocal : turn.billing.usdToAud;
+		if (rate === undefined || turn.apiUsd === undefined) incomplete++;
+		else apiAud = (apiAud ?? 0) + turn.apiUsd * rate;
+	}
+	return { id, name, kind: "openai", current, apiAud, incomplete };
+};
+
 export class CostService implements ICostService {
 	constructor(
 		private readonly access: Pick<IAccessService, "assertOwner">,
@@ -42,17 +56,19 @@ export class CostService implements ICostService {
 		private readonly codex: ICodexLimits,
 		private readonly now: () => Date,
 		private readonly quotas?: IQuotaStore,
+		private readonly providers?: ICostProviders,
 	) {}
 	async read(actor: Actor, range = defaultCostRange): Promise<Costs> {
 		this.access.assertOwner(actor);
 		const now = this.now();
 		const window = this.window(range, now);
-		const [{ since, turns }, tickets, limits, intervals, history] = await Promise.all([
+		const [{ since, turns }, tickets, limits, intervals, history, providers] = await Promise.all([
 			this.store.read(undefined, window),
 			this.tickets.listForCost(),
 			this.codex.limits(),
 			this.quotas?.intervals?.(window) ?? [],
 			this.quotas?.read(window.from),
+			this.providers?.list(true) ?? [],
 		]);
 		const chartStart = Math.max(Date.parse(window.from), Date.parse(since));
 		const days = this.tokenSeries(turns, chartStart, now.getTime(), dayMs);
@@ -75,6 +91,11 @@ export class CostService implements ICostService {
 		}
 		return {
 			since,
+			providers: this.providerCosts(
+				providers,
+				turns,
+				Boolean(limits?.windows.length || history?.observations.length),
+			),
 			limits,
 			days,
 			hours,
@@ -109,6 +130,37 @@ export class CostService implements ICostService {
 		]);
 		const attributed = turns.filter((turn) => turn.ticketId === ticketId);
 		return { since, ticket: summarizeCosts(attributed, intervals), phases: phases(attributed, intervals) };
+	}
+
+	private providerCosts(
+		providers: Awaited<ReturnType<ICostProviders["list"]>>,
+		turns: UsageTurn[],
+		hasQuota: boolean,
+	): Costs["providers"] {
+		const openai = providers.filter((provider) => provider.kind === "openai");
+		const byProvider = new Map<string | undefined, UsageTurn[]>();
+		for (const turn of turns) {
+			const id =
+				openai.find((provider) => provider.id === turn.providerId)?.id
+				?? (!turn.providerId && openai.length === 1 ? openai.at(0)?.id : undefined);
+			const group = byProvider.get(id) ?? [];
+			group.push(turn);
+			byProvider.set(id, group);
+		}
+		const result: Costs["providers"] = providers.flatMap(({ id, name, kind, retired }) => {
+			const group = byProvider.get(id) ?? [];
+			if (retired && !group.length) return [];
+			return [kind === "openai" ? openaiCost(id, name, !retired, group) : { id, name, kind }];
+		});
+		const history = byProvider.get(undefined) ?? [];
+		const hasCurrent = openai.some((provider) => !provider.retired);
+		if (!openai.length && (hasQuota || history.length))
+			result.push(openaiCost("openai-account", "OpenAI account", true, history));
+		else {
+			if (!hasCurrent && hasQuota) result.push(openaiCost("openai-account", "OpenAI account", true, []));
+			if (history.length) result.push(openaiCost("openai-history", "OpenAI history", false, history));
+		}
+		return result;
 	}
 
 	private window(range: string, now: Date): CostWindow {

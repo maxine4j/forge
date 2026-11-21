@@ -1,18 +1,33 @@
 import type { WeeklyBudget } from "@forge/contracts";
 import { useState } from "react";
+import { CartesianGrid, Line, LineChart, ReferenceLine, Tooltip, XAxis, YAxis } from "recharts";
 
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
 
-const timestamp = (value: string) => new Date(value).toLocaleString();
+const timestamp = (value: string | number) => new Date(value).toLocaleString();
+const labelDate = new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric" });
+const percent = new Intl.NumberFormat(undefined, { maximumFractionDigits: 2 });
+const formatPercent = (value: number) => `${percent.format(value)}%`;
+
+const observations = (bucket: WeeklyBudget["buckets"][number]) => {
+	const points: { time: number; remaining: number | null }[] = [];
+	for (const point of bucket.observations) {
+		if (point.resetsAt !== bucket.resetsAt) continue;
+		const time = Date.parse(point.observedAt);
+		const previous = points.at(-1);
+		if (previous && time - previous.time > 900_000)
+			points.push({ time: (previous.time + time) / 2, remaining: null });
+		points.push({ time, remaining: 100 - point.usedPercent });
+	}
+	return points;
+};
+
 export function WeeklyBudgetChart({ budget }: { budget?: WeeklyBudget }) {
 	const [selected, setSelected] = useState<string>();
 	const bucket =
 		budget?.buckets.find((entry) => entry.bucketId === (selected ?? budget.defaultBucketId)) ?? budget?.buckets[0];
-	const latest = bucket?.observations.at(-1);
-	const reset = latest ? Date.parse(latest.resetsAt) : 0;
+	const reset = bucket ? Date.parse(bucket.resetsAt) : 0;
 	const start = reset - 7 * 86_400_000;
-	const x = (value: string) => 45 + (620 * (Date.parse(value) - start)) / (reset - start);
-	const points = bucket?.observations.filter((entry) => entry.resetsAt === latest?.resetsAt);
 	return (
 		<section className='cost-card'>
 			<h3>Weekly budget burndown</h3>
@@ -37,63 +52,56 @@ export function WeeklyBudgetChart({ budget }: { budget?: WeeklyBudget }) {
 			) : (
 				<>
 					<p>
-						{bucket.bucket} · {bucket.remainingPercent}% remaining
+						{bucket.bucket} · {bucket.remainingPercent}% remaining at last observation
 					</p>
 					<p>
 						Resets {timestamp(bucket.resetsAt)} · Last observation {timestamp(bucket.lastObservedAt)}
 					</p>
-					<svg
-						viewBox='0 0 700 240'
-						role='img'
+					<LineChart
+						className='cost-chart cost-budget-chart'
+						responsive
+						data={observations(bucket)}
 						aria-label={`${bucket.bucket} weekly remaining allowance from 100% to 0%`}
-						aria-description='Recorded observations in the current reset cycle. Gaps exceed fifteen minutes. The dashed line shows a straight-line budget reference.'
-						style={{ width: "100%", height: "auto" }}
+						desc='Recorded observations in the current reset cycle. Gaps exceed fifteen minutes. The dashed line shows a straight-line budget reference.'
+						margin={{ top: 10, right: 22, bottom: 0, left: 0 }}
 					>
-						<text x='0' y='25' fill='currentColor'>
-							100%
-						</text>
-						<text x='10' y='205' fill='currentColor'>
-							0%
-						</text>
-						<path
-							d='M45 20 L665 200'
-							stroke='currentColor'
-							strokeDasharray='6 5'
-							fill='none'
-							opacity='.4'
+						<CartesianGrid vertical={false} stroke='var(--cost-border)' />
+						<XAxis
+							dataKey='time'
+							type='number'
+							domain={[start, reset]}
+							ticks={[start, start + 3 * 86_400_000, reset]}
+							tickFormatter={labelDate.format}
+							allowDataOverflow
 						/>
-						{points?.map((point, index) => {
-							const previous = points[index - 1];
-							const y = 20 + point.usedPercent * 1.8;
-							return (
-								<g key={point.observedAt}>
-									{previous
-										&& Date.parse(point.observedAt) - Date.parse(previous.observedAt)
-											<= 900_000 && (
-											<line
-												x1={x(previous.observedAt)}
-												y1={20 + previous.usedPercent * 1.8}
-												x2={x(point.observedAt)}
-												y2={y}
-												stroke='currentColor'
-												strokeWidth='2'
-											/>
-										)}
-									<circle cx={x(point.observedAt)} cy={y} r='3' fill='currentColor'>
-										<title>
-											{timestamp(point.observedAt)}: {100 - point.usedPercent}% remaining
-										</title>
-									</circle>
-								</g>
-							);
-						})}
-						<text x='45' y='230' fill='currentColor'>
-							{new Date(start).toLocaleDateString()}
-						</text>
-						<text x='665' y='230' textAnchor='end' fill='currentColor'>
-							{new Date(reset).toLocaleDateString()}
-						</text>
-					</svg>
+						<YAxis
+							domain={[0, 100]}
+							ticks={[0, 25, 50, 75, 100]}
+							width={42}
+							tickFormatter={formatPercent}
+						/>
+						<ReferenceLine
+							segment={[
+								{ x: start, y: 100 },
+								{ x: reset, y: 0 },
+							]}
+							stroke='var(--cost-muted)'
+							strokeDasharray='5 5'
+						/>
+						<Tooltip
+							labelFormatter={(value) => timestamp(Number(value))}
+							formatter={(value) => (typeof value === "number" ? formatPercent(value) : value)}
+							contentStyle={{ background: "var(--cost-tooltip)", borderColor: "var(--cost-border)" }}
+						/>
+						<Line
+							dataKey='remaining'
+							name='Remaining allowance'
+							stroke='var(--cost-accent)'
+							strokeWidth={2}
+							dot={{ r: 1.5, strokeWidth: 0, fill: "var(--cost-accent)" }}
+							isAnimationActive={false}
+						/>
+					</LineChart>
 					<p>
 						<strong>Estimated additional tickets: </strong>
 						{bucket.additionalTickets !== undefined
@@ -110,29 +118,8 @@ export function WeeklyBudgetChart({ budget }: { budget?: WeeklyBudget }) {
 							&& bucket.periodEnd
 							&& ` · ${timestamp(bucket.periodStart)} to ${timestamp(bucket.periodEnd)}`}
 					</p>
-					<details>
-						<summary>Recorded timestamp and remaining allowance</summary>
-						{[...new Set(bucket.observations.map((point) => point.resetsAt))].map((cycle) => (
-							<div key={cycle}>
-								<h4>Reset {timestamp(cycle)}</h4>
-								<ul>
-									{bucket.observations
-										.filter((point) => point.resetsAt === cycle)
-										.map((point) => (
-											<li key={point.observedAt}>
-												{timestamp(point.observedAt)} · {100 - point.usedPercent}% remaining
-											</li>
-										))}
-								</ul>
-							</div>
-						))}
-					</details>
 				</>
 			)}
-			<p className='cost-muted'>
-				Account-wide budget capacity, not a guarantee of completion before reset. Standalone chats, other
-				account activity and changing ticket complexity affect this estimate.
-			</p>
 		</section>
 	);
 }

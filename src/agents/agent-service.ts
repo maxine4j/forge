@@ -333,10 +333,10 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 						permissions: selection.data.permissions,
 					},
 					ticket
-						? { projectId: record.projectId, ...ticket }
+						? { projectId: record.projectId, providerId: record.providerId, ...ticket }
 						: record.managed
 							? undefined
-							: { projectId: record.projectId, phase: "chat" },
+							: { projectId: record.projectId, providerId: record.providerId, phase: "chat" },
 				);
 				return await this.sync(record);
 			} catch (cause) {

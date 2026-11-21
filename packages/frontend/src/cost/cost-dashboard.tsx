@@ -1,12 +1,13 @@
 import { costRangeSchema, costsSchema, defaultCostRange, type Costs } from "@forge/contracts";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router";
+import { Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
 import { nextModal } from "../navigation/controller.tsx";
 import { useToast } from "../toasts/toasts.tsx";
-import { CostMetrics, Money, PhaseCosts, WeeklyUsage, formatPercent } from "./cost-metrics.tsx";
+import { Money, PhaseCosts, WeeklyUsage, formatPercent, money } from "./cost-metrics.tsx";
 import { WeeklyBudgetChart } from "./weekly-budget.tsx";
 
 const number = new Intl.NumberFormat("en-AU");
@@ -28,22 +29,15 @@ const phaseLabels = {
 	implementation: "Implementation",
 	review: "Review",
 	rebase: "Rebase",
-	chat: "Standalone chats",
 };
-
-const TokenStack = ({ counts, scale }: { counts: Costs["days"][number]; scale: number }) => (
-	<span className='cost-day-stack'>
-		<span className='cost-uncached' style={{ height: `${(100 * (counts.input - counts.cached)) / scale}%` }} />
-		<span className='cost-cached' style={{ height: `${(100 * counts.cached) / scale}%` }} />
-		<span className='cost-output' style={{ height: `${(100 * counts.output) / scale}%` }} />
-	</span>
-);
 
 const UsageCharts = ({ cost }: { cost: Costs }) => {
 	const series = cost.hours ?? cost.days;
 	const format = (date: string) => (cost.hours ? hour : day).format(new Date(date));
-	const scale = series.reduce((max, entry) => Math.max(max, tokens(entry)), 1);
-	const phaseScale = Math.max(1, ...cost.phases.map(tokens));
+	const ticketPhases = cost.phases.filter(
+		(entry): entry is Costs["phases"][number] & { phase: keyof typeof phaseLabels } => entry.phase !== "chat",
+	);
+	const phaseScale = Math.max(1, ...ticketPhases.map(tokens));
 	return (
 		<div className='cost-charts'>
 			<section className='cost-card'>
@@ -52,32 +46,44 @@ const UsageCharts = ({ cost }: { cost: Costs }) => {
 					<p className='cost-muted'>No tokens recorded in this period.</p>
 				) : (
 					<>
-						<div
-							className='cost-trend'
-							role='img'
+						<BarChart
+							className='cost-chart cost-token-chart'
+							responsive
+							data={series.map((entry) => ({ ...entry, uncached: entry.input - entry.cached }))}
 							aria-label={cost.hours ? "Hourly token usage" : "Daily token usage"}
+							margin={{ top: 8, right: 12, bottom: 0, left: 0 }}
 						>
-							<div className='cost-axis'>
-								<span>{shortNumber.format(scale)}</span>
-								<span>0</span>
-							</div>
-							<div className='cost-days' style={{ gap: `min(3px, ${25 / series.length}%)` }}>
-								{series.map((entry) => (
-									<div
-										className='cost-day'
-										key={entry.date}
-										title={`${format(entry.date)} · ${number.format(tokens(entry))} tokens`}
-									>
-										<TokenStack counts={entry} scale={scale} />
-									</div>
-								))}
-							</div>
-						</div>
-						<div className='cost-dates'>
-							{[series.at(0), series.at(-1)].map(
-								(entry, index) => entry && <span key={index}>{format(entry.date)}</span>,
-							)}
-						</div>
+							<CartesianGrid vertical={false} stroke='var(--cost-border)' />
+							<XAxis dataKey='date' tickFormatter={format} minTickGap={20} interval='preserveStartEnd' />
+							<YAxis width={36} tickCount={4} allowDecimals={false} tickFormatter={shortNumber.format} />
+							<Tooltip
+								labelFormatter={(value) => format(String(value))}
+								formatter={(value) => (typeof value === "number" ? number.format(value) : value)}
+								contentStyle={{ background: "var(--cost-tooltip)", borderColor: "var(--cost-border)" }}
+								cursor={{ fill: "var(--cost-muted)", fillOpacity: 0.12 }}
+							/>
+							<Bar
+								dataKey='uncached'
+								name='Input'
+								stackId='tokens'
+								fill='var(--cost-input)'
+								isAnimationActive={false}
+							/>
+							<Bar
+								dataKey='cached'
+								name='Cached input'
+								stackId='tokens'
+								fill='var(--cost-cached)'
+								isAnimationActive={false}
+							/>
+							<Bar
+								dataKey='output'
+								name='Output'
+								stackId='tokens'
+								fill='var(--cost-output)'
+								isAnimationActive={false}
+							/>
+						</BarChart>
 						<ul className='cost-legend' aria-label='Token types'>
 							<li>
 								<span className='cost-uncached' />
@@ -107,19 +113,19 @@ const UsageCharts = ({ cost }: { cost: Costs }) => {
 				)}
 			</section>
 			<section className='cost-card'>
-				<h3>Tokens by phase</h3>
-				{!cost.phases.length ? (
+				<h3>Ticket tokens by phase</h3>
+				{!ticketPhases.length ? (
 					<p className='cost-muted'>No phase usage recorded yet.</p>
 				) : (
 					<div
 						className='cost-phases'
 						role='img'
-						aria-label='Tokens by phase'
-						aria-description={cost.phases
+						aria-label='Ticket tokens by phase'
+						aria-description={ticketPhases
 							.map((entry) => `${phaseLabels[entry.phase]} ${number.format(tokens(entry))}`)
 							.join(", ")}
 					>
-						{cost.phases.map((entry) => (
+						{ticketPhases.map((entry) => (
 							<div className='cost-phase' key={entry.phase}>
 								<div>
 									<span>{phaseLabels[entry.phase]}</span>
@@ -177,6 +183,57 @@ const Quotas = ({ limits }: { limits: Costs["limits"] }) => (
 		)}
 	</section>
 );
+
+const ProviderCosts = ({ cost }: { cost: Costs }) => {
+	const weekly = cost.limits?.windows.filter((window) => window.minutes === 10080) ?? [];
+	const current = weekly.length === 1 ? weekly.at(0) : weekly.find((window) => window.bucketId === "codex");
+	const remaining = current && Math.max(0, 100 - current.usedPercent);
+	return cost.providers.map((provider) => {
+		const heading = `cost-provider-${provider.id}`;
+		return (
+			<section key={provider.id} className='cost-provider' aria-labelledby={heading}>
+				<h3 id={heading}>{provider.name}</h3>
+				{provider.kind === "ollama" ? (
+					<p className='cost-card'>Cost tracking is unavailable.</p>
+				) : (
+					<>
+						<dl className='cost-metrics'>
+							<div className='cost-card'>
+								<dt>Estimated API cost</dt>
+								<dd>
+									<span>
+										{provider.apiAud === undefined
+											? "Unavailable"
+											: `AUD ${money(provider.apiAud, "AUD")}`}
+									</span>
+									{provider.incomplete > 0 && (
+										<small>
+											{provider.incomplete} {provider.incomplete === 1 ? "turn" : "turns"} missing
+											usage, pricing or an AUD exchange rate
+										</small>
+									)}
+								</dd>
+							</div>
+							{provider.current && (
+								<div className='cost-card'>
+									<dt>Weekly limit remaining</dt>
+									<dd>
+										{remaining === undefined ? "Unavailable" : `${number.format(remaining)}%`}
+										{current?.resetsAt && (
+											<small>Resets {resetTime.format(new Date(current.resetsAt))}</small>
+										)}
+									</dd>
+								</div>
+							)}
+						</dl>
+						{provider.current && <WeeklyBudgetChart budget={cost.weeklyBudget} />}
+						{provider.current && <Quotas limits={cost.limits} />}
+					</>
+				)}
+			</section>
+		);
+	});
+};
 
 const TicketCosts = ({ cost }: { cost: Costs }) => {
 	const location = useLocation();
@@ -265,7 +322,7 @@ const TicketCosts = ({ cost }: { cost: Costs }) => {
 	);
 };
 
-export const CostDashboard = ({ api }: { api: IWorkspaceApi }) => {
+export default function CostDashboard({ api }: { api: IWorkspaceApi }) {
 	const { notify } = useToast();
 	const [query, setQuery] = useSearchParams();
 	const range = costRangeSchema.safeParse(query.get("range")).data ?? defaultCostRange;
@@ -369,34 +426,11 @@ export const CostDashboard = ({ api }: { api: IWorkspaceApi }) => {
 			)}
 			{cost && (
 				<>
-					<h3>Ticket totals</h3>
-					<CostMetrics summary={cost.ticketEstimates} />
-					<details>
-						<summary>Account usage including standalone chats</summary>
-						<CostMetrics summary={cost.totals} />
-						<PhaseCosts phases={cost.phases} />
-						<p>
-							Total tokens: {number.format(tokens(cost.totals))}; input:{" "}
-							{number.format(cost.totals.input)}; cached: {number.format(cost.totals.cached)}; output:{" "}
-							{number.format(cost.totals.output)}; turns: {cost.totals.turns}
-						</p>
-					</details>
-					<details>
-						<summary>Standalone chats</summary>
-						<CostMetrics summary={cost.chats} />
-					</details>
-					{cost.quotaAttribution.map((bucket) => (
-						<p key={bucket.bucketId}>
-							{bucket.bucketId}: observed {formatPercent(bucket.consumption)}, allocated{" "}
-							{formatPercent(bucket.allocated)}, unallocated {formatPercent(bucket.unallocated)}
-						</p>
-					))}
-					<WeeklyBudgetChart budget={cost.weeklyBudget} />
+					<ProviderCosts cost={cost} />
 					<UsageCharts cost={cost} />
-					<Quotas limits={cost.limits} />
 					<TicketCosts cost={cost} />
 				</>
 			)}
 		</div>
 	);
-};
+}

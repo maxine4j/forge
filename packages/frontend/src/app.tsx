@@ -1,6 +1,6 @@
 import type { AccountProvider, AccountStatus, AccountsStatus, Project } from "@forge/contracts";
 import { createProjectSchema } from "@forge/contracts";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, Navigate, useLocation } from "react-router";
 
@@ -8,7 +8,6 @@ import { AgentOptionsRevision } from "./agents/execution-settings.tsx";
 import type { IApiClient } from "./api/api-client.ts";
 import { ResourcePoller } from "./api/resource-poller.ts";
 import type { IWorkspaceApi } from "./api/workspace-api.ts";
-import { CostDashboard } from "./cost/cost-dashboard.tsx";
 import {
 	NavigationProvider,
 	useDialogDismissal,
@@ -24,6 +23,8 @@ import { TicketProvider, TicketHost } from "./tasks/ticket-controller.tsx";
 import { useTicketPresentation } from "./tasks/ticket-presentation.tsx";
 import { useErrorState, useFailureToast, ToastVisibility } from "./toasts/toasts.tsx";
 import { Workbench } from "./workspace/workbench.tsx";
+
+const CostDashboard = lazy(() => import("./cost/cost-dashboard.tsx"));
 
 const failureMessages = {
 	unavailable: "Check the CLI installation and credential-home permissions on the server.",
@@ -322,7 +323,11 @@ const Application = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWo
 						</ToastVisibility>
 					</AgentOptionsRevision.Provider>
 				</div>
-				{route.page === "costs" && <CostDashboard api={workspaceApi} />}
+				{route.page === "costs" && (
+					<Suspense fallback={<p role='status'>Loading Costs…</p>}>
+						<CostDashboard api={workspaceApi} />
+					</Suspense>
+				)}
 
 				{route.page === "not-found" && (
 					<section>

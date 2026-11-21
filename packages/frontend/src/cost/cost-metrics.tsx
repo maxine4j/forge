@@ -1,6 +1,6 @@
 import type { CostSummary, TicketCost } from "@forge/contracts";
 
-const money = (value: number | undefined, currency: string) =>
+export const money = (value: number | undefined, currency: string) =>
 	value === undefined
 		? "—"
 		: new Intl.NumberFormat("en-AU", {

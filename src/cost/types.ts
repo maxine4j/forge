@@ -7,6 +7,7 @@ export interface CostSettings {
 
 export interface BillingSnapshot extends CostSettings {
 	usdToLocal?: number;
+	usdToAud?: number;
 	rateDate?: string;
 	fetchedAt?: string;
 	rates?: TokenCounts;
@@ -17,7 +18,10 @@ export interface TicketUsageScope {
 	ticketId: string;
 }
 
-export type UsageScope = { projectId: string } & ({ phase: "chat"; ticketId?: undefined } | TicketUsageScope);
+export type UsageScope = { projectId: string; providerId?: string } & (
+	| { phase: "chat"; ticketId?: undefined }
+	| TicketUsageScope
+);
 
 export interface TokenCounts {
 	input: number;

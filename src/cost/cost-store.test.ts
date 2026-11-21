@@ -78,6 +78,7 @@ test("concurrent notifications preserve dispatch billing, phase and model rates 
 		await store.initialize("2026-11-12T00:00:00.000Z");
 		const record = {
 			projectId: "repo",
+			providerId: "openai-at-dispatch",
 			threadId: "thread",
 			turnId: "turn",
 			phase: "planning" as const,
@@ -87,6 +88,7 @@ test("concurrent notifications preserve dispatch billing, phase and model rates 
 				localCurrency: "AUD",
 				monthlyPlanLocal: 30,
 				usdToLocal: 1.5,
+				usdToAud: 1.5,
 				rateDate: "2026-11-10",
 				fetchedAt: "2026-11-12T00:00:00.000Z",
 				rates: { input: 2, cached: 0.1, output: 10 },
@@ -102,6 +104,7 @@ test("concurrent notifications preserve dispatch billing, phase and model rates 
 					...record,
 					phase: "implementation",
 					ticketId: "TASK-2",
+					providerId: "replacement",
 					billing: {
 						localCurrency: "EUR",
 						monthlyPlanLocal: 99,
@@ -118,6 +121,7 @@ test("concurrent notifications preserve dispatch billing, phase and model rates 
 		expect(history.turns[0]).toMatchObject({
 			phase: "planning",
 			ticketId: "TASK-1",
+			providerId: "openai-at-dispatch",
 			billing: record.billing,
 			output: 200000,
 			apiUsd: 3.05,

@@ -8,6 +8,7 @@ test("aggregates all phases, chats, archived and repository-free tickets without
 	const planning = {
 		projectId: "a",
 		ticketId: "TASK-1",
+		providerId: "cloud",
 		threadId: "one",
 		turnId: "one",
 		phase: "planning" as const,
@@ -23,7 +24,13 @@ test("aggregates all phases, chats, archived and repository-free tickets without
 		{ ...planning, phase: "implementation", turnId: "two", projectId: "another-repository" },
 		{ ...planning, phase: "review", turnId: "three", apiUsd: undefined },
 		{ ...planning, phase: "rebase", turnId: "four", ticketId: "TASK-3" },
-		{ ...planning, phase: "chat", turnId: "five", ticketId: undefined },
+		{
+			...planning,
+			phase: "chat",
+			turnId: "five",
+			ticketId: undefined,
+			billing: { localCurrency: "EUR", monthlyPlanLocal: 30, usdToLocal: 0.9, usdToAud: 1.5 },
+		},
 		{ ...planning, turnId: "prior", startedAt: "2026-10-31T22:59:59.999Z" },
 		{ ...planning, turnId: "future", startedAt: "2026-11-01T00:00:00.001Z" },
 	];
@@ -50,8 +57,20 @@ test("aggregates all phases, chats, archived and repository-free tickets without
 		},
 		{ limits: async () => undefined },
 		() => new Date("2026-11-01T00:00:00Z"),
+		undefined,
+		{
+			list: async () => [
+				{ id: "cloud", name: "Cloud", kind: "openai" as const, retired: false },
+				{ id: "old", name: "Previous provider", kind: "openai" as const, retired: true },
+				{ id: "local", name: "Local", kind: "ollama" as const, retired: false },
+			],
+		},
 	);
 	const result = await service.read({ username: "owner" });
+	expect(result.providers).toEqual([
+		{ id: "cloud", name: "Cloud", kind: "openai", current: true, apiAud: 21.5625, incomplete: 1 },
+		{ id: "local", name: "Local", kind: "ollama" },
+	]);
 	expect(access.assertOwner).toHaveBeenCalledWith({ username: "owner" });
 	expect(result.totals).toMatchObject({ input: 6000000, cached: 3000000, output: 600000, turns: 6, apiUsd: 14.375 });
 	expect(result.ticketEstimates).toMatchObject({
@@ -82,4 +101,44 @@ test("aggregates all phases, chats, archived and repository-free tickets without
 	expect(scoped.ticket).toEqual(expect.objectContaining({ turns: 3, apiUsd: 5.75 }));
 	expect(scoped.phases.map((phase) => phase.turns)).toEqual([1, 1, 1, 0]);
 	await expect(service.readTicket({ username: "owner" }, "invalid")).rejects.toThrow();
+});
+
+test("keeps retired and unassigned OpenAI usage out of the current provider's total", async () => {
+	const startedAt = "2026-10-31T23:00:00.000Z";
+	const turn = {
+		phase: "chat" as const,
+		projectId: "project",
+		threadId: "thread",
+		startedAt,
+		billing: { localCurrency: "AUD", monthlyPlanLocal: 30, usdToLocal: 1.5 },
+	};
+	const list = vi.fn(async () => [
+		{ id: "current", name: "Current", kind: "openai" as const, retired: false },
+		{ id: "retired", name: "Previous", kind: "openai" as const, retired: true },
+	]);
+	const service = new CostService(
+		{ assertOwner: vi.fn() },
+		{ get: async () => undefined, listForCost: async () => [] },
+		{
+			read: async () => ({
+				since: startedAt,
+				turns: [
+					{ ...turn, turnId: "1", providerId: "current", apiUsd: 10 },
+					{ ...turn, turnId: "2", providerId: "retired", apiUsd: 20 },
+					{ ...turn, turnId: "3", apiUsd: 30 },
+				],
+			}),
+		},
+		{ limits: async () => undefined },
+		() => new Date("2026-11-01T00:00:00Z"),
+		undefined,
+		{ list },
+	);
+	const result = await service.read({ username: "owner" });
+	expect(list).toHaveBeenCalledWith(true);
+	expect(result.providers).toEqual([
+		{ id: "current", name: "Current", kind: "openai", current: true, apiAud: 15, incomplete: 0 },
+		{ id: "retired", name: "Previous", kind: "openai", current: false, apiAud: 30, incomplete: 0 },
+		{ id: "openai-history", name: "OpenAI history", kind: "openai", current: false, apiAud: 45, incomplete: 0 },
+	]);
 });

@@ -7,6 +7,7 @@ import type { CostWindow, UsageTurn } from "./types.ts";
 const recordSchema = z
 	.object({
 		projectId: z.string(),
+		providerId: z.string().optional(),
 		threadId: z.string(),
 		turnId: z.string(),
 		startedAt: z.iso.datetime(),
@@ -19,6 +20,7 @@ const recordSchema = z
 			localCurrency: z.string(),
 			monthlyPlanLocal: z.number().nonnegative(),
 			usdToLocal: z.number().positive().optional(),
+			usdToAud: z.number().positive().optional(),
 			rateDate: z.iso.date().optional(),
 			fetchedAt: z.iso.datetime().optional(),
 			rates: z

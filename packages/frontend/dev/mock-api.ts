@@ -20,6 +20,17 @@ const previewUsage = (turns: number) =>
 		(1.17 * turns) / 8,
 		(0.075 * turns) / 8,
 	);
+const previewProviders = (apiAud: number): Costs["providers"] => [
+	{
+		id: "123e4567-e89b-42d3-a456-426614174099",
+		name: "OpenAI",
+		kind: "openai",
+		current: true,
+		apiAud,
+		incomplete: 0,
+	},
+	{ id: "123e4567-e89b-42d3-a456-426614174098", name: "Local Ollama", kind: "ollama" },
+];
 const previewDays = (days: Costs["days"], cutoff: number): Costs["days"] =>
 	days
 		.filter(
@@ -148,6 +159,9 @@ export class MockApi implements IMockApi {
 			const days = previewDays(first.days, cutoff);
 			const turnCount = days.filter((day) => day.input > 0).length;
 			const totals = previewUsage(turnCount * costData.length);
+			const chats = previewUsage(turnCount);
+			const account = previewUsage(totals.turns + chats.turns);
+			const turnsPerDay = costData.length + 1;
 			const hourly = Date.parse(date) - cutoff <= 86_400_000 && url.searchParams.get("range")?.endsWith("hr");
 			const weeklyBudget = first.weeklyBudget;
 			return {
@@ -158,22 +172,24 @@ export class MockApi implements IMockApi {
 						return { ...row, ...summary, phases: phaseFixtures(summary) };
 					}),
 				),
-				totals,
+				providers: previewProviders(account.localCurrencies.at(0)?.api ?? 0),
+				totals: account,
+				chats,
 				ticketEstimates: totals,
 				days: days.map((day) => ({
 					...day,
-					input: day.input * costData.length,
-					cached: day.cached * costData.length,
-					output: day.output * costData.length,
+					input: day.input * turnsPerDay,
+					cached: day.cached * turnsPerDay,
+					output: day.output * turnsPerDay,
 				})),
 				hours: hourly
 					? Array.from({ length: (Date.parse(date) - cutoff) / 3_600_000 + 1 }, (_, index) => {
 							const start = new Date(cutoff + index * 3_600_000).toISOString();
-							const { input, cached, output } = previewUsage(start === date ? costData.length : 0);
+							const { input, cached, output } = previewUsage(start === date ? turnsPerDay : 0);
 							return { date: start, input, cached, output };
 						})
 					: undefined,
-				phases: phaseFixtures(totals),
+				phases: [...phaseFixtures(totals), { ...chats, phase: "chat" }],
 				quotaAttribution: [
 					{
 						bucketId: "codex",
@@ -359,6 +375,7 @@ export class MockApi implements IMockApi {
 				output: index >= 22 ? 2624 : 0,
 			}));
 			const cost: Costs = {
+				providers: previewProviders(usage.localCurrencies.at(0)?.api ?? 0),
 				ticketEstimates: usage,
 				chats: costFixture({ input: 0, cached: 0, output: 0, turns: 0 }),
 				quotaAttribution: [{ bucketId: "codex", consumption: 2, allocated: 1.17, unallocated: 0.83 }],
