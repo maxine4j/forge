@@ -88,6 +88,7 @@ export class ModelProviderService implements IModelProviderService {
 			if (!patch.success) throw new ModelProviderError("invalid-provider");
 			const merged = { ...previous, ...patch.data };
 			if (merged.comparisonModel === null) merged.comparisonModel = undefined;
+			if (merged.compactionThresholdTokens === null) merged.compactionThresholdTokens = undefined;
 			if (merged.kind !== previous.kind) throw new ModelProviderError("invalid-provider");
 			const { id: _id, retired: _retired, ...configuration } = merged;
 			const value = await this.save(id, configuration);

@@ -24,6 +24,26 @@ const actor = { username: "owner" };
 const access = new AccessService({ owner: "owner", origin: "https://forge.test" });
 const ollama = { name: "Local", kind: "ollama", endpoint: "http://ollama/v1" };
 
+test("provider compaction thresholds persist, validate, and clear", async () => {
+	const f = await fixture();
+	try {
+		for (const input of [ollama, { name: "Account", kind: "openai" }]) {
+			const provider = await f.service.create(actor, { ...input, compactionThresholdTokens: 1234 });
+			expect((await f.store.get(provider.id))?.compactionThresholdTokens).toBe(1234);
+			await f.service.update(actor, provider.id, { name: provider.name });
+			expect((await f.store.get(provider.id))?.compactionThresholdTokens).toBe(1234);
+			for (const value of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1])
+				await expect(
+					f.service.update(actor, provider.id, { compactionThresholdTokens: value }),
+				).rejects.toThrow();
+			await f.service.update(actor, provider.id, { compactionThresholdTokens: null });
+			expect((await f.store.get(provider.id))?.compactionThresholdTokens).toBeUndefined();
+		}
+	} finally {
+		await f.close();
+	}
+});
+
 test("reservation upgrade keeps existing assignments, routes and unfinished over-capacity work", async () => {
 	const f = await fixture();
 	try {

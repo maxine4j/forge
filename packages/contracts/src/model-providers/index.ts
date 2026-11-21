@@ -4,6 +4,7 @@ import { inferenceProviderSchema } from "../settings/index.ts";
 
 const name = z.string().trim().min(1).max(120);
 const concurrentAgents = z.int().positive();
+const compactionThresholdTokens = z.int().positive();
 const comparisonModel = z.string().trim().min(1).max(256).optional();
 const comparisonInput = z
 	.string()
@@ -17,9 +18,15 @@ export const modelProviderPatchSchema = z.strictObject({
 	endpoint: z.string().optional(),
 	comparisonModel: comparisonInput.nullable(),
 	maxConcurrentAgents: concurrentAgents.optional(),
+	compactionThresholdTokens: compactionThresholdTokens.nullable().optional(),
 });
 export const modelProviderInputSchema = z.discriminatedUnion("kind", [
-	z.strictObject({ name, kind: z.literal("openai"), maxConcurrentAgents: concurrentAgents.default(1) }),
+	z.strictObject({
+		name,
+		kind: z.literal("openai"),
+		maxConcurrentAgents: concurrentAgents.default(1),
+		compactionThresholdTokens: compactionThresholdTokens.optional(),
+	}),
 	z
 		.strictObject({
 			name,
@@ -27,6 +34,7 @@ export const modelProviderInputSchema = z.discriminatedUnion("kind", [
 			endpoint: inferenceProviderSchema.options[1].shape.endpoint,
 			comparisonModel: comparisonInput,
 			maxConcurrentAgents: concurrentAgents.default(1),
+			compactionThresholdTokens: compactionThresholdTokens.optional(),
 		})
 		.refine(
 			(value) => URL.parse(value.endpoint)?.pathname.endsWith("/v1") ?? false,
@@ -41,6 +49,7 @@ export const modelProviderSchema = z.object({
 	comparisonModel,
 	retired: z.boolean(),
 	maxConcurrentAgents: concurrentAgents.default(1),
+	compactionThresholdTokens: compactionThresholdTokens.optional(),
 });
 export const modelProvidersSchema = z.array(modelProviderSchema);
 export const modelProviderHealthSchema = z.object({
