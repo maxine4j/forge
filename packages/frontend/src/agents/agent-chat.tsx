@@ -411,6 +411,7 @@ export const Conversation = ({
 					}
 					completions={!readOnly}
 					contextWindow={messagePath ? view.contextWindow : undefined}
+					compactionThresholdTokens={view.compactionThresholdTokens}
 					change={(value) => {
 						setDraft(value);
 						drafts?.set(draftKey, value);

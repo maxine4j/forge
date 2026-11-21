@@ -297,7 +297,7 @@ deliberately escaped live processes are outside that application-level boundary.
 
 ### Docker workloads
 
-The image bundles Docker Engine/CLI 28.5.2, Compose 2.39.4 and Buildx 0.28.0,
+The image includes Chromium runtime libraries for Playwright browser tests; projects still install their pinned browser binaries. The image bundles Docker Engine/CLI 28.5.2, Compose 2.39.4 and Buildx 0.28.0,
 without adding application dependencies or removing development tools. Tini stays
 PID 1; `main.ts` composes a privileged supervisor which starts dockerd as root and
 Forge as UID/GID 1000 with supplementary groups cleared. Docker startup or runtime

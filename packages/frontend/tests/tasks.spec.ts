@@ -798,6 +798,7 @@ const setup = async (
 							: [],
 						truncated: review,
 						contextWindow: { used: 32000, max: 128000 },
+						compactionThresholdTokens: 64000,
 						...(measured
 							? {
 									performance: {
@@ -2733,6 +2734,7 @@ test("ticket chat shows the current context window", async ({ page }) => {
 	await ring.focus();
 	await expect(modal.getByRole("tooltip")).toContainText("32,000 of 128,000 tokens");
 	await expect(modal.getByRole("tooltip")).toContainText("25% used");
+	await expect(modal.getByRole("tooltip")).toContainText("Configured compaction threshold · 64,000 tokens");
 });
 
 for (const implementation of [false, true]) {

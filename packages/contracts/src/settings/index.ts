@@ -23,8 +23,13 @@ const ollamaModel = z
 	.regex(/^[^\s\p{Cc}]+$/u);
 
 export const inferenceProviderSchema = z.discriminatedUnion("kind", [
-	z.strictObject({ kind: z.literal("openai") }),
-	z.strictObject({ kind: z.literal("ollama"), endpoint: ollamaEndpoint, model: ollamaModel }),
+	z.strictObject({ kind: z.literal("openai"), compactionThresholdTokens: z.int().positive().optional() }),
+	z.strictObject({
+		kind: z.literal("ollama"),
+		endpoint: ollamaEndpoint,
+		model: ollamaModel,
+		compactionThresholdTokens: z.int().positive().optional(),
+	}),
 ]);
 export type InferenceProvider = z.infer<typeof inferenceProviderSchema>;
 

@@ -76,6 +76,7 @@ export interface AgentView {
 	requests: AgentRequest[];
 	truncated: boolean;
 	contextWindow?: AgentContextWindow;
+	compactionThresholdTokens?: number;
 	turnFailure?: AgentTurnFailure;
 	performance?: AgentPerformance;
 }

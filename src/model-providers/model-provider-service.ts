@@ -24,9 +24,13 @@ export interface IModelProviderService {
 	snapshotOptions(actor: Actor, configuration: InferenceProvider): Promise<AgentOptions>;
 }
 export function inferenceConfiguration(provider: ModelProvider, model?: string): InferenceProvider {
-	if (provider.kind === "openai") return { kind: "openai" };
+	const threshold =
+		provider.compactionThresholdTokens === undefined
+			? {}
+			: { compactionThresholdTokens: provider.compactionThresholdTokens };
+	if (provider.kind === "openai") return { kind: "openai", ...threshold };
 	if (!model || !provider.endpoint) throw new ModelProviderError("invalid-provider");
-	return { kind: "ollama", endpoint: provider.endpoint, model };
+	return { kind: "ollama", endpoint: provider.endpoint, model, ...threshold };
 }
 export class ModelProviderService implements IModelProviderService {
 	constructor(

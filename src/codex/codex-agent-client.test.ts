@@ -201,7 +201,12 @@ test("routes Ollama start and resume overrides, rejects mismatched reconciliatio
 	const { client, rpc } = setup();
 	const path = "/data/worktrees/one";
 	const model = "local:latest";
-	const provider = { kind: "ollama", endpoint: "http://ollama.internal/v1", model } as const;
+	const provider = {
+		kind: "ollama",
+		endpoint: "http://ollama.internal/v1",
+		model,
+		compactionThresholdTokens: 8000,
+	} as const;
 	const thread = {
 		id: "codex-1",
 		cwd: path,
@@ -225,6 +230,7 @@ test("routes Ollama start and resume overrides, rejects mismatched reconciliatio
 		modelProvider: "forge_ollama",
 		config: {
 			...runtimeOptions.config,
+			model_auto_compact_token_limit: 8000,
 			web_search: "disabled",
 			model_providers: {
 				forge_ollama: {

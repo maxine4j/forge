@@ -29,6 +29,7 @@ function namedFixture(dispatchMode?: Parameters<typeof fixture>[0], quotaExhaust
 		name: "Local",
 		kind: "ollama",
 		endpoint: "http://local/v1",
+		compactionThresholdTokens: 8000,
 		retired: false,
 		maxConcurrentAgents: 1,
 	};
@@ -163,8 +164,9 @@ test("independent assignees pin model and provider for feedback, recovery and re
 	const job = f.jobs.get(ticket.id)!;
 	expect(job.implementationProviderSnapshot).toMatchObject({
 		agentId: implementer.id,
-		configuration: { kind: "ollama", model: "local" },
+		configuration: { kind: "ollama", model: "local", compactionThresholdTokens: 8000 },
 	});
+	await f.providers.update(actor, f.implementer.id, { compactionThresholdTokens: 16000 });
 	await f.taskAgents.save(
 		actor,
 		{ name: "Implementer", models: [{ providerId: f.implementer.id, model: "edited" }] },
@@ -177,6 +179,9 @@ test("independent assignees pin model and provider for feedback, recovery and re
 	await f.service.tick(actor);
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[3]?.phase).toBe("rebase");
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[5]).toMatchObject({ model: "local" });
+	expect(f.agents.createTicketThread.mock.calls.at(-1)?.[5]?.configuration).toMatchObject({
+		compactionThresholdTokens: 8000,
+	});
 	expect(JSON.stringify(await f.service.get(actor, ticket.id))).not.toContain("http://");
 });
 

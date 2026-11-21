@@ -129,6 +129,7 @@ export const agentViewSchema = z
 		requests: z.array(agentRequestSchema).max(32),
 		truncated: z.boolean(),
 		contextWindow: agentContextWindowSchema.optional(),
+		compactionThresholdTokens: z.int().positive().optional(),
 		turnFailure: z.enum(["provider-request", "context-window", "other"]).optional(),
 		performance: agentPerformanceSchema.optional(),
 	})

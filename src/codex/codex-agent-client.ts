@@ -476,6 +476,9 @@ export class CodexAgentClient implements ICodexAgentClient {
 			...(provider?.kind === "ollama" ? { model: provider.model, modelProvider: ollamaProviderId } : {}),
 			config: {
 				features: { multi_agent: false },
+				...(provider?.compactionThresholdTokens !== undefined
+					? { model_auto_compact_token_limit: provider.compactionThresholdTokens }
+					: {}),
 				...(this.typescriptMcp
 					? {
 							"mcp_servers.forge_typescript": {

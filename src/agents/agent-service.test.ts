@@ -374,11 +374,14 @@ test("completed managed conversations load history and saved context after workt
 	const { thread } = await f.service.createTicketThread(owner, projectId, "Implementation");
 	await f.service.dispatch(owner, thread.id, "Implement", { ticketId: "TASK-1", phase: "implementation" });
 	const codexId = f.records.get(thread.id)!.codexId!;
+	f.records.get(thread.id)!.provider = { kind: "openai", compactionThresholdTokens: 8000 };
 	Object.assign(f.views.get(codexId)!, { status: "completed", contextWindow: { used: 4200, max: 128000 } });
 	f.changed(codexId);
 	await expect(f.service.get(owner, thread.id)).resolves.toMatchObject({
 		contextWindow: { used: 4200, max: 128000 },
+		compactionThresholdTokens: 8000,
 	});
+	expect((await f.service.get(owner, thread.id)).thread).not.toHaveProperty("provider");
 	expect(f.records.get(thread.id)?.contextWindow).toEqual({ used: 4200, max: 128000 });
 	f.views.get(codexId)!.contextWindow = undefined;
 	const { workspace } = await f.workspaces.resolve(owner, thread.workspaceId);

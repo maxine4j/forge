@@ -65,7 +65,10 @@ async function setup(page: Page, verified = false) {
 			return route.fulfill({ status: 201, json: value });
 		}
 		if (request.method() === "PATCH" && provider) {
-			Object.assign(provider, request.postDataJSON());
+			const input = request.postDataJSON();
+			writes.push(input);
+			Object.assign(provider, input);
+			if (provider.compactionThresholdTokens === null) delete provider.compactionThresholdTokens;
 			return route.fulfill({ json: provider });
 		}
 		if (request.method() === "DELETE" && provider) {
@@ -153,14 +156,19 @@ for (const width of [1280, 390]) {
 		await dialog.getByLabel("Name", { exact: true }).fill("Local");
 		await dialog.getByLabel("Responses API base URL").fill("http://ollama/v1");
 		await dialog.getByLabel("Comparison model (optional)").fill("gpt-5.4");
+		await dialog.getByLabel("Automatic compaction threshold (tokens)").fill("64000");
 		await dialog.getByRole("button", { name: "Save provider", exact: true }).click();
 		await expect(dialog).toHaveCount(0);
 		expect(f.providers[1]).toMatchObject({
 			name: "Local",
 			endpoint: "http://ollama/v1",
 			comparisonModel: "gpt-5.4",
+			compactionThresholdTokens: 64000,
 		});
+		expect(f.writes[1]).toMatchObject({ compactionThresholdTokens: 64000 });
 		await page.getByRole("button", { name: "Edit Local", exact: true }).click();
+		await expect(dialog.getByLabel("Automatic compaction threshold (tokens)")).toHaveValue("64000");
+		await dialog.getByLabel("Automatic compaction threshold (tokens)").fill("");
 		await dialog.getByLabel("Name", { exact: true }).fill("Renamed");
 		await expect(dialog.getByLabel("Max concurrent agents")).toHaveValue("1");
 		await dialog.getByLabel("Max concurrent agents").fill("3");
@@ -169,6 +177,7 @@ for (const width of [1280, 390]) {
 		await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue("Renamed");
 		await dialog.getByRole("button", { name: "Save provider", exact: true }).click();
 		await expect.poll(() => f.providers.at(1)?.maxConcurrentAgents).toBe(3);
+		expect(f.writes.at(-1)).toMatchObject({ compactionThresholdTokens: null });
 		await page.getByRole("button", { name: "Remove Renamed", exact: true }).click();
 		await page
 			.getByRole("dialog", { name: "Remove provider", exact: true })

@@ -12,7 +12,11 @@ import { AgentOptionsRevision } from "./execution-settings.tsx";
 
 const number = new Intl.NumberFormat("en-AU");
 
-const ContextWindow = ({ used, max }: AgentContextWindow) => {
+const ContextWindow = ({
+	used,
+	max,
+	compactionThresholdTokens,
+}: AgentContextWindow & { compactionThresholdTokens?: number }) => {
 	const tooltipId = useId();
 	const percent = 100 * (used / max);
 	return (
@@ -41,6 +45,9 @@ const ContextWindow = ({ used, max }: AgentContextWindow) => {
 				<div>
 					{number.format(used)} of {number.format(max)} tokens
 				</div>
+				{compactionThresholdTokens !== undefined && (
+					<div>Configured compaction threshold · {number.format(compactionThresholdTokens)} tokens</div>
+				)}
 			</div>
 		</div>
 	);
@@ -56,6 +63,7 @@ export const AgentComposer = ({
 	disabled,
 	sendable,
 	contextWindow,
+	compactionThresholdTokens,
 	completions = true,
 }: {
 	id: string;
@@ -67,6 +75,7 @@ export const AgentComposer = ({
 	disabled: boolean;
 	sendable: boolean;
 	contextWindow?: AgentContextWindow;
+	compactionThresholdTokens?: number;
 	completions?: boolean;
 }) => {
 	const inputId = useId();
@@ -281,7 +290,9 @@ export const AgentComposer = ({
 			<div className='agent-composer-footer'>
 				<div />
 				<div className='agent-composer-actions'>
-					{contextWindow && <ContextWindow {...contextWindow} />}
+					{contextWindow && (
+						<ContextWindow {...contextWindow} compactionThresholdTokens={compactionThresholdTokens} />
+					)}
 					<button
 						type={stop ? "button" : "submit"}
 						className='agent-send'

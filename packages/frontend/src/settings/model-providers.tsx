@@ -166,6 +166,7 @@ function ProviderEditor({
 	const [endpoint, setEndpoint] = useState(provider?.endpoint ?? "");
 	const [comparisonModel, setComparisonModel] = useState(provider?.comparisonModel ?? "");
 	const [maxConcurrentAgents, setMaxConcurrentAgents] = useState(String(provider?.maxConcurrentAgents ?? 1));
+	const [threshold, setThreshold] = useState(provider?.compactionThresholdTokens?.toString() ?? "");
 	const [busy, setBusy] = useState(false);
 	const [persisted, setPersisted] = useState(provider);
 	const [dirty, setDirty] = useState(false);
@@ -185,16 +186,18 @@ function ProviderEditor({
 				await navigation.completeConfirmation();
 				return;
 			}
+			const compactionThresholdTokens = threshold ? Number(threshold) : persisted ? null : undefined;
 			const input =
 				kind === "ollama"
 					? {
 							name,
 							kind,
 							maxConcurrentAgents: Number(maxConcurrentAgents),
+							compactionThresholdTokens,
 							endpoint,
 							comparisonModel: comparisonModel.trim() || (persisted ? null : undefined),
 						}
-					: { name, kind, maxConcurrentAgents: Number(maxConcurrentAgents) };
+					: { name, kind, maxConcurrentAgents: Number(maxConcurrentAgents), compactionThresholdTokens };
 			const value = await api.read(
 				persisted ? `model-providers/${persisted.id}` : "model-providers",
 				modelProviderSchema,
@@ -278,6 +281,22 @@ function ProviderEditor({
 						</label>
 						<small id='provider-concurrency-help'>
 							Shared across all Tasks board agents using this provider.
+						</small>
+						<label>
+							Automatic compaction threshold (tokens)
+							<input
+								type='number'
+								min={1}
+								step={1}
+								max={Number.MAX_SAFE_INTEGER}
+								value={threshold}
+								onChange={(e) => setThreshold(e.target.value)}
+								aria-describedby='provider-compaction-help'
+							/>
+						</label>
+						<small id='provider-compaction-help'>
+							Blank uses Codex defaults. For Ollama, leave headroom below the deployed context size for
+							instructions, tool output, and generation.
 						</small>
 						{kind === "ollama" && (
 							<>

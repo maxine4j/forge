@@ -184,6 +184,8 @@ contains inference routing, singleton Ollama configuration or OpenAI defaults.
 
 ### Model providers
 
+Providers may specify an automatic compaction threshold in tokens. Leave it blank to use Codex defaults; clearing an existing value removes the override. For Ollama, choose a threshold below the deployed context size with headroom for instructions, tool output, and generation. See [Codex lifecycle](agents.md#codex-harness-and-lifecycle) and [ticket execution settings](tickets.md#ticket-execution-settings).
+
 Fresh installations have no providers. Named cards show the name, type, OpenAI
 account status or Ollama endpoint, the ticket concurrency limit, and Edit/Remove actions. Add and edit use
 routed dialogs at `/config?provider=new|<id>`; removal adds `remove=true` and

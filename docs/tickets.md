@@ -534,6 +534,8 @@ ticket cleanup.
 
 ### Ticket execution settings
 
+Each new phase pin captures the provider's current [automatic compaction threshold](foundation.md#model-providers), if set. Retries, linked implementation, retirement, and recovery retain the pinned value or its absence.
+
 Tickets use the exported `TicketExecutionSettings` type and
 `ticketExecutionSettingsSchema`, extending agent settings with optional boolean
 `skipPlanning` and `acceptRecommendations`. Missing flags mean false.

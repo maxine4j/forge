@@ -602,6 +602,9 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			requests: runtime?.requests ?? record.requests,
 			truncated: runtime?.truncated ?? false,
 			...(contextWindow && { contextWindow }),
+			...(record.provider?.compactionThresholdTokens !== undefined && {
+				compactionThresholdTokens: record.provider.compactionThresholdTokens,
+			}),
 			...(performance && { performance }),
 			...(thread.status === "failed" && runtime?.turnFailure && { turnFailure: runtime.turnFailure }),
 		};

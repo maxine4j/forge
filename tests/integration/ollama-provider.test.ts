@@ -61,9 +61,12 @@ test("pinned Codex streams through the relay and resumes after restart without s
 			const input = JSON.parse(body);
 			const needsTool =
 				body.includes("Run the fixture command") && !body.includes('"type":"function_call_output"');
-			const answer = body.includes("Plan a greeting.")
-				? "<proposed_plan>\n# Greeting\nSay hello.\n</proposed_plan>"
-				: "Fixture answer";
+			const compact = body.includes("CONTEXT CHECKPOINT COMPACTION");
+			const answer = compact
+				? "The fixture conversation is ready to continue."
+				: body.includes("Plan a greeting.")
+					? "<proposed_plan>\n# Greeting\nSay hello.\n</proposed_plan>"
+					: "Fixture answer";
 			const output = needsTool
 				? {
 						id: "fixture-tool",
@@ -95,10 +98,10 @@ test("pinned Codex streams through the relay and resumes after restart without s
 						status: "completed",
 						output: [output],
 						usage: {
-							input_tokens: 20,
+							input_tokens: body.includes("Trigger automatic compaction") && !compact ? 2000 : 20,
 							input_tokens_details: { cached_tokens: 8 },
 							output_tokens: 5,
-							total_tokens: 25,
+							total_tokens: body.includes("Trigger automatic compaction") && !compact ? 2005 : 25,
 						},
 					},
 				},
@@ -204,6 +207,17 @@ test("pinned Codex streams through the relay and resumes after restart without s
 		// account request before that check to prove the synthetic token was loaded.
 		await vi.waitFor(() => expect(accountAuthorization).toContain(`Bearer ${syntheticToken}`));
 		const id = await client.start(path, provider);
+		const compactId = await client.start(path, { ...provider, compactionThresholdTokens: 1000 });
+		const compactStart = requests.length;
+		await client.send(compactId, path, "Trigger automatic compaction", { permissions: "ask" });
+		await vi.waitFor(() => expect(client.read(compactId).status).toBe("completed"), { timeout: 10000 });
+		await client.send(compactId, path, "Continue after compaction", { permissions: "ask" });
+		await vi.waitFor(() => expect(client.read(compactId).status).toBe("completed"), { timeout: 10000 });
+		const compactRequests = requests.slice(compactStart);
+		const summaryIndex = compactRequests.findIndex(({ body }) => body.includes("CONTEXT CHECKPOINT COMPACTION"));
+		const followupIndex = compactRequests.findIndex(({ body }) => body.includes("Continue after compaction"));
+		expect(summaryIndex).toBeGreaterThan(0);
+		expect(followupIndex).toBeGreaterThan(summaryIndex);
 		await client.send(
 			id,
 			path,
@@ -281,9 +295,12 @@ test("pinned Codex streams through the relay and resumes after restart without s
 		});
 		const beforeCompact = requests.length;
 		const compactionItems: unknown[] = [];
+		let compactTurnCompleted = false;
 		const unsubscribe = connection.subscribe((method, params) => {
 			if (method === "item/completed" && z.object({ threadId: z.literal(id) }).safeParse(params).success)
 				compactionItems.push(params);
+			if (method === "turn/completed" && z.object({ threadId: z.literal(id) }).safeParse(params).success)
+				compactTurnCompleted = true;
 		});
 		try {
 			await connection.request("thread/compact/start", { threadId: id });
@@ -297,6 +314,7 @@ test("pinned Codex streams through the relay and resumes after restart without s
 					),
 				{ timeout: 5000 },
 			);
+			await vi.waitFor(() => expect(compactTurnCompleted).toBe(true), { timeout: 5000 });
 		} finally {
 			unsubscribe();
 		}
