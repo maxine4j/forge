@@ -1,5 +1,11 @@
-import { ticketCostSchema, type TicketCost as TicketCostData } from "@forge/contracts";
+import {
+	costRangeSchema,
+	defaultCostRange,
+	ticketCostSchema,
+	type TicketCost as TicketCostData,
+} from "@forge/contracts";
 import { useEffect, useState } from "react";
+import { useSearchParams } from "react-router";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { CostMetrics, PhaseCosts } from "../cost/cost-metrics.tsx";
@@ -8,18 +14,21 @@ import { useToast } from "../toasts/toasts.tsx";
 const number = new Intl.NumberFormat("en-AU");
 export const TicketCost = ({ api, ticketId }: { api: IWorkspaceApi; ticketId: string }) => {
 	const { notify } = useToast();
+	const [query] = useSearchParams();
+	const range = costRangeSchema.safeParse(query.get("range")).data ?? defaultCostRange;
 	const [attempt, setAttempt] = useState(0);
-	const [result, setResult] = useState<{ ticketId: string; value: TicketCostData | "unavailable" }>();
-	const cost = result?.ticketId === ticketId ? result.value : undefined;
+	const [result, setResult] = useState<{ ticketId: string; range: string; value: TicketCostData | "unavailable" }>();
+	const cost = result?.ticketId === ticketId && result.range === range ? result.value : undefined;
 	useEffect(() => {
 		let current = true;
-		void api.read(`tickets/${ticketId}/cost`, ticketCostSchema).then(
+		const path = `tickets/${ticketId}/cost`;
+		void api.read(range === defaultCostRange ? path : `${path}?range=${range}`, ticketCostSchema).then(
 			(value) => {
-				if (current) setResult({ ticketId, value });
+				if (current) setResult({ ticketId, range, value });
 			},
 			() => {
 				if (current) {
-					setResult({ ticketId, value: "unavailable" });
+					setResult({ ticketId, range, value: "unavailable" });
 					notify("Cost data is unavailable.");
 				}
 			},
@@ -27,7 +36,7 @@ export const TicketCost = ({ api, ticketId }: { api: IWorkspaceApi; ticketId: st
 		return () => {
 			current = false;
 		};
-	}, [api, ticketId, attempt, notify]);
+	}, [api, ticketId, attempt, notify, range]);
 	if (!cost) return <p role='status'>Loading cost data…</p>;
 	if (cost === "unavailable")
 		return (
@@ -47,7 +56,7 @@ export const TicketCost = ({ api, ticketId }: { api: IWorkspaceApi; ticketId: st
 
 	return (
 		<div className='cost-dashboard'>
-			{!ticket.turns && <p>No usage recorded for this ticket.</p>}
+			{!ticket.turns && <p>No usage recorded for this ticket in this period.</p>}
 			<CostMetrics summary={ticket} />
 			<PhaseCosts phases={cost.phases} />
 			{ticket.incomplete.tokens > 0 && (
@@ -67,7 +76,9 @@ export const TicketCost = ({ api, ticketId }: { api: IWorkspaceApi; ticketId: st
 					</div>
 				))}
 			</dl>
-			<p className='cost-muted'>Recorded since {cost.since.slice(0, 10)} (UTC)</p>
+			<p className='cost-muted'>
+				Range {range} · Recorded since {cost.since.slice(0, 10)} (UTC)
+			</p>
 		</div>
 	);
 };

@@ -474,6 +474,13 @@ export const TicketDetails = ({
 							</span>
 							<span className='ticket-key-label'>{ticket.id}</span>
 						</h2>
+						<span
+							role='group'
+							aria-label='Status'
+							className={`ticket-status-pill ticket-status-${ticket.status}`}
+						>
+							{ticketLabels[ticket.status]}
+						</span>
 					</div>
 				</div>
 				<span className='ticket-details-status' role='status'>
@@ -694,16 +701,6 @@ export const TicketDetails = ({
 				</button>
 			)}
 			<div className='ticket-fields' {...panel("details")}>
-				<div className='ticket-status-field'>
-					<span id={`${fieldId}-status`}>Status</span>
-					<span
-						role='group'
-						aria-labelledby={`${fieldId}-status`}
-						className={`ticket-status-pill ticket-status-${ticket.status}`}
-					>
-						{ticketLabels[ticket.status]}
-					</span>
-				</div>
 				<InlineTicketDescription
 					value={ticket.description}
 					draft={descriptionDraft}
@@ -799,17 +796,6 @@ export const TicketDetails = ({
 				{ticket.status !== "backlog" && <p>Scope is fixed after execution starts. Discuss changes in chat.</p>}
 			</div>
 			<div className='ticket-chat' {...panel("chat")}>
-				<TicketAgentSettings
-					api={api}
-					ticketId={ticket.id}
-					phase={activePhase}
-					providerOnly
-					settings={settings}
-					job={job}
-					change={changeSettings}
-					disabled={settingsDisabled}
-					permissions
-				/>
 				{currentId ? (
 					<Conversation
 						key={currentId}

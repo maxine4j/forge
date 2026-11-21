@@ -4,6 +4,12 @@ const count = z.int().nonnegative();
 const amount = z.number().nonnegative();
 const tokens = z.object({ input: count, cached: count, output: count });
 
+export const defaultCostRange = "-7d";
+export const costRangeSchema = z
+	.string()
+	.regex(/^-[1-9]\d*(?:d|hr)$/u)
+	.refine((range) => Number.isSafeInteger(Number.parseInt(range, 10)));
+
 export const costPhaseSchema = z.enum(["planning", "implementation", "review", "rebase", "chat"]);
 export const weeklyObservationSchema = z.object({
 	bucketId: z.string(),
@@ -65,7 +71,8 @@ export const costsSchema = z.object({
 	chats: ticketEstimateSchema,
 	ticketEstimates: ticketEstimateSchema,
 	phases: z.array(phaseSummary),
-	days: z.array(tokens.extend({ date: z.iso.date() })).max(30),
+	days: z.array(tokens.extend({ date: z.iso.date() })),
+	hours: z.array(tokens.extend({ date: z.iso.datetime() })).optional(),
 	tickets: z.array(
 		ticketEstimateSchema.extend({
 			id: z.string(),

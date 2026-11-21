@@ -67,6 +67,7 @@ const cost = {
 test("Cost deep links render charts, ticket estimates and account windows on mobile", async ({ page }) => {
 	let unavailable = true;
 	let costReads = 0;
+	let requestedRange: string | null = null;
 	await page.clock.install();
 	await page.route(
 		(url) => url.pathname.startsWith("/api/"),
@@ -82,7 +83,14 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 				});
 			if (path === "/api/costs") {
 				costReads++;
+				requestedRange = new URL(route.request().url()).searchParams.get("range");
 				if (unavailable) return route.fulfill({ status: 503, json: {} });
+				if (requestedRange === "-1hr") {
+					const empty = costFixture({ input: 0, cached: 0, output: 0, turns: 0 });
+					return route.fulfill({
+						json: { ...cost, totals: empty, ticketEstimates: empty, days: [], hours: [] },
+					});
+				}
 				return route.fulfill({ json: cost });
 			}
 			return route.fulfill({ json: [] });
@@ -96,14 +104,27 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	unavailable = false;
 	await page.getByRole("button", { name: "Retry" }).click();
 	await expect(page.getByRole("img", { name: "Daily token usage" })).toBeVisible();
-	const period = page.getByRole("combobox", { name: "Usage period", exact: true });
-	await period.press("Enter");
-	await period.press("Home");
-	await expect(period).toHaveText("Last 30 days");
-	await period.press("Enter");
-	await expect(period).toHaveText("Last 7 days");
-	await expect(period).toBeFocused();
-	await chooseDropdown(period, "30");
+	const period = page.getByRole("combobox", { name: "Cost time range", exact: true });
+	await expect(period).toHaveText("-7d");
+	expect(requestedRange).toBe("-7d");
+	await chooseDropdown(period, "-1hr");
+	await expect(page.getByText("No tokens recorded in this period.")).toBeVisible();
+	await expect(page.getByRole("link", { name: "TASK-2 Search" })).toHaveAttribute(
+		"href",
+		"/costs?range=-1hr&ticket=TASK-2",
+	);
+	expect(requestedRange).toBe("-1hr");
+	await chooseDropdown(period, "custom");
+	const custom = page.getByRole("textbox", { name: "Custom range" });
+	await custom.fill("-2.5d");
+	await page.getByRole("button", { name: "Apply" }).click();
+	await expect(page.getByText("Enter a range such as -14d or -12hr.")).toBeVisible();
+	await custom.fill("-35d");
+	await custom.press("Enter");
+	await expect(page).toHaveURL("/costs?range=-35d");
+	await expect(page.getByRole("img", { name: "Daily token usage" })).toBeVisible();
+	expect(requestedRange).toBe("-35d");
+	await chooseDropdown(period, "-7d");
 	await expect(page.getByRole("img", { name: "codex weekly remaining allowance from 100% to 0%" })).toBeVisible();
 	await expect(page.getByText(/Estimated additional tickets:.*≈ 8/)).toBeVisible();
 	await chooseDropdown(page.getByRole("combobox", { name: "Weekly bucket", exact: true }), "other");
@@ -149,6 +170,7 @@ test("legacy project Cost paths show the unknown-route view", async ({ page }) =
 });
 
 test("Costs links open archived tickets outside the active board", async ({ page }) => {
+	let ticketRange: string | null = null;
 	await page.route(
 		(url) => url.pathname.startsWith("/api/"),
 		(route) => {
@@ -181,25 +203,32 @@ test("Costs links open archived tickets outside the active board", async ({ page
 				return route.fulfill({
 					json: { ticketId: "TASK-1", state: "idle", phase: "implementation", mergeAttempts: 0 },
 				});
+			if (path === "/api/tickets/TASK-1/cost") {
+				ticketRange = new URL(route.request().url()).searchParams.get("range");
+				return route.fulfill({ json: { since, ticket: cost.tickets[1], phases: [] } });
+			}
 			return route.fulfill({ status: 404, json: {} });
 		},
 	);
-	await page.goto("/costs");
+	await page.goto("/costs?range=-12hr");
 	await page
 		.getByRole("row", { name: /TASK-1 Cleanup/ })
 		.getByRole("link")
 		.click();
-	await expect(page).toHaveURL(/\/costs\?ticket=TASK-1(?:&tab=details)?$/);
+	await expect(page).toHaveURL(/\/costs\?range=-12hr&ticket=TASK-1(?:&tab=details)?$/);
 	const panel = page.getByRole("dialog", { name: "TASK-1" });
 	await expect(panel).toBeVisible();
 	await expect(panel.getByText("Archived scope", { exact: true })).toBeVisible();
+	await panel.getByRole("tab", { name: "Cost" }).click();
+	await expect(panel.getByText("No usage recorded for this ticket in this period.")).toBeVisible();
+	expect(ticketRange).toBe("-12hr");
 	await panel.getByRole("button", { name: "Close ticket" }).click();
 	await expect(panel).toHaveCount(0);
-	await expect(page).toHaveURL("/costs");
+	await expect(page).toHaveURL("/costs?range=-12hr");
 	await expect(page.getByRole("heading", { name: "Costs", exact: true })).toBeVisible();
 	await page.goForward();
 	await expect(panel).toBeVisible();
 	await page.goBack();
-	await expect(page).toHaveURL("/costs");
+	await expect(page).toHaveURL("/costs?range=-12hr");
 	await expect(panel).toHaveCount(0);
 });

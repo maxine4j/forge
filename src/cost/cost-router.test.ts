@@ -36,7 +36,7 @@ test("cost route uses owner access, removes project routes and returns browser-s
 		},
 		{ read: history },
 		{ limits: async () => undefined },
-		() => new Date(),
+		() => new Date("2026-11-12T14:15:00.000Z"),
 	);
 	const server = app
 		.create([new CostRouter({ read, readTicket: service.readTicket.bind(service) })])
@@ -52,7 +52,11 @@ test("cost route uses owner access, removes project routes and returns browser-s
 		expect((await get("/api/costs", "outsider")).status).toBe(403);
 		expect((await get(`/api/projects/${id}/cost`, "owner")).status).toBe(404);
 		expect(await (await get("/api/costs", "owner")).json()).toEqual(response);
-		expect(read).toHaveBeenCalledExactlyOnceWith({ username: "owner" });
+		expect(read).toHaveBeenCalledExactlyOnceWith({ username: "owner" }, "-7d");
+		expect((await get("/api/costs?range=-35d", "owner")).status).toBe(200);
+		expect(read).toHaveBeenLastCalledWith({ username: "owner" }, "-35d");
+		expect((await get("/api/costs?range=-1d&range=-7d", "owner")).status).toBe(400);
+		expect((await get("/api/costs?range=-1.5d", "owner")).status).toBe(400);
 		expect((await get("/api/tickets/TASK-1/cost", "outsider")).status).toBe(403);
 		expect((await get("/api/tickets/invalid/cost", "owner")).status).toBe(400);
 		expect((await get("/api/tickets/TASK-2/cost", "owner")).status).toBe(404);
@@ -64,7 +68,16 @@ test("cost route uses owner access, removes project routes and returns browser-s
 			since: response.since,
 			ticket: response.ticketEstimates,
 		});
-		expect(history).toHaveBeenCalledExactlyOnceWith("TASK-1");
+		expect(history).toHaveBeenCalledExactlyOnceWith("TASK-1", {
+			from: "2026-11-05T14:15:00.000Z",
+			to: "2026-11-12T14:15:00.000Z",
+		});
+		expect((await get("/api/tickets/TASK-1/cost?range=-0d", "owner")).status).toBe(400);
+		expect((await get("/api/tickets/TASK-1/cost?range=-12hr", "owner")).status).toBe(200);
+		expect(history).toHaveBeenLastCalledWith("TASK-1", {
+			from: "2026-11-12T02:15:00.000Z",
+			to: "2026-11-12T14:15:00.000Z",
+		});
 		await expect(service.read({ username: "outsider" })).rejects.toThrow("Access denied");
 		await expect(service.readTicket({ username: "outsider" }, "TASK-1")).rejects.toThrow("Access denied");
 	} finally {

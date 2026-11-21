@@ -115,6 +115,12 @@ test("allocation intervals are durable, idempotent and conserve ambiguous bucket
 		await store.capture([observation(6, 20, "a"), observation(6, 30, "b")], observation(6, 20).observedAt);
 		await costs.save({ ...turn, input: 2000 });
 		await store.capture([observation(7, 21, "a"), observation(7, 32, "b")], observation(7, 21).observedAt);
+		expect(await store.intervals({ from: observation(5, 0).observedAt, to: observation(6, 0).observedAt })).toEqual(
+			[],
+		);
+		expect(await store.intervals({ from: observation(0, 0).observedAt, to: observation(5, 0).observedAt })).toEqual(
+			intervals,
+		);
 		expect((await store.intervals()).slice(1)).toMatchObject([
 			{ bucketId: "a", consumption: 1, unallocated: 1, allocations: [] },
 			{ bucketId: "b", consumption: 2, unallocated: 2, allocations: [] },

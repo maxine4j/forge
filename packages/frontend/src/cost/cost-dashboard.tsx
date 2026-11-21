@@ -1,6 +1,6 @@
-import { costsSchema, type Costs } from "@forge/contracts";
+import { costRangeSchema, costsSchema, defaultCostRange, type Costs } from "@forge/contracts";
 import { useEffect, useState } from "react";
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useSearchParams } from "react-router";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
@@ -12,6 +12,15 @@ import { WeeklyBudgetChart } from "./weekly-budget.tsx";
 const number = new Intl.NumberFormat("en-AU");
 const shortNumber = new Intl.NumberFormat("en-AU", { notation: "compact" });
 const day = new Intl.DateTimeFormat("en-AU", { month: "short", day: "numeric", timeZone: "UTC" });
+const hour = new Intl.DateTimeFormat("en-AU", {
+	month: "short",
+	day: "numeric",
+	hour: "2-digit",
+	minute: "2-digit",
+	hourCycle: "h23",
+	timeZone: "UTC",
+});
+const presets = ["-28d", "-7d", "-1d", "-12hr", "-1hr"];
 const resetTime = new Intl.DateTimeFormat("en-AU", { dateStyle: "medium", timeStyle: "short" });
 const tokens = (value: { input: number; output: number }) => value.input + value.output;
 const phaseLabels = {
@@ -31,35 +40,33 @@ const TokenStack = ({ counts, scale }: { counts: Costs["days"][number]; scale: n
 );
 
 const UsageCharts = ({ cost }: { cost: Costs }) => {
-	const [range, setRange] = useState(30);
-	const days = cost.days.slice(-range);
-	const scale = Math.max(1, ...days.map(tokens));
+	const series = cost.hours ?? cost.days;
+	const format = (date: string) => (cost.hours ? hour : day).format(new Date(date));
+	const scale = series.reduce((max, entry) => Math.max(max, tokens(entry)), 1);
 	const phaseScale = Math.max(1, ...cost.phases.map(tokens));
 	return (
 		<div className='cost-charts'>
 			<section className='cost-card'>
-				<header className='cost-heading'>
-					<h3>Token usage over time</h3>
-					<Dropdown aria-label='Usage period' value={range} onChange={(value) => setRange(Number(value))}>
-						<DropdownOption value={7}>Last 7 days</DropdownOption>
-						<DropdownOption value={30}>Last 30 days</DropdownOption>
-					</Dropdown>
-				</header>
-				{days.every((entry) => tokens(entry) === 0) ? (
+				<h3>Token usage over time</h3>
+				{series.every((entry) => tokens(entry) === 0) ? (
 					<p className='cost-muted'>No tokens recorded in this period.</p>
 				) : (
 					<>
-						<div className='cost-trend' role='img' aria-label='Daily token usage'>
+						<div
+							className='cost-trend'
+							role='img'
+							aria-label={cost.hours ? "Hourly token usage" : "Daily token usage"}
+						>
 							<div className='cost-axis'>
 								<span>{shortNumber.format(scale)}</span>
 								<span>0</span>
 							</div>
-							<div className='cost-days'>
-								{days.map((entry) => (
+							<div className='cost-days' style={{ gap: `min(3px, ${25 / series.length}%)` }}>
+								{series.map((entry) => (
 									<div
 										className='cost-day'
 										key={entry.date}
-										title={`${day.format(new Date(entry.date))} · ${number.format(tokens(entry))} tokens`}
+										title={`${format(entry.date)} · ${number.format(tokens(entry))} tokens`}
 									>
 										<TokenStack counts={entry} scale={scale} />
 									</div>
@@ -67,8 +74,8 @@ const UsageCharts = ({ cost }: { cost: Costs }) => {
 							</div>
 						</div>
 						<div className='cost-dates'>
-							{[days.at(0), days.at(-1)].map(
-								(entry, index) => entry && <span key={index}>{day.format(new Date(entry.date))}</span>,
+							{[series.at(0), series.at(-1)].map(
+								(entry, index) => entry && <span key={index}>{format(entry.date)}</span>,
 							)}
 						</div>
 						<ul className='cost-legend' aria-label='Token types'>
@@ -86,11 +93,11 @@ const UsageCharts = ({ cost }: { cost: Costs }) => {
 							</li>
 						</ul>
 						<details className='cost-daily-details'>
-							<summary>Daily values (UTC)</summary>
+							<summary>{cost.hours ? "Hourly" : "Daily"} values (UTC)</summary>
 							<ul>
-								{days.map((entry) => (
+								{series.map((entry) => (
 									<li key={entry.date}>
-										<time dateTime={entry.date}>{day.format(new Date(entry.date))}</time>{" "}
+										<time dateTime={entry.date}>{format(entry.date)}</time>{" "}
 										<span>{number.format(tokens(entry))} tokens</span>
 									</li>
 								))}
@@ -133,7 +140,7 @@ const UsageCharts = ({ cost }: { cost: Costs }) => {
 const Quotas = ({ limits }: { limits: Costs["limits"] }) => (
 	<section className='cost-card cost-quotas'>
 		<header className='cost-heading'>
-			<h3>Codex account limits</h3>
+			<h3>Current Codex account limits</h3>
 			{limits?.plan && <span className='cost-plan'>{limits.plan}</span>}
 		</header>
 		{!limits?.windows.length ? (
@@ -260,21 +267,39 @@ const TicketCosts = ({ cost }: { cost: Costs }) => {
 
 export const CostDashboard = ({ api }: { api: IWorkspaceApi }) => {
 	const { notify } = useToast();
+	const [query, setQuery] = useSearchParams();
+	const range = costRangeSchema.safeParse(query.get("range")).data ?? defaultCostRange;
+	const [custom, setCustom] = useState<string>();
+	const [rangeError, setRangeError] = useState(false);
+	const selectRange = (value: string) => {
+		setRangeError(false);
+		if (value === "custom") {
+			setCustom(presets.includes(range) ? "" : range);
+			return;
+		}
+		setCustom(undefined);
+		setQuery((previous) => {
+			const next = new URLSearchParams(previous);
+			if (value === defaultCostRange) next.delete("range");
+			else next.set("range", value);
+			return next;
+		});
+	};
 	const [attempt, setAttempt] = useState(0);
 	useEffect(() => {
 		const timer = window.setInterval(() => setAttempt((value) => value + 1), 300_000);
 		return () => window.clearInterval(timer);
 	}, []);
-	const [result, setResult] = useState<{ attempt: number; value?: Costs }>();
+	const [result, setResult] = useState<{ attempt: number; range: string; value?: Costs }>();
 	useEffect(() => {
 		let current = true;
-		void api.read("costs", costsSchema).then(
+		void api.read(`costs?range=${range}`, costsSchema).then(
 			(value) => {
-				if (current) setResult({ attempt, value });
+				if (current) setResult({ attempt, range, value });
 			},
 			() => {
 				if (current) {
-					setResult({ attempt });
+					setResult({ attempt, range });
 					notify("Cost data is unavailable.");
 				}
 			},
@@ -282,9 +307,9 @@ export const CostDashboard = ({ api }: { api: IWorkspaceApi }) => {
 		return () => {
 			current = false;
 		};
-	}, [api, attempt, notify]);
-	const cost = result?.value;
-	const pending = result?.attempt !== attempt;
+	}, [api, attempt, notify, range]);
+	const cost = result?.range === range ? result.value : undefined;
+	const pending = result?.range !== range || result.attempt !== attempt;
 	return (
 		<div className='cost-dashboard' aria-busy={pending}>
 			<header className='cost-heading cost-title'>
@@ -292,12 +317,50 @@ export const CostDashboard = ({ api }: { api: IWorkspaceApi }) => {
 					<h2>Costs</h2>
 					{cost && <p className='cost-muted'>Recorded since {cost.since.slice(0, 10)} (UTC)</p>}
 				</div>
-				{cost && (
-					<button disabled={pending} onClick={() => setAttempt((value) => value + 1)}>
+				<div className='cost-controls'>
+					<Dropdown aria-label='Cost time range' value={range} onChange={selectRange}>
+						{presets.map((preset) => (
+							<DropdownOption key={preset} value={preset}>
+								{preset}
+							</DropdownOption>
+						))}
+						{!presets.includes(range) && <DropdownOption value={range}>{range}</DropdownOption>}
+						<DropdownOption value='custom'>Custom range…</DropdownOption>
+					</Dropdown>
+					<button disabled={pending || !cost} onClick={() => setAttempt((value) => value + 1)}>
 						Refresh
 					</button>
-				)}
+				</div>
 			</header>
+			{custom !== undefined && (
+				<form
+					className='cost-controls'
+					onSubmit={(event) => {
+						event.preventDefault();
+						const parsed = costRangeSchema.safeParse(custom.trim());
+						if (parsed.success) selectRange(parsed.data);
+						else setRangeError(true);
+					}}
+				>
+					<label>
+						Custom range{" "}
+						<input
+							placeholder='-14d'
+							value={custom}
+							onChange={(event) => {
+								setCustom(event.target.value);
+								setRangeError(false);
+							}}
+							aria-invalid={rangeError}
+						/>
+					</label>
+					<button type='submit'>Apply</button>
+					<button type='button' onClick={() => setCustom(undefined)}>
+						Cancel
+					</button>
+					{rangeError && <span role='alert'>Enter a range such as -14d or -12hr.</span>}
+				</form>
+			)}
 			{pending && !cost && <p role='status'>Loading cost data…</p>}
 			{!pending && !cost && (
 				<div className='cost-card'>

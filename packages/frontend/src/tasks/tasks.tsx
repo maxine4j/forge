@@ -397,6 +397,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 							/>
 						) : name === "board" ? (
 							<TaskBoard
+								selectedId={linkedId}
 								tickets={tickets.filter((ticket) => !ticket.archivedAt)}
 								busy={busy}
 								loading={loading}

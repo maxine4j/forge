@@ -25,6 +25,11 @@ export interface TokenCounts {
 	output: number;
 }
 
+export interface CostWindow {
+	from: string;
+	to: string;
+}
+
 export type UsageSnapshot = UsageScope & {
 	threadId: string;
 	startedAt: string;

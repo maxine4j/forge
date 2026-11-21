@@ -72,10 +72,11 @@ scope/title edits and busy actions also guard ticket switching.
 See [browser and gesture verification](development.md#android-back-verification).
 
 At viewport widths of at least 1024px, Board and Backlog allocate a fixed 580px
-right column below the usable global header. The ticket slides in from the right
+right column below the usable global header. The board shrinks in place as the ticket slides in from the right
 (without animation under reduced motion). Its non-modal dialog has no backdrop
 or focus trap; outside clicks leave it open. Toolbars wrap, board columns retain
 horizontal scrolling, and backlog overflow stays inside the reduced task area.
+As the board narrows, it scrolls horizontally only as needed to reveal the selected ticket's entire column, with a 12px gap beside the panel.
 On other pages, including Notifications, a native 580px modal is centred in both
 axes with a maximum height of the visible viewport minus 32px. Below 1024px,
 every page uses a native full-screen modal covering navigation, with safe-area
@@ -147,7 +148,7 @@ Done. The corresponding API statuses are `backlog`, `todo`, `in-progress` and
 prefixed by the epic icon and key followed by a slash when the ticket belongs
 to an epic. Cards support pointer and touch reordering, edge scrolling and
 cancellation. Status transitions use the board's drag controls; ticket details
-shows a labelled, read-only Status pill at the top of Details instead of a status menu.
+shows a labelled, read-only status pill beside the ticket key in the header.
 Ready and In progress tickets offer **Return to backlog** beside Archive and Close.
 The ticket header keeps epic/ticket keys, right-aligned execution status and these
 actions on one row. Long execution statuses truncate with an ellipsis. All three
@@ -623,7 +624,9 @@ in USD, estimated weekly limit spent, and estimated effective USD cost. Planning
 implementation, review and rebase have separate summaries using the same contract
 as ticket and board totals. Standalone chats remain outside ticket totals.
 Owner-only, project-independent `GET /api/tickets/:id/cost` returns only that
-ticket’s summary, phase summaries and tracking start date. Archived tickets, tickets
+ticket’s summary, phase summaries and tracking start date. It accepts the same
+rolling `range` query as the [Costs page](agents.md#cost-and-usage) and defaults
+to `-7d`. The Cost tab uses the range from the page URL. Archived tickets, tickets
 without repositories, and zero-usage tickets remain queryable. Invalid IDs return
 400 and missing tickets return 404.
 

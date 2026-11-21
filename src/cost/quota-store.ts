@@ -4,12 +4,13 @@ import { z } from "zod";
 import type { IDatabase } from "../database/sqlite-database.ts";
 import type { ICostHistory } from "./cost-store.ts";
 import { allocateQuota, type QuotaSample, type QuotaInterval } from "./quota-attribution.ts";
+import type { CostWindow } from "./types.ts";
 
 export interface IQuotaStore {
 	save(observation: WeeklyObservation): Promise<void>;
 	read(since: string): Promise<{ observations: WeeklyObservation[]; completions: string[] }>;
 	capture?(observations: WeeklyObservation[], observedAt: string, selectable?: boolean): Promise<void>;
-	intervals?(): Promise<QuotaInterval[]>;
+	intervals?(window?: CostWindow): Promise<QuotaInterval[]>;
 }
 export class QuotaStore implements IQuotaStore {
 	private pending: Promise<unknown> = Promise.resolve();
@@ -99,12 +100,13 @@ export class QuotaStore implements IQuotaStore {
 		this.pending = work.catch(() => {});
 		return work;
 	}
-	async intervals(): Promise<QuotaInterval[]> {
+	async intervals(window?: CostWindow): Promise<QuotaInterval[]> {
 		const result: QuotaInterval[] = [];
 		for (let offset = 0; ; offset += 500) {
 			const rows = await this.database.all(
-				"SELECT allocation FROM quota_samples WHERE allocation IS NOT NULL ORDER BY observedAt LIMIT 500 OFFSET ?",
-				[offset],
+				`SELECT allocation FROM quota_samples WHERE allocation IS NOT NULL
+				 ${window ? "AND observedAt > ? AND observedAt <= ?" : ""} ORDER BY observedAt LIMIT 500 OFFSET ?`,
+				window ? [window.from, window.to, offset] : [offset],
 			);
 			result.push(
 				...rows.flatMap(

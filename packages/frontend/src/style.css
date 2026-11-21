@@ -478,7 +478,7 @@
 	font-size: 12px;
 	cursor: pointer;
 }
-.agent-composer-settings .dropdown-trigger:hover {
+.agent-composer-settings .dropdown-trigger:hover:not(:disabled) {
 	background: #303137;
 }
 .agent-composer-settings .dropdown-option {
@@ -1054,6 +1054,10 @@
 	background: #633615;
 	border-color: #ed9244;
 }
+.ticket-card.is-selected {
+	border-color: #58a6ff;
+	box-shadow: 0 0 0 2px rgb(88 166 255 / 30%);
+}
 .ticket-card.needs-attention .ticket-title {
 	color: #fff4e8;
 }
@@ -1270,22 +1274,40 @@
 	border-radius: 10px;
 }
 @media (min-width: 1024px) {
+	.shell.shell-constrained main:has(> .tasks-view:not([hidden])):not(.ticket-docked-layout) {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) 0px;
+		grid-template-rows: minmax(0, 1fr);
+		max-width: none;
+		padding: 0;
+		overflow: clip;
+		transition: grid-template-columns 180ms ease-out;
+	}
+	.shell-constrained main > .tasks-view {
+		grid-column: 1;
+		min-width: 0;
+		padding: 16px;
+		overflow: hidden;
+	}
 	.shell.shell-constrained main.ticket-docked-layout {
 		display: grid;
 		grid-template-columns: minmax(0, 1fr) 580px;
 		grid-template-rows: minmax(0, 1fr);
 		max-width: none;
 		padding: 0;
-		overflow: hidden;
+		overflow: clip;
+		transition: grid-template-columns 180ms ease-out;
 	}
-	.ticket-docked-layout > .tasks-view {
+	.shell-constrained main.ticket-docked-layout > .tasks-view {
 		grid-column: 1;
 		min-width: 0;
-		padding: 16px;
+		padding: 16px 0 16px 16px;
 		overflow: hidden;
 	}
 	.ticket-dialog.ticket-docked {
 		position: relative;
+		z-index: 1;
+		box-shadow: -8px 0 20px rgb(0 0 0 / 24%);
 		grid-column: 2;
 		top: auto;
 		left: auto;
@@ -1296,6 +1318,13 @@
 	.ticket-docked-layout .backlog-toolbar,
 	.ticket-docked-layout .backlog-filters {
 		flex-wrap: wrap;
+	}
+	.ticket-docked-layout .task-board-actions {
+		margin-inline-end: 16px;
+	}
+	.ticket-docked-layout .kanban-columns::after {
+		content: "";
+		flex: 0 0 0px;
 	}
 	.ticket-docked-layout .backlog-toolbar .backlog-filters {
 		flex-shrink: 1;
@@ -1319,6 +1348,9 @@
 	}
 }
 @media (prefers-reduced-motion: reduce) {
+	.shell.shell-constrained main:where(:has(> .tasks-view:not([hidden]))) {
+		transition: none !important;
+	}
 	.ticket-dialog.ticket-docked {
 		animation: none;
 	}
@@ -1413,14 +1445,9 @@
 }
 .ticket-status-pill {
 	padding: 5px 8px;
-	margin: 0;
+	margin: 0 0 0 4px;
 	width: fit-content;
-}
-.ticket-status-field {
-	display: flex;
-	flex-direction: column;
-	gap: 4px;
-	margin-bottom: 8px;
+	white-space: nowrap;
 }
 .ticket-chevron {
 	display: inline-block;
@@ -1991,7 +2018,7 @@ button {
 	font-weight: 600;
 	cursor: pointer;
 }
-button:hover {
+button:hover:not(:disabled) {
 	background: #30363d;
 	border-color: #8b949e;
 }
@@ -2423,6 +2450,16 @@ small {
 	flex-wrap: wrap;
 	gap: 8px 16px;
 }
+.cost-controls {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-left: auto;
+}
+.cost-controls input {
+	width: 6rem;
+}
 .cost-card {
 	min-width: 0;
 	padding: 16px;
@@ -2496,7 +2533,6 @@ small {
 }
 .cost-days {
 	display: flex;
-	gap: 3px;
 	border-block: 1px solid var(--cost-border);
 	background: linear-gradient(
 		to bottom,

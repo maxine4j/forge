@@ -46,14 +46,42 @@ export const TaskBoard = ({
 	move,
 	onDragChange,
 	reportError,
+	selectedId,
 }: TaskViewProps & {
 	move: (id: string, input: MoveTicket) => Promise<void>;
 	onDragChange: (dragging: boolean) => void;
 	reportError: (error: string) => void;
+	selectedId: string | null;
 }) => {
 	const [drag, setDrag] = useState<Drag>();
 	const dragging = useRef<Drag | undefined>(undefined);
 	const board = useRef<HTMLDivElement>(null);
+	useEffect(() => {
+		const container = board.current;
+		if (!container || !selectedId) return;
+		const reveal = () => {
+			if (!window.matchMedia("(min-width: 1024px)").matches || !container.closest(".ticket-docked-layout"))
+				return;
+			const card = [...container.querySelectorAll<HTMLElement>("[data-ticket-id]")].find(
+				(element) => element.dataset["ticketId"] === selectedId,
+			);
+			const column = card?.closest<HTMLElement>(".kanban-column");
+			if (!column) return;
+			const bounds = container.getBoundingClientRect();
+			const rect = column.getBoundingClientRect();
+			const delta =
+				rect.left < bounds.left
+					? rect.left - bounds.left
+					: rect.right > bounds.right - 12
+						? rect.right - bounds.right + 12
+						: 0;
+			if (delta) container.scrollBy(delta, 0);
+		};
+		const observer = new ResizeObserver(reveal);
+		observer.observe(container);
+		reveal();
+		return () => observer.disconnect();
+	}, [selectedId]);
 	const locate = useCallback((x: number, y: number, id: string): Drop | undefined => {
 		const element = document.elementFromPoint(x, y);
 		const column = element?.closest<HTMLElement>("[data-drop-status]");
@@ -171,7 +199,7 @@ export const TaskBoard = ({
 											<div className='ticket-drop-placeholder' aria-hidden='true' />
 										)}
 										<article
-											className={`ticket-card ${ticket.needsAttention ? "needs-attention" : ""} ${drag?.ticket.id === ticket.id ? "is-drag-source" : ""}`}
+											className={`ticket-card ${selectedId === ticket.id ? "is-selected" : ""} ${ticket.needsAttention ? "needs-attention" : ""} ${drag?.ticket.id === ticket.id ? "is-drag-source" : ""}`}
 											data-ticket-id={ticket.id}
 										>
 											<button

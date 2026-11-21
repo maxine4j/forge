@@ -447,12 +447,11 @@ test("ticket creation omits agent settings and provider switching retains ticket
 	expect(f.tickets()[0]!.executionSettings?.reasoningEffort).toBeUndefined();
 	await expect(dialog.getByRole("combobox", { name: "Model", exact: true }).first()).toContainText("Local model");
 	await dialog.getByRole("tab", { name: "Chat", exact: true }).click();
-	await expectDropdownValue(
+	await expect(
 		dialog
 			.getByRole("tabpanel", { name: "Chat", exact: true })
 			.getByRole("combobox", { name: "Planning agent", exact: true }),
-		other,
-	);
+	).toHaveCount(0);
 });
 
 test("ticket phases start inherited, unlink independently, save immediately and survive reopening", async ({
@@ -507,7 +506,7 @@ test("Chat switches to implementation controls and preserves planning overrides"
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 	const chat = dialog.getByRole("tabpanel", { name: "Chat", exact: true });
-	await expect(chat.getByRole("combobox", { name: "Planning agent", exact: true })).toBeVisible();
+	await expect(chat.getByRole("combobox", { name: "Planning agent", exact: true })).toHaveCount(0);
 	f.setWorkflow({
 		phase: "implementation",
 		implementerId: "123e4567-e89b-42d3-a456-426614174010",
@@ -515,8 +514,7 @@ test("Chat switches to implementation controls and preserves planning overrides"
 		planningProvider: { providerId: projectId, providerName: "OpenAI", providerLocked: true },
 		implementationProvider: { providerId: projectId, providerName: "OpenAI", providerLocked: true },
 	});
-	await expect(chat.getByRole("combobox", { name: "Implementing agent", exact: true })).toBeVisible();
-	await expect(chat.getByRole("combobox", { name: "Implementing agent", exact: true })).toBeDisabled();
+	await expect(chat.getByRole("combobox", { name: "Implementing agent", exact: true })).toHaveCount(0);
 	await chooseDropdown(chat.getByRole("combobox", { name: "Model", exact: true }), "other-model");
 	await expect.poll(() => f.tickets()[0]!.executionSettings?.implementation).toMatchObject({ model: "other-model" });
 	expect(f.tickets()[0]!.executionSettings?.model).toBe("test-model");
@@ -527,7 +525,7 @@ test("inherited implementation Chat keeps model and thinking read-only with shar
 	await setup(page, false, true, true);
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const chat = page.getByRole("tabpanel", { name: "Chat", exact: true });
-	await expect(chat.getByRole("combobox", { name: "Implementing agent", exact: true })).toHaveText("Same as planner");
+	await expect(chat.getByRole("combobox", { name: "Implementing agent", exact: true })).toHaveCount(0);
 	await expect(chat.getByRole("combobox", { name: "Model", exact: true })).toBeDisabled();
 	await expect(chat.getByRole("combobox", { name: "Thinking level", exact: true })).toBeDisabled();
 	await expect(chat.getByRole("combobox", { name: "Permissions", exact: true })).toBeEnabled();
@@ -537,13 +535,14 @@ test("running ticket provider selection stays locked in Details and Chat", async
 	await setup(page, false, true);
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await dialog.getByRole("tab", { name: "Details", exact: true }).click();
 	await expect(dialog.getByRole("combobox", { name: "Planning agent", exact: true })).toBeDisabled();
 	await dialog.getByRole("tab", { name: "Chat", exact: true }).click();
 	await expect(
 		dialog
 			.getByRole("tabpanel", { name: "Chat", exact: true })
 			.getByRole("combobox", { name: "Planning agent", exact: true }),
-	).toBeDisabled();
+	).toHaveCount(0);
 });
 
 test("busy creation blocks Back and rapid Back unwinds ticket entries", async ({ page }) => {
@@ -1147,11 +1146,11 @@ for (const width of [1280, 768, 600, 390, 320]) {
 			"title",
 			"EPIC-1 · Full epic title",
 		);
-		await expect(details.getByLabel("Status", { exact: true })).toHaveText("Backlog");
+		await expect(page.getByLabel("Status", { exact: true })).toHaveText("Backlog");
 		await expect(details.getByRole("combobox", { name: "Status", exact: true })).toHaveCount(0);
 		f.tickets()[0]!.status = "todo";
 		f.tickets()[0]!.canReturnToBacklog = true;
-		await expect(details.getByLabel("Status", { exact: true })).toHaveText("Ready for development");
+		await expect(page.getByLabel("Status", { exact: true })).toHaveText("Ready for development");
 		expect(await textLeft(title)).toBeCloseTo(contentLeft, 0);
 		const returning = details.getByRole("button", { name: "Return to backlog", exact: true });
 		const size = width <= 600 ? 32 : 36;
@@ -3486,6 +3485,43 @@ test("docked ticket switching guards drafts, retains one owner and restores the 
 	await expect(first).toBeFocused();
 });
 
+test("opening a docked ticket reveals its column with a gap beside the panel", async ({ page }) => {
+	await page.setViewportSize({ width: 1280, height: 900 });
+	const fixture = await setup(page);
+	fixture.tickets()[1]!.status = "done";
+	await page.reload();
+	const board = page.locator(".kanban-columns");
+	for (const [id, title] of [
+		["TASK-2", "Second task"],
+		["TASK-1", "First task"],
+	]) {
+		if (id === "TASK-1")
+			await board.evaluate((element) => {
+				element.scrollLeft = 80;
+			});
+		await page.getByRole("button", { name: `${id} ${title}`, exact: true }).click();
+		await expect(board.locator(".ticket-card.is-selected")).toHaveAttribute("data-ticket-id", id!);
+		await page
+			.locator("main")
+			.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+		await expect
+			.poll(async () => {
+				const bounds = (await board.boundingBox())!;
+				const column = (await board
+					.locator(".kanban-column")
+					.filter({ has: page.locator(`[data-ticket-id="${id}"]`) })
+					.boundingBox())!;
+				return column.x >= bounds.x - 1 && column.x + column.width <= bounds.x + bounds.width - 11;
+			})
+			.toBe(true);
+		await page.getByRole("button", { name: "Close ticket", exact: true }).click();
+		await expect(board.locator(".ticket-card.is-selected")).toHaveCount(0);
+		await page
+			.locator("main")
+			.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
+	}
+});
+
 test("docked tickets leave board scrolling and keyboard navigation usable, with dropdown dismissal priority", async ({
 	page,
 }) => {
@@ -3495,6 +3531,9 @@ test("docked tickets leave board scrolling and keyboard navigation usable, with 
 	await expect(ticket).toBeVisible();
 	await expect.poll(() => ticket.evaluate((element) => element.contains(document.activeElement))).toBe(true);
 	const columns = page.locator(".kanban-columns");
+	await page
+		.locator("main")
+		.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
 	await columns.evaluate((element) => {
 		element.scrollLeft = element.scrollWidth;
 	});

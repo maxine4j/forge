@@ -58,6 +58,15 @@ const read = async (path: string) => {
 	return response.json();
 };
 
+test("working ticket exposes an active conversation", async () => {
+	const workflow = ticketWorkflowSchema.parse(await read("/api/tickets/TASK-12/workflow"));
+	expect(workflow.state).toBe("running");
+	expect(workflow.plannerId).toBeDefined();
+	const conversation = agentViewSchema.parse(await read(`/api/agents/${workflow.plannerId}`));
+	expect(conversation.thread.status).toBe("running");
+	expect(conversation.items.length).toBeGreaterThan(0);
+});
+
 test("mock providers expose named cards and provider-specific catalogs", async () => {
 	const providers = modelProvidersSchema.parse(await read("/api/model-providers"));
 	expect(providers.map((p) => p.kind)).toEqual(["openai", "ollama"]);
@@ -110,7 +119,10 @@ test("mock cost data includes every global ticket and archived history", async (
 	for (const archived of cost.tickets.filter((ticket) => ticket.archivedAt)) {
 		expect(await read(`/api/tickets/${archived.id}`)).toMatchObject({ archivedAt: archived.archivedAt });
 	}
-	expect(cost.days).toHaveLength(30);
+	expect(cost.days).toHaveLength(8);
+	const recent = costsSchema.parse(await read("/api/costs?range=-1hr"));
+	expect(recent.hours).toHaveLength(2);
+	expect(recent.totals.turns).toBeLessThan(cost.totals.turns);
 });
 
 test("mock chats expose isolated project history and requests while every mutation stays read-only", async () => {

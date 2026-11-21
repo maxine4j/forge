@@ -1,4 +1,4 @@
-import type { Costs } from "@forge/contracts";
+import { costRangeSchema, defaultCostRange, type Costs } from "@forge/contracts";
 import type { AgentView } from "@forge/contracts/agents";
 import type { DockerOverview } from "@forge/contracts/docker";
 import { defaultForgeSettings } from "@forge/contracts/settings";
@@ -9,6 +9,25 @@ import { costFixture, phaseFixtures } from "./cost-fixture.ts";
 import { historyFixture } from "./history-fixture.ts";
 
 const date = "2026-11-02T00:00:00.000Z";
+const costCutoff = (url: URL) => {
+	const range = costRangeSchema.safeParse(url.searchParams.get("range")).data ?? defaultCostRange;
+	return Date.parse(date) + Number.parseInt(range, 10) * (range.endsWith("hr") ? 3_600_000 : 86_400_000);
+};
+const previewUsage = (turns: number) =>
+	costFixture(
+		{ input: 20500 * turns, cached: 12000 * turns, output: 2624 * turns, turns },
+		(0.73 * turns) / 8,
+		(1.17 * turns) / 8,
+		(0.075 * turns) / 8,
+	);
+const previewDays = (days: Costs["days"], cutoff: number): Costs["days"] =>
+	days
+		.filter(
+			(day) =>
+				Date.parse(day.date)
+				>= new Date(Math.max(Date.parse(days.at(0)!.date), cutoff)).setUTCHours(0, 0, 0, 0),
+		)
+		.map((day) => (Date.parse(day.date) < cutoff ? { ...day, input: 0, cached: 0, output: 0 } : day));
 const head = "a".repeat(40);
 const baseSha = "b".repeat(40);
 const commit = { sha: head, subject: "Improve repository navigation", author: "Owner", date };
@@ -123,31 +142,64 @@ export class MockApi implements IMockApi {
 		this.routes.set("/api/tickets", (url) =>
 			boardTickets.filter((ticket) => url.searchParams.get("includeArchived") === "true" || !ticket.archivedAt),
 		);
-		this.routes.set("/api/costs", () => {
+		this.routes.set("/api/costs", (url) => {
 			const first = costData[0]!;
+			const cutoff = costCutoff(url);
+			const days = previewDays(first.days, cutoff);
+			const turnCount = days.filter((day) => day.input > 0).length;
+			const totals = previewUsage(turnCount * costData.length);
+			const hourly = Date.parse(date) - cutoff <= 86_400_000 && url.searchParams.get("range")?.endsWith("hr");
+			const weeklyBudget = first.weeklyBudget;
 			return {
 				...first,
-				tickets: costData.flatMap((cost) => cost.tickets),
-				totals: costFixture({ input: 328000, cached: 192000, output: 42000, turns: 16 }, 1.46, 2.34, 0.15),
-				ticketEstimates: costFixture(
-					{ input: 328000, cached: 192000, output: 42000, turns: 16 },
-					1.46,
-					2.34,
-					0.15,
+				tickets: costData.flatMap((cost) =>
+					cost.tickets.map((row) => {
+						const summary = previewUsage(row.turns ? turnCount : 0);
+						return { ...row, ...summary, phases: phaseFixtures(summary) };
+					}),
 				),
-				days: first.days.map((day) => ({
+				totals,
+				ticketEstimates: totals,
+				days: days.map((day) => ({
 					...day,
-					input: day.input * 2,
-					cached: day.cached * 2,
-					output: day.output * 2,
+					input: day.input * costData.length,
+					cached: day.cached * costData.length,
+					output: day.output * costData.length,
 				})),
-				phases: first.phases.map((phase) => ({
-					...phase,
-					input: phase.input * 2,
-					cached: phase.cached * 2,
-					output: phase.output * 2,
-					turns: phase.turns * 2,
-				})),
+				hours: hourly
+					? Array.from({ length: (Date.parse(date) - cutoff) / 3_600_000 + 1 }, (_, index) => {
+							const start = new Date(cutoff + index * 3_600_000).toISOString();
+							const { input, cached, output } = previewUsage(start === date ? costData.length : 0);
+							return { date: start, input, cached, output };
+						})
+					: undefined,
+				phases: phaseFixtures(totals),
+				quotaAttribution: [
+					{
+						bucketId: "codex",
+						consumption: (2 * totals.turns) / 8,
+						allocated: totals.weeklyUsagePercent,
+						unallocated: (0.83 * totals.turns) / 8,
+					},
+				],
+				weeklyBudget: weeklyBudget && {
+					...weeklyBudget,
+					buckets: weeklyBudget.buckets.map((bucket) => ({
+						...bucket,
+						observations: bucket.observations.filter((entry) => Date.parse(entry.observedAt) >= cutoff),
+						...(hourly && cutoff > Date.parse(date) - 86_400_000
+							? {
+									additionalTickets: undefined,
+									unavailable: "learning",
+									completedTickets: 0,
+									coverageHours: (Date.parse(date) - cutoff) / 3_600_000,
+									consumption: 0,
+									periodStart: undefined,
+									periodEnd: undefined,
+								}
+							: {}),
+					})),
+				},
 			};
 		});
 		for (const [projectIndex, project] of projects.entries()) {
@@ -299,12 +351,12 @@ export class MockApi implements IMockApi {
 				},
 			];
 			boardTickets.push(...tickets);
-			const usage = costFixture({ input: 164000, cached: 96000, output: 21000, turns: 8 }, 0.73, 1.17, 0.075);
+			const usage = previewUsage(8);
 			const daily = Array.from({ length: 30 }, (_, index) => ({
 				date: new Date(Date.parse(date) - (29 - index) * 86_400_000).toISOString().slice(0, 10),
 				input: index >= 22 ? 20500 : 0,
 				cached: index >= 22 ? 12000 : 0,
-				output: index >= 22 ? 2625 : 0,
+				output: index >= 22 ? 2624 : 0,
 			}));
 			const cost: Costs = {
 				ticketEstimates: usage,
@@ -355,11 +407,12 @@ export class MockApi implements IMockApi {
 			};
 			costData.push(cost);
 			for (const row of cost.tickets)
-				this.routes.set(`/api/tickets/${row.id}/cost`, () => ({
-					since: cost.since,
-					phases: row.phases,
-					ticket: row,
-				}));
+				this.routes.set(`/api/tickets/${row.id}/cost`, (url) => {
+					const summary = previewUsage(
+						row.turns ? previewDays(daily, costCutoff(url)).filter((day) => day.input > 0).length : 0,
+					);
+					return { since: cost.since, phases: phaseFixtures(summary), ticket: summary };
+				});
 			for (const ticket of tickets) {
 				this.routes.set(`/api/tickets/${ticket.id}/history`, (url) => {
 					const history = historyFixture(ticket.id, ticket.status);
@@ -368,7 +421,12 @@ export class MockApi implements IMockApi {
 						events: history.events.filter((event) => event.id > Number(url.searchParams.get("after") ?? 0)),
 					};
 				});
-				const plannerId = ticket.needsAttention ? project.id.replace(/0$/, "7") : undefined;
+				const working = ticket.agentStatus === "working";
+				const plannerId = ticket.needsAttention
+					? project.id.replace(/0$/, "7")
+					: working
+						? project.id.replace(/0$/, "8")
+						: undefined;
 				if (plannerId) {
 					const conversation: AgentView = {
 						thread: {
@@ -377,28 +435,55 @@ export class MockApi implements IMockApi {
 							workspaceId: id,
 							title: ticket.title,
 							createdAt: date,
-							status: "idle",
+							status: working ? "running" : "idle",
 						},
-						items: [
-							{
-								id: "scope",
-								role: "user",
-								text: "Make repository navigation easier to use on smaller screens.",
-							},
-							{
-								id: "inspect",
-								role: "activity",
-								title: "Read repository navigation",
-								status: "completed",
-								text: "Reviewed the repository tabs and their links at desktop and mobile widths.",
-							},
-							{
-								id: "findings",
-								role: "assistant",
-								text: "The tabs can overflow on narrow screens. I’ll keep the active tab in view and preserve links to each section.",
-							},
-							{ id: "plan", role: "assistant", kind: "plan", text: navigationPlan.text },
-						],
+						items: working
+							? [
+									{
+										id: "scope",
+										role: "user",
+										text: "Improve search ranking so exact title matches appear first.",
+									},
+									{
+										id: "inspect",
+										role: "activity",
+										title: "Inspect search ranking",
+										status: "completed",
+										text: "Reviewed the existing search and filtering behavior.",
+									},
+									{
+										id: "update",
+										role: "assistant",
+										text: "I’m checking the ranking rules and will preserve the existing filters.",
+									},
+									{
+										id: "work",
+										role: "activity",
+										title: "Review search tests",
+										status: "running",
+										text: "Checking ranking and filter coverage.",
+									},
+								]
+							: [
+									{
+										id: "scope",
+										role: "user",
+										text: "Make repository navigation easier to use on smaller screens.",
+									},
+									{
+										id: "inspect",
+										role: "activity",
+										title: "Read repository navigation",
+										status: "completed",
+										text: "Reviewed the repository tabs and their links at desktop and mobile widths.",
+									},
+									{
+										id: "findings",
+										role: "assistant",
+										text: "The tabs can overflow on narrow screens. I’ll keep the active tab in view and preserve links to each section.",
+									},
+									{ id: "plan", role: "assistant", kind: "plan", text: navigationPlan.text },
+								],
 						requests: [],
 						truncated: false,
 						contextWindow: { used: 8200, max: 128000 },
@@ -424,7 +509,7 @@ export class MockApi implements IMockApi {
 								: "idle",
 					mergeAttempts: 0,
 					plannerId,
-					plan: plannerId ? navigationPlan : ticket.agentStatus === "working" ? searchPlan : undefined,
+					plan: ticket.needsAttention ? navigationPlan : working ? searchPlan : undefined,
 				}));
 			}
 			const workspaceRoot = `/api/workspaces/${id}`;

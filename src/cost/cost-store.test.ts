@@ -60,6 +60,10 @@ test("persists one usage snapshot per turn across restarts and reads all project
 		const history = await reopened.read();
 		expect(history.turns).toHaveLength(1002);
 		expect(history.turns.at(-1)?.turnId).toBe("turn-1000");
+		const next = "2026-11-11T00:00:00.001Z";
+		await reopened.save({ ...record, turnId: "new", startedAt: next });
+		expect((await reopened.read("TASK-1", { from: next, to: next })).turns).toMatchObject([{ turnId: "new" }]);
+		expect((await reopened.read(undefined, { from: date, to: date })).turns).toHaveLength(1002);
 	} finally {
 		await db.close();
 		await rm(directory, { recursive: true, force: true });

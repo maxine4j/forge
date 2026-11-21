@@ -1,4 +1,4 @@
-import { costPhaseSchema, type Costs, type TicketCost } from "@forge/contracts";
+import { costPhaseSchema, costRangeSchema, defaultCostRange, type Costs, type TicketCost } from "@forge/contracts";
 import { ticketIdSchema } from "@forge/contracts/tickets";
 
 import type { IAccessService } from "../auth/access-service.ts";
@@ -9,7 +9,7 @@ import type { ICostHistory } from "./cost-store.ts";
 import { summarizeCosts } from "./cost-summary.ts";
 import type { QuotaInterval } from "./quota-attribution.ts";
 import type { IQuotaStore } from "./quota-store.ts";
-import type { UsageTurn } from "./types.ts";
+import type { CostWindow, TokenCounts, UsageTurn } from "./types.ts";
 import { weeklyBudget } from "./weekly-budget.ts";
 
 export interface ICostTickets {
@@ -18,10 +18,11 @@ export interface ICostTickets {
 	get(id: string): Promise<{ id: string } | undefined>;
 }
 export interface ICostService {
-	read(actor: Actor): Promise<Costs>;
-	readTicket(actor: Actor, ticketId: string): Promise<TicketCost>;
+	read(actor: Actor, range?: string): Promise<Costs>;
+	readTicket(actor: Actor, ticketId: string, range?: string): Promise<TicketCost>;
 }
-const dayMs = 86_400_000;
+const hourMs = 3_600_000;
+const dayMs = 24 * hourMs;
 const phases = (turns: UsageTurn[], intervals: QuotaInterval[], chat = false) =>
 	costPhaseSchema.options
 		.filter((phase) => chat || phase !== "chat")
@@ -42,24 +43,23 @@ export class CostService implements ICostService {
 		private readonly now: () => Date,
 		private readonly quotas?: IQuotaStore,
 	) {}
-	async read(actor: Actor): Promise<Costs> {
+	async read(actor: Actor, range = defaultCostRange): Promise<Costs> {
 		this.access.assertOwner(actor);
-		const [{ since, turns }, tickets, limits, intervals] = await Promise.all([
-			this.store.read(),
+		const now = this.now();
+		const window = this.window(range, now);
+		const [{ since, turns }, tickets, limits, intervals, history] = await Promise.all([
+			this.store.read(undefined, window),
 			this.tickets.listForCost(),
 			this.codex.limits(),
-			this.quotas?.intervals?.() ?? [],
+			this.quotas?.intervals?.(window) ?? [],
+			this.quotas?.read(window.from),
 		]);
-		const today = this.now();
-		today.setUTCHours(0, 0, 0, 0);
-		const days = Array.from({ length: 30 }, (_, index) => {
-			const date = new Date(today.getTime() - (29 - index) * dayMs).toISOString().slice(0, 10);
-			const summary = summarizeCosts(
-				turns.filter((turn) => turn.startedAt.slice(0, 10) === date),
-				[],
-			);
-			return { date, input: summary.input, cached: summary.cached, output: summary.output };
-		});
+		const chartStart = Math.max(Date.parse(window.from), Date.parse(since));
+		const days = this.tokenSeries(turns, chartStart, now.getTime(), dayMs);
+		const hours =
+			now.getTime() - Date.parse(window.from) <= dayMs && range.endsWith("hr")
+				? this.tokenSeries(turns, chartStart, now.getTime(), hourMs)
+				: undefined;
 		const quotaAttribution: Costs["quotaAttribution"] = [];
 		for (const interval of intervals) {
 			const bucket = quotaAttribution.find((value) => value.bucketId === interval.bucketId) ?? {
@@ -73,11 +73,11 @@ export class CostService implements ICostService {
 			bucket.unallocated += interval.unallocated;
 			bucket.allocated += interval.consumption - interval.unallocated;
 		}
-		const history = await this.quotas?.read(new Date(this.now().getTime() - 28 * dayMs).toISOString());
 		return {
 			since,
 			limits,
 			days,
+			hours,
 			quotaAttribution,
 			totals: summarizeCosts(turns, intervals),
 			chats: summarizeCosts(
@@ -93,18 +93,51 @@ export class CostService implements ICostService {
 				const attributed = turns.filter((turn) => turn.ticketId === ticket.id);
 				return { ...ticket, ...summarizeCosts(attributed, intervals), phases: phases(attributed, intervals) };
 			}),
-			weeklyBudget: history ? weeklyBudget(history.observations, history.completions, this.now()) : undefined,
+			weeklyBudget: history
+				? weeklyBudget(history.observations, history.completions, now, Date.parse(window.from))
+				: undefined,
 		};
 	}
-	async readTicket(actor: Actor, ticketId: string): Promise<TicketCost> {
+	async readTicket(actor: Actor, ticketId: string, range = defaultCostRange): Promise<TicketCost> {
 		this.access.assertOwner(actor);
 		if (!ticketIdSchema.safeParse(ticketId).success) throw new TicketError("invalid-request");
+		const window = this.window(range, this.now());
 		if (!(await this.tickets.get(ticketId))) throw new TicketError("ticket-not-found");
 		const [{ since, turns }, intervals] = await Promise.all([
-			this.store.read(ticketId),
-			this.quotas?.intervals?.() ?? [],
+			this.store.read(ticketId, window),
+			this.quotas?.intervals?.(window) ?? [],
 		]);
 		const attributed = turns.filter((turn) => turn.ticketId === ticketId);
 		return { since, ticket: summarizeCosts(attributed, intervals), phases: phases(attributed, intervals) };
+	}
+
+	private window(range: string, now: Date): CostWindow {
+		if (!costRangeSchema.safeParse(range).success) throw new TicketError("invalid-request");
+		const unit = range.endsWith("hr") ? hourMs : dayMs;
+		const start = now.getTime() + Number.parseInt(range, 10) * unit;
+		const earliest = Date.parse("0000-01-01T00:00:00.000Z");
+		return { from: new Date(Math.max(earliest, start)).toISOString(), to: now.toISOString() };
+	}
+
+	private tokenSeries(turns: UsageTurn[], start: number, end: number, step: number) {
+		const bucket = (time: number) => Math.floor(time / step) * step;
+		const totals = new Map<number, TokenCounts>();
+		for (const turn of turns) {
+			const time = bucket(Date.parse(turn.startedAt));
+			const counts = totals.get(time) ?? { input: 0, cached: 0, output: 0 };
+			counts.input += turn.input ?? 0;
+			counts.cached += turn.cached ?? 0;
+			counts.output += turn.output ?? 0;
+			totals.set(time, counts);
+		}
+		const series = [];
+		for (let time = bucket(start); time <= end; time += step) {
+			const date = new Date(time).toISOString();
+			series.push({
+				date: step === dayMs ? date.slice(0, 10) : date,
+				...(totals.get(time) ?? { input: 0, cached: 0, output: 0 }),
+			});
+		}
+		return series;
 	}
 }

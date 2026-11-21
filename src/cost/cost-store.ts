@@ -2,7 +2,7 @@ import { z } from "zod";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
 import { apiCostUsd } from "./api-pricing.ts";
-import type { UsageTurn } from "./types.ts";
+import type { CostWindow, UsageTurn } from "./types.ts";
 
 const recordSchema = z
 	.object({
@@ -60,7 +60,7 @@ const recordSchema = z
 	);
 
 export interface ICostHistory {
-	read(ticketId?: string): Promise<{ since: string; turns: UsageTurn[] }>;
+	read(ticketId?: string, window?: CostWindow): Promise<{ since: string; turns: UsageTurn[] }>;
 }
 
 export interface ICostStore extends ICostHistory {
@@ -83,16 +83,20 @@ export class CostStore implements ICostStore {
 		]);
 	}
 
-	async read(ticketId?: string): Promise<{ since: string; turns: UsageTurn[] }> {
+	async read(ticketId?: string, window?: CostWindow): Promise<{ since: string; turns: UsageTurn[] }> {
 		const metadata = await this.database.all("SELECT since FROM cost_tracking WHERE id=1");
 		const { since } = z.object({ since: z.iso.datetime() }).parse(metadata.at(0));
 		const turns: UsageTurn[] = [];
+		const conditions = [
+			...(ticketId ? ["ticketId=?"] : []),
+			...(window ? ["julianday(json_extract(record, '$.startedAt')) BETWEEN julianday(?) AND julianday(?)"] : []),
+		];
+		const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+		const parameters = [...(ticketId ? [ticketId] : []), ...(window ? [window.from, window.to] : [])];
 		for (let offset = 0; ; offset += 500) {
 			const rows = await this.database.all(
-				ticketId
-					? "SELECT record FROM codex_usage WHERE ticketId=? ORDER BY rowid LIMIT 500 OFFSET ?"
-					: "SELECT record FROM codex_usage ORDER BY rowid LIMIT 500 OFFSET ?",
-				ticketId ? [ticketId, offset] : [offset],
+				`SELECT record FROM codex_usage ${where} ORDER BY rowid LIMIT 500 OFFSET ?`,
+				[...parameters, offset],
 			);
 			for (const row of rows)
 				turns.push(recordSchema.parse(JSON.parse(z.object({ record: z.string() }).parse(row).record)));

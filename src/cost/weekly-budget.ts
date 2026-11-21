@@ -4,8 +4,12 @@ const day = 86_400_000;
 export const quotaGap = 15 * 60_000;
 
 /** Intervals are open on the left so a completion is counted only once. */
-export function weeklyBudget(observations: WeeklyObservation[], completions: string[], now: Date): WeeklyBudget {
-	const cutoff = now.getTime() - 28 * day;
+export function weeklyBudget(
+	observations: WeeklyObservation[],
+	completions: string[],
+	now: Date,
+	cutoff = now.getTime() - 28 * day,
+): WeeklyBudget {
 	const groups = new Map<string, WeeklyObservation[]>();
 	for (const observation of observations) {
 		if (Date.parse(observation.observedAt) < cutoff || Date.parse(observation.observedAt) > now.getTime()) continue;

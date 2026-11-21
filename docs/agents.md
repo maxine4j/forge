@@ -463,11 +463,18 @@ live ChatGPT inference remains a separate manual check.
 ### Cost and usage
 
 The global Costs page at `/costs` reads `GET /api/costs` through the owner-only
-API. It shows cumulative recorded usage, 7- and 30-day UTC charts by turn start
-date, a breakdown by phase, and [per-ticket estimates](tickets.md#ticket-cost)
+API. Both cost endpoints accept `?range=-7d` and default to that range when
+omitted. Use a positive whole number with `d` or `hr`; duplicate and malformed
+values return 400. Days are rolling 24-hour periods. The page offers `-28d`,
+`-7d`, `-1d`, `-12hr`, `-1hr`, and custom input in the top-right selector.
+The selection is preserved in the URL and carried into the ticket Cost tab.
+Usage and estimated API costs include whole turns by timestamp of turn start.
+The chart groups those same turns into UTC days, or UTC hours for hour ranges
+of at most 24 hours. The page also shows a phase breakdown and
+[per-ticket estimates](tickets.md#ticket-cost)
 for every board ticket, including archived tickets, tickets with no repository
-references and tickets without usage. Ticket rows link directly to
-`/tasks?ticket=:id` and show no single-repository label. Ticket usage is aggregated
+references and tickets without usage in the selected range. Ticket rows open
+details on Costs and show no single-repository label. Ticket usage is aggregated
 by ticket ID, independently of a turn's execution repository. See
 [board ownership and execution context](tickets.md#agentic-ticket-board). Summary cards sum known ticket API USD costs, attributed weekly percentage and
 effective USD costs before formatting, with per-metric incomplete-turn counts.
@@ -497,8 +504,9 @@ same notification. Context can shrink after compaction. Completed ticket chats
 load stored history without resuming Codex in a removed worktree.
 
 Account-wide quota windows come from `account/rateLimits/read` when available.
-Forge shows the reported window length, percent used, and reset time. The request
-is read-only. A quota timeout leaves the shared execution connection open.
+Forge shows the current reported window length, percent used, and reset time as
+a live snapshot. The request is read-only. A quota timeout leaves the shared
+execution connection open.
 
 #### Quota cost attribution
 
@@ -515,6 +523,9 @@ selection and gaps over fifteen minutes leave observed consumption unallocated.
 Per-bucket observed consumption equals ticket allocations plus chat allocations
 plus unallocated consumption. Unobserved consumption is unknown. Raw observations
 remain available independently of the dashboard and attribution selection.
+The dashboard counts intervals whose ending observation falls after the range
+start and at or before the response timestamp. Ticket and chat estimates include
+the allocations from those intervals for turns that started in the range.
 Effective USD cost is `percentage / 100 × monthlyPlanLocal / usdToLocal / 4.33`,
 using each turn's saved values. Both quota attribution and effective cost are
 estimates: account-wide counters include external activity and delayed updates.
@@ -533,7 +544,7 @@ dispatch, completion and every five minutes without
 requiring an open dashboard. Missing quota data leaves token and cost views usable.
 The open dashboard also refreshes every five minutes and supports manual Refresh.
 
-Each bucket uses the trailing 28 days of observations across all projects. Valid
+Each bucket uses observations across all projects within the selected range. Valid
 intervals are consecutive samples in the same reset cycle, at most fifteen minutes
 apart, with no counter decrease. Consumption sums positive percentage-point changes;
 the denominator counts first-time Done transitions in those intervals, including
