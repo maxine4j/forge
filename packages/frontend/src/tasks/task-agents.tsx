@@ -2,6 +2,7 @@ import { agentOptionsSchema, type AgentOptions } from "@forge/contracts/agents";
 import { modelProvidersSchema, type ModelProvider } from "@forge/contracts/model-providers";
 import {
 	agentAvatarColours,
+	agentAvatarSymbols,
 	taskAgentSchema,
 	taskAgentsSchema,
 	type TaskAgent,
@@ -107,7 +108,7 @@ export function TaskAgents({
 				<article className='account-card model-provider-card' key={agent.id}>
 					<div className='task-agent-summary'>
 						<h3>
-							<AgentAvatar colour={agent.avatarColour} />
+							<AgentAvatar colour={agent.avatarColour} symbol={agent.avatarSymbol} />
 							{agent.name}
 						</h3>
 						<ol aria-label={`${agent.name} model priority`}>
@@ -210,7 +211,14 @@ function AgentEditor({
 	const [name, setName] = useState(agent?.name ?? "");
 	const [nameDraft, setNameDraft] = useState<string>();
 	const [avatarColour, setAvatarColour] = useState(agent?.avatarColour);
-	const [maxConcurrentTickets, setMaxConcurrentTickets] = useState(String(agent?.maxConcurrentTickets ?? 1));
+	const [avatarSymbol, setAvatarSymbol] = useState(agent?.avatarSymbol);
+	const [maxConcurrentTickets, setMaxConcurrentTickets] = useState<number | null>(
+		agent ? agent.maxConcurrentTickets : 1,
+	);
+	const concurrencyStops: (number | null)[] = [
+		...new Set([1, 2, 3, 4, 5, 10, ...(agent?.maxConcurrentTickets != null ? [agent.maxConcurrentTickets] : [])]),
+	].sort((a, b) => a - b);
+	concurrencyStops.push(null);
 	const [rows, setRows] = useState(() =>
 		(agent?.models ?? [{ providerId: "" }]).map((value, key) => ({ key, value })),
 	);
@@ -225,7 +233,8 @@ function AgentEditor({
 		!!agent
 		&& ((nameDraft !== undefined && nameDraft !== agent.name)
 			|| avatarColour !== agent.avatarColour
-			|| maxConcurrentTickets !== String(agent.maxConcurrentTickets)
+			|| avatarSymbol !== agent.avatarSymbol
+			|| maxConcurrentTickets !== agent.maxConcurrentTickets
 			|| JSON.stringify(rows.map(({ value }) => value)) !== JSON.stringify(agent.models));
 	const release = useModalDraft(dirty, busy, undefined, "task-agent");
 	useModalDialog(dialog, !!agent);
@@ -267,8 +276,9 @@ function AgentEditor({
 					{
 						name,
 						models: rows.map(({ value }) => value),
-						maxConcurrentTickets: Number(maxConcurrentTickets),
+						maxConcurrentTickets,
 						avatarColour,
+						avatarSymbol,
 					},
 				),
 			);
@@ -338,48 +348,82 @@ function AgentEditor({
 				<h3>Create agent</h3>
 			)}
 			<fieldset disabled={busy}>
-				{agent && (
-					<fieldset className='agent-colour-picker'>
-						<legend>Avatar colour</legend>
-						{agentAvatarColours.map((colour) => (
-							<label key={colour} title={colour}>
-								<input
-									className='visually-hidden'
-									type='radio'
-									name='avatar-colour'
-									aria-label={colour}
-									checked={avatarColour === colour}
-									onChange={() => setAvatarColour(colour)}
-								/>
-								<AgentAvatar colour={colour} />
-							</label>
-						))}
-					</fieldset>
-				)}
-				{!agent && (
-					<label>
-						Name
+				<div className='task-agent-details'>
+					{agent && (
+						<fieldset className='agent-colour-picker'>
+							<legend>Avatar colour</legend>
+							{agentAvatarColours.map((colour) => (
+								<label key={colour} title={colour}>
+									<input
+										className='visually-hidden'
+										type='radio'
+										name='avatar-colour'
+										aria-label={colour}
+										checked={avatarColour === colour}
+										onChange={() => setAvatarColour(colour)}
+									/>
+									<AgentAvatar colour={colour} symbol={avatarSymbol} />
+								</label>
+							))}
+						</fieldset>
+					)}
+					{agent && (
+						<fieldset className='agent-symbol-picker'>
+							<legend>Avatar symbol</legend>
+							{agentAvatarSymbols.map((symbol) => (
+								<label key={symbol} title={symbol}>
+									<input
+										className='visually-hidden'
+										type='radio'
+										name='avatar-symbol'
+										aria-label={symbol}
+										checked={avatarSymbol === symbol}
+										onChange={() => setAvatarSymbol(symbol)}
+									/>
+									<AgentAvatar colour={avatarColour ?? agent.avatarColour} symbol={symbol} />
+								</label>
+							))}
+						</fieldset>
+					)}
+					{!agent && (
+						<label>
+							Name
+							<input
+								autoFocus
+								required
+								maxLength={120}
+								value={name}
+								onChange={(event) => setName(event.target.value)}
+							/>
+						</label>
+					)}
+					<label className='task-agent-concurrency'>
+						<span>Max concurrent tickets</span>
 						<input
-							autoFocus
-							required
-							maxLength={120}
-							value={name}
-							onChange={(event) => setName(event.target.value)}
+							type='range'
+							min={0}
+							max={concurrencyStops.length - 1}
+							step={1}
+							aria-label='Max concurrent tickets'
+							aria-valuetext={String(maxConcurrentTickets ?? "Unlimited")}
+							value={concurrencyStops.indexOf(maxConcurrentTickets)}
+							onChange={(event) =>
+								setMaxConcurrentTickets(concurrencyStops[Number(event.target.value)] ?? null)
+							}
 						/>
+						<span className='task-agent-concurrency-stops' aria-hidden='true'>
+							{concurrencyStops.map((stop, index) => (
+								<span
+									key={stop ?? "unlimited"}
+									style={{ left: `${(index / (concurrencyStops.length - 1)) * 100}%` }}
+								>
+									{stop ?? "Unlimited"}
+								</span>
+							))}
+						</span>
 					</label>
-				)}
-				<label>
-					Max concurrent tickets
-					<input
-						type='number'
-						min={1}
-						max={Number.MAX_SAFE_INTEGER}
-						step={1}
-						required
-						value={maxConcurrentTickets}
-						onChange={(event) => setMaxConcurrentTickets(event.target.value)}
-					/>
-				</label>
+				</div>
+				<h4 className='task-agent-model-heading'>Model priority</h4>
 				{rows.map(({ key, value }, index) => (
 					<div
 						key={key}

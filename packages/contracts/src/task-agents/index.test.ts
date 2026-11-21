@@ -24,6 +24,10 @@ test("agent inputs trim names and models and reject unknown fields", () => {
 		taskAgentSchema.parse({ id: providerId, name: "Migrated", models: [{ providerId }], retired: false })
 			.maxConcurrentTickets,
 	).toBe(1);
+	expect(
+		taskAgentInputSchema.parse({ name: "Planner", models: [{ providerId }], maxConcurrentTickets: null })
+			.maxConcurrentTickets,
+	).toBeNull();
 });
 
 test("legacy agents get a stable preset and inputs accept only the twelve preset colours", () => {
@@ -38,6 +42,11 @@ test("legacy agents get a stable preset and inputs accept only the twelve preset
 	expect(agentAvatarColours).toContain(saved.avatarColour);
 	expect(taskAgentSchema.parse(legacy).avatarColour).toBe(saved.avatarColour);
 	expect(taskAgentSchema.parse({ ...legacy, avatarColour: "Mint" }).avatarColour).toBe("Mint");
+	expect(saved.avatarSymbol).toBe("Robot");
+	expect(taskAgentSchema.parse({ ...legacy, avatarSymbol: "Apple" }).avatarSymbol).toBe("Apple");
+	expect(
+		taskAgentInputSchema.safeParse({ name: legacy.name, models: legacy.models, avatarSymbol: "unknown" }).success,
+	).toBe(false);
 	expect(
 		taskAgentInputSchema.safeParse({ name: legacy.name, models: legacy.models, avatarColour: "red" }).success,
 	).toBe(false);

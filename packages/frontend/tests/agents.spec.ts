@@ -18,7 +18,11 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 			if (path === "/api/board/settings") return route.fulfill({ json: defaultBoardSettings });
 			if (path === "/api/accounts") return route.fulfill({ status: 503, json: { error: "internal-error" } });
 			if (path === "/api/tickets" && agent) {
-				const assignee = { name: agent.name, avatarColour: agent.avatarColour };
+				const assignee = {
+					name: agent.name,
+					avatarColour: agent.avatarColour,
+					avatarSymbol: agent.avatarSymbol,
+				};
 				const ticket = { repositoryIds: [], description: "", createdAt: "2026-11-03T00:00:00.000Z" };
 				return route.fulfill({
 					json: [
@@ -70,8 +74,9 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 					...input,
 					id,
 					retired: false,
-					maxConcurrentTickets: input.maxConcurrentTickets ?? 1,
+					maxConcurrentTickets: input.maxConcurrentTickets === undefined ? 1 : input.maxConcurrentTickets,
 					avatarColour: input.avatarColour ?? agent?.avatarColour ?? "Sky",
+					avatarSymbol: input.avatarSymbol ?? agent?.avatarSymbol ?? "Robot",
 				};
 				return route.fulfill({ json: agent, status: method === "POST" ? 201 : 200 });
 			}
@@ -110,18 +115,44 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	expect(writes).toEqual([{ name: "Reviewer", models: [primary], maxConcurrentTickets: 1 }]);
 	const colours = page.getByRole("group", { name: "Avatar colour" });
 	await expect(colours.getByRole("radio")).toHaveCount(12);
+	const contrasts = await colours.locator(".agent-avatar").evaluateAll((avatars) => {
+		const luminance = (colour: string) => {
+			const channels = colour
+				.match(/\d+/g)!
+				.slice(0, 3)
+				.map((value) => Number(value) / 255)
+				.map((value) => (value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4));
+			return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
+		};
+		return avatars.map((avatar) => {
+			const background = luminance(getComputedStyle(avatar).backgroundColor);
+			const foreground = luminance(getComputedStyle(avatar.querySelector(".agent-avatar-head")!).color);
+			return (Math.max(background, foreground) + 0.05) / (Math.min(background, foreground) + 0.05);
+		});
+	});
+	expect(Math.min(...contrasts)).toBeGreaterThanOrEqual(4.5);
 	await expect(colours.getByRole("radio", { name: "Sky" })).toBeChecked();
 	await colours.getByTitle("Mint").click();
 	await expect(colours.getByRole("radio", { name: "Mint" })).toBeChecked();
-	await expect(page.getByLabel("Max concurrent tickets")).toHaveValue("1");
-	await page.getByLabel("Max concurrent tickets").fill("2");
+	const symbols = page.getByRole("group", { name: "Avatar symbol" });
+	await expect(symbols.getByRole("radio", { name: "Robot" })).toBeChecked();
+	await symbols.getByTitle("Apple").click();
+	await expect(symbols.getByRole("radio", { name: "Apple" })).toBeChecked();
+	await expect(page.getByRole("slider", { name: "Max concurrent tickets" })).toHaveAttribute("aria-valuetext", "1");
+	await page.getByRole("slider", { name: "Max concurrent tickets" }).press("End");
+	await expect(page.getByRole("slider", { name: "Max concurrent tickets" })).toHaveAttribute(
+		"aria-valuetext",
+		"Unlimited",
+	);
+	await page.getByRole("slider", { name: "Max concurrent tickets" }).press("Home");
+	await page.getByRole("slider", { name: "Max concurrent tickets" }).press("ArrowRight");
 
 	await page.getByRole("button", { name: "Edit title: Reviewer" }).click();
 	await page.getByLabel("Title", { exact: true }).fill("Reviewer updated");
 	await page.getByRole("button", { name: "Save title" }).click();
 	await expect(page.getByRole("button", { name: "Edit title: Reviewer updated" })).toBeVisible();
 	expect(writes.at(-1)).toEqual({ name: "Reviewer updated", models: [primary], maxConcurrentTickets: 1 });
-	await expect(page.getByLabel("Max concurrent tickets")).toHaveValue("2");
+	await expect(page.getByLabel("Max concurrent tickets")).toHaveAttribute("aria-valuetext", "2");
 	await expect(page.getByRole("button", { name: "Remove model 1" })).toBeDisabled();
 	await expect(page.getByRole("button", { name: /Move model/ })).toHaveCount(0);
 	await page.getByRole("button", { name: "Add model", exact: true }).click();
@@ -178,30 +209,35 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 		models: [local, primary],
 		maxConcurrentTickets: 2,
 		avatarColour: "Mint",
+		avatarSymbol: "Apple",
 	});
 	await page.getByRole("button", { name: "Edit Reviewer updated" }).click();
-	await expect(page.getByLabel("Max concurrent tickets")).toHaveValue("2");
+	await expect(page.getByLabel("Max concurrent tickets")).toHaveAttribute("aria-valuetext", "2");
 	await colours.getByTitle("Amber").click();
 	await page.getByRole("button", { name: "Cancel", exact: true }).click();
 	await page.getByRole("button", { name: "Discard changes" }).click();
 	await expect(page.getByText("OpenAI · codex · high")).toBeVisible();
 	await page.getByRole("button", { name: "Edit Reviewer updated" }).click();
 	await expect(colours.getByRole("radio", { name: "Mint" })).toBeChecked();
-	await expect(page.getByLabel("Max concurrent tickets")).toHaveValue("2");
+	await expect(symbols.getByRole("radio", { name: "Apple" })).toBeChecked();
+	await expect(page.getByLabel("Max concurrent tickets")).toHaveAttribute("aria-valuetext", "2");
+	await page.getByRole("slider", { name: "Max concurrent tickets" }).press("End");
 	await page.getByRole("button", { name: "Remove model 2" }).click();
 	await page.getByRole("button", { name: "Save agent" }).click();
 	await expect(page.getByRole("button", { name: "Archive Reviewer updated" })).toBeEnabled();
 	expect(writes.at(-1)).toEqual({
 		name: "Reviewer updated",
 		models: [local],
-		maxConcurrentTickets: 2,
+		maxConcurrentTickets: null,
 		avatarColour: "Mint",
+		avatarSymbol: "Apple",
 	});
 	expect([...new Set(modelReads)]).toEqual([`/api/model-providers/${openai}/model-options`]);
 
 	await page.getByRole("tab", { name: "Board", exact: true }).click();
 	const assigned = page.getByRole("button", { name: "TASK-1 Assigned" });
 	await expect(assigned.getByRole("img", { name: "Reviewer updated" })).toHaveAttribute("data-colour", "Mint");
+	await expect(assigned.getByRole("img", { name: "Reviewer updated" })).toHaveAttribute("data-symbol", "Apple");
 	const active = page.getByRole("button", { name: "TASK-2 Active" });
 	await expect(active.getByRole("img", { name: "Agent working" })).toBeVisible();
 	await expect(active.locator(".ticket-agent-status + .agent-avatar")).toHaveAttribute("data-colour", "Mint");

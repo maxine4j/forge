@@ -31,6 +31,7 @@ import {
 	ticketSchema,
 	ticketWorkflowSchema,
 	ticketHistorySchema,
+	ticketNotificationsSchema,
 } from "@forge/contracts/tickets";
 import { createServer, resolveConfig } from "vite";
 import type { ViteDevServer } from "vite";
@@ -57,6 +58,15 @@ const read = async (path: string) => {
 	expect(response.headers.get("cache-control")).toBe("no-store");
 	return response.json();
 };
+
+test("mock notifications reference existing tickets and workflows", async () => {
+	const notifications = ticketNotificationsSchema.parse(await read("/api/tickets/notifications"));
+	expect(notifications.length).toBeGreaterThan(0);
+	for (const notification of notifications) {
+		expect(await read(`/api/tickets/${notification.ticket.id}`)).toEqual(notification.ticket);
+		expect(await read(`/api/tickets/${notification.ticket.id}/workflow`)).toEqual(notification.workflow);
+	}
+});
 
 test("working ticket exposes an active conversation", async () => {
 	const workflow = ticketWorkflowSchema.parse(await read("/api/tickets/TASK-12/workflow"));

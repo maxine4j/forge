@@ -160,8 +160,8 @@ export class MockApi implements IMockApi {
 	private readonly routes = new Map<string, (url: URL) => unknown>();
 
 	constructor() {
-		const planner = { name: "Planner", avatarColour: "Sky" } as const;
-		const implementer = { name: "Local implementer", avatarColour: "Mint" } as const;
+		const planner = { name: "Planner", avatarColour: "Sky", avatarSymbol: "Robot" } as const;
+		const implementer = { name: "Local implementer", avatarColour: "Mint", avatarSymbol: "Terminal" } as const;
 		this.routes.set("/api/projects", () => projects);
 		this.routes.set("/api/settings", () => defaultForgeSettings);
 		this.routes.set("/api/model-providers", () => [
@@ -212,7 +212,18 @@ export class MockApi implements IMockApi {
 		}));
 		const costData: Costs[] = [];
 		const boardTickets: Ticket[] = [];
-		this.routes.set("/api/tickets/notifications", () => []);
+		this.routes.set("/api/tickets/notifications", () =>
+			boardTickets
+				.filter((ticket) => ticket.needsAttention)
+				.map((ticket) => ({
+					id: `plan-${ticket.id}`,
+					at: date,
+					kind: "plan",
+					ticket,
+					epic: { ...epics.find((epic) => epic.id === ticket.epicId)!, createdAt: date },
+					workflow: this.routes.get(`/api/tickets/${ticket.id}/workflow`)!(new URL("http://localhost")),
+				})),
+		);
 		this.routes.set("/api/tickets", (url) =>
 			boardTickets.filter((ticket) => url.searchParams.get("includeArchived") === "true" || !ticket.archivedAt),
 		);

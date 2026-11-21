@@ -35,7 +35,7 @@ export interface ITaskAgents {
 		actor: Actor,
 		id: string | undefined,
 		permissions?: AgentSettings["permissions"],
-	): AsyncIterable<{ snapshot: ModelProviderSnapshot; providerId: string; limit: number; agentLimit: number }>;
+	): AsyncIterable<{ snapshot: ModelProviderSnapshot; providerId: string; limit: number; agentLimit: number | null }>;
 }
 
 export class TaskAgentService implements ITaskAgents {
@@ -82,7 +82,13 @@ export class TaskAgentService implements ITaskAgents {
 					parsed.data.avatarColour
 					?? previous?.avatarColour
 					?? agentAvatarColours.at(this.randomIndex(agentAvatarColours.length))!,
-				maxConcurrentTickets: parsed.data.maxConcurrentTickets ?? previous?.maxConcurrentTickets ?? 1,
+				avatarSymbol: parsed.data.avatarSymbol ?? previous?.avatarSymbol ?? "Robot",
+				maxConcurrentTickets:
+					parsed.data.maxConcurrentTickets !== undefined
+						? parsed.data.maxConcurrentTickets
+						: previous
+							? previous.maxConcurrentTickets
+							: 1,
 			};
 			await this.write(agent);
 			this.wake();

@@ -2329,6 +2329,54 @@ small {
 	border: 0;
 	padding: 0;
 }
+.task-agent-details {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: start;
+	gap: 24px;
+}
+.task-agent-details > label {
+	flex: 1 1 200px;
+	max-width: 280px;
+}
+.task-agent-concurrency > span:first-child {
+	display: flex;
+	justify-content: space-between;
+}
+.ticket-dialog:not(.ticket-details) .task-agent-details .task-agent-concurrency input[type="range"],
+.task-agent-concurrency input[type="range"] {
+	width: calc(100% - 28px);
+	margin-left: 8px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+}
+.task-agent-concurrency-stops {
+	position: relative;
+	width: calc(100% - 44px);
+	height: 22px;
+	margin-left: 16px;
+	font-size: 10px;
+	color: #a4b0bf;
+}
+.task-agent-concurrency-stops > span {
+	position: absolute;
+	transform: translateX(-50%);
+	text-align: center;
+	white-space: nowrap;
+}
+.task-agent-concurrency-stops > span::before {
+	content: "";
+	display: block;
+	width: 1px;
+	height: 4px;
+	margin: 0 auto 2px;
+	background: currentColor;
+}
+.task-agent-model-heading {
+	margin: 12px 0 0;
+	font-size: 16px;
+}
 .task-agent-model-row {
 	display: flex;
 	flex-wrap: wrap;
@@ -2382,39 +2430,59 @@ small {
 }
 .agent-avatar[data-colour="Coral"] {
 	--avatar-colour: #ff807c;
+	--avatar-ink: #501719;
 }
 .agent-avatar[data-colour="Rose"] {
 	--avatar-colour: #ffa4be;
+	--avatar-ink: #50152b;
 }
 .agent-avatar[data-colour="Berry"] {
 	--avatar-colour: #ea80cf;
+	--avatar-ink: #4b1645;
 }
 .agent-avatar[data-colour="Violet"] {
 	--avatar-colour: #bc8af3;
+	--avatar-ink: #301451;
 }
 .agent-avatar[data-colour="Lavender"] {
 	--avatar-colour: #cab8ff;
+	--avatar-ink: #302052;
 }
 .agent-avatar[data-colour="Indigo"] {
 	--avatar-colour: #8f9bf5;
+	--avatar-ink: #182353;
 }
 .agent-avatar[data-colour="Sky"] {
 	--avatar-colour: #7bc5fb;
+	--avatar-ink: #103451;
 }
 .agent-avatar[data-colour="Teal"] {
 	--avatar-colour: #61d0ce;
+	--avatar-ink: #073a3a;
 }
 .agent-avatar[data-colour="Mint"] {
 	--avatar-colour: #83dfa8;
+	--avatar-ink: #103e29;
 }
 .agent-avatar[data-colour="Lime"] {
 	--avatar-colour: #c1dd7d;
+	--avatar-ink: #303e0e;
 }
 .agent-avatar[data-colour="Amber"] {
 	--avatar-colour: #f8cb6e;
+	--avatar-ink: #493006;
 }
 .agent-avatar[data-colour="Peach"] {
 	--avatar-colour: #ffb180;
+	--avatar-ink: #4c240e;
+}
+.agent-avatar .agent-avatar-head,
+.agent-avatar .agent-avatar-symbol {
+	color: var(--avatar-ink);
+}
+.agent-avatar-symbol {
+	width: 16px;
+	height: 16px;
 }
 .agent-avatar-head {
 	position: relative;
@@ -2445,19 +2513,25 @@ small {
 	border-radius: 50%;
 	box-shadow: 4px 0 currentColor;
 }
-.task-agent-editor .agent-colour-picker {
-	display: flex;
-	flex-wrap: wrap;
+.task-agent-editor .agent-colour-picker,
+.task-agent-editor .agent-symbol-picker {
+	display: grid;
+	grid-template-columns: repeat(6, 36px);
 	gap: 4px;
 	border: 0;
 	padding: 0;
 	margin: 0;
 	min-width: 0;
 }
-.agent-colour-picker legend {
+.task-agent-editor .agent-symbol-picker {
+	grid-template-columns: repeat(5, 36px);
+}
+.agent-colour-picker legend,
+.agent-symbol-picker legend {
 	margin-bottom: 4px;
 }
-.agent-colour-picker label {
+.agent-colour-picker label,
+.agent-symbol-picker label {
 	position: relative;
 	display: grid;
 	place-items: center;
@@ -2466,11 +2540,13 @@ small {
 	margin: 0;
 	cursor: pointer;
 }
-.agent-colour-picker input:checked + .agent-avatar {
+.agent-colour-picker input:checked + .agent-avatar,
+.agent-symbol-picker input:checked + .agent-avatar {
 	outline: 2px solid #a4b0bf;
 	outline-offset: 2px;
 }
-.agent-colour-picker input:focus-visible + .agent-avatar {
+.agent-colour-picker input:focus-visible + .agent-avatar,
+.agent-symbol-picker input:focus-visible + .agent-avatar {
 	outline: 2px solid #79c0ff;
 	outline-offset: 3px;
 }

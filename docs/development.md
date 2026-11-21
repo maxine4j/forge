@@ -108,7 +108,8 @@ and starts Vite in explicit `mock` mode; no backend, database, credentials, or
 container is required.
 Vite serves deterministic HTTP fixtures for projects, accounts, repository
 branches/files/history, project workspaces, changes, pull-request reviews and
-project chat history with clarification requests. Tasks includes a running ticket conversation and sample epics
+project chat history with clarification requests. Tasks includes pending plan notifications,
+a running ticket conversation and sample epics
 and ticket planning conversations. Board settings includes two
 sample running containers with resource statistics.
 Commit history opens shareable commit pages with parent navigation, structured

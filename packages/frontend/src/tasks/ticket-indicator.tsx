@@ -45,7 +45,11 @@ export const TicketIndicator = ({ ticket }: { ticket: Ticket }) =>
 	ticket.assignee ? (
 		<span className='ticket-indicators'>
 			<TicketActivity ticket={ticket} />
-			<AgentAvatar colour={ticket.assignee.avatarColour} name={ticket.assignee.name} />
+			<AgentAvatar
+				colour={ticket.assignee.avatarColour}
+				symbol={ticket.assignee.avatarSymbol}
+				name={ticket.assignee.name}
+			/>
 		</span>
 	) : (
 		<TicketActivity ticket={ticket} />

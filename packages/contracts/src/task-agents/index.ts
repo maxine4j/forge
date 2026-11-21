@@ -20,7 +20,14 @@ export const agentAvatarColours = [
 ] as const;
 const avatarColourSchema = z.enum(agentAvatarColours);
 export type AgentAvatarColour = z.infer<typeof avatarColourSchema>;
-export const ticketAssigneeSchema = z.strictObject({ name, avatarColour: avatarColourSchema });
+export const agentAvatarSymbols = ["Robot", "Apple", "ChatGPT", "Terminal", "Star"] as const;
+const avatarSymbolSchema = z.enum(agentAvatarSymbols);
+export type AgentAvatarSymbol = z.infer<typeof avatarSymbolSchema>;
+export const ticketAssigneeSchema = z.strictObject({
+	name,
+	avatarColour: avatarColourSchema,
+	avatarSymbol: avatarSymbolSchema.default("Robot"),
+});
 export type TicketAssignee = z.infer<typeof ticketAssigneeSchema>;
 
 const modelSelection = z.strictObject({
@@ -33,21 +40,23 @@ const modelSelection = z.strictObject({
 export const taskAgentInputSchema = z.strictObject({
 	name,
 	models: z.array(modelSelection).min(1),
-	maxConcurrentTickets: z.int().positive().optional(),
+	maxConcurrentTickets: z.int().positive().nullable().optional(),
 	avatarColour: avatarColourSchema.optional(),
+	avatarSymbol: avatarSymbolSchema.optional(),
 });
 
 export const taskAgentSchema = taskAgentInputSchema
 	.extend({
 		id: z.uuid(),
 		retired: z.boolean(),
-		maxConcurrentTickets: z.int().positive().default(1),
+		maxConcurrentTickets: z.int().positive().nullable().default(1),
 	})
 	.transform((agent) => ({
 		...agent,
 		avatarColour:
 			agent.avatarColour
 			?? agentAvatarColours.at(Number.parseInt(agent.id.slice(0, 8), 16) % agentAvatarColours.length)!,
+		avatarSymbol: agent.avatarSymbol ?? "Robot",
 	}));
 
 export const taskAgentsSchema = z.array(taskAgentSchema);

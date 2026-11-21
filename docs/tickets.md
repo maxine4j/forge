@@ -566,10 +566,12 @@ Each Agent has a stable UUID, name, `maxConcurrentTickets` and a nonempty, order
 entry selects a [provider](foundation.md#model-providers), model and optional
 thinking level. Each Agent card shows its ordered model priority list; Edit opens
 its controls in a dialog. Edit the name in place and use the editor to set
-**Max concurrent tickets** and add, remove or reorder models. Save applies
+avatar colour and symbol, **Max concurrent tickets**, and add, remove or reorder models.
+The symbol follows the agent onto tickets; existing agents default to Robot. Save applies
 the limit and model changes together. Drag handles and their arrow keys reorder
-the fallback list. The limit is a positive integer and defaults to 1 for new
-and existing Agents. Planner and Implementer assignments share it across all
+the fallback list. The limit is a positive integer or unlimited and defaults to 1 for new
+and existing Agents. The slider offers 1–5, 10 and unlimited; existing custom limits remain selectable.
+Unlimited removes the Agent limit while provider limits still apply. Planner and Implementer assignments share it across all
 providers. Lowering it preserves current reservations and holds new work until
 the count falls below the limit.
 Choose an OpenAI model and supported thinking

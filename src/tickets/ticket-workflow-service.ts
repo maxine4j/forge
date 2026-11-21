@@ -303,7 +303,12 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				: undefined);
 		const agent = assigneeId ? await this.taskAgents?.get(actor, assigneeId) : undefined;
 		const capabilities: Pick<Ticket, "assignee" | "canReturnToBacklog" | "resetting"> = {};
-		if (agent) capabilities.assignee = { name: agent.name, avatarColour: agent.avatarColour };
+		if (agent)
+			capabilities.assignee = {
+				name: agent.name,
+				avatarColour: agent.avatarColour,
+				avatarSymbol: agent.avatarSymbol,
+			};
 		if (inactive) return capabilities;
 		if (job?.state === "resetting") capabilities.resetting = true;
 		else if (this.canReturnToBacklog(ticket, job)) capabilities.canReturnToBacklog = true;
@@ -602,7 +607,12 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			const id = ticketAgentId(ticket.executionSettings, phase);
 			let usable = false;
 			for await (const option of this.taskAgents.candidates(actor, id, ticket.executionSettings?.permissions)) {
-				if (!usable && id && (await this.store.countAgentReservations(id)) >= option.agentLimit)
+				if (
+					!usable
+					&& id
+					&& option.agentLimit !== null
+					&& (await this.store.countAgentReservations(id)) >= option.agentLimit
+				)
 					return undefined;
 				usable = true;
 				if ((await this.store.countReservations(option.providerId)) >= option.limit) continue;

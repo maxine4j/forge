@@ -452,7 +452,13 @@ export const TicketDetails = ({
 								? "Queued to merge"
 								: (job?.state ?? "Loading")}
 				</span>
-				{ticket.assignee && <AgentAvatar colour={ticket.assignee.avatarColour} name={ticket.assignee.name} />}
+				{ticket.assignee && (
+					<AgentAvatar
+						colour={ticket.assignee.avatarColour}
+						symbol={ticket.assignee.avatarSymbol}
+						name={ticket.assignee.name}
+					/>
+				)}
 				<div className='ticket-details-actions'>
 					{!archived && ticket.canReturnToBacklog && (
 						<button

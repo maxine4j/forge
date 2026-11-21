@@ -109,17 +109,25 @@ test("ticket avatars follow the workflow phase and retain retired assignees", as
 	const ticket = f.create();
 	await f.service.settings(actor, ticket, { plannerAgentId: planner.id, implementerAgentId: implementer.id });
 	const assigned = () => f.service.capabilities(actor, f.tickets.get(ticket.id)!);
-	expect((await assigned()).assignee).toEqual({ name: planner.name, avatarColour: planner.avatarColour });
+	expect((await assigned()).assignee).toEqual({
+		name: planner.name,
+		avatarColour: planner.avatarColour,
+		avatarSymbol: "Robot",
+	});
 	await f.service.move(actor, ticket, { status: "todo" });
 	const job = f.jobs.get(ticket.id)!;
 	f.jobs.set(ticket.id, { ...job, phase: "implementation", state: "running" });
 	await f.taskAgents.save(
 		actor,
-		{ name: implementer.name, models: implementer.models, avatarColour: "Teal" },
+		{ name: implementer.name, models: implementer.models, avatarColour: "Teal", avatarSymbol: "Apple" },
 		implementer.id,
 	);
 	await f.taskAgents.retire(actor, implementer.id);
-	expect((await assigned()).assignee).toEqual({ name: implementer.name, avatarColour: "Teal" });
+	expect((await assigned()).assignee).toEqual({
+		name: implementer.name,
+		avatarColour: "Teal",
+		avatarSymbol: "Apple",
+	});
 });
 
 test("independent assignees pin model and provider for feedback, recovery and rebase", async () => {
@@ -1187,6 +1195,21 @@ test("agent slots are shared across providers and phases and survive a scheduler
 	expect(f.jobs.get(second.id)).toMatchObject({ state: "running", reservation: f.implementer.id });
 	await f.taskAgents.save(actor, { name: agent.name, models: agent.models, maxConcurrentTickets: 1 }, agent.id);
 	expect(f.jobs.get(first.id)?.state).toBe("running");
+	expect(f.jobs.get(second.id)?.state).toBe("running");
+});
+
+test("unlimited agent concurrency releases queued work while respecting provider limits", async () => {
+	const f = namedFixture();
+	const agent = await f.addAgent("Shared");
+	const first = f.create();
+	const second = f.create("TASK-2");
+	await f.ready(first, agent);
+	await f.ready(second, agent);
+	await f.providers.update(actor, f.planner.id, { maxConcurrentAgents: 2 });
+	await f.service.tick(actor);
+	expect(f.jobs.get(second.id)?.state).toBe("queued");
+	await f.taskAgents.save(actor, { name: agent.name, models: agent.models, maxConcurrentTickets: null }, agent.id);
+	await f.service.tick(actor);
 	expect(f.jobs.get(second.id)?.state).toBe("running");
 });
 
