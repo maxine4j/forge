@@ -559,7 +559,9 @@ See [migration and recovery](development.md#named-provider-upgrades) and
 The fourth Tasks tab at `/tasks?view=agents` lists reusable configurations.
 Each Agent has a stable UUID, name and a nonempty, ordered `models` list. Each
 entry selects a [provider](foundation.md#model-providers), model and optional
-thinking level. Add, remove or reorder entries in the Agent editor.
+thinking level. Edit the name in place and add, remove or reorder entries in each
+Agent card. Model changes are saved together or discarded with Cancel; drag handles
+and their arrow keys reorder the fallback list.
 Choose an OpenAI model and supported thinking
 level from the provider catalog, or leave thinking at the model default. Enter an
 Ollama tag as text. Saving an Ollama Agent makes no network request to the provider.

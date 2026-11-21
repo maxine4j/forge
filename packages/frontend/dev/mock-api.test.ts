@@ -69,6 +69,17 @@ test("working ticket exposes an active conversation", async () => {
 
 test("mock providers expose named cards and provider-specific catalogs", async () => {
 	const providers = modelProvidersSchema.parse(await read("/api/model-providers"));
+	const agents = await read("/api/task-agents");
+	expect(agents).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({
+				models: expect.arrayContaining([
+					expect.objectContaining({ providerId: providers[0]!.id }),
+					expect.objectContaining({ providerId: providers[1]!.id }),
+				]),
+			}),
+		]),
+	);
 	expect(providers.map((p) => p.kind)).toEqual(["openai", "ollama"]);
 	const catalog = agentOptionsSchema.parse(await read(`/api/model-providers/${providers[0]!.id}/model-options`));
 	expect(catalog.models).toHaveLength(1);

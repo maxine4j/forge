@@ -5,9 +5,16 @@ import { useEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 
-export function TaskAgents({ api }: { api: IWorkspaceApi }) {
+export function TaskAgents({
+	api,
+	creating,
+	closeCreate,
+}: {
+	api: IWorkspaceApi;
+	creating: boolean;
+	closeCreate: () => void;
+}) {
 	const [catalog, setCatalog] = useState<{ agents: TaskAgent[]; providers: ModelProvider[] }>();
-	const [editing, setEditing] = useState<TaskAgent | "new">();
 	const [retiring, setRetiring] = useState<TaskAgent>();
 	const [attempt, retry] = useState(0);
 	const [error, setError] = useState("");
@@ -50,7 +57,7 @@ export function TaskAgents({ api }: { api: IWorkspaceApi }) {
 			);
 			setRetiring(undefined);
 		} catch (error) {
-			setError(error instanceof Error ? error.message : "Could not retire agent.");
+			setError(error instanceof Error ? error.message : "Could not archive agent.");
 		} finally {
 			setBusy(false);
 		}
@@ -73,65 +80,61 @@ export function TaskAgents({ api }: { api: IWorkspaceApi }) {
 		);
 	return (
 		<section className='forge-settings task-agent-catalog' aria-label='Agents'>
-			<button
-				className='primary'
-				disabled={!!editing || !!retiring || !catalog.providers.length}
-				onClick={() => setEditing("new")}
-			>
-				Add agent
-			</button>
 			{!catalog.providers.length && <p>Add a model provider in Config to configure agents.</p>}
 			{!catalog.agents.length && <p>No agents configured.</p>}
-			{editing && (
+			{creating && (
 				<AgentEditor
 					api={api}
 					providers={catalog.providers}
-					agent={editing === "new" ? undefined : editing}
-					cancel={() => setEditing(undefined)}
+					cancel={closeCreate}
 					saved={(agent) => {
 						saved(agent);
-						setEditing(undefined);
+						closeCreate();
 					}}
 				/>
 			)}
 			{catalog.agents.map((agent) => (
 				<article className='account-card model-provider-card' key={agent.id}>
-					<h3>{agent.name}</h3>
-					<ol>
-						{agent.models.map((model, index) => (
-							<li key={index}>
-								{catalog.providers.find(({ id }) => id === model.providerId)?.name
-									?? "Unavailable provider"}
-								{" · "}
-								{model.model ?? "Codex default"}
-								{model.reasoningEffort && ` · ${model.reasoningEffort}`}
-							</li>
-						))}
-					</ol>
+					<AgentEditor
+						api={api}
+						providers={catalog.providers}
+						agent={agent}
+						saved={saved}
+						cancel={() => {}}
+					/>
 					{retiring?.id !== agent.id && (
 						<>
 							<button
-								disabled={!!editing || !!retiring}
-								aria-label={`Edit ${agent.name}`}
-								onClick={() => setEditing(agent)}
-							>
-								Edit
-							</button>
-							<button
-								disabled={!!editing || !!retiring}
-								aria-label={`Retire ${agent.name}`}
+								type='button'
+								className='ticket-archive-action task-agent-archive'
+								disabled={!!retiring}
+								aria-label={`Archive ${agent.name}`}
+								title='Archive agent'
 								onClick={() => setRetiring(agent)}
 							>
-								Retire
+								<svg
+									width='16'
+									height='16'
+									viewBox='0 0 24 24'
+									fill='none'
+									stroke='currentColor'
+									strokeWidth='2'
+									strokeLinecap='round'
+									strokeLinejoin='round'
+									aria-hidden='true'
+								>
+									<rect x='3' y='3' width='18' height='5' rx='1' />
+									<path d='M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8m-9 4h4' />
+								</svg>
 							</button>
 						</>
 					)}
 					{retiring?.id === agent.id && (
 						<>
-							<p>Retire {agent.name}?</p>
+							<p>Archive {agent.name}?</p>
 							{error && <p role='alert'>{error}</p>}
 							<button disabled={busy} onClick={() => void retire(agent)}>
-								Retire agent
+								Archive agent
 							</button>
 							<button
 								disabled={busy}
@@ -164,14 +167,36 @@ function AgentEditor({
 	cancel: () => void;
 }) {
 	const [name, setName] = useState(agent?.name ?? "");
+	const [nameDraft, setNameDraft] = useState<string>();
 	const [rows, setRows] = useState(() =>
 		(agent?.models ?? [{ providerId: "" }]).map((value, key) => ({ key, value })),
 	);
 	const nextKey = useRef(rows.length);
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
+	const dragged = useRef<{ key: number; original: typeof rows; dropped: boolean } | undefined>(undefined);
+	const [draggedKey, setDraggedKey] = useState<number>();
+	const saveName = async () => {
+		if (!agent || nameDraft === undefined || !nameDraft.trim()) return;
+		setBusy(true);
+		setError("");
+		try {
+			const result = await api.read(`task-agents/${agent.id}`, taskAgentSchema, "PATCH", {
+				name: nameDraft,
+				models: agent.models,
+			});
+			setName(result.name);
+			setNameDraft(undefined);
+			saved(result);
+		} catch (error) {
+			setError(error instanceof Error ? error.message : "Could not save agent.");
+		} finally {
+			setBusy(false);
+		}
+	};
 	const move = (index: number, direction: number) => {
 		const target = index + direction;
+		if (target < 0 || target >= rows.length) return;
 		setRows((current) =>
 			current.map((row, i) => (i === index ? current.at(target)! : i === target ? current.at(index)! : row)),
 		);
@@ -196,27 +221,131 @@ function AgentEditor({
 	};
 	return (
 		<form
-			className='account-card task-agent-editor'
+			className={agent ? "task-agent-editor task-agent-inline" : "account-card task-agent-editor"}
 			onSubmit={(event) => {
 				event.preventDefault();
 				void save();
 			}}
 		>
-			<h3>{agent ? `Edit ${agent.name}` : "Add agent"}</h3>
+			{agent ? (
+				nameDraft === undefined ? (
+					<h3 className='ticket-title'>
+						<button
+							type='button'
+							aria-label={`Edit title: ${name}`}
+							title='Edit title'
+							onClick={() => setNameDraft(name)}
+						>
+							{name}
+						</button>
+					</h3>
+				) : (
+					<div className='ticket-title-editor'>
+						<input
+							autoFocus
+							aria-label='Title'
+							maxLength={120}
+							value={nameDraft}
+							onChange={(event) => setNameDraft(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key === "Escape") setNameDraft(undefined);
+								if (event.key === "Enter") {
+									event.preventDefault();
+									void saveName();
+								}
+							}}
+						/>
+						<button
+							type='button'
+							aria-label='Save title'
+							disabled={busy || !nameDraft.trim()}
+							onClick={() => void saveName()}
+						>
+							✓
+						</button>
+						<button
+							type='button'
+							aria-label='Discard title changes'
+							disabled={busy}
+							onClick={() => setNameDraft(undefined)}
+						>
+							✕
+						</button>
+					</div>
+				)
+			) : (
+				<h3>Create agent</h3>
+			)}
 			<fieldset disabled={busy}>
-				<label>
-					Name
-					<input
-						autoFocus
-						required
-						maxLength={120}
-						value={name}
-						onChange={(event) => setName(event.target.value)}
-					/>
-				</label>
+				{!agent && (
+					<label>
+						Name
+						<input
+							autoFocus
+							required
+							maxLength={120}
+							value={name}
+							onChange={(event) => setName(event.target.value)}
+						/>
+					</label>
+				)}
 				{rows.map(({ key, value }, index) => (
-					<fieldset key={key}>
-						<legend>Model {index + 1}</legend>
+					<div
+						key={key}
+						className={`task-agent-model-row${draggedKey === key ? " is-dragging" : ""}`}
+						role='group'
+						aria-label={`Model ${index + 1}`}
+						onDragOver={(event) => {
+							if (!dragged.current) return;
+							event.preventDefault();
+							const draggedRow = dragged.current.key;
+							if (draggedRow === key) return;
+							setRows((current) => {
+								const from = current.findIndex((row) => row.key === draggedRow);
+								const target = current.findIndex((row) => row.key === key);
+								if (from < 0 || target < 0 || from === target) return current;
+								const next = [...current];
+								const [row] = next.splice(from, 1);
+								if (row) next.splice(target, 0, row);
+								return next;
+							});
+						}}
+						onDrop={(event) => {
+							event.preventDefault();
+							if (dragged.current) dragged.current.dropped = true;
+						}}
+					>
+						<button
+							type='button'
+							draggable
+							aria-label={`Drag model ${index + 1}`}
+							title='Drag or use arrow keys to reorder'
+							onKeyDown={(event) => {
+								if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+								event.preventDefault();
+								move(index, event.key === "ArrowUp" ? -1 : 1);
+							}}
+							onDragStart={(event) => {
+								const row = event.currentTarget.parentElement;
+								if (row) {
+									const bounds = row.getBoundingClientRect();
+									event.dataTransfer.setDragImage(
+										row,
+										event.clientX - bounds.left,
+										event.clientY - bounds.top,
+									);
+								}
+								dragged.current = { key, original: rows, dropped: false };
+								setDraggedKey(key);
+							}}
+							onDragEnd={() => {
+								if (dragged.current && !dragged.current.dropped) setRows(dragged.current.original);
+								dragged.current = undefined;
+								setDraggedKey(undefined);
+							}}
+						>
+							⋮⋮
+						</button>
 						<label>
 							Model provider
 							<select
@@ -254,53 +383,47 @@ function AgentEditor({
 						/>
 						<button
 							type='button'
-							aria-label={`Move model ${index + 1} up`}
-							disabled={index === 0}
-							onClick={() => move(index, -1)}
-						>
-							Move up
-						</button>
-						<button
-							type='button'
-							aria-label={`Move model ${index + 1} down`}
-							disabled={index === rows.length - 1}
-							onClick={() => move(index, 1)}
-						>
-							Move down
-						</button>
-						<button
-							type='button'
 							aria-label={`Remove model ${index + 1}`}
 							disabled={rows.length === 1}
 							onClick={() => setRows((current) => current.filter((row) => row.key !== key))}
 						>
 							Remove
 						</button>
-					</fieldset>
+					</div>
 				))}
-				<button
-					type='button'
-					onClick={() => {
-						const key = nextKey.current++;
-						setRows((current) => [...current, { key, value: { providerId: "" } }]);
-					}}
-				>
-					Add model
-				</button>
 				{error && <p role='alert'>{error}</p>}
-				<button
-					className='primary'
-					disabled={rows.some(
-						({ value }) =>
-							!value.model?.trim()
-							&& !agent?.models.some((saved) => saved.providerId === value.providerId && !saved.model),
-					)}
-				>
-					Save agent
-				</button>
-				<button type='button' onClick={cancel}>
-					Cancel
-				</button>
+				<div className='task-agent-actions'>
+					<button
+						type='button'
+						onClick={() => {
+							const key = nextKey.current++;
+							setRows((current) => [...current, { key, value: { providerId: "" } }]);
+						}}
+					>
+						Add model
+					</button>
+					<button
+						type='button'
+						onClick={() => {
+							if (agent) setRows(agent.models.map((value, key) => ({ key, value })));
+							else cancel();
+						}}
+					>
+						Cancel
+					</button>
+					<button
+						className='primary'
+						disabled={rows.some(
+							({ value }) =>
+								!value.model?.trim()
+								&& !agent?.models.some(
+									(saved) => saved.providerId === value.providerId && !saved.model,
+								),
+						)}
+					>
+						Save agent
+					</button>
+				</div>
 			</fieldset>
 		</form>
 	);

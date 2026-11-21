@@ -1473,12 +1473,14 @@
 	min-height: 36px;
 	padding: 0;
 }
-.ticket-details-actions .ticket-archive-action {
+.ticket-details-actions .ticket-archive-action,
+.task-agent-archive {
 	background: #2b2619;
 	border-color: #473b20;
 	color: #e3b768;
 }
-.ticket-details-actions .ticket-archive-action:hover {
+.ticket-details-actions .ticket-archive-action:hover,
+.task-agent-archive:hover {
 	background: #3a301d;
 }
 .ticket-archive-dialog {
@@ -2309,6 +2311,63 @@ small {
 }
 .task-agent-editor button {
 	justify-self: start;
+}
+.task-agent-inline > fieldset {
+	border: 0;
+	padding: 0;
+}
+.task-agent-model-row {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: end;
+	gap: 12px;
+	padding: 12px 0;
+	border-bottom: 1px solid #30363d;
+}
+.task-agent-model-row.is-dragging {
+	opacity: 0.45;
+}
+.task-agent-inline > fieldset > p {
+	grid-column: 1 / -1;
+}
+.task-agent-model-row label {
+	flex: 1 1 150px;
+	margin: 0;
+}
+.task-agent-model-row :is(button, input, select) {
+	height: 36px;
+}
+.task-agent-inline [draggable="true"] {
+	cursor: grab;
+}
+.task-agent-actions {
+	display: flex;
+	justify-content: flex-end;
+	flex-wrap: wrap;
+	gap: 8px;
+}
+.task-agent-catalog > .model-provider-card {
+	position: relative;
+}
+.task-agent-catalog .task-agent-archive {
+	position: absolute;
+	top: 16px;
+	right: 16px;
+	display: grid;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	min-height: 36px;
+	margin: 0;
+	padding: 0;
+}
+.task-agent-inline > .ticket-title {
+	margin-right: 44px;
+	font-size: 20px;
+	line-height: 1.35;
+}
+.task-agent-inline > .ticket-title-editor {
+	margin-right: 44px;
 }
 :is(.task-agent-editor, .ticket-agent-settings) select {
 	min-width: 0;

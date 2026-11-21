@@ -184,7 +184,15 @@ export class MockApi implements IMockApi {
 			{
 				id: "123e4567-e89b-42d3-a456-426614174090",
 				name: "Planner",
-				models: [{ providerId: "123e4567-e89b-42d3-a456-426614174099", model: "preview-model" }],
+				models: [
+					{
+						providerId: "123e4567-e89b-42d3-a456-426614174099",
+						model: "preview-model",
+						reasoningEffort: "high",
+					},
+					{ providerId: "123e4567-e89b-42d3-a456-426614174098", model: "local:latest" },
+					{ providerId: "123e4567-e89b-42d3-a456-426614174098", model: "local:backup" },
+				],
 				retired: false,
 			},
 			{
@@ -307,7 +315,18 @@ export class MockApi implements IMockApi {
 			};
 			this.routes.set(`${projectRoot}/agents`, () => [agent]);
 			const agentOptions = () => ({
-				models: [{ id: "preview-model", name: "Codex", isDefault: true }],
+				models: [
+					{
+						id: "preview-model",
+						name: "Codex",
+						isDefault: true,
+						defaultReasoningEffort: "medium",
+						supportedReasoningEfforts: ["medium", "high"].map((reasoningEffort) => ({
+							reasoningEffort,
+							description: reasoningEffort,
+						})),
+					},
+				],
 				skills: [{ name: "review", description: "Review changes and check behavior" }],
 			});
 			this.routes.set("/api/model-providers/123e4567-e89b-42d3-a456-426614174099/model-options", agentOptions);
