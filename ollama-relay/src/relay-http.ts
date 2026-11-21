@@ -6,6 +6,7 @@ import type { Duplex } from "node:stream";
 import type { ISleep } from "@forge/backend-infrastructure/sleep";
 import { WebSocketServer } from "ws";
 
+import { canonicalIp, type PairingLimiter } from "./pairing-limiter.ts";
 import { messageBytes, readChunk, readFrame, sendFrame } from "./pairing-socket.ts";
 import type { IInferenceResponse, IRelayService, IWorkerConnection } from "./relay-service.ts";
 import { maxChunkBytes, maxRequestBytes } from "./types.ts";
@@ -27,11 +28,14 @@ export class RelayHttp {
 	private reading = 0;
 	private bufferedBytes = 0;
 	private paired = false;
+	private warnedFallback = false;
 
 	constructor(
 		private readonly service: IRelayService,
 		private readonly bearer: Buffer,
 		private readonly sleep: ISleep,
+		private readonly limiter: PairingLimiter,
+		private readonly logger: { warn(message: string): void },
 	) {
 		this.pairing.on("upgrade", (request, socket, head) => this.upgrade(request, socket, head));
 	}
@@ -68,9 +72,36 @@ export class RelayHttp {
 	private upgrade(request: IncomingMessage, socket: Duplex, head: Buffer): void {
 		if (request.url !== "/pair") return rejectUpgrade(socket, 404, "Not Found");
 		if (request.headers.origin !== undefined) return rejectUpgrade(socket, 403, "Forbidden");
+		const protocols = request.headers["sec-websocket-protocol"]?.split(",").map((value) => value.trim());
+		if (
+			request.method !== "GET"
+			|| request.headers.upgrade?.toLowerCase() !== "websocket"
+			|| !/^([+/0-9A-Za-z]{22}==)$/.test(request.headers["sec-websocket-key"] ?? "")
+			|| !["8", "13"].includes(request.headers["sec-websocket-version"] ?? "")
+			|| (protocols !== undefined
+				&& (protocols.some((value) => !/^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(value))
+					|| new Set(protocols).size !== protocols.length))
+		)
+			return rejectUpgrade(socket, 400, "Bad Request");
+		const header = request.headers["x-forwarded-for"];
+		const forwarded = (Array.isArray(header) ? header.join(",") : header)?.split(",").at(-1);
+		let ip = canonicalIp(forwarded);
+		if (!ip) {
+			if (!this.warnedFallback) {
+				this.warnedFallback = true;
+				this.logger.warn("Missing or invalid forwarded client IP; using socket address");
+			}
+			ip = canonicalIp(request.socket.remoteAddress);
+		}
+		if (!ip) return rejectUpgrade(socket, 400, "Bad Request");
+		const retryAfter = this.limiter.blocked(ip);
+		if (retryAfter !== undefined) return rejectUpgrade(socket, 429, "Too Many Requests", retryAfter);
 		const candidate = Buffer.from(request.headers.authorization ?? "");
-		if (candidate.length !== this.bearer.length || !timingSafeEqual(candidate, this.bearer))
+		if (candidate.length !== this.bearer.length || !timingSafeEqual(candidate, this.bearer)) {
+			this.limiter.fail(ip);
 			return rejectUpgrade(socket, 401, "Unauthorized");
+		}
+		this.limiter.success(ip);
 		if (this.paired) return rejectUpgrade(socket, 409, "Conflict");
 
 		this.sockets.handleUpgrade(request, socket, head, (webSocket) => {
@@ -193,8 +224,10 @@ class HttpInferenceResponse implements IInferenceResponse {
 	}
 }
 
-const rejectUpgrade = (socket: Duplex, status: number, reason: string): void => {
-	socket.end(`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
+const rejectUpgrade = (socket: Duplex, status: number, reason: string, retryAfter?: number): void => {
+	socket.end(
+		`HTTP/1.1 ${status} ${reason}\r\nConnection: close\r\nContent-Length: 0\r\n${retryAfter === undefined ? "" : `Retry-After: ${retryAfter}\r\n`}\r\n`,
+	);
 };
 
 const listen = (server: ReturnType<typeof createServer>, port: number, host: string): Promise<void> =>

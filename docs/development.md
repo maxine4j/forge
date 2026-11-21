@@ -362,6 +362,21 @@ availability even when the worker is offline. The Forge container reaches
 `POST /v1/responses` on port 8081 through the shared service Docker network.
 Treat that network as trusted for inference requests.
 
+Pairing limits each client IP to five failed bearer checks before a cooldown;
+the fifth failure returns 401 and subsequent attempts return 429 with a
+`Retry-After` in seconds. Cooldowns escalate from 15 and 30 minutes through
+1, 2, 4, 8, 16 and 32 hours, capped at 32 hours. A successful token check
+clears history even if a worker is already connected. Seven days without a
+failed or blocked attempt also clears it; blocked attempts do not extend the
+cooldown. Partial counts persist until reset. State is in memory per relay and
+is lost on restart or least-recently-active eviction at 10,000 addresses.
+The rightmost `X-Forwarded-For` address is selected, following the ingress
+[append convention](https://www.envoyproxy.io/docs/envoy/latest/configuration/http/http_conn_man/headers#x-forwarded-for).
+Missing or invalid forwarding falls back to the socket address and warns once
+per relay instance; an unusable socket address yields 400. Additional proxies
+may share a bucket, and forwarded values can be spoofed until ingress is corrected.
+The worker retains its existing reconnect behavior.
+
 1. Provision `OLLAMA_RELAY_TOKEN` in `/etc/homelab-paas/env/forge.env` before
    deploying. Use a random value of 32–256 URL-safe characters, such as 32 bytes
    encoded as hex. Grant the deployment registry pull access to

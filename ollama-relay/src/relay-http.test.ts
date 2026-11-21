@@ -5,14 +5,58 @@ import { sleep } from "@forge/backend-infrastructure/sleep";
 import { expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
 
+import { PairingLimiter } from "./pairing-limiter.ts";
 import { RelayHttp } from "./relay-http.ts";
 import { RelayService } from "./relay-service.ts";
 import { maxRequestBytes } from "./types.ts";
 import { WorkerSession } from "./worker-session.ts";
 
+test("limits real pairing upgrades by forwarded IP and resets after expiry", async () => {
+	let now = 0;
+	const warn = vi.fn();
+	const relay = new RelayHttp(
+		new RelayService(sleep),
+		Buffer.from("Bearer secret"),
+		sleep,
+		new PairingLimiter(() => now),
+		{ warn },
+	);
+	await relay.listen("127.0.0.1", 0, 0);
+	const url = `ws://127.0.0.1:${relay.ports.pairing}/pair`;
+	const response = (headers: Record<string, string>) =>
+		new Promise<{ status: number | undefined; retry: string | undefined }>((resolve, reject) => {
+			const socket = new WebSocket(url, { headers });
+			socket.once("unexpected-response", (_request, reply) => {
+				reply.resume();
+				resolve({ status: reply.statusCode, retry: reply.headers["retry-after"] });
+			});
+			socket.once("error", reject);
+		});
+	try {
+		for (let i = 0; i < 5; i++)
+			expect((await response({ "X-Forwarded-For": "198.51.100.1, ::ffff:192.0.2.1" })).status).toBe(401);
+		now++;
+		expect(await response({ "X-Forwarded-For": "192.0.2.1", Authorization: "Bearer secret" })).toEqual({
+			status: 429,
+			retry: "900",
+		});
+		expect((await response({ "X-Forwarded-For": "invalid" })).status).toBe(401);
+		expect((await response({})).status).toBe(401);
+		expect(warn).toHaveBeenCalledOnce();
+		now = 900_000;
+		const worker = await connect(url, { "X-Forwarded-For": "192.0.2.1", Authorization: "Bearer secret" });
+		expect((await response({ "X-Forwarded-For": "192.0.2.1", Authorization: "Bearer secret" })).status).toBe(409);
+		worker.terminate();
+	} finally {
+		await relay.close();
+	}
+});
+
 test("isolates public ingress and preserves inference responses through an authenticated worker", async () => {
 	const bearer = "Bearer fixture-token";
-	const relay = new RelayHttp(new RelayService(sleep), Buffer.from(bearer), sleep);
+	const relay = new RelayHttp(new RelayService(sleep), Buffer.from(bearer), sleep, new PairingLimiter(Date.now), {
+		warn: () => {},
+	});
 	await relay.listen("127.0.0.1", 0, 0);
 	const { pairing, inference } = relay.ports;
 	const pairingUrl = `ws://127.0.0.1:${pairing}/pair`;

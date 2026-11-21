@@ -10,6 +10,7 @@ import { WebSocket } from "ws";
 import { z } from "zod";
 
 import { OllamaClient } from "../../ollama-relay/src/ollama-client.ts";
+import { PairingLimiter } from "../../ollama-relay/src/pairing-limiter.ts";
 import { RelayHttp } from "../../ollama-relay/src/relay-http.ts";
 import { RelayService } from "../../ollama-relay/src/relay-service.ts";
 import { maxRequestBytes } from "../../ollama-relay/src/types.ts";
@@ -109,7 +110,9 @@ test("pinned Codex streams through the relay and resumes after restart without s
 	);
 	const connection = new CodexConnection(processes, sleep);
 	const bearer = "Bearer synthetic-ollama-pairing-token";
-	const relay = new RelayHttp(new RelayService(sleep), Buffer.from(bearer), sleep);
+	const relay = new RelayHttp(new RelayService(sleep), Buffer.from(bearer), sleep, new PairingLimiter(Date.now), {
+		warn: () => {},
+	});
 	let socket: WebSocket | undefined;
 	try {
 		await processes.initialize();

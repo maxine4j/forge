@@ -54,6 +54,15 @@ try {
 		});
 		assert.equal((await request(8080)).status, 404);
 		assert.equal((await request(8081)).status, 503);
+		const rejected = (headers) => new Promise((resolve, reject) => {
+			const socket = new WebSocket("ws://127.0.0.1:8080/pair", { headers });
+			socket.once("unexpected-response", (_request, response) => { response.resume(); resolve(response); });
+			socket.once("error", reject);
+		});
+		for (let i = 0; i < 5; i++) assert.equal((await rejected({ "X-Forwarded-For": "192.0.2.1" })).statusCode, 401);
+		const blocked = await rejected({ "X-Forwarded-For": "192.0.2.1", Authorization: "Bearer " + process.env.OLLAMA_RELAY_TOKEN });
+		assert.equal(blocked.statusCode, 429);
+		assert.ok(Number(blocked.headers["retry-after"]) > 0);
 		const worker = new WebSocket("ws://127.0.0.1:8080/pair", {
 			headers: { Authorization: "Bearer " + process.env.OLLAMA_RELAY_TOKEN },
 		});
