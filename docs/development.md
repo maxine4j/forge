@@ -393,8 +393,10 @@ The worker retains its existing reconnect behavior.
 1. Provision `OLLAMA_RELAY_TOKEN` in `/etc/homelab-paas/env/forge.env` before
    deploying. Use a random value of 32–256 URL-safe characters, such as 32 bytes
    encoded as hex. Grant the deployment registry pull access to
-   `ghcr.io/maxine4j/forge-ollama-relay`. CI publishes the same SHA, branch,
-   and release tags as the Forge image after the relay smoke test and checks.
+   `ghcr.io/maxine4j/forge-ollama-relay`. Relay publication runs independently
+   of validation and can succeed when validation fails. A push to `main`
+   publishes the full commit SHA and `latest`; a `vX.X.X` tag publishes the
+   full SHA and release tag.
 2. Confirm the public `/health` returns 200 and a public
    `POST /v1/responses` returns 404. On the approved Mac, install Ollama and
    the local model you intend to use. Stop any existing Ollama instance on port 11434. From the matching Forge checkout, run:
