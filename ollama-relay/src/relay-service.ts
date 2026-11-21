@@ -21,9 +21,11 @@ export interface IRelayService {
 	disconnect(worker: IWorkerConnection): void;
 	receive(worker: IWorkerConnection, frame: RelayFrame | Buffer): void;
 	infer(body: Buffer, response: IInferenceResponse, signal: AbortSignal): void;
+	listModels(response: IInferenceResponse, signal: AbortSignal): void;
 }
 
 interface Inference {
+	kind: "request" | "list-models";
 	id: number;
 	body?: Buffer;
 	response: IInferenceResponse;
@@ -64,6 +66,19 @@ export class RelayService implements IRelayService {
 	}
 
 	infer(body: Buffer, response: IInferenceResponse, signal: AbortSignal): void {
+		this.enqueue("request", body, response, signal);
+	}
+
+	listModels(response: IInferenceResponse, signal: AbortSignal): void {
+		this.enqueue("list-models", undefined, response, signal);
+	}
+
+	private enqueue(
+		kind: Inference["kind"],
+		body: Buffer | undefined,
+		response: IInferenceResponse,
+		signal: AbortSignal,
+	): void {
 		if (signal.aborted) return;
 		if (!this.worker) {
 			response.fail(503, "worker_offline", "Inference worker is unavailable");
@@ -75,6 +90,7 @@ export class RelayService implements IRelayService {
 		}
 		const onAbort = () => this.cancel(inference);
 		const inference: Inference = {
+			kind,
 			id: ++this.nextId,
 			body,
 			response,
@@ -141,15 +157,16 @@ export class RelayService implements IRelayService {
 		const worker = this.worker;
 		if (!worker || this.active) return;
 		const inference = this.queued.shift();
-		if (!inference?.body) return;
+		if (!inference) return;
 		const body = inference.body;
 		inference.body = undefined;
 		this.active = inference;
 		inference.state = "headers";
 		// Both frames are enqueued synchronously so a cancellation always follows the body.
-		void Promise.all([worker.send({ type: "request", id: inference.id }), worker.send(body)]).catch(() =>
-			this.drop(worker),
-		);
+		void Promise.all([
+			worker.send({ type: inference.kind, id: inference.id }),
+			...(body ? [worker.send(body)] : []),
+		]).catch(() => this.drop(worker));
 		void this.sleep(this.upstreamDeadline, inference.lifetime.signal).then(
 			() => {
 				if (this.active !== inference || inference.state === "cancelling") return;

@@ -70,6 +70,8 @@ test("isolates public ingress and preserves inference responses through an authe
 		});
 	try {
 		expect((await fetch(`http://127.0.0.1:${pairing}/health`)).status).toBe(200);
+		expect((await fetch(`http://127.0.0.1:${pairing}/v1/models`)).status).toBe(404);
+		expect((await fetch(`http://127.0.0.1:${inference}/v1/models`)).status).toBe(503);
 		expect((await fetch(`http://127.0.0.1:${pairing}/v1/responses`, { method: "POST" })).status).toBe(404);
 		expect((await generate()).status).toBe(503);
 		await expect(connect(pairingUrl)).rejects.toThrow("401");
@@ -103,8 +105,15 @@ test("isolates public ingress and preserves inference responses through an authe
 				headers: { "Content-Type": "application/json" },
 			});
 		});
+		const listModels = vi
+			.fn()
+			.mockResolvedValueOnce(new Response('{"data":[]}', { headers: { "Content-Type": "application/json" } }))
+			.mockResolvedValue(new Response("limited", { status: 429 }));
 		const worker = await connect(pairingUrl, headers);
-		new WorkerSession(worker, { infer });
+		new WorkerSession(worker, { infer, listModels });
+		const models = await fetch(`http://127.0.0.1:${inference}/v1/models`);
+		expect(await models.json()).toEqual({ data: [] });
+		expect((await fetch(`http://127.0.0.1:${inference}/v1/models`)).status).toBe(429);
 		await expect(connect(pairingUrl, headers)).rejects.toThrow("409");
 		const failure = await generate();
 		expect(failure.status).toBe(404);
@@ -150,7 +159,7 @@ test("isolates public ingress and preserves inference responses through an authe
 		worker.terminate();
 		await expect(interrupted.text()).rejects.toThrow();
 		const replacement = await connect(pairingUrl, headers);
-		new WorkerSession(replacement, { infer });
+		new WorkerSession(replacement, { infer, listModels });
 		expect((await generate()).status).toBe(404);
 	} finally {
 		await relay.close();

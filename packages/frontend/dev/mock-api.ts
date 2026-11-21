@@ -164,6 +164,10 @@ export class MockApi implements IMockApi {
 		const implementer = { name: "Local implementer", avatarColour: "Mint", avatarSymbol: "Terminal" } as const;
 		this.routes.set("/api/projects", () => projects);
 		this.routes.set("/api/settings", () => defaultForgeSettings);
+		this.routes.set("/api/model-providers/health", () => [
+			{ providerId: "123e4567-e89b-42d3-a456-426614174099", status: "healthy" },
+			{ providerId: "123e4567-e89b-42d3-a456-426614174098", status: "healthy" },
+		]);
 		this.routes.set("/api/model-providers", () => [
 			{
 				id: "123e4567-e89b-42d3-a456-426614174099",

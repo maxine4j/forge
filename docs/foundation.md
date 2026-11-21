@@ -196,11 +196,13 @@ Owner-only APIs (mutations require the configured origin):
 | Route                                        | Contract                                               |
 | -------------------------------------------- | ------------------------------------------------------ |
 | `GET/POST /api/model-providers`              | List active providers / create a named provider.       |
+| `GET /api/model-providers/health`            | Owner-only current provider health (IDs and statuses). |
 | `PATCH/DELETE /api/model-providers/:id`      | Edit configuration / retire after confirmation.        |
 | `GET /api/model-providers/:id/model-options` | Selected OpenAI provider's model and thinking catalog. |
 
-Browser contracts live in `@forge/contracts/model-providers`. IDs are stable;
-kind is immutable. Names are trimmed, required, at most 120 characters, and unique
+Browser contracts live in `@forge/contracts/model-providers`. Health is checked on demand in
+[Agents](tickets.md#named-agents) and is not cached. IDs are stable; kind is immutable.
+Names are trimmed, required, at most 120 characters, and unique
 among active providers ignoring case. At most one active OpenAI provider exists,
 including incomplete login; the type picker disables OpenAI and SQLite enforces
 the restriction transactionally. Any number of Ollama providers can be configured,

@@ -7,6 +7,7 @@ import { maxChunkBytes } from "./types.ts";
 
 export interface IOllamaClient {
 	infer(body: Buffer, signal: AbortSignal): Promise<Response>;
+	listModels(signal: AbortSignal): Promise<Response>;
 }
 
 interface RequestState {
@@ -44,9 +45,15 @@ export class WorkerSession {
 
 	private control(bytes: Buffer): void {
 		const { type, id } = readFrame(bytes);
-		if (type === "request" && !this.active && this.pendingId === undefined && id > this.latestId) {
-			this.pendingId = id;
+		if (
+			(type === "request" || type === "list-models")
+			&& !this.active
+			&& this.pendingId === undefined
+			&& id > this.latestId
+		) {
 			this.latestId = id;
+			if (type === "request") this.pendingId = id;
+			else this.begin(id);
 		} else if (type === "ack" && this.active?.id === id && this.active.acknowledge) {
 			this.active.acknowledge();
 		} else if (type === "cancel" && this.active?.id === id) {
@@ -58,13 +65,18 @@ export class WorkerSession {
 
 	private start(body: Buffer): void {
 		if (this.pendingId === undefined || this.active) throw new Error("Unexpected inference body");
-		const request: RequestState = { id: this.pendingId, lifetime: new AbortController() };
+		const id = this.pendingId;
 		this.pendingId = undefined;
+		this.begin(id, body);
+	}
+
+	private begin(id: number, body?: Buffer): void {
+		const request: RequestState = { id, lifetime: new AbortController() };
 		this.active = request;
 		this.finished = this.stream(request, body).catch(() => this.socket.terminate());
 	}
 
-	private async stream(request: RequestState, body: Buffer): Promise<void> {
+	private async stream(request: RequestState, body?: Buffer): Promise<void> {
 		const {
 			id,
 			lifetime: { signal },
@@ -72,7 +84,7 @@ export class WorkerSession {
 		let terminal: "end" | "failed" | "cancelled" = "end";
 		let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
 		try {
-			const upstream = await this.ollama.infer(body, signal);
+			const upstream = body ? await this.ollama.infer(body, signal) : await this.ollama.listModels(signal);
 			reader = upstream.body?.getReader();
 			signal.throwIfAborted();
 			await sendFrame(this.socket, {

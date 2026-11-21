@@ -373,7 +373,8 @@ The descriptor adds a separate `ollama-relay` resource. Its public HTTPS host is
 `ollama-relay.forge.<base-domain>`. Port 8080 serves `GET /health` and the
 authenticated `/pair` WebSocket upgrade. The health check reports listener
 availability even when the worker is offline. The Forge container reaches
-`POST /v1/responses` on port 8081 through the shared service Docker network.
+`POST /v1/responses` and `GET /v1/models` on port 8081 through the shared service Docker network.
+The [Agents health check](tickets.md#named-agents) requires both an updated relay and worker.
 Treat that network as trusted for inference requests.
 
 Pairing limits each client IP to five failed bearer checks before a cooldown;

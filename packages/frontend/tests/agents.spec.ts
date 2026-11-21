@@ -5,11 +5,13 @@ import { expect, test } from "@playwright/test";
 const openai = "123e4567-e89b-42d3-a456-426614174000";
 const ollama = "123e4567-e89b-42d3-a456-426614174001";
 const id = "123e4567-e89b-42d3-a456-426614174002";
+const unused = "123e4567-e89b-42d3-a456-426614174003";
 
 test("Tasks Agents manages models and avatar colours and shows the assignee on tickets", async ({ page }) => {
 	let agent: TaskAgent | undefined;
 	const writes: TaskAgentInput[] = [];
 	const modelReads: string[] = [];
+	let healthReads = 0;
 	await page.route(
 		(url) => url.pathname.startsWith("/api/"),
 		async (route) => {
@@ -40,11 +42,23 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 				});
 			}
 			if (path === "/api/task-agents" && method === "GET") return route.fulfill({ json: agent ? [agent] : [] });
+			if (path === "/api/model-providers/health") {
+				healthReads++;
+				if (healthReads === 2) return route.fulfill({ status: 503 });
+				return route.fulfill({
+					json: [
+						{ providerId: openai, status: "healthy" },
+						{ providerId: ollama, status: "unhealthy" },
+						{ providerId: unused, status: "usage-limits-reached" },
+					],
+				});
+			}
 			if (path === "/api/model-providers")
 				return route.fulfill({
 					json: [
 						{ id: openai, name: "OpenAI", kind: "openai", retired: false },
 						{ id: ollama, name: "Local", kind: "ollama", retired: false, endpoint: "http://ollama/v1" },
+						{ id: unused, name: "Unused", kind: "ollama", retired: false, endpoint: "http://unused/v1" },
 					],
 				});
 			if (path.endsWith("/model-options")) {
@@ -92,6 +106,18 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	await expect(tabs).toHaveText(["Board", "Backlog", /Notifications/, "Agents"]);
 	await tabs.first().press("End");
 	await expect(page).toHaveURL("/tasks?view=agents");
+	const health = page.getByRole("region", { name: "Model provider health" });
+	await expect(health).toContainText("Healthy");
+	await expect(health).toContainText("Unhealthy");
+	await expect(health).toContainText("Usage limits reached");
+	await expect(health).toContainText("Unused");
+	await health.getByRole("button", { name: "Refresh health" }).click();
+	await expect(health).toContainText("Status unavailable");
+	await expect(
+		page.getByRole("group", { name: "Agent actions" }).getByRole("button", { name: "Create agent" }),
+	).toBeEnabled();
+	await health.getByRole("button", { name: "Refresh health" }).click();
+	await expect(health).toContainText("Healthy");
 	await page.reload();
 	await expect(tabs.last()).toHaveAttribute("aria-selected", "true");
 	await page.getByRole("group", { name: "Agent actions" }).getByRole("button", { name: "Create agent" }).click();

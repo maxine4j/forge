@@ -32,6 +32,7 @@ export const readFrame = (data: Buffer): RelayFrame => {
 	const { id, type } = frame;
 	switch (type) {
 		case "request":
+		case "list-models":
 		case "ack":
 		case "cancel":
 		case "end":

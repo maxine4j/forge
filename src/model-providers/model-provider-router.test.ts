@@ -28,6 +28,12 @@ test("provider HTTP routes require owner/origin, expose safe records and return 
 			models: p.kind === "ollama" ? [{ id: p.model, name: p.model, isDefault: true }] : [],
 			skills: [],
 		}),
+		undefined,
+		undefined,
+		async (p) => {
+			if (p.kind === "ollama") throw new Error("offline");
+			return "healthy";
+		},
 	);
 	const server = createServer(
 		new HttpApplication({ create: () => new Router() }, access)
@@ -48,6 +54,8 @@ test("provider HTTP routes require owner/origin, expose safe records and return 
 		expect((await request("", "GET", undefined, "other")).status).toBe(403);
 		expect((await request("", "POST", {}, "owner", "https://other.test")).status).toBe(403);
 		expect(await (await request()).json()).toEqual([]);
+		expect((await request("/health", "GET", undefined, "other")).status).toBe(403);
+		expect(await (await request("/health")).json()).toEqual([]);
 		expect((await request("", "POST", { name: "Secret", kind: "openai", loginId: "private" })).status).toBe(400);
 		const created = await request("", "POST", {
 			name: " Local ",
@@ -57,6 +65,13 @@ test("provider HTTP routes require owner/origin, expose safe records and return 
 		});
 		expect(created.status).toBe(201);
 		const provider = (await created.json()) as ModelProvider;
+		const second = (await (await request("", "POST", { name: "OpenAI", kind: "openai" })).json()) as ModelProvider;
+		const health = await request("/health");
+		expect(health.headers.get("cache-control")).toBe("no-store");
+		expect(await health.json()).toEqual([
+			{ providerId: provider.id, status: "unhealthy" },
+			{ providerId: second.id, status: "healthy" },
+		]);
 		expect(provider).toEqual({
 			id: provider.id,
 			name: "Local",
@@ -78,7 +93,8 @@ test("provider HTTP routes require owner/origin, expose safe records and return 
 		});
 		expect((await request(`/${provider.id}/model-options`)).status).toBe(400);
 		expect((await request(`/${provider.id}`, "DELETE")).status).toBe(204);
-		expect(await (await request()).json()).toEqual([]);
+		expect(await (await request("/health")).json()).toEqual([{ providerId: second.id, status: "healthy" }]);
+		expect((await request("", "GET")).status).toBe(200);
 		expect(await (await request(`/${provider.id}/model-options`)).json()).toEqual({ error: "provider-retired" });
 		expect((await request(`/${randomUUID()}`, "PATCH", { name: "Missing" })).status).toBe(404);
 	} finally {

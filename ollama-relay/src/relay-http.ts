@@ -143,6 +143,12 @@ export class RelayHttp {
 
 	private async respond(request: IncomingMessage, response: ServerResponse): Promise<void> {
 		const output = new HttpInferenceResponse(response);
+		if (request.method === "GET" && request.url === "/v1/models") {
+			const lifetime = new AbortController();
+			response.once("close", () => lifetime.abort());
+			this.service.listModels(output, lifetime.signal);
+			return;
+		}
 		if (request.method !== "POST" || request.url !== "/v1/responses") {
 			output.fail(404, "not_found", "Route not found");
 			return;

@@ -43,5 +43,11 @@ export const modelProviderSchema = z.object({
 	maxConcurrentAgents: concurrentAgents.default(1),
 });
 export const modelProvidersSchema = z.array(modelProviderSchema);
+export const modelProviderHealthSchema = z.object({
+	providerId: z.uuid(),
+	status: z.enum(["healthy", "unhealthy", "usage-limits-reached"]),
+});
+export const modelProviderHealthListSchema = z.array(modelProviderHealthSchema);
+export type ModelProviderHealth = z.infer<typeof modelProviderHealthSchema>;
 export type ModelProvider = z.infer<typeof modelProviderSchema>;
 export type ModelProviderInput = z.infer<typeof modelProviderInputSchema>;

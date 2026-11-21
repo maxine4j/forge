@@ -561,6 +561,11 @@ See [migration and recovery](development.md#named-provider-upgrades) and
 
 ### Named agents
 
+Model provider health shows every active provider, including unused providers. Opening
+the tab or selecting Refresh health checks the model list and shows Healthy, Unhealthy,
+or Usage limits reached. This is informational and does not affect editing or dispatch.
+See the [health API](foundation.md#model-providers) and [relay upgrade](development.md#ollama-relay).
+
 The fourth Tasks tab at `/tasks?view=agents` lists reusable configurations.
 Each Agent has a stable UUID, name, `maxConcurrentTickets` and a nonempty, ordered `models` list. Each
 entry selects a [provider](foundation.md#model-providers), model and optional

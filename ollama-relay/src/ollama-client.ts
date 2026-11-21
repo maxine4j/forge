@@ -7,6 +7,9 @@ export class OllamaClient implements IOllamaClient {
 		private readonly origin: string,
 		private readonly request: typeof fetch,
 	) {}
+	async listModels(signal: AbortSignal): Promise<Response> {
+		return this.request(`${this.origin}/v1/models`, { method: "GET", redirect: "error", signal });
+	}
 
 	async infer(body: Buffer, signal: AbortSignal): Promise<Response> {
 		return await this.request(`${this.origin}/v1/responses`, {

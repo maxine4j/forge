@@ -1,5 +1,10 @@
 import { agentOptionsSchema, type AgentOptions } from "@forge/contracts/agents";
-import { modelProvidersSchema, type ModelProvider } from "@forge/contracts/model-providers";
+import {
+	modelProviderHealthListSchema,
+	modelProvidersSchema,
+	type ModelProvider,
+	type ModelProviderHealth,
+} from "@forge/contracts/model-providers";
 import {
 	agentAvatarColours,
 	agentAvatarSymbols,
@@ -30,6 +35,28 @@ export function TaskAgents({
 	const [attempt, retry] = useState(0);
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
+	const [health, setHealth] = useState<ModelProviderHealth[]>([]);
+	const [checking, setChecking] = useState(true);
+	const [healthAttempt, refreshHealth] = useState(0);
+	useEffect(() => {
+		let active = true;
+		void api
+			.read("model-providers/health", modelProviderHealthListSchema)
+			.then(
+				(value) => {
+					if (active) setHealth(value);
+				},
+				() => {
+					if (active) setHealth([]);
+				},
+			)
+			.finally(() => {
+				if (active) setChecking(false);
+			});
+		return () => {
+			active = false;
+		};
+	}, [api, healthAttempt]);
 	useEffect(() => {
 		let active = true;
 		void Promise.all([
@@ -91,6 +118,43 @@ export function TaskAgents({
 		);
 	return (
 		<section className='forge-settings task-agent-catalog' aria-label='Agents'>
+			{catalog.providers.length > 0 && (
+				<section className='provider-health' aria-label='Model provider health'>
+					<h3>Model provider health</h3>
+					<button
+						disabled={checking}
+						onClick={() => {
+							setChecking(true);
+							refreshHealth((value) => value + 1);
+						}}
+					>
+						Refresh health
+					</button>
+					{catalog.providers
+						.filter((provider) => !provider.retired)
+						.map((provider) => {
+							const status = checking
+								? undefined
+								: health.find((item) => item.providerId === provider.id)?.status;
+							const label = checking
+								? "Checking…"
+								: status === "healthy"
+									? "Healthy"
+									: status === "unhealthy"
+										? "Unhealthy"
+										: status === "usage-limits-reached"
+											? "Usage limits reached"
+											: "Status unavailable";
+							return (
+								<p key={provider.id}>
+									{provider.name}:{" "}
+									<span className={`provider-health-dot ${status ?? "neutral"}`} aria-hidden='true' />{" "}
+									{label}
+								</p>
+							);
+						})}
+				</section>
+			)}
 			{!catalog.providers.length && <p>Add a model provider in Config to configure agents.</p>}
 			{!catalog.agents.length && <p>No agents configured.</p>}
 			{creating && (

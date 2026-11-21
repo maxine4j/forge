@@ -4019,3 +4019,19 @@ summary {
 		animation: none;
 	}
 }
+.provider-health-dot {
+	display: inline-block;
+	width: 0.65em;
+	height: 0.65em;
+	border-radius: 50%;
+	background: #777;
+}
+.provider-health-dot.healthy {
+	background: #16803c;
+}
+.provider-health-dot.unhealthy {
+	background: #c32929;
+}
+.provider-health-dot.usage-limits-reached {
+	background: #b78100;
+}

@@ -43,6 +43,7 @@ import { EpicStore } from "./epics/epic-store.ts";
 import { HttpApplication } from "./http/http-application.ts";
 import type { ILifecycle } from "./http/lifecycle.ts";
 import { StaticAssets } from "./http/static-assets.ts";
+import { modelProviderHealth } from "./model-providers/model-provider-health.ts";
 import { migrateModelProviders } from "./model-providers/model-provider-migration.ts";
 import { ModelProviderRouter } from "./model-providers/model-provider-router.ts";
 import { ModelProviderService } from "./model-providers/model-provider-service.ts";
@@ -333,6 +334,12 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		(provider) => agentClient.options(undefined, provider),
 		serializeAdmission,
 		wakeScheduler,
+		modelProviderHealth(
+			fetch,
+			() => agentClient.options(undefined, { kind: "openai" }),
+			() => usage.quotaExhausted(),
+			sleep,
+		),
 	);
 	const tracker = new AgentExecutionTracker(wakeScheduler);
 	const agents = new AgentService(

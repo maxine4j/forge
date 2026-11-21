@@ -3,6 +3,7 @@ import {
 	modelProviderInputSchema,
 	modelProviderPatchSchema,
 	type ModelProvider,
+	type ModelProviderHealth,
 } from "@forge/contracts/model-providers";
 import type { InferenceProvider } from "@forge/contracts/settings";
 
@@ -13,6 +14,7 @@ import { ModelProviderError } from "./errors.ts";
 import type { IModelProviderStore } from "./model-provider-store.ts";
 
 export interface IModelProviderService {
+	health(actor: Actor): Promise<ModelProviderHealth[]>;
 	list(actor: Actor): Promise<ModelProvider[]>;
 	create(actor: Actor, input: unknown): Promise<ModelProvider>;
 	update(actor: Actor, id: string, input: unknown): Promise<ModelProvider>;
@@ -34,7 +36,26 @@ export class ModelProviderService implements IModelProviderService {
 		private readonly catalog: (provider: InferenceProvider) => Promise<AgentOptions>,
 		private readonly serialize: <T>(operation: () => Promise<T>) => Promise<T> = (operation) => operation(),
 		private readonly wake: () => void = () => {},
+		private readonly checkHealth: (provider: ModelProvider) => Promise<ModelProviderHealth["status"]> = async () =>
+			"unhealthy",
 	) {}
+	async health(actor: Actor): Promise<ModelProviderHealth[]> {
+		this.access.assertOwner(actor);
+		const providers = await this.store.list();
+		return Promise.all(
+			providers
+				.filter((provider) => !provider.retired)
+				.map(async (provider) => {
+					let status: ModelProviderHealth["status"] = "unhealthy";
+					try {
+						status = await this.checkHealth(provider);
+					} catch {
+						/* Keep other results available. */
+					}
+					return { providerId: provider.id, status };
+				}),
+		);
+	}
 	async list(actor: Actor): Promise<ModelProvider[]> {
 		this.access.assertOwner(actor);
 		return this.store.list();
