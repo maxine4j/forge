@@ -250,3 +250,54 @@ test("migration routes unstarted tickets and seeds attempts from agents without 
 		await f.close();
 	}
 });
+
+test("task agent migration converts settings and workflow pins across multiple pages", async () => {
+	const f = await fixture();
+	try {
+		await migrateModelProviders(f.database, randomUUID, false);
+		const provider = await f.service.create(actor, { name: "Account", kind: "openai" });
+		const agents = new TaskAgentStore(f.database);
+		await agents.initialize();
+		const ticketCount = 501;
+		await f.database.transaction([
+			{
+				sql: `WITH RECURSIVE numbers(n) AS (SELECT 1 UNION ALL SELECT n+1 FROM numbers WHERE n<?)
+				INSERT INTO tickets SELECT 'TASK-'||n, 'in-progress', json_object('providerId', ?, 'model', 'model-'||n)
+				FROM numbers`,
+				parameters: [ticketCount, provider.id],
+			},
+			{
+				sql: `INSERT INTO ticket_workflows SELECT id, ? FROM tickets`,
+				parameters: [
+					JSON.stringify({
+						providerSnapshot: {
+							providerId: provider.id,
+							providerName: provider.name,
+							configuration: { kind: "openai" },
+						},
+					}),
+				],
+			},
+		]);
+
+		await migrateTaskAgents(f.database, randomUUID);
+
+		expect(await agents.list()).toHaveLength(ticketCount);
+		expect(
+			await f.database.all(`
+				SELECT count(*) AS migrated FROM tickets t JOIN ticket_workflows w ON w.ticketId=t.id
+				JOIN task_agents a ON a.id=json_extract(t.executionSettings,'$.plannerAgentId')
+				WHERE a.id=json_extract(t.executionSettings,'$.implementerAgentId')
+				AND a.id=json_extract(w.record,'$.planningProviderSnapshot.agentId')
+				AND a.id=json_extract(w.record,'$.implementationProviderSnapshot.agentId')
+				AND json_extract(a.record,'$.model')='model-'||substr(t.id,6)
+				AND json_type(t.executionSettings,'$.providerId') IS NULL
+				AND json_type(w.record,'$.providerSnapshot') IS NULL`),
+		).toEqual([{ migrated: ticketCount }]);
+		await migrateTaskAgents(f.database, () => {
+			throw new Error("migration ran again");
+		});
+	} finally {
+		await f.close();
+	}
+});

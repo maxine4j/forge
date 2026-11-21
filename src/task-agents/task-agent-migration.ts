@@ -2,9 +2,8 @@ import type { TaskAgent } from "@forge/contracts/task-agents";
 import { ticketPhaseSettings, type TicketExecutionSettings } from "@forge/contracts/tickets";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
-import type { SqlStatement } from "../database/types.ts";
 import type { ModelProviderSnapshot } from "../model-providers/types.ts";
-import { taskAgentWrite } from "./task-agent-store.ts";
+import { taskAgentRow } from "./task-agent-store.ts";
 
 type LegacyProvider = {
 	id: string;
@@ -36,7 +35,8 @@ export async function migrateTaskAgents(database: IDatabase, id: () => string): 
 		}
 		if (rows.length < 500) break;
 	}
-	const statements: SqlStatement[] = [];
+	const ticketUpdates: { id: string; settings: string }[] = [];
+	const workflowUpdates: { ticketId: string; record: string }[] = [];
 	const agents = new Map<string, TaskAgent>();
 	const names = new Set<string>();
 	const assign = (providerId?: string, model?: string, effort?: string) => {
@@ -56,7 +56,6 @@ export async function migrateTaskAgents(database: IDatabase, id: () => string): 
 		const agent = { id: id(), name, providerId: provider.id, model, reasoningEffort: effort, retired: false };
 		agents.set(key, agent);
 		names.add(name.toLowerCase());
-		statements.push(taskAgentWrite(agent));
 		return agent.id;
 	};
 	for (const provider of providers.values()) {
@@ -128,23 +127,31 @@ export async function migrateTaskAgents(database: IDatabase, id: () => string): 
 			}
 			delete workflow.providerSnapshot;
 			if (row.executionSettings || settings.plannerAgentId || settings.implementerAgentId)
-				statements.push({
-					sql: "UPDATE tickets SET executionSettings=? WHERE id=?",
-					parameters: [JSON.stringify(settings), row.id],
-				});
-			if (row.workflow)
-				statements.push({
-					sql: "UPDATE ticket_workflows SET record=? WHERE ticketId=?",
-					parameters: [JSON.stringify(workflow), row.id],
-				});
+				ticketUpdates.push({ id: row.id, settings: JSON.stringify(settings) });
+			if (row.workflow) workflowUpdates.push({ ticketId: row.id, record: JSON.stringify(workflow) });
 		}
 		if (rows.length < 500) break;
 	}
-	statements.push(
+	// Keep the statement count fixed while committing all migrated records and the marker together.
+	await database.transaction([
+		{
+			sql: `INSERT INTO task_agents(id,nameKey,retired,record)
+				SELECT value->>'id', value->>'nameKey', value->>'retired', value->>'record' FROM json_each(?)`,
+			parameters: [JSON.stringify([...agents.values()].map(taskAgentRow))],
+		},
+		{
+			sql: `UPDATE tickets SET executionSettings = updates.value->>'settings'
+				FROM json_each(?) AS updates WHERE tickets.id = updates.value->>'id'`,
+			parameters: [JSON.stringify(ticketUpdates)],
+		},
+		{
+			sql: `UPDATE ticket_workflows SET record = updates.value->>'record'
+				FROM json_each(?) AS updates WHERE ticket_workflows.ticketId = updates.value->>'ticketId'`,
+			parameters: [JSON.stringify(workflowUpdates)],
+		},
 		{
 			sql: "UPDATE model_providers SET record=json_remove(record,'$.model','$.defaultAgentModel','$.defaultAgentReasoningEffort')",
 		},
 		{ sql: "INSERT INTO forge_migrations(version) VALUES(?)", parameters: [version] },
-	);
-	await database.transaction(statements);
+	]);
 }

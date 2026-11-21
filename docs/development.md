@@ -439,8 +439,9 @@ node ollama-relay/tests/image-smoke.mjs
 Startup runs the `task-agents-v1` migration after `named-model-providers-v1` and
 before recovery. It creates reusable Agents from legacy provider defaults and
 per-ticket configurations, converts saved phase selections to independent IDs and
-preserves existing routing pins and thread settings. It removes superseded execution
-fields from provider records in the same transaction as the migration marker.
+preserves existing routing pins and thread settings. Bulk writes keep all agent,
+ticket, workflow and provider changes in the same transaction as the migration
+marker, including upgrades with more than 100 affected records.
 Implicit Codex model choices can remain unresolved in migrated records until dispatch.
 Existing conversations, credentials, and recorded turn prices are preserved.
 See [named Agents](tickets.md#named-agents) and [provider configuration](foundation.md#model-providers).

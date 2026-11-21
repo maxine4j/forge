@@ -9,11 +9,13 @@ export interface ITaskAgentStore {
 	retire(id: string): Promise<boolean>;
 }
 
-export function taskAgentWrite(agent: TaskAgent) {
+export function taskAgentRow(agent: TaskAgent) {
 	const value = taskAgentSchema.parse(agent);
 	return {
-		sql: "INSERT INTO task_agents(id,nameKey,retired,record) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET nameKey=excluded.nameKey,retired=excluded.retired,record=excluded.record WHERE task_agents.retired=0",
-		parameters: [value.id, value.name.toLowerCase(), Number(value.retired), JSON.stringify(value)],
+		id: value.id,
+		nameKey: value.name.toLowerCase(),
+		retired: Number(value.retired),
+		record: JSON.stringify(value),
 	};
 }
 
@@ -42,8 +44,12 @@ export class TaskAgentStore implements ITaskAgentStore {
 		return row ? decode(row) : undefined;
 	}
 	async save(agent: TaskAgent): Promise<void> {
-		const { sql, parameters } = taskAgentWrite(agent);
-		if ((await this.database.run(sql, parameters)) !== 1) throw new Error("Agent was retired");
+		const { id, nameKey, retired, record } = taskAgentRow(agent);
+		const changed = await this.database.run(
+			"INSERT INTO task_agents(id,nameKey,retired,record) VALUES(?,?,?,?) ON CONFLICT(id) DO UPDATE SET nameKey=excluded.nameKey,retired=excluded.retired,record=excluded.record WHERE task_agents.retired=0",
+			[id, nameKey, retired, record],
+		);
+		if (changed !== 1) throw new Error("Agent was retired");
 	}
 	async retire(id: string): Promise<boolean> {
 		return (
