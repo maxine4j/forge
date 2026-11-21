@@ -33,6 +33,7 @@ test("reservation upgrade keeps existing assignments, routes and unfinished over
 		await migrateTaskAgents(f.database, randomUUID);
 		const provider = await f.service.create(actor, { name: "Account", kind: "openai" });
 		const agentId = randomUUID();
+		const implementationAgentId = randomUUID();
 		const plannerId = randomUUID();
 		const implementerId = randomUUID();
 		const snapshot = {
@@ -43,7 +44,7 @@ test("reservation upgrade keeps existing assignments, routes and unfinished over
 		};
 		const legacyAgent = { id: agentId, name: "Codex default", retired: true, providerId: provider.id };
 		const legacyThread = { providerId: provider.id, model: "original" };
-		const settings = JSON.stringify({ plannerAgentId: agentId, implementerAgentId: agentId });
+		const settings = JSON.stringify({ plannerAgentId: agentId, implementerAgentId: implementationAgentId });
 		await f.database.transaction([
 			{ sql: "UPDATE model_providers SET record=json_remove(record,'$.maxConcurrentAgents')" },
 			{
@@ -101,6 +102,8 @@ test("reservation upgrade keeps existing assignments, routes and unfinished over
 		await migrateProviderReservations(f.database);
 		const workflows = new TicketWorkflowStore(f.database);
 		expect(await workflows.countReservations(provider.id)).toBe(2);
+		expect(await workflows.countAgentReservations(agentId)).toBe(1);
+		expect(await workflows.countAgentReservations(implementationAgentId)).toBe(1);
 		expect(await workflows.get("TASK-1")).toMatchObject({
 			reservation: provider.id,
 			plannerId,
@@ -116,6 +119,7 @@ test("reservation upgrade keeps existing assignments, routes and unfinished over
 			name: "Codex default",
 			retired: true,
 			models: [{ providerId: provider.id }],
+			maxConcurrentTickets: 1,
 		});
 		expect(await f.store.get(provider.id)).toMatchObject({ maxConcurrentAgents: 1 });
 		expect(await f.database.all("SELECT DISTINCT executionSettings FROM tickets")).toEqual([
@@ -129,6 +133,9 @@ test("reservation upgrade keeps existing assignments, routes and unfinished over
 		);
 		await migrateProviderReservations(f.database);
 		expect(await workflows.countReservations(provider.id)).toBe(1);
+		expect(await workflows.countAgentReservations(agentId)).toBe(0);
+		await f.database.run("UPDATE tickets SET archivedAt='2026-11-21' WHERE id='TASK-2'");
+		expect(await workflows.countAgentReservations(implementationAgentId)).toBe(0);
 	} finally {
 		await f.close();
 	}
@@ -256,7 +263,15 @@ test("task agents validate catalogs, retain retired records and enforce active n
 		const local = await f.service.create(actor, ollama);
 		const input = { name: " Local agent ", models: [{ providerId: local.id, model: " local:latest " }] };
 		const agent = await agents.save(actor, input);
-		expect(agent).toMatchObject({ name: "Local agent", models: [{ model: "local:latest" }] });
+		expect(agent).toMatchObject({
+			name: "Local agent",
+			models: [{ model: "local:latest" }],
+			maxConcurrentTickets: 1,
+		});
+		await agents.save(actor, { ...input, maxConcurrentTickets: 3 }, agent.id);
+		await agents.save(actor, { ...input, name: "Renamed agent" }, agent.id);
+		expect(await store.get(agent.id)).toMatchObject({ name: "Renamed agent", maxConcurrentTickets: 3 });
+		await agents.save(actor, input, agent.id);
 		await expect(agents.save(actor, { ...input, name: "local AGENT" })).rejects.toMatchObject({ status: 409 });
 		await expect(
 			agents.save(actor, { ...input, models: [{ ...input.models[0], reasoningEffort: "high" }] }, agent.id),

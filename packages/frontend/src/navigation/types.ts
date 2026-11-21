@@ -9,6 +9,7 @@ export type ModalOwner =
 	| "create-epic"
 	| "create-repo"
 	| "board-settings"
+	| "task-agent"
 	| "model-provider"
 	| "remove-provider"
 	| "archive"

@@ -13,10 +13,15 @@ test("agent inputs trim names and models and reject unknown fields", () => {
 		{ name: "Planner", models: [] },
 		{ name: "Planner", models: [{ providerId, model: " " }] },
 		{ name: "Planner", models: [{ providerId, model: "model" }], retired: false },
+		...[0, 1.5, "2", Number.MAX_SAFE_INTEGER + 1].map((maxConcurrentTickets) => ({
+			name: "Planner",
+			models: [{ providerId, model: "model" }],
+			maxConcurrentTickets,
+		})),
 	])
 		expect(taskAgentInputSchema.safeParse(input).success).toBe(false);
 	expect(
-		taskAgentSchema.safeParse({ id: providerId, name: "Migrated", models: [{ providerId }], retired: false })
-			.success,
-	).toBe(true);
+		taskAgentSchema.parse({ id: providerId, name: "Migrated", models: [{ providerId }], retired: false })
+			.maxConcurrentTickets,
+	).toBe(1);
 });

@@ -362,7 +362,14 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	await migrateTaskAgents(database, randomUUID);
 	await migrateProviderReservations(database);
 	await agentStore.recover();
-	const taskAgents = new TaskAgentService(taskAgentStore, providers, access, randomUUID, serializeAdmission);
+	const taskAgents = new TaskAgentService(
+		taskAgentStore,
+		providers,
+		access,
+		randomUUID,
+		serializeAdmission,
+		wakeScheduler,
+	);
 	collector.start();
 	const workflow = new TicketWorkflowService(
 		workflowStore,
@@ -377,6 +384,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		new AbandonedWorkspaceCleanup(terminals, workspaces),
 		providers,
 		taskAgents,
+		() => usage.quotaExhausted(),
 	);
 	const tickets = new TicketService(ticketStore, store, access, () => new Date(), workflow, epicStore);
 	const epics = new EpicService(epicStore, ticketStore, access, () => new Date());

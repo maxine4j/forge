@@ -162,6 +162,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		private readonly abandonmentCleanup?: IAbandonedWorkspaceCleanup,
 		private readonly providers?: IModelProviderService,
 		private readonly taskAgents?: ITaskAgents,
+		private readonly openAIQuotaExhausted: () => Promise<boolean> = async () => false,
 	) {}
 	async update(actor: Actor, id: string, input: CreateTicket): Promise<void> {
 		this.access.assertOwner(actor);
@@ -401,12 +402,14 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		this.access.assertOwner(actor);
 		await this.processResets(actor);
 		return this.serialize(async () => {
+			let quota: Promise<boolean> | undefined;
+			const quotaExhausted = () => (quota ??= this.openAIQuotaExhausted());
 			for (const job of await this.store.list()) {
 				let ticket = await this.tickets.get(job.ticketId);
 				if (!ticket || ticket.archivedAt || ticket.status === "backlog" || ticket.status === "done") continue;
 				if (job.state === "queued") {
 					if (!this.canDispatch(ticket)) continue;
-					const admitted = await this.admit(actor, ticket, job);
+					const admitted = await this.admit(actor, ticket, job, quotaExhausted);
 					if (!admitted) continue;
 					ticket = admitted;
 				}
@@ -557,7 +560,12 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			throw new TicketError("ticket-conflict", { cause });
 		}
 	}
-	private async admit(actor: Actor, ticket: Ticket, job: TicketWorkflowRecord): Promise<Ticket | undefined> {
+	private async admit(
+		actor: Actor,
+		ticket: Ticket,
+		job: TicketWorkflowRecord,
+		quotaExhausted: () => Promise<boolean>,
+	): Promise<Ticket | undefined> {
 		const next = { ...job, providerSelectionError: undefined };
 		if (!next.reservation && !next.plannerId && !next.implementerId) {
 			next.phase = this.initialPhase(ticket, next);
@@ -569,8 +577,11 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			const id = ticketAgentId(ticket.executionSettings, phase);
 			let usable = false;
 			for await (const option of this.taskAgents.candidates(actor, id, ticket.executionSettings?.permissions)) {
+				if (!usable && id && (await this.store.countAgentReservations(id)) >= option.agentLimit)
+					return undefined;
 				usable = true;
 				if ((await this.store.countReservations(option.providerId)) >= option.limit) continue;
+				if (option.snapshot.configuration.kind === "openai" && (await quotaExhausted())) continue;
 				next[snapshotKey] = option.snapshot;
 				next.reservation = option.providerId;
 				break;

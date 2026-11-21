@@ -4,6 +4,7 @@ import { taskAgentSchema, taskAgentsSchema, type TaskAgent, type TaskAgentModel 
 import { useEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { useDialogDismissal, useModalDialog, useModalDraft, useModalNavigation } from "../navigation/controller.tsx";
 
 export function TaskAgents({
 	api,
@@ -16,6 +17,8 @@ export function TaskAgents({
 }) {
 	const [catalog, setCatalog] = useState<{ agents: TaskAgent[]; providers: ModelProvider[] }>();
 	const [retiring, setRetiring] = useState<TaskAgent>();
+	const navigation = useModalNavigation();
+	const editing = navigation.modal?.owner === "task-agent" ? navigation.modal.selection : undefined;
 	const [attempt, retry] = useState(0);
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -95,19 +98,45 @@ export function TaskAgents({
 			)}
 			{catalog.agents.map((agent) => (
 				<article className='account-card model-provider-card' key={agent.id}>
-					<AgentEditor
-						api={api}
-						providers={catalog.providers}
-						agent={agent}
-						saved={saved}
-						cancel={() => {}}
-					/>
+					<div className='task-agent-summary'>
+						<h3>{agent.name}</h3>
+						<ol aria-label={`${agent.name} model priority`}>
+							{agent.models.map((model, index) => (
+								<li key={index}>
+									{catalog.providers.find(({ id }) => id === model.providerId)?.name
+										?? "Unavailable provider"}
+									{" · "}
+									{model.model ?? "Codex default"}
+									{model.reasoningEffort && ` · ${model.reasoningEffort}`}
+								</li>
+							))}
+						</ol>
+						<button
+							type='button'
+							className='task-agent-edit'
+							aria-label={`Edit ${agent.name}`}
+							disabled={!!retiring}
+							onClick={() => navigation.open("task-agent", undefined, agent.id)}
+						>
+							Edit
+						</button>
+					</div>
+					{editing === agent.id && (
+						<AgentEditor
+							api={api}
+							providers={catalog.providers}
+							agent={agent}
+							saved={saved}
+							cancel={navigation.dismiss}
+							complete={navigation.dismiss}
+						/>
+					)}
 					{retiring?.id !== agent.id && (
 						<>
 							<button
 								type='button'
 								className='ticket-archive-action task-agent-archive'
-								disabled={!!retiring}
+								disabled={!!retiring || editing === agent.id}
 								aria-label={`Archive ${agent.name}`}
 								title='Archive agent'
 								onClick={() => setRetiring(agent)}
@@ -159,15 +188,18 @@ function AgentEditor({
 	agent,
 	saved,
 	cancel,
+	complete,
 }: {
 	api: IWorkspaceApi;
 	providers: ModelProvider[];
 	agent?: TaskAgent;
 	saved: (agent: TaskAgent) => void;
 	cancel: () => void;
+	complete?: () => void;
 }) {
 	const [name, setName] = useState(agent?.name ?? "");
 	const [nameDraft, setNameDraft] = useState<string>();
+	const [maxConcurrentTickets, setMaxConcurrentTickets] = useState(String(agent?.maxConcurrentTickets ?? 1));
 	const [rows, setRows] = useState(() =>
 		(agent?.models ?? [{ providerId: "" }]).map((value, key) => ({ key, value })),
 	);
@@ -176,6 +208,15 @@ function AgentEditor({
 	const [busy, setBusy] = useState(false);
 	const dragged = useRef<{ key: number; original: typeof rows; dropped: boolean } | undefined>(undefined);
 	const [draggedKey, setDraggedKey] = useState<number>();
+	const dialog = useRef<HTMLDialogElement>(null);
+	const dismissal = useDialogDismissal(busy);
+	const dirty =
+		!!agent
+		&& ((nameDraft !== undefined && nameDraft !== agent.name)
+			|| maxConcurrentTickets !== String(agent.maxConcurrentTickets)
+			|| JSON.stringify(rows.map(({ value }) => value)) !== JSON.stringify(agent.models));
+	const release = useModalDraft(dirty, busy, undefined, "task-agent");
+	useModalDialog(dialog, !!agent);
 	const saveName = async () => {
 		if (!agent || nameDraft === undefined || !nameDraft.trim()) return;
 		setBusy(true);
@@ -184,6 +225,7 @@ function AgentEditor({
 			const result = await api.read(`task-agents/${agent.id}`, taskAgentSchema, "PATCH", {
 				name: nameDraft,
 				models: agent.models,
+				maxConcurrentTickets: agent.maxConcurrentTickets,
 			});
 			setName(result.name);
 			setNameDraft(undefined);
@@ -210,16 +252,22 @@ function AgentEditor({
 					agent ? `task-agents/${agent.id}` : "task-agents",
 					taskAgentSchema,
 					agent ? "PATCH" : "POST",
-					{ name, models: rows.map(({ value }) => value) },
+					{
+						name,
+						models: rows.map(({ value }) => value),
+						maxConcurrentTickets: Number(maxConcurrentTickets),
+					},
 				),
 			);
+			release();
+			complete?.();
 		} catch (error) {
 			setError(error instanceof Error ? error.message : "Could not save agent.");
 		} finally {
 			setBusy(false);
 		}
 	};
-	return (
+	const form = (
 		<form
 			className={agent ? "task-agent-editor task-agent-inline" : "account-card task-agent-editor"}
 			onSubmit={(event) => {
@@ -289,6 +337,18 @@ function AgentEditor({
 						/>
 					</label>
 				)}
+				<label>
+					Max concurrent tickets
+					<input
+						type='number'
+						min={1}
+						max={Number.MAX_SAFE_INTEGER}
+						step={1}
+						required
+						value={maxConcurrentTickets}
+						onChange={(event) => setMaxConcurrentTickets(event.target.value)}
+					/>
+				</label>
 				{rows.map(({ key, value }, index) => (
 					<div
 						key={key}
@@ -405,8 +465,7 @@ function AgentEditor({
 					<button
 						type='button'
 						onClick={() => {
-							if (agent) setRows(agent.models.map((value, key) => ({ key, value })));
-							else cancel();
+							cancel();
 						}}
 					>
 						Cancel
@@ -426,6 +485,18 @@ function AgentEditor({
 				</div>
 			</fieldset>
 		</form>
+	);
+	return agent ? (
+		<dialog
+			ref={dialog}
+			className='ticket-dialog task-agent-dialog'
+			aria-label={`Edit ${agent.name}`}
+			{...dismissal}
+		>
+			{form}
+		</dialog>
+	) : (
+		form
 	);
 }
 

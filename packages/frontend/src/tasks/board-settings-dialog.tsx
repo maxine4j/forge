@@ -107,7 +107,7 @@ export const BoardSettingsDialog = ({
 							? "Ticket dispatch is stopped."
 							: settings.dispatch === "paused"
 								? "Ready tickets are paused. In-progress tickets can continue."
-								: "Ready tickets start when provider capacity opens."}
+								: "Ready tickets start when agent and provider capacity opens."}
 					</p>
 					<div className='board-settings-actions'>
 						<button type='button' disabled={busy} onClick={() => void toggleDispatch()}>

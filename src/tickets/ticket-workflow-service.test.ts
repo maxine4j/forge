@@ -16,7 +16,7 @@ import type { TicketWorkflowRecord } from "./types.ts";
 
 const actor = { username: "owner" };
 
-function namedFixture(dispatchMode?: Parameters<typeof fixture>[0]) {
+function namedFixture(dispatchMode?: Parameters<typeof fixture>[0], quotaExhausted?: () => Promise<boolean>) {
 	const planner: ModelProvider = {
 		id: "123e4567-e89b-42d3-a456-426614174001",
 		name: "OpenAI",
@@ -79,14 +79,17 @@ function namedFixture(dispatchMode?: Parameters<typeof fixture>[0]) {
 		new AccessService({ owner: "owner", origin: "https://forge.example" }),
 		() => `123e4567-e89b-42d3-a456-${String(recordsById.size + 100).padStart(12, "0")}`,
 	);
-	const f = fixture(dispatchMode, providers, taskAgents);
+	const f = fixture(dispatchMode, providers, taskAgents, quotaExhausted);
 	f.agents.catalogOptions.mockImplementation(async (_actor, id) => {
 		const call = f.agents.createTicketThread.mock.calls.find((call) => call[2] === f.views.get(id!)?.thread.title);
 		const snapshot = call?.[5];
 		return providers.snapshotOptions(actor, snapshot?.configuration ?? { kind: "openai" });
 	});
-	const addAgent = (name: string, models: TaskAgentModel[] = [{ providerId: planner.id, model: "test-model" }]) =>
-		taskAgents.save(actor, { name, models });
+	const addAgent = (
+		name: string,
+		models: TaskAgentModel[] = [{ providerId: planner.id, model: "test-model" }],
+		maxConcurrentTickets?: number,
+	) => taskAgents.save(actor, { name, models, maxConcurrentTickets });
 	const ready = async (ticket: Ticket, planner: TaskAgent, implementer = planner, skipPlanning = false) => {
 		await f.service.settings(actor, ticket, {
 			plannerAgentId: planner.id,
@@ -301,6 +304,7 @@ const fixture = (
 	dispatchMode: () => "running" | "paused" | "stopped" = () => "running",
 	providers?: IModelProviderService,
 	taskAgents?: ITaskAgents,
+	quotaExhausted?: () => Promise<boolean>,
 ) => {
 	const jobs = new Map<string, TicketWorkflowRecord>();
 	const tickets = new Map<string, Ticket>();
@@ -357,6 +361,16 @@ const fixture = (
 		boardSummary: async () => [...jobs.values()],
 		countReservations: async (id: string) =>
 			[...jobs.values()].filter((job) => job.reservation === id && !tickets.get(job.ticketId)?.archivedAt).length,
+		countAgentReservations: async (id: string) =>
+			[...jobs.values()].filter((job) => {
+				const ticket = tickets.get(job.ticketId);
+				if (!job.reservation || !ticket || ticket.archivedAt) return false;
+				const implementing =
+					job.state === "resetting" ? !!job.abandonment?.implementerId : job.phase !== "planning";
+				return implementing
+					? job.implementationProviderSnapshot?.agentId === id
+					: job.planningProviderSnapshot?.agentId === id;
+			}).length,
 		get: async (id: string) => structuredClone(jobs.get(id)),
 		list: async () => [...jobs.values()].map((job) => structuredClone(job)),
 		pendingCleanup: async () =>
@@ -405,6 +419,7 @@ const fixture = (
 			{ cleanupAbandoned },
 			providers,
 			taskAgents,
+			quotaExhausted,
 		);
 	const service = makeService();
 	const create = (id = "TASK-1") => {
@@ -1092,7 +1107,7 @@ test.each(["setup-failed", "failed", "uncertain", "idle"] as const)(
 
 test("admission precedes setup, failures hold capacity, and limit changes preserve board order", async () => {
 	const f = namedFixture();
-	const agent = await f.addAgent("Planner");
+	const agent = await f.addAgent("Planner", undefined, 3);
 	const tickets = [f.create(), f.create("TASK-2"), f.create("TASK-3")];
 	for (const ticket of tickets) await f.ready(ticket, agent);
 	f.agents.createTicketThread.mockImplementationOnce(async () => {
@@ -1125,6 +1140,51 @@ test("admission precedes setup, failures hold capacity, and limit changes preser
 	await f.service.recover(actor, tickets[1]!.id);
 	await f.service.tick(actor);
 	expect(tickets[2]!.status).toBe("in-progress");
+});
+
+test("agent slots are shared across providers and phases and survive a scheduler restart", async () => {
+	const f = namedFixture();
+	const local = { providerId: f.implementer.id, model: "local" };
+	const agent = await f.addAgent("Shared", [{ providerId: f.planner.id, model: "test-model" }, local]);
+	const other = await f.addAgent("Other", [local]);
+	const first = f.create();
+	const second = f.create("TASK-2");
+	const third = f.create("TASK-3");
+	await f.ready(first, agent, agent, true);
+	await f.ready(second, agent);
+	await f.ready(third, other);
+	await f.service.tick(actor);
+	expect(f.jobs.get(first.id)).toMatchObject({ state: "running", reservation: f.planner.id });
+	expect(f.jobs.get(second.id)).toMatchObject({ state: "queued" });
+	expect(f.jobs.get(third.id)).toMatchObject({ state: "running", reservation: f.implementer.id });
+	const restarted = f.makeService();
+	await restarted.tick(actor);
+	expect(second.status).toBe("todo");
+	await f.taskAgents.save(actor, { name: agent.name, models: agent.models, maxConcurrentTickets: 2 }, agent.id);
+	await f.providers.update(actor, f.implementer.id, { maxConcurrentAgents: 2 });
+	await restarted.tick(actor);
+	expect(f.jobs.get(second.id)).toMatchObject({ state: "running", reservation: f.implementer.id });
+	await f.taskAgents.save(actor, { name: agent.name, models: agent.models, maxConcurrentTickets: 1 }, agent.id);
+	expect(f.jobs.get(first.id)?.state).toBe("running");
+	expect(f.jobs.get(second.id)?.state).toBe("running");
+});
+
+test("exhausted OpenAI quota routes new work to the next provider and queues cloud-only work", async () => {
+	const quota = vi.fn(async () => true);
+	const f = namedFixture(undefined, quota);
+	const cloud = await f.addAgent("Cloud");
+	const fallback = await f.addAgent("Fallback", [...cloud.models, { providerId: f.implementer.id, model: "local" }]);
+	const waiting = f.create();
+	const routed = f.create("TASK-2");
+	await f.ready(waiting, cloud);
+	await f.ready(routed, fallback);
+	await f.service.tick(actor);
+	expect(quota).toHaveBeenCalledTimes(1);
+	expect(f.jobs.get(waiting.id)).toMatchObject({ state: "queued" });
+	expect(f.jobs.get(routed.id)).toMatchObject({ state: "running", reservation: f.implementer.id });
+	quota.mockResolvedValue(false);
+	await f.service.tick(actor);
+	expect(f.jobs.get(waiting.id)).toMatchObject({ state: "running", reservation: f.planner.id });
 });
 
 test.each(["todo", "backlog"] as const)("return to %s holds capacity until cancellation settles", async (status) => {

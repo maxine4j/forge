@@ -236,16 +236,19 @@ or pending merge must settle before archiving.
 | Stage                 | Behavior                                                                                                                                                                                                                                                                                               |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Backlog               | The owner writes the scope.                                                                                                                                                                                                                                                                            |
-| Ready for development | The scheduler checks Ready tickets in board order and can skip tickets waiting for provider capacity. It persists In progress and the phase reservation together before workspace setup. An unusable assignment leaves the ticket in Ready with Retry setup.                                           |
+| Ready for development | The scheduler checks Ready tickets in board order and can skip tickets waiting for Agent or provider capacity. It persists In progress and the phase reservation together before workspace setup. An unusable assignment leaves the ticket in Ready with Retry setup.                                  |
 | In progress           | A fresh Codex planner proposes a plan. The card shows an orange notification dot and Chat renders the Markdown plan and accepts feedback. Approve plan applies to the latest completed revision and queues a fresh implementer in the same worktree. Completed implementation goes to the merge queue. |
 | Done                  | Forge moves the ticket here after confirming its commit is in local main.                                                                                                                                                                                                                              |
 
 The serialized scheduler walks the assigned Agent's models in order. It skips
-retired providers, unresolved models and selections incompatible with ticket
-permissions. If usable providers are full, it leaves the phase queued and scans
-the rest of the board. If no model is usable, the phase exposes Retry setup.
-The scheduler persists the chosen model, routing and one reservation against
-the [provider's limit](foundation.md#model-providers) before worktree or thread setup.
+retired providers, unresolved models, selections incompatible with ticket
+permissions, full providers and OpenAI while its reported Codex quota is
+exhausted. A phase waits in the queue while its Agent is full or every usable
+provider is busy. The scheduler continues scanning the board. If no model is
+usable, the phase exposes Retry setup. Before worktree or thread setup, the
+scheduler persists the chosen model and routing with a reservation that counts
+against both the [Agent's limit](#named-agents) and the
+[provider's limit](foundation.md#model-providers).
 
 Planning holds its reservation through tool calls, permission and input waits,
 plan review and feedback, and releases it on approval. Implementation acquires
@@ -557,17 +560,23 @@ See [migration and recovery](development.md#named-provider-upgrades) and
 ### Named agents
 
 The fourth Tasks tab at `/tasks?view=agents` lists reusable configurations.
-Each Agent has a stable UUID, name and a nonempty, ordered `models` list. Each
+Each Agent has a stable UUID, name, `maxConcurrentTickets` and a nonempty, ordered `models` list. Each
 entry selects a [provider](foundation.md#model-providers), model and optional
-thinking level. Edit the name in place and add, remove or reorder entries in each
-Agent card. Model changes are saved together or discarded with Cancel; drag handles
-and their arrow keys reorder the fallback list.
+thinking level. Each Agent card shows its ordered model priority list; Edit opens
+its controls in a dialog. Edit the name in place and use the editor to set
+**Max concurrent tickets** and add, remove or reorder models. Save applies
+the limit and model changes together. Drag handles and their arrow keys reorder
+the fallback list. The limit is a positive integer and defaults to 1 for new
+and existing Agents. Planner and Implementer assignments share it across all
+providers. Lowering it preserves current reservations and holds new work until
+the count falls below the limit.
 Choose an OpenAI model and supported thinking
 level from the provider catalog, or leave thinking at the model default. Enter an
 Ollama tag as text. Saving an Ollama Agent makes no network request to the provider.
 
 Owner-only `GET/POST /api/task-agents` lists all records and creates a record
-with status 201. `PATCH /api/task-agents/:id` replaces the full configuration.
+with status 201. `PATCH /api/task-agents/:id` replaces the name and model list
+and preserves the saved limit when the request omits it.
 `DELETE /api/task-agents/:id` retires a record with status 204. Mutations use the
 existing exact-origin checks. Names are trimmed, 1–120 characters and unique among
 active Agents ignoring case. Model identifiers are trimmed and 1–256 characters.

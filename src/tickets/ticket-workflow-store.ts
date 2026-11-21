@@ -17,6 +17,7 @@ export interface ITicketWorkflowStore {
 	pendingCleanup(): Promise<TicketWorkflowRecord[]>;
 	boardSummary(): Promise<TicketWorkflowRecord[]>;
 	countReservations(providerId: string): Promise<number>;
+	countAgentReservations(agentId: string): Promise<number>;
 	/** Persists job intent and any board move in one transaction. */
 	save(record: TicketWorkflowRecord, move?: MoveTicket): Promise<void>;
 }
@@ -65,6 +66,22 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 			`SELECT COUNT(*) AS count FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId
 			 WHERE t.archivedAt IS NULL AND json_extract(w.record,'$.reservation')=?`,
 			[providerId],
+		);
+		return z.object({ count: z.int().nonnegative() }).parse(rows.at(0)).count;
+	}
+	async countAgentReservations(agentId: string): Promise<number> {
+		// Reset records use the destination phase, so identify the abandoned implementation by its thread or pin.
+		const rows = await this.database.all(
+			`SELECT COUNT(*) AS count FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId
+			 WHERE t.archivedAt IS NULL AND json_extract(w.record,'$.reservation') IS NOT NULL
+			 AND CASE WHEN CASE WHEN w.record->>'$.state'='resetting'
+			   THEN w.record->>'$.abandonment.implementerId' IS NOT NULL
+			     OR w.record->>'$.implementationProviderSnapshot.providerId'=w.record->>'$.reservation'
+			   ELSE w.record->>'$.phase'<>'planning' END
+			   THEN COALESCE(w.record->>'$.implementationProviderSnapshot.agentId', t.executionSettings->>'$.implementerAgentId')
+			   ELSE COALESCE(w.record->>'$.planningProviderSnapshot.agentId', t.executionSettings->>'$.plannerAgentId')
+			 END=?`,
+			[agentId],
 		);
 		return z.object({ count: z.int().nonnegative() }).parse(rows.at(0)).count;
 	}

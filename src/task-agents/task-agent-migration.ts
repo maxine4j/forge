@@ -58,6 +58,7 @@ export async function migrateTaskAgents(database: IDatabase, id: () => string): 
 			name,
 			models: [{ providerId: provider.id, model, reasoningEffort: effort }],
 			retired: false,
+			maxConcurrentTickets: 1,
 		};
 		agents.set(key, agent);
 		names.add(name.toLowerCase());

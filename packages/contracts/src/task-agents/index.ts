@@ -14,11 +14,13 @@ const modelSelection = z.strictObject({
 export const taskAgentInputSchema = z.strictObject({
 	name,
 	models: z.array(modelSelection).min(1),
+	maxConcurrentTickets: z.int().positive().optional(),
 });
 
 export const taskAgentSchema = taskAgentInputSchema.extend({
 	id: z.uuid(),
 	retired: z.boolean(),
+	maxConcurrentTickets: z.int().positive().default(1),
 });
 
 export const taskAgentsSchema = z.array(taskAgentSchema);

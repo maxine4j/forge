@@ -69,6 +69,7 @@ test("records cumulative changes once per turn and preserves the dispatch phase"
 });
 
 test("returns reported quota windows and omits private account data", async () => {
+	let now = 0;
 	const request = vi.fn(async () => ({
 		accountId: "private",
 		rateLimits: {},
@@ -84,7 +85,7 @@ test("returns reported quota windows and omits private account data", async () =
 	const client = new CodexUsageClient(
 		{ initialize: async () => {}, request, subscribe: () => () => {} },
 		async () => {},
-		() => new Date(0),
+		() => new Date(now),
 		async () => ({ localCurrency: "AUD", monthlyPlanLocal: 30 }),
 		async () => {},
 	);
@@ -104,6 +105,24 @@ test("returns reported quota windows and omits private account data", async () =
 		],
 	});
 	expect(request).toHaveBeenCalledWith("account/rateLimits/read", null);
+	expect(await client.quotaExhausted()).toBe(false);
+	request.mockResolvedValueOnce({
+		accountId: "private",
+		rateLimits: {},
+		rateLimitsByLimitId: {
+			codex: {
+				limitName: "Display name",
+				planType: "plus",
+				primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: 1794355200 },
+				secondary: { usedPercent: 75.125, windowDurationMins: 10080 },
+			},
+		},
+	});
+	expect(await client.quotaExhausted()).toBe(true);
+	expect(await client.quotaExhausted()).toBe(true);
+	expect(request).toHaveBeenCalledTimes(3);
+	now = 30_000;
+	expect(await client.quotaExhausted()).toBe(false);
 	request.mockRejectedValueOnce(new Error("signed out"));
 	expect(await client.limits()).toBeUndefined();
 });

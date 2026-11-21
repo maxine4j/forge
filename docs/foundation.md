@@ -212,7 +212,10 @@ Provider create, edit and read contracts include `maxConcurrentAgents`, a
 positive integer that defaults to 1 for new and upgraded providers. Config
 exposes it as **Max concurrent agents**. Lowering it preserves current
 [ticket phase reservations](tickets.md#agentic-ticket-board) and blocks new
-admissions until the count falls below the limit.
+admissions until the count falls below the limit. The provider limit is shared
+across all named Agents. New phases skip full providers and skip OpenAI while
+its account reports an exhausted Codex quota window. Existing phases keep
+their pinned provider.
 
 OpenAI cards reuse the [account APIs](#account-login-and-application-access) and device-code flow.
 Model and thinking selections live in [Tasks → Agents](tickets.md#named-agents).

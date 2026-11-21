@@ -2349,6 +2349,29 @@ small {
 .task-agent-catalog > .model-provider-card {
 	position: relative;
 }
+.task-agent-summary h3 {
+	margin: 0 130px 12px 0;
+	font-size: 20px;
+	line-height: 1.35;
+}
+.task-agent-summary ol {
+	margin: 0;
+	padding-left: 24px;
+}
+.task-agent-summary li + li {
+	margin-top: 6px;
+}
+.task-agent-dialog {
+	width: min(960px, calc(100vw - 24px));
+}
+.task-agent-dialog .task-agent-model-row label {
+	margin: 0;
+}
+.task-agent-edit {
+	position: absolute;
+	top: 16px;
+	right: 60px;
+}
 .task-agent-catalog .task-agent-archive {
 	position: absolute;
 	top: 16px;

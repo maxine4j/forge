@@ -28,7 +28,7 @@ export interface ITaskAgents {
 		actor: Actor,
 		id: string | undefined,
 		permissions?: AgentSettings["permissions"],
-	): AsyncIterable<{ snapshot: ModelProviderSnapshot; providerId: string; limit: number }>;
+	): AsyncIterable<{ snapshot: ModelProviderSnapshot; providerId: string; limit: number; agentLimit: number }>;
 }
 
 export class TaskAgentService implements ITaskAgents {
@@ -38,6 +38,7 @@ export class TaskAgentService implements ITaskAgents {
 		private readonly access: IAccessService,
 		private readonly id: () => string,
 		private readonly serialize: <T>(operation: () => Promise<T>) => Promise<T> = (operation) => operation(),
+		private readonly wake: () => void = () => {},
 	) {}
 	list(actor: Actor): Promise<TaskAgent[]> {
 		this.access.assertOwner(actor);
@@ -61,8 +62,14 @@ export class TaskAgentService implements ITaskAgents {
 					continue;
 				await this.validateModel(actor, entry);
 			}
-			const agent = { ...parsed.data, id: id ?? this.id(), retired: false };
+			const agent = {
+				...parsed.data,
+				id: id ?? this.id(),
+				retired: false,
+				maxConcurrentTickets: parsed.data.maxConcurrentTickets ?? previous?.maxConcurrentTickets ?? 1,
+			};
 			await this.write(agent);
+			this.wake();
 			return agent;
 		});
 	}
@@ -112,6 +119,7 @@ export class TaskAgentService implements ITaskAgents {
 				yield {
 					providerId: provider.id,
 					limit: provider.maxConcurrentAgents,
+					agentLimit: agent.maxConcurrentTickets,
 					snapshot: {
 						providerId: provider.id,
 						providerName: provider.name,

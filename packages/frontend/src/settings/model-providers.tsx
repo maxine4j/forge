@@ -272,9 +272,13 @@ function ProviderEditor({
 								step={1}
 								required
 								value={maxConcurrentAgents}
+								aria-describedby='provider-concurrency-help'
 								onChange={(e) => setMaxConcurrentAgents(e.target.value)}
 							/>
 						</label>
+						<small id='provider-concurrency-help'>
+							Shared across all Tasks board agents using this provider.
+						</small>
 						{kind === "ollama" && (
 							<>
 								<label>

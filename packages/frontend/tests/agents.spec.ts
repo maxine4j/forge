@@ -48,7 +48,7 @@ test("Tasks Agents adds, reorders, removes models and hides retired agents", asy
 			if (path.startsWith("/api/task-agents") && (method === "POST" || method === "PATCH")) {
 				const input = route.request().postDataJSON() as TaskAgentInput;
 				writes.push(input);
-				agent = { ...input, id, retired: false };
+				agent = { ...input, id, retired: false, maxConcurrentTickets: input.maxConcurrentTickets ?? 1 };
 				return route.fulfill({ json: agent, status: method === "POST" ? 201 : 200 });
 			}
 			if (path === `/api/task-agents/${id}` && method === "DELETE" && agent) {
@@ -72,15 +72,23 @@ test("Tasks Agents adds, reorders, removes models and hides retired agents", asy
 	await expect(page.getByRole("option", { name: "Model default (medium)" })).toHaveCount(1);
 	await page.getByRole("combobox", { name: "Thinking level", exact: true }).selectOption("high");
 	await page.getByRole("button", { name: "Save agent" }).click();
-	await expect(page.getByRole("button", { name: "Edit title: Reviewer" })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "Reviewer", exact: true })).toBeVisible();
+	await expect(page.getByText("OpenAI · codex · high")).toBeVisible();
+	await expect(page.getByRole("button", { name: "Save agent" })).toHaveCount(0);
+	await expect(page.getByRole("button", { name: "Add model" })).toHaveCount(0);
+	await page.getByRole("button", { name: "Edit Reviewer" }).click();
+	await expect(page.getByRole("dialog", { name: "Edit Reviewer" })).toBeVisible();
 	const primary = { providerId: openai, model: "codex", reasoningEffort: "high" };
-	expect(writes).toEqual([{ name: "Reviewer", models: [primary] }]);
+	expect(writes).toEqual([{ name: "Reviewer", models: [primary], maxConcurrentTickets: 1 }]);
+	await expect(page.getByLabel("Max concurrent tickets")).toHaveValue("1");
+	await page.getByLabel("Max concurrent tickets").fill("2");
 
 	await page.getByRole("button", { name: "Edit title: Reviewer" }).click();
 	await page.getByLabel("Title", { exact: true }).fill("Reviewer updated");
 	await page.getByRole("button", { name: "Save title" }).click();
 	await expect(page.getByRole("button", { name: "Edit title: Reviewer updated" })).toBeVisible();
-	expect(writes.at(-1)).toEqual({ name: "Reviewer updated", models: [primary] });
+	expect(writes.at(-1)).toEqual({ name: "Reviewer updated", models: [primary], maxConcurrentTickets: 1 });
+	await expect(page.getByLabel("Max concurrent tickets")).toHaveValue("2");
 	await expect(page.getByRole("button", { name: "Remove model 1" })).toBeDisabled();
 	await expect(page.getByRole("button", { name: /Move model/ })).toHaveCount(0);
 	await page.getByRole("button", { name: "Add model", exact: true }).click();
@@ -129,13 +137,22 @@ test("Tasks Agents adds, reorders, removes models and hides retired agents", asy
 	await page.mouse.up();
 	await page.getByRole("button", { name: "Drag model 2" }).press("ArrowUp");
 	await page.getByRole("button", { name: "Save agent" }).click();
-	await expect(page.getByLabel("Model tag")).toHaveValue("local:latest");
+	await expect(page.getByText("Local · local:latest")).toBeVisible();
+	await expect(page.getByRole("button", { name: "Save agent" })).toHaveCount(0);
 	const local = { providerId: ollama, model: "local:latest" };
-	expect(writes.at(-1)).toEqual({ name: "Reviewer updated", models: [local, primary] });
+	expect(writes.at(-1)).toEqual({ name: "Reviewer updated", models: [local, primary], maxConcurrentTickets: 2 });
+	await page.getByRole("button", { name: "Edit Reviewer updated" }).click();
+	await expect(page.getByLabel("Max concurrent tickets")).toHaveValue("2");
+	await page.getByLabel("Max concurrent tickets").fill("3");
+	await page.getByRole("button", { name: "Cancel", exact: true }).click();
+	await page.getByRole("button", { name: "Discard changes" }).click();
+	await expect(page.getByText("OpenAI · codex · high")).toBeVisible();
+	await page.getByRole("button", { name: "Edit Reviewer updated" }).click();
+	await expect(page.getByLabel("Max concurrent tickets")).toHaveValue("2");
 	await page.getByRole("button", { name: "Remove model 2" }).click();
 	await page.getByRole("button", { name: "Save agent" }).click();
 	await expect(page.getByRole("button", { name: "Archive Reviewer updated" })).toBeEnabled();
-	expect(writes.at(-1)).toEqual({ name: "Reviewer updated", models: [local] });
+	expect(writes.at(-1)).toEqual({ name: "Reviewer updated", models: [local], maxConcurrentTickets: 2 });
 	expect([...new Set(modelReads)]).toEqual([`/api/model-providers/${openai}/model-options`]);
 
 	await page.getByRole("button", { name: "Archive Reviewer updated" }).click();

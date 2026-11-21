@@ -2475,7 +2475,7 @@ test("board settings control pause, stop and resume without a board-wide limit",
 	await modal.getByRole("button", { name: "Close board settings" }).click();
 	await expect(settings).toBeFocused();
 	await settings.click();
-	await expect(modal.getByText("Ready tickets start when provider capacity opens.")).toBeVisible();
+	await expect(modal.getByText("Ready tickets start when agent and provider capacity opens.")).toBeVisible();
 });
 
 test("Docker statistics, cleanup progress and retries stay independent of agent controls", async ({ page }) => {
