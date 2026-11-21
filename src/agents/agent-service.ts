@@ -60,7 +60,6 @@ export interface ITicketAgents {
 	/** Reconciles and interrupts only these managed threads. True requires confirmed settlement. */
 	stopTicket(actor: Actor, ids: string[]): Promise<boolean>;
 	catalogOptions(actor: Actor, threadId?: string): Promise<AgentOptions>;
-	providerSnapshot?(actor: Actor, id: string): Promise<ModelProviderSnapshot>;
 	assertRepositoryReady(actor: Actor, id: string): Promise<void>;
 	steer(actor: Actor, id: string, turnId: string, text: string): Promise<AgentView>;
 	createTicketThread(
@@ -77,7 +76,7 @@ export interface ITicketAgents {
 		text: string,
 		ticket: TicketUsageScope,
 		allowed?: () => boolean,
-		settings?: AgentSettings,
+		settings?: AgentSettings & { pinned?: true },
 	): Promise<AgentView>;
 	plan(actor: Actor, id: string, turnId: string): Promise<string | undefined>;
 	get(actor: Actor, id: string): Promise<AgentView>;
@@ -195,9 +194,10 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		text: string,
 		ticket?: TicketUsageScope,
 		allowed?: () => boolean,
-		settings?: AgentSettings,
+		settings?: AgentSettings & { pinned?: true },
 	): Promise<AgentView> {
-		return this.execute(actor, id, text, settings ?? {}, ticket, allowed);
+		const { pinned, ...selection } = settings ?? {};
+		return this.execute(actor, id, text, selection, ticket, allowed, pinned);
 	}
 	async steer(actor: Actor, id: string, turnId: string, text: string): Promise<AgentView> {
 		this.authorize(actor);
@@ -236,6 +236,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		settings?: AgentSettings,
 		ticket?: TicketUsageScope,
 		allowed?: () => boolean,
+		pinned = false,
 	): Promise<AgentView> {
 		this.authorize(actor);
 		const input = z.object({ text: z.string().trim().min(1).max(64000) }).safeParse({ text });
@@ -311,7 +312,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 					input.data.text,
 					{
 						model: resolved.model?.id,
-						reasoningEffort: resolved.reasoningEffort,
+						reasoningEffort: pinned ? selection.data.reasoningEffort : resolved.reasoningEffort,
 						permissions: selection.data.permissions,
 					},
 					ticket
@@ -560,18 +561,6 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			if (managed) this.ticketThreads.add(id);
 			return this.view(record);
 		});
-	}
-	async providerSnapshot(actor: Actor, id: string): Promise<ModelProviderSnapshot> {
-		this.authorize(actor);
-		const record = await this.require(id);
-		return {
-			providerId: record.providerId,
-			providerName:
-				record.providerName ?? (record.provider?.kind === "ollama" ? "Ollama (legacy)" : "OpenAI (legacy)"),
-			configuration: record.provider ?? { kind: "openai" },
-			model: record.model,
-			reasoningEffort: record.reasoningEffort,
-		};
 	}
 	private authorize(actor: Actor): void {
 		this.access.assertOwner(actor);

@@ -28,6 +28,7 @@ export async function migrateModelProviders(database: IDatabase, id: () => strin
 			name: "OpenAI",
 			kind: "openai",
 			retired: false,
+			maxConcurrentAgents: 1,
 			defaultAgentModel: legacy.defaultAgentModel,
 			defaultAgentReasoningEffort: legacy.defaultAgentReasoningEffort,
 		});
@@ -43,6 +44,7 @@ export async function migrateModelProviders(database: IDatabase, id: () => strin
 			name: "Ollama",
 			kind: "ollama",
 			retired: false,
+			maxConcurrentAgents: 1,
 			endpoint: ollama.data.endpoint,
 			model: ollama.data.model,
 		});

@@ -258,11 +258,14 @@ try {
 	const agentResponse = request("/api/task-agents", {
 		method: "POST",
 		headers,
-		body: JSON.stringify({ name: "Persistent agent", providerId: provider.id, model: "local:latest" }),
+		body: JSON.stringify({
+			name: "Persistent agent",
+			models: [{ providerId: provider.id, model: "local:latest" }],
+		}),
 	});
 	assert.equal(agentResponse.status, 201);
 	const agent = JSON.parse(agentResponse.body);
-	assert.equal(agent.providerId, provider.id);
+	assert.equal(agent.models[0].providerId, provider.id);
 	assert.equal(agent.retired, false);
 	assert.equal(
 		docker(

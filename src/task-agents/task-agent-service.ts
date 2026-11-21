@@ -1,7 +1,13 @@
-import { resolveAgentSettings } from "@forge/contracts/agents";
+import { resolveAgentSettings, type AgentSettings } from "@forge/contracts/agents";
 import { inferenceProviderSchema } from "@forge/contracts/settings";
-import { taskAgentInputSchema, type TaskAgent } from "@forge/contracts/task-agents";
+import {
+	agentAvatarColours,
+	taskAgentInputSchema,
+	type TaskAgent,
+	type TaskAgentModel,
+} from "@forge/contracts/task-agents";
 
+import { AgentError } from "../agents/errors.ts";
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
 import { ModelProviderError } from "../model-providers/errors.ts";
@@ -20,9 +26,16 @@ export class TaskAgentError extends Error {
 
 export interface ITaskAgents {
 	list(actor: Actor): Promise<TaskAgent[]>;
+	/** Includes retired agents so existing assignments keep their display identity. */
+	get(actor: Actor, id: string): Promise<TaskAgent | undefined>;
 	save(actor: Actor, input: unknown, id?: string): Promise<TaskAgent>;
 	retire(actor: Actor, id: string): Promise<void>;
-	resolve(actor: Actor, id?: string): Promise<ModelProviderSnapshot>;
+	resolve(actor: Actor, id?: string, permissions?: AgentSettings["permissions"]): Promise<ModelProviderSnapshot>;
+	candidates(
+		actor: Actor,
+		id: string | undefined,
+		permissions?: AgentSettings["permissions"],
+	): AsyncIterable<{ snapshot: ModelProviderSnapshot; providerId: string; limit: number; agentLimit: number | null }>;
 }
 
 export class TaskAgentService implements ITaskAgents {
@@ -31,17 +44,59 @@ export class TaskAgentService implements ITaskAgents {
 		private readonly providers: IModelProviderService,
 		private readonly access: IAccessService,
 		private readonly id: () => string,
+		private readonly randomIndex: (length: number) => number,
+		private readonly serialize: <T>(operation: () => Promise<T>) => Promise<T> = (operation) => operation(),
+		private readonly wake: () => void = () => {},
 	) {}
 	list(actor: Actor): Promise<TaskAgent[]> {
 		this.access.assertOwner(actor);
 		return this.store.list();
 	}
+	get(actor: Actor, id: string): Promise<TaskAgent | undefined> {
+		this.access.assertOwner(actor);
+		return this.store.get(id);
+	}
 	async save(actor: Actor, input: unknown, id?: string): Promise<TaskAgent> {
 		this.access.assertOwner(actor);
-		if (id !== undefined) await this.active(id);
 		const parsed = taskAgentInputSchema.safeParse(input);
 		if (!parsed.success) throw new TaskAgentError(400, "invalid-task-agent");
-		const settings = parsed.data;
+		return this.serialize(async () => {
+			const previous = id === undefined ? undefined : await this.active(id);
+			for (const entry of parsed.data.models) {
+				if (
+					previous?.models.some(
+						(saved) =>
+							saved.providerId === entry.providerId
+							&& saved.model === entry.model
+							&& saved.reasoningEffort === entry.reasoningEffort,
+					)
+				)
+					continue;
+				await this.validateModel(actor, entry);
+			}
+			const agent = {
+				...parsed.data,
+				id: id ?? this.id(),
+				retired: false,
+				avatarColour:
+					parsed.data.avatarColour
+					?? previous?.avatarColour
+					?? agentAvatarColours.at(this.randomIndex(agentAvatarColours.length))!,
+				avatarSymbol: parsed.data.avatarSymbol ?? previous?.avatarSymbol ?? "Robot",
+				maxConcurrentTickets:
+					parsed.data.maxConcurrentTickets !== undefined
+						? parsed.data.maxConcurrentTickets
+						: previous
+							? previous.maxConcurrentTickets
+							: 1,
+			};
+			await this.write(agent);
+			this.wake();
+			return agent;
+		});
+	}
+	private async validateModel(actor: Actor, settings: TaskAgentModel): Promise<void> {
+		if (!settings.model) throw new TaskAgentError(400, "invalid-task-agent");
 		try {
 			const provider = await this.providers.require(actor, settings.providerId);
 			const valid =
@@ -54,34 +109,52 @@ export class TaskAgentService implements ITaskAgents {
 			if (error instanceof ModelProviderError) throw new TaskAgentError(400, "invalid-task-agent");
 			throw error;
 		}
-		const agent = { ...settings, id: id ?? this.id(), retired: false };
-		await this.write(agent);
-		return agent;
 	}
 	async retire(actor: Actor, id: string): Promise<void> {
 		this.access.assertOwner(actor);
-		if (!(await this.store.retire(id))) {
-			if (await this.store.get(id)) throw new TaskAgentError(409, "task-agent-retired");
-			throw new TaskAgentError(404, "task-agent-not-found");
-		}
+		await this.serialize(async () => {
+			if (!(await this.store.retire(id))) {
+				if (await this.store.get(id)) throw new TaskAgentError(409, "task-agent-retired");
+				throw new TaskAgentError(404, "task-agent-not-found");
+			}
+		});
 	}
-	async resolve(actor: Actor, id?: string): Promise<ModelProviderSnapshot> {
+	async resolve(
+		actor: Actor,
+		id?: string,
+		permissions?: AgentSettings["permissions"],
+	): Promise<ModelProviderSnapshot> {
+		for await (const { snapshot } of this.candidates(actor, id, permissions)) return snapshot;
+		throw new ModelProviderError("provider-required");
+	}
+	async *candidates(actor: Actor, id: string | undefined, permissions?: AgentSettings["permissions"]) {
 		this.access.assertOwner(actor);
 		const agent = id ? await this.store.get(id) : undefined;
-		if (!agent || agent.retired) throw new ModelProviderError("provider-required");
-		const provider = await this.providers.require(actor, agent.providerId);
-		const configuration = inferenceConfiguration(provider, agent.model);
-		const options = await this.providers.snapshotOptions(actor, configuration);
-		const resolved = resolveAgentSettings(options, agent);
-		if (!resolved.supported) throw new ModelProviderError("invalid-provider");
-		return {
-			providerId: provider.id,
-			providerName: provider.name,
-			configuration,
-			agentId: agent.id,
-			model: resolved.model?.id,
-			reasoningEffort: resolved.reasoningEffort,
-		};
+		if (!agent || agent.retired) return;
+		for (const entry of agent.models) {
+			try {
+				const provider = await this.providers.require(actor, entry.providerId);
+				const configuration = inferenceConfiguration(provider, entry.model);
+				const options = await this.providers.snapshotOptions(actor, configuration);
+				const resolved = resolveAgentSettings(options, { ...entry, permissions });
+				if (!resolved.supported || !resolved.model) continue;
+				yield {
+					providerId: provider.id,
+					limit: provider.maxConcurrentAgents,
+					agentLimit: agent.maxConcurrentTickets,
+					snapshot: {
+						providerId: provider.id,
+						providerName: provider.name,
+						configuration,
+						agentId: agent.id,
+						model: resolved.model.id,
+						reasoningEffort: resolved.reasoningEffort,
+					},
+				};
+			} catch (cause) {
+				if (!(cause instanceof ModelProviderError || cause instanceof AgentError)) throw cause;
+			}
+		}
 	}
 	private async active(id: string): Promise<TaskAgent> {
 		const agent = await this.store.get(id);

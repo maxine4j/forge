@@ -71,6 +71,7 @@ export class CodexUsageClient implements ICodexUsageTracker, ICodexLimits {
 	private readonly unsubscribe: () => void;
 	private writes = Promise.resolve();
 	private limitRequest?: Promise<AccountLimits | undefined>;
+	private quotaRetryAt = 0;
 
 	constructor(
 		private readonly connection: ICodexUsageConnection,
@@ -103,6 +104,22 @@ export class CodexUsageClient implements ICodexUsageTracker, ICodexLimits {
 		return (this.limitRequest ??= this.readLimits().finally(() => {
 			this.limitRequest = undefined;
 		}));
+	}
+
+	async quotaExhausted(): Promise<boolean> {
+		const now = this.now().getTime();
+		if (now < this.quotaRetryAt) return true;
+		const limits = await this.limits();
+		const exhausted = limits?.windows.find(
+			(window) =>
+				window.bucketId === "codex"
+				&& window.usedPercent >= 100
+				&& (!window.resetsAt || Date.parse(window.resetsAt) > now),
+		);
+		if (!exhausted) return false;
+		// The board scheduler polls frequently. Recheck an exhausted account at most every 30 seconds or at reset.
+		this.quotaRetryAt = Math.min(now + 30_000, exhausted.resetsAt ? Date.parse(exhausted.resetsAt) : Infinity);
+		return true;
 	}
 
 	private async readLimits(): Promise<AccountLimits | undefined> {

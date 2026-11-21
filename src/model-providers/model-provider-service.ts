@@ -32,6 +32,8 @@ export class ModelProviderService implements IModelProviderService {
 		private readonly access: IAccessService,
 		private readonly id: () => string,
 		private readonly catalog: (provider: InferenceProvider) => Promise<AgentOptions>,
+		private readonly serialize: <T>(operation: () => Promise<T>) => Promise<T> = (operation) => operation(),
+		private readonly wake: () => void = () => {},
 	) {}
 	async list(actor: Actor): Promise<ModelProvider[]> {
 		this.access.assertOwner(actor);
@@ -59,18 +61,25 @@ export class ModelProviderService implements IModelProviderService {
 		return this.save(this.id(), input);
 	}
 	async update(actor: Actor, id: string, input: unknown): Promise<ModelProvider> {
-		const previous = await this.require(actor, id);
-		const patch = modelProviderPatchSchema.safeParse(input);
-		if (!patch.success) throw new ModelProviderError("invalid-provider");
-		const merged = { ...previous, ...patch.data };
-		if (merged.comparisonModel === null) merged.comparisonModel = undefined;
-		if (merged.kind !== previous.kind) throw new ModelProviderError("invalid-provider");
-		const { id: _id, retired: _retired, ...configuration } = merged;
-		return this.save(id, configuration);
+		return this.serialize(async () => {
+			const previous = await this.require(actor, id);
+			const patch = modelProviderPatchSchema.safeParse(input);
+			if (!patch.success) throw new ModelProviderError("invalid-provider");
+			const merged = { ...previous, ...patch.data };
+			if (merged.comparisonModel === null) merged.comparisonModel = undefined;
+			if (merged.kind !== previous.kind) throw new ModelProviderError("invalid-provider");
+			const { id: _id, retired: _retired, ...configuration } = merged;
+			const value = await this.save(id, configuration);
+			this.wake();
+			return value;
+		});
 	}
 	async remove(actor: Actor, id: string): Promise<void> {
-		const value = await this.require(actor, id);
-		await this.store.save({ ...value, retired: true });
+		await this.serialize(async () => {
+			const value = await this.require(actor, id);
+			await this.store.save({ ...value, retired: true });
+			this.wake();
+		});
 	}
 	private async save(id: string, input: unknown): Promise<ModelProvider> {
 		const parsed = modelProviderInputSchema.safeParse(input);

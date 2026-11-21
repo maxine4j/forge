@@ -1,5 +1,8 @@
 import type { Ticket } from "@forge/contracts/tickets";
-export const TicketIndicator = ({ ticket }: { ticket: Ticket }) =>
+
+import { AgentAvatar } from "./agent-avatar.tsx";
+
+const TicketActivity = ({ ticket }: { ticket: Ticket }) =>
 	ticket.resetting ? (
 		<span
 			className='ticket-agent-status is-working'
@@ -37,3 +40,17 @@ export const TicketIndicator = ({ ticket }: { ticket: Ticket }) =>
 			)}
 		</svg>
 	) : null;
+
+export const TicketIndicator = ({ ticket }: { ticket: Ticket }) =>
+	ticket.assignee ? (
+		<span className='ticket-indicators'>
+			<TicketActivity ticket={ticket} />
+			<AgentAvatar
+				colour={ticket.assignee.avatarColour}
+				symbol={ticket.assignee.avatarSymbol}
+				name={ticket.assignee.name}
+			/>
+		</span>
+	) : (
+		<TicketActivity ticket={ticket} />
+	);

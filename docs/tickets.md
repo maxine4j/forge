@@ -179,8 +179,8 @@ Workspace allocation records its ID in workflow intent before preparation, so se
 failure before agent creation can still be abandoned and cleaned safely.
 Cancellation is requested promptly for only these ticket agents. Reconciliation
 never replays ambiguous dispatches and retains execution tracking until confirmed
-settlement. Returning to Ready or Backlog frees ticket capacity immediately, even
-while cancellation is unresolved. The returned ticket cannot restart until its
+settlement. Returning to Ready or Backlog releases the provider reservation once
+execution is confirmed settled. The returned ticket cannot restart until its
 reset completes. Workflow dispatch, feedback, approval and merge reject pending resets;
 late results cannot advance the abandoned execution.
 
@@ -236,22 +236,27 @@ or pending merge must settle before archiving.
 | Stage                 | Behavior                                                                                                                                                                                                                                                                                               |
 | --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Backlog               | The owner writes the scope.                                                                                                                                                                                                                                                                            |
-| Ready for development | The scheduler admits the top ticket when ticket capacity opens. It persists In progress before allocating a new ticket worktree from latest local main. Setup failures retain that status and capacity.                                                                                                |
+| Ready for development | The scheduler checks Ready tickets in board order and can skip tickets waiting for Agent or provider capacity. It persists In progress and the phase reservation together before workspace setup. An unusable assignment leaves the ticket in Ready with Retry setup.                                  |
 | In progress           | A fresh Codex planner proposes a plan. The card shows an orange notification dot and Chat renders the Markdown plan and accepts feedback. Approve plan applies to the latest completed revision and queues a fresh implementer in the same worktree. Completed implementation goes to the merge queue. |
 | Done                  | Forge moves the ticket here after confirming its commit is in local main.                                                                                                                                                                                                                              |
 
-The scheduler counts persisted, non-archived In progress tickets, independently
-of active jobs or agent execution states. Each ticket occupies one slot throughout
-planning, awaiting plan approval, implementation, failure recovery and merging.
-Idle, failed and uncertain workflows retain their slots across restart. Under
-workflow serialization, occupancy is rechecked before each Ready admission in
-board order. Subsequent turns, feedback, retries, rebases and merges need no
-additional capacity check.
+The serialized scheduler walks the assigned Agent's models in order. It skips
+retired providers, unresolved models, selections incompatible with ticket
+permissions, full providers and OpenAI while its reported Codex quota is
+exhausted. A phase waits in the queue while its Agent is full or every usable
+provider is busy. The scheduler continues scanning the board. If no model is
+usable, the phase exposes Retry setup. Before worktree or thread setup, the
+scheduler persists the chosen model and routing with a reservation that counts
+against both the [Agent's limit](#named-agents) and the
+[provider's limit](foundation.md#model-providers).
 
-Done, archive and moves back to Ready or Backlog free capacity. These changes,
-Ready moves and limit increases wake scheduling. [Standalone chats](agents.md#interactive-agents)
-have no board concurrency limit and remain available while ticket dispatch is
-paused or stopped. Board and conversation selection have no effect on execution.
+Planning holds its reservation through tool calls, permission and input waits,
+plan review and feedback, and releases it on approval. Implementation acquires
+its own reservation and retains it through verification, merge retries and
+rebases until Done. Pause, stop, retryable failures and restarts preserve
+reservations. Archiving or abandoning work releases capacity once execution
+settles. [Standalone chats](agents.md#interactive-agents) run independently of
+ticket reservations and dispatch controls.
 
 **Stop all agents** durably stops ticket dispatch until explicitly resumed and
 remains available while dispatch is stopped. `POST /api/board/settings/stop`
@@ -264,7 +269,7 @@ resetting Codex. Submissions cannot race the stop operation.
 
 [Startup and stop reconciliation](agents.md#interactive-agents) persist settled
 execution and invalidate approvals before ending execution tracking. This does
-not free the ticket slot; see [execution recovery](agents.md#interactive-agents).
+not release the phase reservation. See [execution recovery](agents.md#interactive-agents).
 Stopped or missing
 ticket executions become failed/recoverable even without a saved turn ID.
 Plans, conversation history, branches and worktrees are retained. Interrupted
@@ -279,9 +284,11 @@ planner or implementer in `waiting` for input or permission requires attention.
 Completed plans ready for review, failures, uncertain execution and unreadable
 agent state also require attention. These cards have an orange background and
 border, including on hover, and a solid orange dot labelled and titled “Action required”.
-Attention takes precedence over the queued clock and working spinner: only one
-indicator appears. Idle and merge-queued workflows without attention have no
+Attention takes precedence over the queued clock and working spinner.
+Idle and merge-queued workflows without attention have no
 status icon; Backlog and Done never show one. Git merge activity is excluded.
+Ticket list and detail responses include an optional `assignee` with the
+[Agent's name and avatar colour](#named-agents).
 Notifications remain until the underlying condition resolves; opening or closing
 a ticket does not dismiss them. Approving a plan clears its review notification
 once implementation is queued. Resolved cards return to normal styling and show
@@ -292,12 +299,8 @@ ticket-open button. The attention dot is 8px, centered in that same slot. Status
 icons have labels and tooltips “Agent queued” and “Agent working”. The working icon
 remains static when reduced motion is requested.
 
-Board settings apply across the global board and persist in SQLite. The concurrency
-control is **Max concurrent tickets**, ranges from 1 to 10 and defaults to 3.
-The API and SQLite retain the `maxAgents` field and existing numeric settings;
-no migration is needed. Lowering it leaves existing tickets running and admits
-another Ready ticket only when occupancy falls below the new limit. Pause new
-tickets keeps Ready
+Board dispatch settings apply across the global board and persist in SQLite.
+Pause new tickets keeps Ready
 tickets queued while in-progress tickets continue. The Board toolbar and Board
 settings dialog share the pause and resume control state. Stop all agents requests
 interruption of active ticket turns in parallel, reports any
@@ -352,7 +355,7 @@ Browser contracts are exported from `@forge/contracts/tickets`:
 | `POST /api/tickets/:id/messages`                                    | Queue feedback, or steer implementation/rebase with `{text,expectedTurnId}`.                                                                               |
 | `POST /api/tickets/:id/merge`                                       | Queue a legacy review candidate or retry a failed merge.                                                                                                   |
 | `POST /api/tickets/:id/reconcile`                                   | Reconcile uncertain execution, retry failed setup, or retry pending abandonment cleanup.                                                                   |
-| `GET/PATCH /api/board/settings`                                     | Read settings or update `maxAgents` and ticket dispatch (`running` or `paused`).                                                                           |
+| `GET/PATCH /api/board/settings`                                     | Read dispatch state or set it to `running` or `paused`.                                                                                                    |
 | `POST /api/board/settings/stop`                                     | Stop ticket dispatch and return interruption request and failure counts.                                                                                   |
 
 Ticket conversations reuse the private agent read, resume, interrupt, reply and
@@ -545,8 +548,9 @@ implementation using a saved plan or the current ticket scope. Accept recommenda
 applies to each dispatched turn, including feedback and rebase. Manual plan approval
 and ticket-wide tool permissions still apply.
 
-Drafts may omit assignees. Moving to Todo requires an active Implementer and, when
-planning is needed, an active Planner. Dispatch rechecks the relevant selection.
+Drafts may omit assignees. Moving to Ready requires an Implementer assignment
+and, when planning is needed, a Planner assignment. Dispatch checks current
+model and provider availability for the assigned Agent.
 Before external setup, each phase persists its own pin with the assignee ID,
 provider identity, inference configuration, model and resolved thinking level.
 Feedback and rebase reuse the corresponding pin after agent edits, provider edits,
@@ -558,20 +562,38 @@ See [migration and recovery](development.md#named-provider-upgrades) and
 ### Named agents
 
 The fourth Tasks tab at `/tasks?view=agents` lists reusable configurations.
-Each Agent has a stable UUID, name, [provider](foundation.md#model-providers),
-model and optional thinking level. Choose an OpenAI model and supported thinking
+Each Agent has a stable UUID, name, `maxConcurrentTickets` and a nonempty, ordered `models` list. Each
+entry selects a [provider](foundation.md#model-providers), model and optional
+thinking level. Each Agent card shows its ordered model priority list; Edit opens
+its controls in a dialog. Edit the name in place and use the editor to set
+avatar colour and symbol, **Max concurrent tickets**, and add, remove or reorder models.
+The symbol follows the agent onto tickets; existing agents default to Robot. Save applies
+the limit and model changes together. Drag handles and their arrow keys reorder
+the fallback list. The limit is a positive integer or unlimited and defaults to 1 for new
+and existing Agents. The slider offers 1–5, 10 and unlimited; existing custom limits remain selectable.
+Unlimited removes the Agent limit while provider limits still apply. Planner and Implementer assignments share it across all
+providers. Lowering it preserves current reservations and holds new work until
+the count falls below the limit.
+Choose an OpenAI model and supported thinking
 level from the provider catalog, or leave thinking at the model default. Enter an
 Ollama tag as text. Saving an Ollama Agent makes no network request to the provider.
 
 Owner-only `GET/POST /api/task-agents` lists all records and creates a record
-with status 201. `PATCH /api/task-agents/:id` replaces the full configuration.
+with status 201. `PATCH /api/task-agents/:id` replaces the name and model list
+and preserves the saved limit when the request omits it.
 `DELETE /api/task-agents/:id` retires a record with status 204. Mutations use the
 existing exact-origin checks. Names are trimmed, 1–120 characters and unique among
 active Agents ignoring case. Model identifiers are trimmed and 1–256 characters.
+New Agents receive a random robot avatar colour from twelve presets. Edit an
+Agent to choose another preset. A PATCH that omits `avatarColour` keeps the saved
+colour. Agents saved before this field was added receive a stable preset based on
+their ID. Board cards and backlog rows show
+the avatar beside the activity indicator. The avatar follows the active phase
+when planning and implementation have different assignees.
 An invalid configuration returns 400, an unknown record returns 404, and an active
 name collision or modification of a retired record returns 409. Retirement retains
-the record and excludes it from new selections. Retiring a provider leaves its
-Agents visible for reassignment to an active provider or retirement.
+the name on existing assignments and hides the Agent from the Agents tab and
+new selections. Retiring a provider leaves its Agents visible for editing.
 
 ### Ticket cost
 

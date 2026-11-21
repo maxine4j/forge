@@ -1,14 +1,32 @@
 import { agentOptionsSchema, type AgentOptions } from "@forge/contracts/agents";
 import { modelProvidersSchema, type ModelProvider } from "@forge/contracts/model-providers";
-import { taskAgentSchema, taskAgentsSchema, type TaskAgent } from "@forge/contracts/task-agents";
-import { useEffect, useState } from "react";
+import {
+	agentAvatarColours,
+	agentAvatarSymbols,
+	taskAgentSchema,
+	taskAgentsSchema,
+	type TaskAgent,
+	type TaskAgentModel,
+} from "@forge/contracts/task-agents";
+import { useEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { useDialogDismissal, useModalDialog, useModalDraft, useModalNavigation } from "../navigation/controller.tsx";
+import { AgentAvatar } from "./agent-avatar.tsx";
 
-export function TaskAgents({ api }: { api: IWorkspaceApi }) {
+export function TaskAgents({
+	api,
+	creating,
+	closeCreate,
+}: {
+	api: IWorkspaceApi;
+	creating: boolean;
+	closeCreate: () => void;
+}) {
 	const [catalog, setCatalog] = useState<{ agents: TaskAgent[]; providers: ModelProvider[] }>();
-	const [editing, setEditing] = useState<TaskAgent | "new">();
 	const [retiring, setRetiring] = useState<TaskAgent>();
+	const navigation = useModalNavigation();
+	const editing = navigation.modal?.owner === "task-agent" ? navigation.modal.selection : undefined;
 	const [attempt, retry] = useState(0);
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
@@ -19,7 +37,7 @@ export function TaskAgents({ api }: { api: IWorkspaceApi }) {
 			api.read("model-providers", modelProvidersSchema),
 		]).then(
 			([agents, providers]) => {
-				if (active) setCatalog({ agents, providers });
+				if (active) setCatalog({ agents: agents.filter((agent) => !agent.retired), providers });
 			},
 			() => {
 				if (active) setError("Could not load agents and model providers.");
@@ -45,10 +63,12 @@ export function TaskAgents({ api }: { api: IWorkspaceApi }) {
 		setError("");
 		try {
 			await api.read(`task-agents/${agent.id}`, { parse: () => undefined }, "DELETE");
-			saved({ ...agent, retired: true });
+			setCatalog(
+				(current) => current && { ...current, agents: current.agents.filter(({ id }) => id !== agent.id) },
+			);
 			setRetiring(undefined);
 		} catch (error) {
-			setError(error instanceof Error ? error.message : "Could not retire agent.");
+			setError(error instanceof Error ? error.message : "Could not archive agent.");
 		} finally {
 			setBusy(false);
 		}
@@ -71,78 +91,104 @@ export function TaskAgents({ api }: { api: IWorkspaceApi }) {
 		);
 	return (
 		<section className='forge-settings task-agent-catalog' aria-label='Agents'>
-			<button
-				className='primary'
-				disabled={!!editing || !!retiring || !catalog.providers.length}
-				onClick={() => setEditing("new")}
-			>
-				Add agent
-			</button>
 			{!catalog.providers.length && <p>Add a model provider in Config to configure agents.</p>}
 			{!catalog.agents.length && <p>No agents configured.</p>}
-			{editing && (
+			{creating && (
 				<AgentEditor
 					api={api}
 					providers={catalog.providers}
-					agent={editing === "new" ? undefined : editing}
-					cancel={() => setEditing(undefined)}
+					cancel={closeCreate}
 					saved={(agent) => {
 						saved(agent);
-						setEditing(undefined);
+						closeCreate();
 					}}
 				/>
 			)}
-			{catalog.agents.map((agent) => {
-				const provider = catalog.providers.find((entry) => entry.id === agent.providerId);
-				return (
-					<article className='account-card model-provider-card' key={agent.id}>
+			{catalog.agents.map((agent) => (
+				<article className='account-card model-provider-card' key={agent.id}>
+					<div className='task-agent-summary'>
 						<h3>
+							<AgentAvatar colour={agent.avatarColour} symbol={agent.avatarSymbol} />
 							{agent.name}
-							{agent.retired ? " (retired)" : ""}
 						</h3>
-						<p>
-							{provider?.name ?? "Unavailable provider"} · {agent.model ?? "Codex default"}
-							{agent.reasoningEffort && ` · ${agent.reasoningEffort}`}
-						</p>
-						{!agent.retired && retiring?.id !== agent.id && (
-							<>
-								<button
-									disabled={!!editing || !!retiring}
-									aria-label={`Edit ${agent.name}`}
-									onClick={() => setEditing(agent)}
+						<ol aria-label={`${agent.name} model priority`}>
+							{agent.models.map((model, index) => (
+								<li key={index}>
+									{catalog.providers.find(({ id }) => id === model.providerId)?.name
+										?? "Unavailable provider"}
+									{" · "}
+									{model.model ?? "Codex default"}
+									{model.reasoningEffort && ` · ${model.reasoningEffort}`}
+								</li>
+							))}
+						</ol>
+						<button
+							type='button'
+							className='task-agent-edit'
+							aria-label={`Edit ${agent.name}`}
+							disabled={!!retiring}
+							onClick={() => navigation.open("task-agent", undefined, agent.id)}
+						>
+							Edit
+						</button>
+					</div>
+					{editing === agent.id && (
+						<AgentEditor
+							api={api}
+							providers={catalog.providers}
+							agent={agent}
+							saved={saved}
+							cancel={navigation.dismiss}
+							complete={navigation.dismiss}
+						/>
+					)}
+					{retiring?.id !== agent.id && (
+						<>
+							<button
+								type='button'
+								className='ticket-archive-action task-agent-archive'
+								disabled={!!retiring || editing === agent.id}
+								aria-label={`Archive ${agent.name}`}
+								title='Archive agent'
+								onClick={() => setRetiring(agent)}
+							>
+								<svg
+									width='16'
+									height='16'
+									viewBox='0 0 24 24'
+									fill='none'
+									stroke='currentColor'
+									strokeWidth='2'
+									strokeLinecap='round'
+									strokeLinejoin='round'
+									aria-hidden='true'
 								>
-									Edit
-								</button>
-								<button
-									disabled={!!editing || !!retiring}
-									aria-label={`Retire ${agent.name}`}
-									onClick={() => setRetiring(agent)}
-								>
-									Retire
-								</button>
-							</>
-						)}
-						{retiring?.id === agent.id && (
-							<>
-								<p>Retire {agent.name}?</p>
-								{error && <p role='alert'>{error}</p>}
-								<button disabled={busy} onClick={() => void retire(agent)}>
-									Retire agent
-								</button>
-								<button
-									disabled={busy}
-									onClick={() => {
-										setRetiring(undefined);
-										setError("");
-									}}
-								>
-									Cancel
-								</button>
-							</>
-						)}
-					</article>
-				);
-			})}
+									<rect x='3' y='3' width='18' height='5' rx='1' />
+									<path d='M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8m-9 4h4' />
+								</svg>
+							</button>
+						</>
+					)}
+					{retiring?.id === agent.id && (
+						<>
+							<p>Archive {agent.name}?</p>
+							{error && <p role='alert'>{error}</p>}
+							<button disabled={busy} onClick={() => void retire(agent)}>
+								Archive agent
+							</button>
+							<button
+								disabled={busy}
+								onClick={() => {
+									setRetiring(undefined);
+									setError("");
+								}}
+							>
+								Cancel
+							</button>
+						</>
+					)}
+				</article>
+			))}
 		</section>
 	);
 }
@@ -153,23 +199,399 @@ function AgentEditor({
 	agent,
 	saved,
 	cancel,
+	complete,
 }: {
 	api: IWorkspaceApi;
 	providers: ModelProvider[];
 	agent?: TaskAgent;
 	saved: (agent: TaskAgent) => void;
 	cancel: () => void;
+	complete?: () => void;
 }) {
 	const [name, setName] = useState(agent?.name ?? "");
-	const [providerId, setProviderId] = useState(agent?.providerId ?? "");
-	const [model, setModel] = useState(agent?.model ?? "");
-	const [effort, setEffort] = useState(agent?.reasoningEffort ?? "");
+	const [nameDraft, setNameDraft] = useState<string>();
+	const [avatarColour, setAvatarColour] = useState(agent?.avatarColour);
+	const [avatarSymbol, setAvatarSymbol] = useState(agent?.avatarSymbol);
+	const [maxConcurrentTickets, setMaxConcurrentTickets] = useState<number | null>(
+		agent ? agent.maxConcurrentTickets : 1,
+	);
+	const concurrencyStops: (number | null)[] = [
+		...new Set([1, 2, 3, 4, 5, 10, ...(agent?.maxConcurrentTickets != null ? [agent.maxConcurrentTickets] : [])]),
+	].sort((a, b) => a - b);
+	concurrencyStops.push(null);
+	const [rows, setRows] = useState(() =>
+		(agent?.models ?? [{ providerId: "" }]).map((value, key) => ({ key, value })),
+	);
+	const nextKey = useRef(rows.length);
+	const [error, setError] = useState("");
+	const [busy, setBusy] = useState(false);
+	const dragged = useRef<{ key: number; original: typeof rows; dropped: boolean } | undefined>(undefined);
+	const [draggedKey, setDraggedKey] = useState<number>();
+	const dialog = useRef<HTMLDialogElement>(null);
+	const dismissal = useDialogDismissal(busy);
+	const dirty =
+		!!agent
+		&& ((nameDraft !== undefined && nameDraft !== agent.name)
+			|| avatarColour !== agent.avatarColour
+			|| avatarSymbol !== agent.avatarSymbol
+			|| maxConcurrentTickets !== agent.maxConcurrentTickets
+			|| JSON.stringify(rows.map(({ value }) => value)) !== JSON.stringify(agent.models));
+	const release = useModalDraft(dirty, busy, undefined, "task-agent");
+	useModalDialog(dialog, !!agent);
+	const saveName = async () => {
+		if (!agent || nameDraft === undefined || !nameDraft.trim()) return;
+		setBusy(true);
+		setError("");
+		try {
+			const result = await api.read(`task-agents/${agent.id}`, taskAgentSchema, "PATCH", {
+				name: nameDraft,
+				models: agent.models,
+				maxConcurrentTickets: agent.maxConcurrentTickets,
+			});
+			setName(result.name);
+			setNameDraft(undefined);
+			saved(result);
+		} catch (error) {
+			setError(error instanceof Error ? error.message : "Could not save agent.");
+		} finally {
+			setBusy(false);
+		}
+	};
+	const move = (index: number, direction: number) => {
+		const target = index + direction;
+		if (target < 0 || target >= rows.length) return;
+		setRows((current) =>
+			current.map((row, i) => (i === index ? current.at(target)! : i === target ? current.at(index)! : row)),
+		);
+	};
+	const save = async () => {
+		setBusy(true);
+		setError("");
+		try {
+			saved(
+				await api.read(
+					agent ? `task-agents/${agent.id}` : "task-agents",
+					taskAgentSchema,
+					agent ? "PATCH" : "POST",
+					{
+						name,
+						models: rows.map(({ value }) => value),
+						maxConcurrentTickets,
+						avatarColour,
+						avatarSymbol,
+					},
+				),
+			);
+			release();
+			complete?.();
+		} catch (error) {
+			setError(error instanceof Error ? error.message : "Could not save agent.");
+		} finally {
+			setBusy(false);
+		}
+	};
+	const form = (
+		<form
+			className={agent ? "task-agent-editor task-agent-inline" : "account-card task-agent-editor"}
+			onSubmit={(event) => {
+				event.preventDefault();
+				void save();
+			}}
+		>
+			{agent ? (
+				nameDraft === undefined ? (
+					<h3 className='ticket-title'>
+						<button
+							type='button'
+							aria-label={`Edit title: ${name}`}
+							title='Edit title'
+							onClick={() => setNameDraft(name)}
+						>
+							{name}
+						</button>
+					</h3>
+				) : (
+					<div className='ticket-title-editor'>
+						<input
+							autoFocus
+							aria-label='Title'
+							maxLength={120}
+							value={nameDraft}
+							onChange={(event) => setNameDraft(event.target.value)}
+							onKeyDown={(event) => {
+								if (event.key === "Escape") setNameDraft(undefined);
+								if (event.key === "Enter") {
+									event.preventDefault();
+									void saveName();
+								}
+							}}
+						/>
+						<button
+							type='button'
+							aria-label='Save title'
+							disabled={busy || !nameDraft.trim()}
+							onClick={() => void saveName()}
+						>
+							✓
+						</button>
+						<button
+							type='button'
+							aria-label='Discard title changes'
+							disabled={busy}
+							onClick={() => setNameDraft(undefined)}
+						>
+							✕
+						</button>
+					</div>
+				)
+			) : (
+				<h3>Create agent</h3>
+			)}
+			<fieldset disabled={busy}>
+				<div className='task-agent-details'>
+					{agent && (
+						<fieldset className='agent-colour-picker'>
+							<legend>Avatar colour</legend>
+							{agentAvatarColours.map((colour) => (
+								<label key={colour} title={colour}>
+									<input
+										className='visually-hidden'
+										type='radio'
+										name='avatar-colour'
+										aria-label={colour}
+										checked={avatarColour === colour}
+										onChange={() => setAvatarColour(colour)}
+									/>
+									<AgentAvatar colour={colour} symbol={avatarSymbol} />
+								</label>
+							))}
+						</fieldset>
+					)}
+					{agent && (
+						<fieldset className='agent-symbol-picker'>
+							<legend>Avatar symbol</legend>
+							{agentAvatarSymbols.map((symbol) => (
+								<label key={symbol} title={symbol}>
+									<input
+										className='visually-hidden'
+										type='radio'
+										name='avatar-symbol'
+										aria-label={symbol}
+										checked={avatarSymbol === symbol}
+										onChange={() => setAvatarSymbol(symbol)}
+									/>
+									<AgentAvatar colour={avatarColour ?? agent.avatarColour} symbol={symbol} />
+								</label>
+							))}
+						</fieldset>
+					)}
+					{!agent && (
+						<label>
+							Name
+							<input
+								autoFocus
+								required
+								maxLength={120}
+								value={name}
+								onChange={(event) => setName(event.target.value)}
+							/>
+						</label>
+					)}
+					<label className='task-agent-concurrency'>
+						<span>Max concurrent tickets</span>
+						<input
+							type='range'
+							min={0}
+							max={concurrencyStops.length - 1}
+							step={1}
+							aria-label='Max concurrent tickets'
+							aria-valuetext={String(maxConcurrentTickets ?? "Unlimited")}
+							value={concurrencyStops.indexOf(maxConcurrentTickets)}
+							onChange={(event) =>
+								setMaxConcurrentTickets(concurrencyStops[Number(event.target.value)] ?? null)
+							}
+						/>
+						<span className='task-agent-concurrency-stops' aria-hidden='true'>
+							{concurrencyStops.map((stop, index) => (
+								<span
+									key={stop ?? "unlimited"}
+									style={{ left: `${(index / (concurrencyStops.length - 1)) * 100}%` }}
+								>
+									{stop ?? "Unlimited"}
+								</span>
+							))}
+						</span>
+					</label>
+				</div>
+				<h4 className='task-agent-model-heading'>Model priority</h4>
+				{rows.map(({ key, value }, index) => (
+					<div
+						key={key}
+						className={`task-agent-model-row${draggedKey === key ? " is-dragging" : ""}`}
+						role='group'
+						aria-label={`Model ${index + 1}`}
+						onDragOver={(event) => {
+							if (!dragged.current) return;
+							event.preventDefault();
+							const draggedRow = dragged.current.key;
+							if (draggedRow === key) return;
+							setRows((current) => {
+								const from = current.findIndex((row) => row.key === draggedRow);
+								const target = current.findIndex((row) => row.key === key);
+								if (from < 0 || target < 0 || from === target) return current;
+								const next = [...current];
+								const [row] = next.splice(from, 1);
+								if (row) next.splice(target, 0, row);
+								return next;
+							});
+						}}
+						onDrop={(event) => {
+							event.preventDefault();
+							if (dragged.current) dragged.current.dropped = true;
+						}}
+					>
+						<button
+							type='button'
+							draggable
+							aria-label={`Drag model ${index + 1}`}
+							title='Drag or use arrow keys to reorder'
+							onKeyDown={(event) => {
+								if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+								event.preventDefault();
+								move(index, event.key === "ArrowUp" ? -1 : 1);
+							}}
+							onDragStart={(event) => {
+								const row = event.currentTarget.parentElement;
+								if (row) {
+									const bounds = row.getBoundingClientRect();
+									event.dataTransfer.setDragImage(
+										row,
+										event.clientX - bounds.left,
+										event.clientY - bounds.top,
+									);
+								}
+								dragged.current = { key, original: rows, dropped: false };
+								setDraggedKey(key);
+							}}
+							onDragEnd={() => {
+								if (dragged.current && !dragged.current.dropped) setRows(dragged.current.original);
+								dragged.current = undefined;
+								setDraggedKey(undefined);
+							}}
+						>
+							⋮⋮
+						</button>
+						<label>
+							Model provider
+							<select
+								required
+								value={value.providerId}
+								onChange={(event) => {
+									const providerId = event.target.value;
+									setRows((current) =>
+										current.map((row) => (row.key === key ? { key, value: { providerId } } : row)),
+									);
+								}}
+							>
+								<option value=''>Select a provider</option>
+								{value.providerId && !providers.some(({ id }) => id === value.providerId) && (
+									<option value={value.providerId}>Unavailable provider</option>
+								)}
+								{providers.map((entry) => (
+									<option key={entry.id} value={entry.id}>
+										{entry.name}
+									</option>
+								))}
+							</select>
+						</label>
+						<ModelSelection
+							key={value.providerId}
+							api={api}
+							provider={providers.find(({ id }) => id === value.providerId)}
+							value={value}
+							allowDefault={
+								!!agent?.models.some((model) => model.providerId === value.providerId && !model.model)
+							}
+							change={(value) =>
+								setRows((current) => current.map((row) => (row.key === key ? { key, value } : row)))
+							}
+						/>
+						<button
+							type='button'
+							aria-label={`Remove model ${index + 1}`}
+							disabled={rows.length === 1}
+							onClick={() => setRows((current) => current.filter((row) => row.key !== key))}
+						>
+							Remove
+						</button>
+					</div>
+				))}
+				{error && <p role='alert'>{error}</p>}
+				<div className='task-agent-actions'>
+					<button
+						type='button'
+						onClick={() => {
+							const key = nextKey.current++;
+							setRows((current) => [...current, { key, value: { providerId: "" } }]);
+						}}
+					>
+						Add model
+					</button>
+					<button
+						type='button'
+						onClick={() => {
+							cancel();
+						}}
+					>
+						Cancel
+					</button>
+					<button
+						className='primary'
+						disabled={rows.some(
+							({ value }) =>
+								!value.model?.trim()
+								&& !agent?.models.some(
+									(saved) => saved.providerId === value.providerId && !saved.model,
+								),
+						)}
+					>
+						Save agent
+					</button>
+				</div>
+			</fieldset>
+		</form>
+	);
+	return agent ? (
+		<dialog
+			ref={dialog}
+			className='ticket-dialog task-agent-dialog'
+			aria-label={`Edit ${agent.name}`}
+			{...dismissal}
+		>
+			{form}
+		</dialog>
+	) : (
+		form
+	);
+}
+
+function ModelSelection({
+	api,
+	provider,
+	value,
+	allowDefault,
+	change,
+}: {
+	api: IWorkspaceApi;
+	provider?: ModelProvider;
+	value: TaskAgentModel;
+	allowDefault: boolean;
+	change: (value: TaskAgentModel) => void;
+}) {
+	const { model, reasoningEffort: effort } = value;
 	const [options, setOptions] = useState<AgentOptions>();
 	const [optionsError, setOptionsError] = useState(false);
 	const [attempt, retry] = useState(0);
-	const [error, setError] = useState("");
-	const [busy, setBusy] = useState(false);
-	const provider = providers.find((entry) => entry.id === providerId);
 	useEffect(() => {
 		if (provider?.kind !== "openai") return;
 		let active = true;
@@ -187,157 +609,84 @@ function AgentEditor({
 	}, [api, provider, attempt]);
 	const selected = options?.models.find((entry) => entry.id === model);
 	const efforts = selected?.supportedReasoningEfforts ?? [];
-	const save = async () => {
-		setBusy(true);
-		setError("");
-		try {
-			saved(
-				await api.read(
-					agent ? `task-agents/${agent.id}` : "task-agents",
-					taskAgentSchema,
-					agent ? "PATCH" : "POST",
-					{
-						name,
-						providerId,
-						model,
-						reasoningEffort: efforts.length ? effort || undefined : undefined,
-					},
-				),
-			);
-		} catch (error) {
-			setError(error instanceof Error ? error.message : "Could not save agent.");
-		} finally {
-			setBusy(false);
-		}
-	};
 	return (
-		<form
-			className='account-card task-agent-editor'
-			onSubmit={(event) => {
-				event.preventDefault();
-				void save();
-			}}
-		>
-			<h3>{agent ? `Edit ${agent.name}` : "Add agent"}</h3>
-			<fieldset disabled={busy}>
+		<>
+			{!provider && value.providerId && <p>{model ?? "Codex default"}</p>}
+			{provider?.kind === "ollama" && (
 				<label>
-					Name
+					Model tag
 					<input
-						autoFocus
 						required
-						maxLength={120}
-						value={name}
-						onChange={(event) => setName(event.target.value)}
+						maxLength={256}
+						value={model ?? ""}
+						onChange={(event) => change({ ...value, model: event.target.value })}
 					/>
 				</label>
+			)}
+			{provider?.kind === "openai" && (
 				<label>
-					Model provider
+					Model
 					<select
-						required
-						value={providerId}
+						required={!allowDefault}
+						value={model ?? ""}
+						disabled={!options}
 						onChange={(event) => {
-							setProviderId(event.target.value);
-							setModel("");
-							setEffort("");
-							setOptions(undefined);
-							setOptionsError(false);
+							change({ providerId: value.providerId, model: event.target.value || undefined });
 						}}
 					>
-						<option value=''>Select a provider</option>
-						{providerId && !provider && (
-							<option value={providerId} disabled>
-								Unavailable provider
-							</option>
-						)}
-						{providers.map((entry) => (
+						<option value=''>
+							{optionsError
+								? "Models unavailable"
+								: !options
+									? "Loading models…"
+									: allowDefault
+										? "Codex default"
+										: "Select a model"}
+						</option>
+						{model && !selected && <option value={model}>{model}</option>}
+						{options?.models.map((entry) => (
 							<option key={entry.id} value={entry.id}>
 								{entry.name}
 							</option>
 						))}
 					</select>
 				</label>
-				{provider?.kind === "ollama" && (
-					<label>
-						Model tag
-						<input
-							required
-							maxLength={256}
-							value={model}
-							onChange={(event) => setModel(event.target.value)}
-						/>
-					</label>
-				)}
-				{provider?.kind === "openai" && (
-					<label>
-						Model
-						<select
-							required
-							value={model}
-							disabled={!options}
-							onChange={(event) => {
-								setModel(event.target.value);
-								setEffort("");
-							}}
-						>
-							<option value=''>
-								{options ? "Select a model" : optionsError ? "Models unavailable" : "Loading models…"}
-							</option>
-							{model && !selected && (
-								<option value={model} disabled>
-									{model}
-								</option>
-							)}
-							{options?.models.map((entry) => (
-								<option key={entry.id} value={entry.id}>
-									{entry.name}
-								</option>
-							))}
-						</select>
-					</label>
-				)}
-				{optionsError && (
-					<button
-						type='button'
-						onClick={() => {
-							setOptionsError(false);
-							retry(attempt + 1);
-						}}
-					>
-						Retry loading models
-					</button>
-				)}
-				{efforts.length > 0 && (
-					<label>
-						Thinking level
-						<select value={effort} onChange={(event) => setEffort(event.target.value)}>
-							<option value=''>
-								Model default
-								{selected?.defaultReasoningEffort && ` (${selected.defaultReasoningEffort})`}
-							</option>
-							{effort && !efforts.some((entry) => entry.reasoningEffort === effort) && (
-								<option value={effort} disabled>
-									{effort}
-								</option>
-							)}
-							{efforts.map((entry) => (
-								<option key={entry.reasoningEffort} value={entry.reasoningEffort}>
-									{entry.reasoningEffort}
-								</option>
-							))}
-						</select>
-					</label>
-				)}
-				{error && <p role='alert'>{error}</p>}
+			)}
+			{optionsError && (
 				<button
-					className='primary'
-					disabled={!provider || !model.trim() || (provider.kind === "openai" && !selected)}
+					type='button'
+					onClick={() => {
+						setOptionsError(false);
+						retry(attempt + 1);
+					}}
 				>
-					Save agent
+					Retry loading models
 				</button>
-				<button type='button' onClick={cancel}>
-					Cancel
-				</button>
-			</fieldset>
-		</form>
+			)}
+			{efforts.length > 0 && (
+				<label>
+					Thinking level
+					<select
+						value={effort ?? ""}
+						onChange={(event) => change({ ...value, reasoningEffort: event.target.value || undefined })}
+					>
+						<option value=''>
+							Model default
+							{selected?.defaultReasoningEffort && ` (${selected.defaultReasoningEffort})`}
+						</option>
+						{effort && !efforts.some((entry) => entry.reasoningEffort === effort) && (
+							<option value={effort} disabled>
+								{effort}
+							</option>
+						)}
+						{efforts.map((entry) => (
+							<option key={entry.reasoningEffort} value={entry.reasoningEffort}>
+								{entry.reasoningEffort}
+							</option>
+						))}
+					</select>
+				</label>
+			)}
+		</>
 	);
 }

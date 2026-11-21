@@ -233,6 +233,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 	const views = ["board", "backlog", "notifications", "agents"] as const;
 	const view = views.find((name) => name === search.get("view")) ?? "board";
 	const [dragging, setDragging] = useState(false);
+	const [creatingAgent, setCreatingAgent] = useState(false);
 	const actionsBusy = busy || loading || (view === "board" && dragging);
 	const opener = useRef<HTMLElement | null>(null);
 	const wasOpen = useRef(false);
@@ -326,11 +327,22 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 				</SectionTabs>
 				<div
 					className='task-board-actions'
-					hidden={view === "notifications" || view === "agents"}
+					hidden={view === "notifications"}
 					role='group'
-					aria-label={view === "board" ? "Board actions" : "Backlog actions"}
+					aria-label={
+						view === "board" ? "Board actions" : view === "agents" ? "Agent actions" : "Backlog actions"
+					}
 				>
-					{view === "board" ? (
+					{view === "agents" ? (
+						<ToolbarButton
+							type='button'
+							className='primary'
+							disabled={creatingAgent}
+							onClick={() => setCreatingAgent(true)}
+						>
+							Create agent
+						</ToolbarButton>
+					) : view === "board" ? (
 						<>
 							<ToolbarButton
 								type='button'
@@ -367,9 +379,11 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 							</ToolbarButton>
 						</>
 					)}
-					<ToolbarButton type='button' className='primary' disabled={actionsBusy} onClick={create}>
-						Create ticket
-					</ToolbarButton>
+					{view !== "agents" && (
+						<ToolbarButton type='button' className='primary' disabled={actionsBusy} onClick={create}>
+							Create ticket
+						</ToolbarButton>
+					)}
 				</div>
 			</div>
 			{views.map((name) => (
@@ -384,7 +398,11 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 				>
 					{view === name
 						&& (name === "agents" ? (
-							<TaskAgents api={api} />
+							<TaskAgents
+								api={api}
+								creating={creatingAgent}
+								closeCreate={() => setCreatingAgent(false)}
+							/>
 						) : name === "notifications" ? (
 							<TaskNotifications
 								items={notifications}

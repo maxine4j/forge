@@ -31,6 +31,7 @@ import {
 	ticketSchema,
 	ticketWorkflowSchema,
 	ticketHistorySchema,
+	ticketNotificationsSchema,
 } from "@forge/contracts/tickets";
 import { createServer, resolveConfig } from "vite";
 import type { ViteDevServer } from "vite";
@@ -58,6 +59,15 @@ const read = async (path: string) => {
 	return response.json();
 };
 
+test("mock notifications reference existing tickets and workflows", async () => {
+	const notifications = ticketNotificationsSchema.parse(await read("/api/tickets/notifications"));
+	expect(notifications.length).toBeGreaterThan(0);
+	for (const notification of notifications) {
+		expect(await read(`/api/tickets/${notification.ticket.id}`)).toEqual(notification.ticket);
+		expect(await read(`/api/tickets/${notification.ticket.id}/workflow`)).toEqual(notification.workflow);
+	}
+});
+
 test("working ticket exposes an active conversation", async () => {
 	const workflow = ticketWorkflowSchema.parse(await read("/api/tickets/TASK-12/workflow"));
 	expect(workflow.state).toBe("running");
@@ -69,6 +79,17 @@ test("working ticket exposes an active conversation", async () => {
 
 test("mock providers expose named cards and provider-specific catalogs", async () => {
 	const providers = modelProvidersSchema.parse(await read("/api/model-providers"));
+	const agents = await read("/api/task-agents");
+	expect(agents).toEqual(
+		expect.arrayContaining([
+			expect.objectContaining({
+				models: expect.arrayContaining([
+					expect.objectContaining({ providerId: providers[0]!.id }),
+					expect.objectContaining({ providerId: providers[1]!.id }),
+				]),
+			}),
+		]),
+	);
 	expect(providers.map((p) => p.kind)).toEqual(["openai", "ollama"]);
 	const catalog = agentOptionsSchema.parse(await read(`/api/model-providers/${providers[0]!.id}/model-options`));
 	expect(catalog.models).toHaveLength(1);

@@ -160,15 +160,24 @@ export class MockApi implements IMockApi {
 	private readonly routes = new Map<string, (url: URL) => unknown>();
 
 	constructor() {
+		const planner = { name: "Planner", avatarColour: "Sky", avatarSymbol: "Robot" } as const;
+		const implementer = { name: "Local implementer", avatarColour: "Mint", avatarSymbol: "Terminal" } as const;
 		this.routes.set("/api/projects", () => projects);
 		this.routes.set("/api/settings", () => defaultForgeSettings);
 		this.routes.set("/api/model-providers", () => [
-			{ id: "123e4567-e89b-42d3-a456-426614174099", name: "OpenAI", kind: "openai", retired: false },
+			{
+				id: "123e4567-e89b-42d3-a456-426614174099",
+				name: "OpenAI",
+				kind: "openai",
+				retired: false,
+				maxConcurrentAgents: 1,
+			},
 			{
 				id: "123e4567-e89b-42d3-a456-426614174098",
 				name: "Local Ollama",
 				kind: "ollama",
 				retired: false,
+				maxConcurrentAgents: 1,
 				endpoint: "http://ollama/v1",
 				comparisonModel: "gpt-5.4",
 			},
@@ -176,16 +185,22 @@ export class MockApi implements IMockApi {
 		this.routes.set("/api/task-agents", () => [
 			{
 				id: "123e4567-e89b-42d3-a456-426614174090",
-				name: "Planner",
-				providerId: "123e4567-e89b-42d3-a456-426614174099",
-				model: "preview-model",
+				...planner,
+				models: [
+					{
+						providerId: "123e4567-e89b-42d3-a456-426614174099",
+						model: "preview-model",
+						reasoningEffort: "high",
+					},
+					{ providerId: "123e4567-e89b-42d3-a456-426614174098", model: "local:latest" },
+					{ providerId: "123e4567-e89b-42d3-a456-426614174098", model: "local:backup" },
+				],
 				retired: false,
 			},
 			{
 				id: "123e4567-e89b-42d3-a456-426614174091",
-				name: "Local implementer",
-				providerId: "123e4567-e89b-42d3-a456-426614174098",
-				model: "local:latest",
+				...implementer,
+				models: [{ providerId: "123e4567-e89b-42d3-a456-426614174098", model: "local:latest" }],
 				retired: false,
 			},
 		]);
@@ -197,7 +212,18 @@ export class MockApi implements IMockApi {
 		}));
 		const costData: Costs[] = [];
 		const boardTickets: Ticket[] = [];
-		this.routes.set("/api/tickets/notifications", () => []);
+		this.routes.set("/api/tickets/notifications", () =>
+			boardTickets
+				.filter((ticket) => ticket.needsAttention)
+				.map((ticket) => ({
+					id: `plan-${ticket.id}`,
+					at: date,
+					kind: "plan",
+					ticket,
+					epic: { ...epics.find((epic) => epic.id === ticket.epicId)!, createdAt: date },
+					workflow: this.routes.get(`/api/tickets/${ticket.id}/workflow`)!(new URL("http://localhost")),
+				})),
+		);
 		this.routes.set("/api/tickets", (url) =>
 			boardTickets.filter((ticket) => url.searchParams.get("includeArchived") === "true" || !ticket.archivedAt),
 		);
@@ -302,7 +328,18 @@ export class MockApi implements IMockApi {
 			};
 			this.routes.set(`${projectRoot}/agents`, () => [agent]);
 			const agentOptions = () => ({
-				models: [{ id: "preview-model", name: "Codex", isDefault: true }],
+				models: [
+					{
+						id: "preview-model",
+						name: "Codex",
+						isDefault: true,
+						defaultReasoningEffort: "medium",
+						supportedReasoningEfforts: ["medium", "high"].map((reasoningEffort) => ({
+							reasoningEffort,
+							description: reasoningEffort,
+						})),
+					},
+				],
 				skills: [{ name: "review", description: "Review changes and check behavior" }],
 			});
 			this.routes.set("/api/model-providers/123e4567-e89b-42d3-a456-426614174099/model-options", agentOptions);
@@ -364,6 +401,7 @@ export class MockApi implements IMockApi {
 					description: "Support keyboard shortcuts.",
 					status: "todo",
 					agentStatus: "queued",
+					assignee: planner,
 					createdAt: date,
 				},
 				{
@@ -373,6 +411,7 @@ export class MockApi implements IMockApi {
 					description: "Implement search ranking.",
 					status: "in-progress",
 					agentStatus: "working",
+					assignee: planner,
 					createdAt: date,
 				},
 				{
@@ -393,6 +432,7 @@ export class MockApi implements IMockApi {
 						"Review the completed navigation plan. The orange card and notification dot remain until the plan is approved.",
 					status: "in-progress",
 					needsAttention: true,
+					assignee: planner,
 					createdAt: date,
 				},
 				{

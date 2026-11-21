@@ -78,6 +78,7 @@ export function ModelProviders({
 				<article className='account-card model-provider-card' key={p.id}>
 					<h3>{p.name}</h3>
 					<p>{p.kind === "openai" ? "OpenAI account" : "Ollama"}</p>
+					<p>Max concurrent agents: {p.maxConcurrentAgents}</p>
 					{p.kind === "openai" ? (
 						<ToastVisibility value={!selected}>{account}</ToastVisibility>
 					) : (
@@ -164,6 +165,7 @@ function ProviderEditor({
 	const [kind, setKind] = useState(provider?.kind ?? (hasOpenAI ? "ollama" : "openai"));
 	const [endpoint, setEndpoint] = useState(provider?.endpoint ?? "");
 	const [comparisonModel, setComparisonModel] = useState(provider?.comparisonModel ?? "");
+	const [maxConcurrentAgents, setMaxConcurrentAgents] = useState(String(provider?.maxConcurrentAgents ?? 1));
 	const [busy, setBusy] = useState(false);
 	const [persisted, setPersisted] = useState(provider);
 	const [dirty, setDirty] = useState(false);
@@ -188,10 +190,11 @@ function ProviderEditor({
 					? {
 							name,
 							kind,
+							maxConcurrentAgents: Number(maxConcurrentAgents),
 							endpoint,
 							comparisonModel: comparisonModel.trim() || (persisted ? null : undefined),
 						}
-					: { name, kind };
+					: { name, kind, maxConcurrentAgents: Number(maxConcurrentAgents) };
 			const value = await api.read(
 				persisted ? `model-providers/${persisted.id}` : "model-providers",
 				modelProviderSchema,
@@ -260,6 +263,22 @@ function ProviderEditor({
 								<DropdownOption value='ollama'>Ollama</DropdownOption>
 							</Dropdown>
 						</label>
+						<label>
+							Max concurrent agents
+							<input
+								type='number'
+								min={1}
+								max={Number.MAX_SAFE_INTEGER}
+								step={1}
+								required
+								value={maxConcurrentAgents}
+								aria-describedby='provider-concurrency-help'
+								onChange={(e) => setMaxConcurrentAgents(e.target.value)}
+							/>
+						</label>
+						<small id='provider-concurrency-help'>
+							Shared across all Tasks board agents using this provider.
+						</small>
 						{kind === "ollama" && (
 							<>
 								<label>

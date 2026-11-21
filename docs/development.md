@@ -108,7 +108,8 @@ and starts Vite in explicit `mock` mode; no backend, database, credentials, or
 container is required.
 Vite serves deterministic HTTP fixtures for projects, accounts, repository
 branches/files/history, project workspaces, changes, pull-request reviews and
-project chat history with clarification requests. Tasks includes a running ticket conversation and sample epics
+project chat history with clarification requests. Tasks includes pending plan notifications,
+a running ticket conversation and sample epics
 and ticket planning conversations. Board settings includes two
 sample running containers with resource statistics.
 Commit history opens shareable commit pages with parent navigation, structured
@@ -435,6 +436,16 @@ node ollama-relay/tests/image-smoke.mjs
 ```
 
 ## Named-provider upgrades
+
+Startup runs `ticket-provider-reservations-v1` after the named Agent migration
+and before agent or scheduler recovery. It wraps saved single-model Agents in
+one-entry `models` lists, including implicit Codex defaults, sets existing
+provider limits to 1 where unset, and backfills reservations from existing phase
+pins and thread routing. Unfinished phases and resets still stopping retain
+their occupancy, even above the configured limit. Ticket assignments, threads
+and routing are preserved. Board initialization removes the former `maxAgents`
+column and preserves dispatch state. See [ticket scheduling](tickets.md#agentic-ticket-board)
+and [provider settings](foundation.md#model-providers).
 
 Startup runs the `task-agents-v1` migration after `named-model-providers-v1` and
 before recovery. It creates reusable Agents from legacy provider defaults and

@@ -31,9 +31,6 @@ export class BoardSettingsService implements IBoardSettingsService {
 	async initialize(): Promise<void> {
 		this.settings = await this.store.load();
 	}
-	maxConcurrentTickets(): number {
-		return this.settings.maxAgents;
-	}
 	dispatchMode(): BoardSettings["dispatch"] {
 		return this.settings.dispatch;
 	}
@@ -48,7 +45,6 @@ export class BoardSettingsService implements IBoardSettingsService {
 		return this.serialize(async () => {
 			const settings = {
 				dispatch: parsed.data.dispatch ?? this.settings.dispatch,
-				maxAgents: parsed.data.maxAgents ?? this.settings.maxAgents,
 			};
 			await this.apply(settings);
 			return { ...settings };
@@ -66,11 +62,7 @@ export class BoardSettingsService implements IBoardSettingsService {
 		const previous = this.settings;
 		await this.store.save(settings);
 		this.settings = settings;
-		if (
-			settings.maxAgents > previous.maxAgents
-			|| (previous.dispatch !== settings.dispatch && settings.dispatch !== "stopped")
-		)
-			this.wake();
+		if (previous.dispatch !== settings.dispatch && settings.dispatch !== "stopped") this.wake();
 	}
 	private serialize<T>(operation: () => Promise<T>): Promise<T> {
 		const result = this.tail.then(operation);

@@ -6,6 +6,7 @@ import { providerSnapshotSchema } from "../model-providers/types.ts";
 export const ticketWorkflowRecordSchema = ticketWorkflowSchema.extend({
 	planningProviderSnapshot: providerSnapshotSchema.optional(),
 	implementationProviderSnapshot: providerSnapshotSchema.optional(),
+	reservation: z.string().min(1).optional(),
 	previousTurnId: z.string().min(1).max(256).optional(),
 	turnId: z.string().min(1).max(256).optional(),
 	workspaceCleaned: z.literal(true).optional(),
@@ -30,6 +31,7 @@ export function ticketWorkflowSummary({
 	abandonment: _abandonment,
 	planningProviderSnapshot,
 	implementationProviderSnapshot,
+	reservation: _reservation,
 	...workflow
 }: TicketWorkflowRecord): TicketWorkflow {
 	const identity = (snapshot: TicketWorkflowRecord["planningProviderSnapshot"]) =>

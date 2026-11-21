@@ -303,13 +303,12 @@ for (const width of [1280, 390]) {
 		const f = await setup(page);
 		await page.getByRole("button", { name: "Board settings", exact: true }).click();
 		const settings = page.getByRole("dialog", { name: "Board settings", exact: true });
-		await settings.getByLabel("Max concurrent tickets", { exact: true }).fill("5");
+		await expect(settings).toBeVisible();
 		await page.goBack();
-		const guard = page.getByRole("dialog", { name: "Unsaved changes" });
-		await guard.getByRole("button", { name: "Keep editing" }).click();
-		await expect(settings.getByLabel("Max concurrent tickets", { exact: true })).toHaveValue("5");
+		await expect(settings).toHaveCount(0);
+		await page.goForward();
+		await expect(settings).toBeVisible();
 		await settings.getByRole("button", { name: "Close board settings" }).click();
-		await guard.getByRole("button", { name: "Discard changes" }).click();
 		await expect(settings).toHaveCount(0);
 		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
@@ -400,8 +399,13 @@ test("ticket creation omits agent settings and changing assignees retains ticket
 	await page.route("**/api/task-agents", (route) =>
 		route.fulfill({
 			json: [
-				{ id: projectId, name: "Planner", providerId: projectId, model: "test-model", retired: false },
-				{ id: other, name: "Local", providerId: other, model: "local", retired: false },
+				{
+					id: projectId,
+					name: "Planner",
+					models: [{ providerId: projectId, model: "test-model" }],
+					retired: false,
+				},
+				{ id: other, name: "Local", models: [{ providerId: other, model: "local" }], retired: false },
 			],
 		}),
 	);
@@ -545,7 +549,7 @@ const setup = async (
 	let approved = false;
 	let planCleared = false;
 	let workflowOverride: Partial<TicketWorkflow> = {};
-	let boardSettings = { dispatch: "running", maxAgents: 3 };
+	let boardSettings = { dispatch: "running" };
 	let stopRequests = 0;
 	let dockerReads = 0;
 	const dockerCleanups: string[] = [];
@@ -671,8 +675,7 @@ const setup = async (
 						{
 							id: projectId,
 							name: "Default agent",
-							providerId: projectId,
-							model: "test-model",
+							models: [{ providerId: projectId, model: "test-model" }],
 							retired: false,
 						},
 					],
@@ -1784,7 +1787,14 @@ test("retired assignees remain visible and can be cleared", async ({ page }) => 
 	f.tickets()[0]!.executionSettings = { plannerAgentId: projectId };
 	await page.route("**/api/task-agents", (route) =>
 		route.fulfill({
-			json: [{ id: projectId, name: "Prior agent", providerId: projectId, model: "test-model", retired: true }],
+			json: [
+				{
+					id: projectId,
+					name: "Prior agent",
+					models: [{ providerId: projectId, model: "test-model" }],
+					retired: true,
+				},
+			],
 		}),
 	);
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
@@ -2439,7 +2449,7 @@ test("mobile agent icons reserve room for long titles and metadata", async ({ pa
 	await expect(card).toHaveCSS("background-color", "rgb(81, 43, 18)");
 });
 
-test("board settings save the slider and control pause, stop and resume", async ({ page }) => {
+test("board settings control pause, stop and resume without a board-wide limit", async ({ page }) => {
 	const fixture = await setup(page);
 	const settings = page.getByRole("button", { name: "Board settings", exact: true });
 	const toolbar = page.getByRole("group", { name: "Board actions" });
@@ -2448,15 +2458,7 @@ test("board settings save the slider and control pause, stop and resume", async 
 	const modal = page.getByRole("dialog", { name: "Board settings" });
 	await modal.getByRole("button", { name: "Resume ticket dispatch" }).click();
 	await expect(modal.getByRole("status")).toHaveText("Ticket dispatch resumed.");
-	const slider = modal.getByRole("slider", { name: "Max concurrent tickets" });
-	await expect(
-		modal.getByText("In progress tickets count while awaiting approval. Standalone chats are unrestricted."),
-	).toBeVisible();
-	await expect(slider).toHaveValue("3");
-	await slider.focus();
-	await slider.press("ArrowRight");
-	await modal.getByRole("button", { name: "Save limit" }).click();
-	await expect(modal.getByRole("status")).toHaveText("Ticket limit saved.");
+	await expect(modal.getByRole("slider")).toHaveCount(0);
 	await modal.getByRole("button", { name: "Pause new tickets" }).click();
 	await expect(modal.getByRole("status")).toHaveText("New tickets are paused.");
 	await modal.getByRole("button", { name: "Close board settings" }).click();
@@ -2477,7 +2479,7 @@ test("board settings save the slider and control pause, stop and resume", async 
 	await modal.getByRole("button", { name: "Close board settings" }).click();
 	await expect(settings).toBeFocused();
 	await settings.click();
-	await expect(slider).toHaveValue("4");
+	await expect(modal.getByText("Ready tickets start when agent and provider capacity opens.")).toBeVisible();
 });
 
 test("Docker statistics, cleanup progress and retries stay independent of agent controls", async ({ page }) => {

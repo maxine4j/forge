@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { agentSettingsSchema, agentRequestSchema } from "../agents/index.ts";
+import { ticketAssigneeSchema } from "../task-agents/index.ts";
 
 export const ticketExecutionSettingsSchema = agentSettingsSchema.extend({
 	plannerAgentId: z.uuid().optional(),
@@ -108,6 +109,7 @@ export const ticketSchema = z.strictObject({
 	archivedAt: z.iso.datetime().optional(),
 	needsAttention: z.literal(true).optional(),
 	agentStatus: z.enum(["queued", "working"]).optional(),
+	assignee: ticketAssigneeSchema.optional(),
 	canReturnToBacklog: z.literal(true).optional(),
 	resetting: z.literal(true).optional(),
 });

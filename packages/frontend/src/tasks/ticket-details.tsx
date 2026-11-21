@@ -19,6 +19,7 @@ import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown } from "../dropdown.tsx";
 import { useDialogDismissal, useModalDraft, useModalNavigation } from "../navigation/controller.tsx";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
+import { AgentAvatar } from "./agent-avatar.tsx";
 import { EpicIcon } from "./epic-icon.tsx";
 import { InlineTicketDescription, InlineTicketTitle } from "./inline-ticket-fields.tsx";
 import { RepositorySelection } from "./repository-selection.tsx";
@@ -451,6 +452,13 @@ export const TicketDetails = ({
 								? "Queued to merge"
 								: (job?.state ?? "Loading")}
 				</span>
+				{ticket.assignee && (
+					<AgentAvatar
+						colour={ticket.assignee.avatarColour}
+						symbol={ticket.assignee.avatarSymbol}
+						name={ticket.assignee.name}
+					/>
+				)}
 				<div className='ticket-details-actions'>
 					{!archived && ticket.canReturnToBacklog && (
 						<button

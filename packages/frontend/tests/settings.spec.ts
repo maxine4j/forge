@@ -126,7 +126,7 @@ for (const width of [1280, 390]) {
 		await dialog.getByLabel("Name", { exact: true }).fill("Account");
 		await dialog.getByRole("button", { name: "Continue", exact: true }).click();
 		await expect.poll(() => f.providers.length).toBe(1);
-		expect(f.writes[0]).toEqual({ name: "Account", kind: "openai" });
+		expect(f.writes[0]).toEqual({ name: "Account", kind: "openai", maxConcurrentAgents: 1 });
 		await expect(dialog.getByText("ABCD-1234")).toBeVisible();
 		await expect(dialog.getByRole("link")).toHaveAttribute("href", "https://auth.openai.com/codex/device");
 		await dialog.getByRole("button", { name: "Cancel sign-in", exact: true }).click();
@@ -162,10 +162,13 @@ for (const width of [1280, 390]) {
 		});
 		await page.getByRole("button", { name: "Edit Local", exact: true }).click();
 		await dialog.getByLabel("Name", { exact: true }).fill("Renamed");
+		await expect(dialog.getByLabel("Max concurrent agents")).toHaveValue("1");
+		await dialog.getByLabel("Max concurrent agents").fill("3");
 		await dialog.getByRole("button", { name: "Close", exact: true }).click();
 		await page.getByRole("button", { name: "Keep editing", exact: true }).click();
 		await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue("Renamed");
 		await dialog.getByRole("button", { name: "Save provider", exact: true }).click();
+		await expect.poll(() => f.providers.at(1)?.maxConcurrentAgents).toBe(3);
 		await page.getByRole("button", { name: "Remove Renamed", exact: true }).click();
 		await page
 			.getByRole("dialog", { name: "Remove provider", exact: true })

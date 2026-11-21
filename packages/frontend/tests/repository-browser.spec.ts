@@ -147,9 +147,7 @@ for (const width of [1280, 820, 390]) {
 		await page.route("**/api/epics", (route) => route.fulfill({ json: [] }));
 		await page.route("**/api/task-agents", (route) => route.fulfill({ json: [] }));
 		await page.route("**/api/model-providers", (route) => route.fulfill({ json: [] }));
-		await page.route("**/api/board/settings", (route) =>
-			route.fulfill({ json: { dispatch: "stopped", maxAgents: 3 } }),
-		);
+		await page.route("**/api/board/settings", (route) => route.fulfill({ json: { dispatch: "stopped" } }));
 		const metrics = async (name: string) =>
 			page.getByRole("tablist", { name }).evaluate((bar) => {
 				const tab = bar.querySelector('[role="tab"]')!;

@@ -6,6 +6,7 @@ import * as files from "@forge/backend-infrastructure/file";
 import type { AgentOptions } from "@forge/contracts/agents";
 import type { InferenceProvider } from "@forge/contracts/settings";
 import { defaultForgeSettings } from "@forge/contracts/settings";
+import { agentAvatarColours } from "@forge/contracts/task-agents";
 import { expect, test, vi } from "vitest";
 
 import { AccessService } from "../../src/auth/access-service.ts";
@@ -16,10 +17,132 @@ import { ModelProviderStore } from "../../src/model-providers/model-provider-sto
 import { migrateTaskAgents } from "../../src/task-agents/task-agent-migration.ts";
 import { TaskAgentService } from "../../src/task-agents/task-agent-service.ts";
 import { TaskAgentStore } from "../../src/task-agents/task-agent-store.ts";
+import { migrateProviderReservations } from "../../src/tickets/provider-reservation-migration.ts";
+import { TicketWorkflowStore } from "../../src/tickets/ticket-workflow-store.ts";
 
 const actor = { username: "owner" };
 const access = new AccessService({ owner: "owner", origin: "https://forge.test" });
 const ollama = { name: "Local", kind: "ollama", endpoint: "http://ollama/v1" };
+
+test("reservation upgrade keeps existing assignments, routes and unfinished over-capacity work", async () => {
+	const f = await fixture();
+	try {
+		await migrateModelProviders(f.database, randomUUID, false);
+		await f.database.run("ALTER TABLE tickets ADD COLUMN archivedAt TEXT");
+		const catalog = new TaskAgentStore(f.database);
+		await catalog.initialize();
+		await migrateTaskAgents(f.database, randomUUID);
+		const provider = await f.service.create(actor, { name: "Account", kind: "openai" });
+		const agentId = randomUUID();
+		const implementationAgentId = randomUUID();
+		const plannerId = randomUUID();
+		const implementerId = randomUUID();
+		const snapshot = {
+			providerId: provider.id,
+			configuration: { kind: "openai" },
+			model: "pinned",
+			reasoningEffort: "high",
+		};
+		const legacyAgent = { id: agentId, name: "Codex default", retired: true, providerId: provider.id };
+		const legacyThread = { providerId: provider.id, model: "original" };
+		const settings = JSON.stringify({ plannerAgentId: agentId, implementerAgentId: implementationAgentId });
+		await f.database.transaction([
+			{ sql: "UPDATE model_providers SET record=json_remove(record,'$.maxConcurrentAgents')" },
+			{
+				sql: "INSERT INTO task_agents VALUES(?,?,1,?)",
+				parameters: [agentId, "codex default", JSON.stringify(legacyAgent)],
+			},
+			{ sql: "INSERT INTO agent_threads VALUES(?,?)", parameters: [implementerId, JSON.stringify(legacyThread)] },
+			...[
+				{
+					status: "in-progress",
+					record: { phase: "planning", state: "idle", plannerId, planningProviderSnapshot: snapshot },
+				},
+				{
+					status: "backlog",
+					record: {
+						phase: "planning",
+						state: "resetting",
+						resetStage: "stopping",
+						abandonment: { implementerId },
+					},
+				},
+				{ status: "ready", record: { phase: "planning", state: "queued" } },
+				{
+					status: "in-progress",
+					record: {
+						phase: "implementation",
+						state: "queued",
+						approvedRevision: 1,
+						planningProviderSnapshot: snapshot,
+					},
+				},
+				{
+					status: "backlog",
+					record: {
+						phase: "planning",
+						state: "resetting",
+						resetStage: "cleanup",
+						abandonment: { implementerId },
+					},
+				},
+			].flatMap(({ status, record }, i) => {
+				const id = `TASK-${i + 1}`;
+				return [
+					{
+						sql: "INSERT INTO tickets(id,status,executionSettings) VALUES(?,?,?)",
+						parameters: [id, status, settings],
+					},
+					{
+						sql: "INSERT INTO ticket_workflows VALUES(?,?)",
+						parameters: [id, JSON.stringify({ ...record, ticketId: id, mergeAttempts: 0 })],
+					},
+				];
+			}),
+		]);
+		await migrateProviderReservations(f.database);
+		const workflows = new TicketWorkflowStore(f.database);
+		expect(await workflows.countReservations(provider.id)).toBe(2);
+		expect(await workflows.countAgentReservations(agentId)).toBe(1);
+		expect(await workflows.countAgentReservations(implementationAgentId)).toBe(1);
+		expect(await workflows.get("TASK-1")).toMatchObject({
+			reservation: provider.id,
+			plannerId,
+			planningProviderSnapshot: snapshot,
+		});
+		expect(await workflows.get("TASK-2")).toMatchObject({
+			reservation: provider.id,
+			abandonment: { implementerId },
+		});
+		for (const id of ["TASK-3", "TASK-4", "TASK-5"]) expect((await workflows.get(id))?.reservation).toBeUndefined();
+		const savedAgent = await catalog.get(agentId);
+		expect(savedAgent).toMatchObject({
+			id: agentId,
+			name: "Codex default",
+			retired: true,
+			models: [{ providerId: provider.id }],
+			maxConcurrentTickets: 1,
+		});
+		expect(agentAvatarColours).toContain(savedAgent?.avatarColour);
+		expect(await f.store.get(provider.id)).toMatchObject({ maxConcurrentAgents: 1 });
+		expect(await f.database.all("SELECT DISTINCT executionSettings FROM tickets")).toEqual([
+			{ executionSettings: settings },
+		]);
+		expect(await f.database.all("SELECT record FROM agent_threads")).toEqual([
+			{ record: JSON.stringify(legacyThread) },
+		]);
+		await f.database.run(
+			"UPDATE ticket_workflows SET record=json_remove(record,'$.reservation') WHERE ticketId='TASK-1'",
+		);
+		await migrateProviderReservations(f.database);
+		expect(await workflows.countReservations(provider.id)).toBe(1);
+		expect(await workflows.countAgentReservations(agentId)).toBe(0);
+		await f.database.run("UPDATE tickets SET archivedAt='2026-11-21' WHERE id='TASK-2'");
+		expect(await workflows.countAgentReservations(implementationAgentId)).toBe(0);
+	} finally {
+		await f.close();
+	}
+});
 
 async function fixture() {
 	const root = await files.mkdtemp(join(tmpdir(), "forge-providers-"));
@@ -139,13 +262,29 @@ test("task agents validate catalogs, retain retired records and enforce active n
 	try {
 		const store = new TaskAgentStore(f.database);
 		await store.initialize();
-		const agents = new TaskAgentService(store, f.service, access, randomUUID);
+		const agents = new TaskAgentService(store, f.service, access, randomUUID, (length) => length - 1);
 		const local = await f.service.create(actor, ollama);
-		const input = { name: " Local agent ", providerId: local.id, model: " local:latest " };
+		const input = { name: " Local agent ", models: [{ providerId: local.id, model: " local:latest " }] };
 		const agent = await agents.save(actor, input);
-		expect(agent).toMatchObject({ name: "Local agent", model: "local:latest" });
+		expect(agent).toMatchObject({
+			name: "Local agent",
+			models: [{ model: "local:latest" }],
+			maxConcurrentTickets: 1,
+			avatarColour: "Peach",
+		});
+		expect(await store.get(agent.id)).toMatchObject({ avatarColour: "Peach" });
+		await agents.save(actor, { ...input, maxConcurrentTickets: 3, avatarColour: "Mint" }, agent.id);
+		await agents.save(actor, { ...input, name: "Renamed agent" }, agent.id);
+		expect(await store.get(agent.id)).toMatchObject({
+			name: "Renamed agent",
+			maxConcurrentTickets: 3,
+			avatarColour: "Mint",
+		});
+		await agents.save(actor, input, agent.id);
 		await expect(agents.save(actor, { ...input, name: "local AGENT" })).rejects.toMatchObject({ status: 409 });
-		await expect(agents.save(actor, { ...input, reasoningEffort: "high" }, agent.id)).rejects.toMatchObject({
+		await expect(
+			agents.save(actor, { ...input, models: [{ ...input.models[0], reasoningEffort: "high" }] }, agent.id),
+		).rejects.toMatchObject({
 			status: 400,
 		});
 		expect(f.catalog).not.toHaveBeenCalled();
@@ -162,12 +301,18 @@ test("task agents validate catalogs, retain retired records and enforce active n
 			skills: [],
 		});
 		await expect(
-			agents.save(actor, { name: "Planner", providerId: account.id, model: "missing" }),
+			agents.save(actor, { name: "Planner", models: [{ providerId: account.id, model: "missing" }] }),
 		).rejects.toMatchObject({ status: 400 });
 		await expect(
-			agents.save(actor, { name: "Planner", providerId: account.id, model: "model", reasoningEffort: "low" }),
+			agents.save(actor, {
+				name: "Planner",
+				models: [{ providerId: account.id, model: "model", reasoningEffort: "low" }],
+			}),
 		).rejects.toMatchObject({ status: 400 });
-		await agents.save(actor, { name: "Planner", providerId: account.id, model: "model", reasoningEffort: "high" });
+		await agents.save(actor, {
+			name: "Planner",
+			models: [{ providerId: account.id, model: "model", reasoningEffort: "high" }],
+		});
 		await f.service.remove(actor, local.id);
 		await agents.retire(actor, agent.id);
 		expect(await store.get(agent.id)).toMatchObject({ retired: true });
@@ -228,8 +373,12 @@ test("migration routes unstarted tickets and seeds attempts from agents without 
 		await agents.initialize();
 		await migrateTaskAgents(f.database, randomUUID);
 		const catalog = await agents.list();
-		const local = catalog.find((entry) => entry.model === "local:latest")!;
-		expect(catalog).toContainEqual(expect.objectContaining({ model: "gpt-test", reasoningEffort: "high" }));
+		const local = catalog.find((entry) => entry.models.at(0)?.model === "local:latest")!;
+		expect(catalog).toContainEqual(
+			expect.objectContaining({
+				models: [expect.objectContaining({ model: "gpt-test", reasoningEffort: "high" })],
+			}),
+		);
 		const [migrated] = (await f.database.all("SELECT executionSettings FROM tickets WHERE id='TASK-1'")) as {
 			executionSettings: string;
 		}[];
@@ -290,7 +439,7 @@ test("task agent migration converts settings and workflow pins across multiple p
 				WHERE a.id=json_extract(t.executionSettings,'$.implementerAgentId')
 				AND a.id=json_extract(w.record,'$.planningProviderSnapshot.agentId')
 				AND a.id=json_extract(w.record,'$.implementationProviderSnapshot.agentId')
-				AND json_extract(a.record,'$.model')='model-'||substr(t.id,6)
+				AND json_extract(a.record,'$.models[0].model')='model-'||substr(t.id,6)
 				AND json_type(t.executionSettings,'$.providerId') IS NULL
 				AND json_type(w.record,'$.providerSnapshot') IS NULL`),
 		).toEqual([{ migrated: ticketCount }]);
