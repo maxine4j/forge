@@ -24,6 +24,7 @@ export class StaticAssets implements IStaticAssets {
 			".png": "image/png",
 			".ico": "image/x-icon",
 			".woff2": "font/woff2",
+			".webmanifest": "application/manifest+json",
 		};
 		if (
 			!path.startsWith("/")
@@ -37,8 +38,8 @@ export class StaticAssets implements IStaticAssets {
 		const asset = path.startsWith("/assets/");
 		const relative = asset
 			? path.slice(1)
-			: path === "/favicon.ico"
-				? "favicon.ico"
+			: path === "/favicon.ico" || path === "/manifest.webmanifest"
+				? path.slice(1)
 				: extname(path)
 					? undefined
 					: "index.html";

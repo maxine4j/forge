@@ -42,6 +42,12 @@ owner-authorized `GET/POST /api/tickets` and ticket-ID routes instead. See the
 [workspace navigation contract](workspaces.md#slice-2-integrated-manual-workspace-and-pr-review).
 
 The global header and browser favicon share the Forge anvil mark.
+Forge can be installed from iPhone Safari or Android Chrome through browser controls.
+Its owner-authorized manifest uses credentialed fetching, launches `/tasks` in a
+standalone window, and provides anvil icons including a maskable icon and Apple
+touch icon. Installation requires authenticated HTTPS ingress and network access;
+an installed app may need a separate ingress login. No offline cache or service
+worker is provided. See [installation and device verification](development.md#phone-installation).
 Config's Cost tracking section uses the owner-only settings API to persist local
 currency and monthly plan price (AUD and A$30 by default). Validate a supported
 currency and a finite, nonnegative amount. Changes affect future turns. Cost APIs are owner-only and

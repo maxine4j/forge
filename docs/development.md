@@ -2,6 +2,19 @@
 
 ## Development checks
 
+### Phone installation
+
+With Forge reachable through authenticated HTTPS ingress, open it in iPhone Safari
+and use Share → Add to Home Screen. In Android Chrome, use the browser menu to
+install the app. The installed app may prompt for ingress authentication separately.
+See the [installation contract](foundation.md#navigation).
+
+Physical device acceptance remains pending until tested on both devices. Record
+device, OS and browser versions, then confirm the Forge name and icon, standalone
+launch and authentication if prompted. Verify Tasks opens, navigation and reload
+work, and ordinary browser access still works. Chromium automation does not prove
+device installation or ingress authentication. Forge requires network access.
+
 ### TypeScript MCP verification
 
 The production dependency set pins `@modelcontextprotocol/sdk@1.32.2`,

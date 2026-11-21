@@ -145,6 +145,65 @@ test("integrated production bundle styles editor/terminal on desktop/mobile and 
 		});
 		expect(favicon.status()).toBe(200);
 		expect(favicon.headers()["content-type"]).toContain("image/svg+xml");
+		const manifestLink = page.locator('link[rel="manifest"]');
+		await expect(manifestLink).toHaveAttribute("href", "/manifest.webmanifest");
+		await expect(manifestLink).toHaveAttribute("crossorigin", "use-credentials");
+		const manifestUrl = new URL("/manifest.webmanifest", page.url()).href;
+		const manifestResponse = await page.request.get(manifestUrl, { headers: { "x-webauth-user": "owner" } });
+		expect(manifestResponse.status()).toBe(200);
+		expect(manifestResponse.headers()["content-type"]).toContain("application/manifest+json");
+		const manifest = await manifestResponse.json();
+		expect(manifest).toMatchObject({
+			name: "Forge",
+			short_name: "Forge",
+			id: "/",
+			start_url: "/tasks",
+			scope: "/",
+			display: "standalone",
+			theme_color: "#102823",
+			background_color: "#0d1117",
+			icons: [
+				{ src: "/assets/icon-192.png", sizes: "192x192", type: "image/png" },
+				{ src: "/assets/icon-512.png", sizes: "512x512", type: "image/png" },
+				{ src: "/assets/icon_maskable_512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+			],
+		});
+		await expect(page.locator('link[rel="apple-touch-icon"]')).toHaveAttribute(
+			"href",
+			"/assets/apple_touch_icon.png",
+		);
+		for (const [path, size] of [
+			["/assets/icon-192.png", 192],
+			["/assets/icon-512.png", 512],
+			["/assets/icon_maskable_512.png", 512],
+			["/assets/apple_touch_icon.png", 180],
+		] as const) {
+			const url = new URL(path, page.url()).href;
+			const asset = await page.request.get(url, { headers: { "x-webauth-user": "owner" } });
+			expect(asset.status()).toBe(200);
+			expect(asset.headers()["content-type"]).toContain("image/png");
+			const dimensions = await page.evaluate(async (src) => {
+				const image = new Image();
+				image.src = src;
+				await image.decode();
+				return [image.naturalWidth, image.naturalHeight];
+			}, url);
+			expect(dimensions).toEqual([size, size]);
+		}
+		for (const path of [
+			"/manifest.webmanifest",
+			"/assets/icon-192.png",
+			"/assets/icon-512.png",
+			"/assets/icon_maskable_512.png",
+			"/assets/apple_touch_icon.png",
+		]) {
+			const url = new URL(path, page.url()).href;
+			const authorized = await page.request.get(url, { headers: { "x-webauth-user": "owner" } });
+			expect(authorized.headers()["cache-control"]).toBe("no-store");
+			expect(authorized.headers()["content-security-policy"]).toContain("frame-ancestors 'none'");
+			const unauthorized = await page.request.get(url, { headers: { "x-webauth-user": "other" } });
+			expect(unauthorized.status()).toBe(403);
+		}
 		await expect(page.getByRole("link", { name: "Forge home" }).locator("img")).toHaveAttribute("src", icon!);
 		await expect(page.getByRole("textbox", { name: "File editor" })).toBeVisible();
 		await page.reload();

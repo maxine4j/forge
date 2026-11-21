@@ -17,6 +17,15 @@ test("serves only owned built files, falls back for navigation, and never masks 
 		await writeFile(join(root, "private.txt"), "secret");
 		await symlink(join(root, "private.txt"), join(root, "assets/leak.js"));
 		const assets = new StaticAssets(root, files);
+		expect(await assets.read("/manifest.webmanifest")).toBeUndefined();
+		await symlink(join(root, "private.txt"), join(root, "manifest.webmanifest"));
+		expect(await assets.read("/manifest.webmanifest")).toBeUndefined();
+		await rm(join(root, "manifest.webmanifest"));
+		await writeFile(join(root, "manifest.webmanifest"), "{}");
+		expect(await assets.read("/manifest.webmanifest")).toMatchObject({
+			type: "application/manifest+json",
+			immutable: false,
+		});
 		expect(await assets.read("/projects/one")).toMatchObject({ type: "text/html", immutable: false });
 		expect(await assets.read("/assets/app-12345678.js")).toMatchObject({
 			type: "text/javascript",

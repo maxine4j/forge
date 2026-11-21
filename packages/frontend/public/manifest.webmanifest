@@ -1,0 +1,15 @@
+{
+	"name": "Forge",
+	"short_name": "Forge",
+	"id": "/",
+	"start_url": "/tasks",
+	"scope": "/",
+	"display": "standalone",
+	"theme_color": "#102823",
+	"background_color": "#0d1117",
+	"icons": [
+		{ "src": "/assets/icon-192.png", "sizes": "192x192", "type": "image/png" },
+		{ "src": "/assets/icon-512.png", "sizes": "512x512", "type": "image/png" },
+		{ "src": "/assets/icon_maskable_512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+	]
+}
