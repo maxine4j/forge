@@ -72,6 +72,10 @@ import { GitSystemConfig } from "./settings/git-system-config.ts";
 import { SettingsRouter } from "./settings/settings-router.ts";
 import { SettingsService } from "./settings/settings-service.ts";
 import { SettingsStore } from "./settings/settings-store.ts";
+import { migrateTaskAgents } from "./task-agents/task-agent-migration.ts";
+import { TaskAgentRouter } from "./task-agents/task-agent-router.ts";
+import { TaskAgentService } from "./task-agents/task-agent-service.ts";
+import { TaskAgentStore } from "./task-agents/task-agent-store.ts";
 import { TerminalInventory } from "./terminal/terminal-inventory.ts";
 import { TerminalProcess } from "./terminal/terminal-process.ts";
 import { TerminalRouter } from "./terminal/terminal-router.ts";
@@ -191,7 +195,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			};
 		},
 		() => collector.sample(),
-		async () => (await providerStore.list()).find((provider) => provider.kind === "openai")?.defaultAgentModel,
+		async (id) => (id ? (await providerStore.get(id))?.comparisonModel : undefined),
 	);
 	lifecycle.register(() => usage.close());
 	const agentClient = new CodexAgentClient(connection, files.realpath, randomUUID, usage, {
@@ -311,7 +315,6 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	await notificationStore.initialize();
 	const agentStore = new AgentThreadStore(database, notificationStore);
 	await agentStore.initialize();
-	await agentStore.recover();
 	const providerStore = new ModelProviderStore(database);
 	await providerStore.initialize();
 	const cost = new CostService(access, ticketStore, costStore, usage, () => new Date(), quotas, providerStore);
@@ -334,11 +337,10 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		randomUUID,
 		() => new Date(),
 		tracker,
-		() => ({}),
-		() => ({ kind: "openai" }),
+		undefined,
 		ticketHistory,
 		performance,
-		providers,
+		true,
 	);
 	lifecycle.register(() => agents.shutdown());
 	const boardStore = new BoardSettingsStore(database);
@@ -348,6 +350,11 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	const workflowStore = new TicketWorkflowStore(database, () => new Date(), notificationStore);
 	await workflowStore.initialize();
 	await migrateModelProviders(database, randomUUID, !!(await codex.status()).account);
+	const taskAgentStore = new TaskAgentStore(database);
+	await taskAgentStore.initialize();
+	await migrateTaskAgents(database, randomUUID);
+	await agentStore.recover();
+	const taskAgents = new TaskAgentService(taskAgentStore, providers, access, randomUUID);
 	collector.start();
 	const workflow = new TicketWorkflowService(
 		workflowStore,
@@ -362,6 +369,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		() => boardSettings.dispatchMode(),
 		new AbandonedWorkspaceCleanup(terminals, workspaces),
 		providers,
+		taskAgents,
 	);
 	const tickets = new TicketService(ticketStore, store, access, () => new Date(), workflow, epicStore);
 	const epics = new EpicService(epicStore, ticketStore, access, () => new Date());
@@ -405,6 +413,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			new AccountRouter(accounts),
 			new SettingsRouter(settings),
 			new ModelProviderRouter(providers),
+			new TaskAgentRouter(taskAgents),
 			agentRouter,
 			new BoardSettingsRouter(boardSettings),
 			new DockerRouter(docker),

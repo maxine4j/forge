@@ -53,7 +53,7 @@ test("provider HTTP routes require owner/origin, expose safe records and return 
 			name: " Local ",
 			kind: "ollama",
 			endpoint: "http://ollama/v1",
-			model: "local",
+			comparisonModel: "gpt-5.4",
 		});
 		expect(created.status).toBe(201);
 		const provider = (await created.json()) as ModelProvider;
@@ -62,7 +62,7 @@ test("provider HTTP routes require owner/origin, expose safe records and return 
 			name: "Local",
 			kind: "ollama",
 			endpoint: "http://ollama/v1",
-			model: "local",
+			comparisonModel: "gpt-5.4",
 			retired: false,
 		});
 		expect((await request(`/${provider.id}`, "PATCH", { kind: "openai" })).status).toBe(400);
@@ -70,9 +70,7 @@ test("provider HTTP routes require owner/origin, expose safe records and return 
 			id: provider.id,
 			name: "Renamed",
 		});
-		expect(await (await request(`/${provider.id}/model-options`)).json()).toMatchObject({
-			models: [{ id: "local" }],
-		});
+		expect((await request(`/${provider.id}/model-options`)).status).toBe(400);
 		expect((await request(`/${provider.id}`, "DELETE")).status).toBe(204);
 		expect(await (await request()).json()).toEqual([]);
 		expect(await (await request(`/${provider.id}/model-options`)).json()).toEqual({ error: "provider-retired" });

@@ -78,7 +78,7 @@ export class CodexUsageClient implements ICodexUsageTracker, ICodexLimits {
 		private readonly now: () => Date,
 		private readonly billing: () => Promise<BillingSnapshot>,
 		private readonly sample: () => Promise<void>,
-		private readonly benchmarkModel?: () => Promise<string | undefined>,
+		private readonly benchmarkModel?: (providerId?: string) => Promise<string | undefined>,
 	) {
 		this.unsubscribe = connection.subscribe((method, params) => this.notification(method, params));
 	}
@@ -86,7 +86,7 @@ export class CodexUsageClient implements ICodexUsageTracker, ICodexLimits {
 		await this.writes;
 		const billing = { ...(await this.billing()) };
 		if (scope.providerKind === "ollama") {
-			const benchmark = await this.benchmarkModel?.();
+			const benchmark = await this.benchmarkModel?.(scope.providerId);
 			if (benchmark) billing.benchmark = { model: benchmark, rates: modelRates(benchmark) };
 		} else {
 			billing.rates = modelRates(model);

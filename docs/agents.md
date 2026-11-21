@@ -2,7 +2,7 @@
 
 ## Worktree TypeScript tools
 
-Planning, implementation and standalone threads receive the reserved
+Planning and implementation threads receive the reserved
 `forge_typescript` MCP server on start, resume and recovery. Its absolute Node
 launcher and compiled bridge receive an explicit canonical worktree argument and
 MCP cwd. Dotted per-server configuration preserves other MCP entries and provider
@@ -51,7 +51,7 @@ replayed after failure. See [architecture](architecture.md#worktree-typescript-i
 ## Latest-turn inference performance
 
 `AgentView.performance` is an optional validated latest-turn snapshot shared by
-ticket planning, implementation and standalone chats, including Ollama. It carries
+ticket planning and implementation, including Ollama. It carries
 `turnId`, `outputTokens`, `requestCount`, `requestDurationMs`, optional
 `firstTokenLatencyMs` and `generationDurationMs`, and `state` (`complete`, `partial`
 or `unavailable`). Rates are derived from these totals independently of
@@ -116,13 +116,12 @@ Ticket-only [execution settings](tickets.md#ticket-execution-settings) can skip
 planning or request recommended choices without clarification questions.
 Direct implementation receives current ticket scope when there is no saved plan.
 Recommendation guidance applies to every ticket turn while preserving manual
-plan approval and tool permission mode. These flags stay in ticket orchestration;
-standalone chats and runtime model, effort and permission settings are unchanged.
+plan approval and tool permission mode. These flags stay in ticket orchestration.
 
 [Returning a ticket](tickets.md#abandonment-and-restart) records durable abandonment
 before requesting ticket-scoped cancellation through the injected agent interface.
 Only the recorded managed planner and implementer are interrupted; unrelated
-tickets and standalone chats keep running. Agents retain a private abandonment
+tickets keep running. Agents retain a private abandonment
 flag rejecting further dispatch, steering and approval replies. Reconciliation
 uses the same termination evidence as Stop all agents, without replaying ambiguous
 turns. Interrupt acknowledgment alone does not settle execution or allow worktree
@@ -150,14 +149,13 @@ reviews; Codex owns model interaction, tools, agent execution, and conversations
   Reconcile actual Codex state after app-server or application restart before
   dispatching more work. Surface interrupted execution and recovery failures explicitly.
 - An unbounded execution tracker records active and uncertain executions across
-  projects, standalone chats and ticket phases for global stop and recovery.
+  projects and ticket phases for global stop and recovery.
   Completed, failed and interrupted turns end execution tracking. Thread creation
   reserves no slot. Serialize mutations within each thread and retain submission
   guards against racing global stop. The [ticket board capacity](tickets.md#agentic-ticket-board)
   limits persisted In progress tickets independently of execution tracking;
-  awaiting approval and failed workflows still count. Standalone chats have no
-  board concurrency limit, including while ticket dispatch is paused or stopped.
-  **Stop all agents** continues interrupting both ticket agents and standalone chats.
+  awaiting approval and failed workflows still count. **Stop all agents** interrupts
+  tracked ticket executions.
 - Shut down child processes cleanly and reap descendants. Keep the web UI and
   process health available when Codex is unavailable or unauthenticated.
 
@@ -180,20 +178,10 @@ skill discovery uses the active agent's verified worktree; internal skill paths
 never enter browser responses. Explicit skills are resolved again at submission
 and sent as structured inputs, including ticket steering.
 
-OpenAI model options come from the installed runtime's catalog, including supported
-thinking levels and its default effort. Messages accept optional `reasoningEffort`,
-a nonempty catalog value. When a field is unset, each new turn inherits the
-[Forge Config](foundation.md#forge-settings) model and thinking defaults. An unavailable
-configured model falls back to Codex's default. Configured thinking applies to any
-selected model that supports it and falls back to Codex's thinking default otherwise.
-Switching models clears an incompatible explicit effort. Standalone selections
-persist in existing SQLite thread JSON records. Unsupported explicit
-model/effort combinations return `unsupported-settings` (400) and preserve drafts.
-`GET /api/projects/:projectId/model-options` reads the catalog without allocating a
-thread or worktree. Each endpoint rechecks owner access.
-
-Ollama exposes the saved model tag as its only model, with no selectable thinking
-levels. Worktree skills still come from app-server.
+[Named Agents](tickets.md#named-agents) select OpenAI models and supported thinking
+levels using the pinned runtime’s catalog, or an Ollama tag with no thinking level.
+Ticket phases resolve and pin routing before external setup. Worktree skills come
+from app-server.
 
 The Agents tab and backend reuse the one private, pinned Codex `0.171.0` stdio
 process and existing persistent ChatGPT login.
@@ -202,11 +190,9 @@ serialization; `CodexAgentClient` owns execution and maps validated harness even
 to browser-safe values. Future ticket workflows can reuse that execution adapter
 without depending on HTTP, browser connections or chat-specific state.
 
-Creating a chat allocates a dedicated managed branch/worktree from local `main`.
-It never uses the project repository or an unrelated manual workspace as its
-execution directory. Codex thread creation is deferred until the first message:
-the pinned runtime does not persist empty threads. Verify workspace ownership
-before starting, resuming or sending a turn, and before answering approvals.
+Ticket phases use their verified ticket worktree. Codex thread creation is deferred
+until dispatch. Repository chat routes have been removed. Existing conversation
+records and credential homes remain on disk.
 Canonicalize runtime paths before checking Codex's resumed working directory.
 All working files, branches and thread records are retained.
 
@@ -263,20 +249,14 @@ thread and turn; disconnects invalidate them. Worktrees remain a trusted-owner
 boundary, not process isolation or protection from deliberately modifying shared
 Git metadata.
 
-Forge uses [named providers](foundation.md#model-providers) with the existing
-Codex harness. Standalone chat creation requires `{title, providerId}`; validation
-and a configuration snapshot precede workspace allocation. The creation selector
-starts unselected. Existing chats retain their saved inference configuration.
-Public agent summaries expose provider ID/name, never inference endpoints.
-
-Tickets snapshot provider identity and configuration separately before each phase's
-first thread creation. Planning and plan feedback use planner settings;
-implementation, implementation feedback and rebase use implementer settings.
-Same as planner inherits the saved planner selection on every turn and reuses its
-pinned routing. Skip planning creates only an implementation thread. Omitted model
-and thinking overrides reach the agent service unchanged, inheriting current
-provider defaults each turn; explicit overrides remain fixed. Routing snapshots
-survive provider edits, retirement, setup retries and recovery. There is no provider fallback.
+Forge uses [named model providers](foundation.md#model-providers) and
+[reusable Agents](tickets.md#named-agents) with the existing Codex harness. Before
+the first setup of each ticket phase, Forge pins its assigned Agent’s model and
+thinking level with the provider identity and routing. Planning and plan feedback
+reuse the Planner pin. Implementation, implementation feedback, and rebase reuse
+the Implementer pin. Skip planning starts implementation directly. Existing pins
+survive Agent or provider edits, retirement, setup retries and recovery. Public
+summaries expose provider identity and keep inference endpoints private.
 Legacy agent records without a provider still mean OpenAI; upgrade never rewrites
 their inference snapshots or replays dispatched turns. See
 [ticket selection and reset](tickets.md#ticket-execution-settings) and
@@ -287,7 +267,7 @@ thread-scoped Responses provider without OpenAI credentials. Ollama permission
 restrictions remain in force. Ollama turns record usage for [API-equivalent and
 weekly allowance estimates](#cost-and-usage). OpenAI quota sampling and attribution
 remain scoped to OpenAI. Provider errors follow existing recovery paths. Named providers
-add no queues, limits, reservations or changes to board/standalone concurrency.
+share the ticket board’s existing scheduler and execution tracker.
 Forge can also reach a local Ollama worker through the [Ollama relay](development.md#ollama-relay).
 The relay forwards Ollama's stateless Responses and SSE stream, and the worker
 connects from the approved inference host over TLS.
@@ -301,7 +281,7 @@ the chosen deployment and model with chat, tool execution, restart, and ticket
 planning and implementation. On Ollama 0.40.16, `qwen3.8:27b` handled chat and
 tool calls. The `qwen3.8-27b-turbo:q4_k_s` template rejected Codex's developer
 messages with HTTP 500 and “System message must be at the beginning.” When
-switching models in Config, start a new chat to pick up the new tag.
+changing an Agent’s tag in Tasks, it takes effect when a phase next pins that Agent.
 
 Codex's curated process environment explicitly supplies
 `DOCKER_HOST=unix:///run/forge/docker.sock`, as do workspace terminals. CLI,
@@ -319,17 +299,15 @@ inference, automatic ticket cleanup, or attribution UI.
 
 Browser-safe schemas are exported from `@forge/contracts/agents`:
 
-| Route                                      | Contract                                                                                                                                                                                                   |
-| ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `GET/POST /api/projects/:projectId/agents` | List summaries / create `{title, providerId}`; returns 201 and a view.                                                                                                                                     |
-| `GET /api/agents/:id`                      | `{thread,items,requests,truncated}`; no Codex thread IDs or internal workspace paths in metadata.                                                                                                          |
-| `POST /api/agents/:id/messages`            | `{text,model?,permissions?}`; starts one turn and returns its current view. Permission values are `ask`, `approve-for-me`, `full-access`.                                                                  |
-| `GET /api/agents/:id/options`              | Runtime models `{id,name,isDefault}` and enabled worktree skills `{name,description}`; no internal skill paths.                                                                                            |
-| `GET /api/agents/:id/files?query=…`        | At most 100 relative file paths from the chat's verified worktree. Empty query lists root files through the workspace tree API; nonempty query uses runtime fuzzy search. Query bounded to 500 characters. |
-| `POST /api/agents/:id/resume`              | History loading and reconciliation; never sends input.                                                                                                                                                     |
-| `POST /api/agents/:id/interrupt`           | Requests interruption of the known active turn.                                                                                                                                                            |
-| `POST /api/agents/:id/replies`             | `{requestId,decision: "accept"/"decline"}` or `{requestId,answers:{questionId:text}}`.                                                                                                                     |
-| `GET /api/agents/:id/events`               | Authorized SSE invalidations (`data: changed`); read the current view after each notification/reconnect.                                                                                                   |
+| Route                               | Contract                                                                                                                                                                                                   |
+| ----------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/agents/:id`               | `{thread,items,requests,truncated}`; no Codex thread IDs or internal workspace paths in metadata.                                                                                                          |
+| `GET /api/agents/:id/options`       | Runtime models `{id,name,isDefault}` and enabled worktree skills `{name,description}`; no internal skill paths.                                                                                            |
+| `GET /api/agents/:id/files?query=…` | At most 100 relative file paths from the chat's verified worktree. Empty query lists root files through the workspace tree API; nonempty query uses runtime fuzzy search. Query bounded to 500 characters. |
+| `POST /api/agents/:id/resume`       | History loading and reconciliation; never sends input.                                                                                                                                                     |
+| `POST /api/agents/:id/interrupt`    | Requests interruption of the known active turn.                                                                                                                                                            |
+| `POST /api/agents/:id/replies`      | `{requestId,decision: "accept"/"decline"}` or `{requestId,answers:{questionId:text}}`.                                                                                                                     |
+| `GET /api/agents/:id/events`        | Authorized SSE invalidations (`data: changed`); read the current view after each notification/reconnect.                                                                                                   |
 
 Every operation rechecks owner access; HTTP mutations retain exact-origin checks.
 Errors are `invalid-request` (400), `agent-not-found` (404), `agent-conflict` (409),
@@ -359,34 +337,7 @@ preserves newer live activity observed during the history read; unloaded or
 system-error runtime states remain uncertain. Externally resolved server requests
 invalidate both the transport reply and browser callback.
 
-The Agents sidebar has a single-row Create chat button without a title input;
-new chats receive a default numbered name. The tab has no additional Agents
-heading, and the selected conversation does not repeat its title. Thread names
-remain in the thread list; execution status and interruption remain available.
-The responsive Agents tab lists and creates project chats, shows conversation and
-tool activity, and supports send, interrupt, one-time approval/denial and structured
-clarification replies. Open chats retain their message and answer drafts across
-thread and project-section selection. Failed writes preserve drafts. Drafts are
-browser memory only. Tasks, Costs and Config visits retain them with the open
-repository workbench; changing repositories or reloading the page discards them.
-Execution continues independently of the selected chat or browser connection.
-At widths up to 700 CSS pixels, the base Agents URL shows only the full-height
-chat list; a chat URL shows only its conversation. Creating a chat opens it after
-success; failures leave the list and error visible. **Back to chats** returns to
-the known list ancestor, skipping intervening chat selections. Direct links fall
-back to the base URL with replacement, including during loading and for
-unavailable chats. See [navigation history](workspaces.md#navigation-history).
-It shares the status/action row without repeating the title. Wider screens show
-the sidebar and conversation together and select the first listed chat when
-entering without a chat URL. Resizing keeps an open chat selected; widening from
-the list restores first-chat selection. Visited conversations stay mounted while
-hidden, preserving drafts, clarification answers, activity and reading position;
-returning to the list never interrupts execution. Hidden panes cannot receive
-keyboard focus. Opening a conversation focuses its container without opening the
-software keyboard; returning focuses its chat button, or Create chat if unavailable.
-The list and history scroll independently within the visible viewport, including
-when the software keyboard reduces it. See the [navigation contract](workspaces.md#slice-2-integrated-manual-workspace-and-pr-review).
-Opening a chat
+Opening ticket Chat
 automatically loads persisted history and reconciles recoverable execution state;
 running/waiting chats retain their live activity and untouched empty chats need no
 resume. Sidebar chats hide the internal `uncertain` status and recover only when
@@ -400,7 +351,7 @@ executed from conversation text.
 
 ### Following chat activity
 
-Standalone chats and ticket Chat timelines initially open at the bottom and follow
+Ticket Chat timelines initially open at the bottom and follow
 new messages, streaming output and content or viewport resizing. Scrolling more
 than 80 pixels from the bottom pauses following and preserves the reading position.
 A circular down-arrow control floats above the bottom of the history viewport,
@@ -421,8 +372,7 @@ available. Running tool summaries use a sweeping text highlight, disabled with
 reduced-motion preferences. Tool titles/statuses remain structured through output
 deltas and history reloads. No project/workspace/worktree picker is exposed.
 
-The rounded composer includes a runtime model selector, permission selector and
-small blue upward-arrow send button. Enter sends; Cmd+Enter and Ctrl+Enter insert
+The rounded composer includes a small upward-arrow send button. Enter sends; Cmd+Enter and Ctrl+Enter insert
 a newline at the caret (Shift+Enter also retains normal textarea behavior). IME
 composition must not submit. `$` opens enabled skills, `@` opens worktree files;
 filter from the caret, navigate with arrows, insert with Tab or a pointer, and
@@ -434,8 +384,7 @@ file-search failures retain the draft and allow another query. Ticket workflow
 conversations share message layout and keyboard behavior. The
 [ticket scheduler](tickets.md#agentic-ticket-board) selects native Codex Plan mode
 on planner turns through the pinned app-server collaboration mode and persists
-its completed plan items. Managed chats use the runtime's thread model and omit
-the standalone model and permission selectors.
+its completed plan items. Ticket Chat uses the phase pin and ticket-wide permissions.
 
 Native Codex plan items carry `kind: "plan"` in the browser contract and render
 as Markdown assistant messages outside tool groups, identically for deltas and
@@ -454,7 +403,7 @@ authoritative even if it precedes the steering response. Stale or inactive turns
 are rejected; transport failures never trigger replay. Ticket workflow
 serialization also prevents steering after completion/merge queuing. Waiting
 structured requests use existing replies; planner feedback requires an idle or
-failed workflow. Standalone chat messages retain their existing turn-start behavior.
+failed workflow.
 
 Controlled Chromium tests cover independent threads, activity, interruptions,
 reopening, failed sends/replies, approval/input, reconnects, automatic recovery and
@@ -479,7 +428,7 @@ details on Costs and show no single-repository label. Ticket usage is aggregated
 by ticket ID, independently of a turn's execution repository. See
 [board ownership and execution context](tickets.md#agentic-ticket-board).
 The OpenAI and Ollama cards compare token counts and AUD estimates for the selected
-range, including standalone chats. OpenAI shows the live weekly allowance remaining.
+range, including historical repository chat usage. OpenAI shows the live weekly allowance remaining.
 Ollama shows the OpenAI API equivalent and estimated weekly allowance saved. The
 provider table groups named providers by type and shows API estimates to the cent
 and each provider's share of recorded input plus output tokens to one decimal place.
@@ -488,8 +437,8 @@ per named provider. Retired providers appear only when they have usage in range.
 Legacy records without an ID count toward the sole known OpenAI provider, or appear
 as OpenAI history when attribution is ambiguous. See [model providers](foundation.md#model-providers).
 
-The Ollama equivalent prices uncached input, cached input and output at the active
-OpenAI provider's explicit default model and AUD exchange rate saved at dispatch.
+The Ollama equivalent prices uncached input, cached input and output using the
+Ollama provider’s optional comparison model and the AUD exchange rate saved at dispatch.
 The estimate is partial or unavailable when usage, benchmark pricing or FX is
 missing. Ollama turns before tracking began have no backfill. Usage charts and
 ticket token counts include both provider types. The [ticket cost estimates](tickets.md#ticket-cost)
@@ -527,7 +476,7 @@ Weekly windows are identified by `minutes === 10080`: use the sole weekly bucket
 or the stable `codex` bucket when multiple exist. Missing or ambiguous selection
 makes attribution unavailable. Consecutive observations in the same bucket and
 reset cycle allocate the nonnegative increase in proportion to each turn's saved
-API-cost increment, including standalone chats in the denominator. SQLite saves
+API-cost increment, including historical repository chat usage in the denominator. SQLite saves
 samples and interval allocations atomically and idempotently; repeated notifications,
 restarts and dashboard reads cannot add duplicate turns or allocations.
 
@@ -580,5 +529,5 @@ and a dashed linear reference from 100% at window start to 0% at reset. It never
 invents a starting observation. A labelled selector defaults to the lowest remaining bucket.
 Both time charts use Recharts and expose values on hover and keyboard focus.
 This is budget capacity, not a guarantee of completing work in the remaining time:
-standalone chats, other account activity and changing ticket complexity affect it.
+other account activity and changing ticket complexity affect it.
 It imposes no spending cap or scheduler enforcement.

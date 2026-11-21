@@ -170,7 +170,23 @@ export class MockApi implements IMockApi {
 				kind: "ollama",
 				retired: false,
 				endpoint: "http://ollama/v1",
+				comparisonModel: "gpt-5.4",
+			},
+		]);
+		this.routes.set("/api/task-agents", () => [
+			{
+				id: "123e4567-e89b-42d3-a456-426614174090",
+				name: "Planner",
+				providerId: "123e4567-e89b-42d3-a456-426614174099",
+				model: "preview-model",
+				retired: false,
+			},
+			{
+				id: "123e4567-e89b-42d3-a456-426614174091",
+				name: "Local implementer",
+				providerId: "123e4567-e89b-42d3-a456-426614174098",
 				model: "local:latest",
+				retired: false,
 			},
 		]);
 		this.routes.set("/api/board/settings", () => defaultBoardSettings);
@@ -542,7 +558,8 @@ export class MockApi implements IMockApi {
 					this.routes.set(`/api/agents/${plannerId}/files`, () => Object.keys(files));
 				}
 				ticket.executionSettings = {
-					providerId: "123e4567-e89b-42d3-a456-426614174099",
+					plannerAgentId: "123e4567-e89b-42d3-a456-426614174090",
+					implementerAgentId: "123e4567-e89b-42d3-a456-426614174091",
 					...ticket.executionSettings,
 				};
 				this.routes.set(`/api/tickets/${ticket.id}`, () => ticket);

@@ -13,6 +13,9 @@ test("agent inputs trim names and models and reject unknown fields", () => {
 		{ name: " ", providerId, model: "model" },
 		{ name: "Planner", providerId, model: " " },
 		{ name: "Planner", providerId, model: "model", retired: false },
-	]) expect(taskAgentInputSchema.safeParse(input).success).toBe(false);
-	expect(taskAgentSchema.safeParse({ id: providerId, name: "Migrated", providerId, retired: false }).success).toBe(true);
+	])
+		expect(taskAgentInputSchema.safeParse(input).success).toBe(false);
+	expect(taskAgentSchema.safeParse({ id: providerId, name: "Migrated", providerId, retired: false }).success).toBe(
+		true,
+	);
 });

@@ -11,6 +11,7 @@ import { ModelProviderError } from "../model-providers/errors.ts";
 import { InvalidProjectError, ProjectNotFoundError, ProjectUnavailableError } from "../projects/errors.ts";
 import type { IProjectRouter } from "../projects/project-router.ts";
 import { SettingsError } from "../settings/settings-service.ts";
+import { TaskAgentError } from "../task-agents/task-agent-service.ts";
 import { TicketError } from "../tickets/errors.ts";
 import { WorkspaceError } from "../workspaces/errors.ts";
 import type { IStaticAssets } from "./static-assets.ts";
@@ -52,6 +53,9 @@ export class HttpApplication implements IHttpApplication {
 				} else if (err instanceof EpicError) {
 					ctx.status = err.code === "invalid-request" ? 400 : err.code === "epic-not-found" ? 404 : 503;
 					ctx.body = { error: err.code };
+				} else if (err instanceof TaskAgentError) {
+					ctx.status = err.status;
+					ctx.body = { error: err.message };
 				} else if (err instanceof ModelProviderError) {
 					ctx.status =
 						err.code === "provider-not-found"

@@ -1,6 +1,5 @@
 import type { AgentView } from "@forge/contracts/agents";
-import { agentOptionsSchema, resolveAgentSettings, type AgentOptions } from "@forge/contracts/agents";
-import { updateTicketSchema, ticketSchema, ticketPhaseSettings } from "@forge/contracts/tickets";
+import { updateTicketSchema, ticketSchema } from "@forge/contracts/tickets";
 import {
 	ticketWorkflowSchema,
 	type Ticket,
@@ -9,12 +8,11 @@ import {
 	type EpicSummary,
 	type TicketExecutionSettings,
 } from "@forge/contracts/tickets";
-import { useContext, useEffect, useRef, useState, useId } from "react";
+import { useEffect, useRef, useState, useId } from "react";
 import { useLocation } from "react-router";
 
 import { PlanMarkdown } from "../agents/agent-activity.tsx";
 import { Conversation } from "../agents/agent-chat.tsx";
-import { AgentOptionsRevision } from "../agents/execution-settings.tsx";
 import { PlanReviewControls } from "../agents/plan-review-controls.tsx";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
@@ -242,47 +240,8 @@ export const TicketDetails = ({
 	const settings = pendingSettings ?? savedSettings ?? ticket.executionSettings ?? {};
 	const [, setError] = useErrorState();
 	const [, setMoveError] = useErrorState();
-	const [loadedOptions, setLoadedOptions] = useState<{ key: string; value: AgentOptions }>();
-	const activePhase = job?.phase && job.phase !== "planning" ? "implementation" : "planning";
-	const activeSettings = ticketPhaseSettings(settings, activePhase);
-	const activeProvider = activePhase === "planning" ? job?.planningProvider : job?.implementationProvider;
-	const optionsKey = JSON.stringify([activeSettings.providerId, job]);
-	const options = loadedOptions?.key === optionsKey ? loadedOptions.value : undefined;
-	const optionsRevision = useContext(AgentOptionsRevision);
 	const [savingSettings, setSavingSettings] = useState(false);
 	const [, setSettingsError] = useErrorState();
-	useEffect(() => {
-		let current = true;
-		if (!activeSettings.providerId && !job?.plannerId && !job?.implementerId) return;
-		void api
-			.read(
-				!activeProvider?.providerLocked && !job?.plannerId && !job?.implementerId && activeSettings.providerId
-					? `model-providers/${activeSettings.providerId}/model-options`
-					: `tickets/${ticket.id}/model-options?phase=${activePhase}`,
-				agentOptionsSchema,
-			)
-			.then((value) => {
-				if (current) setLoadedOptions({ key: optionsKey, value });
-			})
-			.catch(() => {
-				if (current) setError("Models unavailable.");
-			});
-		return () => {
-			current = false;
-		};
-	}, [
-		api,
-		ticket.id,
-		job?.phase,
-		job?.plannerId,
-		job?.implementerId,
-		activeProvider?.providerLocked,
-		optionsKey,
-		activePhase,
-		activeSettings.providerId,
-		optionsRevision,
-		setError,
-	]);
 	const settingsDisabled = archived || savingSettings || !!resetting || ticket.status === "done";
 	const changeSettings = (value: TicketExecutionSettings) => {
 		if (settingsDisabled) return;
@@ -356,10 +315,8 @@ export const TicketDetails = ({
 	useFailureToast(
 		job?.state === "setup-failed"
 			? job.providerSelectionError
-				? "Select an active model provider in Agent Settings, then retry setup."
-				: options && !resolveAgentSettings(options, activeSettings).supported
-					? "Some agent settings are unavailable. Use Default for the model or thinking level, or choose an available permission mode, then retry."
-					: "Agent setup failed."
+				? "Select an available agent in Agent Settings, then retry setup."
+				: "Agent setup failed."
 			: undefined,
 	);
 	const blocked = !job || (!steering && !["idle", "failed"].includes(job.state)) || ticket.status !== "in-progress";
@@ -741,18 +698,6 @@ export const TicketDetails = ({
 					<legend>Agent Settings</legend>
 					<TicketAgentSettings
 						api={api}
-						ticketId={ticket.id}
-						phase='planning'
-						settings={settings}
-						job={job}
-						change={changeSettings}
-						disabled={settingsDisabled}
-						permissions
-					/>
-					<TicketAgentSettings
-						api={api}
-						ticketId={ticket.id}
-						phase='implementation'
 						settings={settings}
 						job={job}
 						change={changeSettings}
@@ -806,29 +751,6 @@ export const TicketDetails = ({
 						changed={refresh}
 						selected={tab === "chat"}
 						messagePath={`tickets/${ticket.id}/messages`}
-						executionSettings={activeSettings}
-						settingsChanged={(value) =>
-							changeSettings(
-								activePhase === "planning"
-									? { ...settings, ...value }
-									: {
-											...settings,
-											permissions: value.permissions,
-											implementation:
-												settings.implementation?.mode === "custom"
-													? {
-															...settings.implementation,
-															model: value.model,
-															reasoningEffort: value.reasoningEffort,
-														}
-													: settings.implementation,
-										},
-							)
-						}
-						selectionDisabled={
-							activePhase === "implementation" && settings.implementation?.mode !== "custom"
-						}
-						settingsDisabled={settingsDisabled}
 						blocked={blocked || savingSettings}
 						steer={steering}
 						readOnly={

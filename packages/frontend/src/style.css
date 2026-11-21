@@ -2317,6 +2317,30 @@ small {
 	display: grid;
 	gap: 6px;
 }
+.task-agent-catalog {
+	width: min(100%, 960px);
+	margin-block: 16px;
+}
+#tasks-panel-agents {
+	overflow-y: auto;
+}
+.task-agent-editor fieldset {
+	display: grid;
+	gap: 12px;
+}
+.task-agent-editor button {
+	justify-self: start;
+}
+:is(.task-agent-editor, .ticket-agent-settings) select {
+	min-width: 0;
+	max-width: 100%;
+	padding: 6px 8px;
+	color: inherit;
+	font: inherit;
+	background: #161b22;
+	border: 1px solid #30363d;
+	border-radius: 6px;
+}
 .forge-settings textarea {
 	resize: vertical;
 }

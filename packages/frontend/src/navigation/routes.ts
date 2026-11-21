@@ -7,14 +7,9 @@ export const resolveRoute = (pathname: string): ForgeRoute => {
 	if (matchPath("/repos", pathname)) return { page: "repos" };
 	if (matchPath("/config", pathname)) return { page: "config" };
 	if (matchPath("/costs", pathname)) return { page: "costs" };
-	const match = matchPath("/repos/:repositoryId/:section/:threadId?", pathname);
-	const { repositoryId, section, threadId } = match?.params ?? {};
-	if (
-		repositoryId
-		&& section
-		&& ["code", "agents", "pipelines", "terminals"].includes(section)
-		&& (!threadId || section === "agents")
-	)
-		return { page: "repo", repositoryId, section, ...(threadId ? { threadId } : {}) };
+	const match = matchPath("/repos/:repositoryId/:section", pathname);
+	const { repositoryId, section } = match?.params ?? {};
+	if (repositoryId && section && ["code", "pipelines", "terminals"].includes(section))
+		return { page: "repo", repositoryId, section };
 	return { page: "not-found" };
 };

@@ -145,9 +145,7 @@ export const BoardSettingsDialog = ({
 							Stop all agents
 						</button>
 					</div>
-					<p className='board-settings-help'>
-						Stop interrupts ticket agents and standalone chats throughout Forge.
-					</p>
+					<p className='board-settings-help'>Stop interrupts ticket agents throughout Forge.</p>
 				</>
 			) : error ? (
 				<button type='button' onClick={retry}>

@@ -11,7 +11,11 @@ export async function migrateModelProviders(database: IDatabase, id: () => strin
 		return;
 	const rows = await database.all("SELECT payload FROM forge_settings WHERE id=1");
 	const legacy = rows.length ? JSON.parse((rows[0] as { payload: string }).payload) : {};
-	const providers: ModelProvider[] = [];
+	const providers: (ModelProvider & {
+		model?: string;
+		defaultAgentModel?: string;
+		defaultAgentReasoningEffort?: string;
+	})[] = [];
 	if (
 		(rows.length && (legacy.inferenceProvider ?? "openai") === "openai")
 		|| legacy.defaultAgentModel

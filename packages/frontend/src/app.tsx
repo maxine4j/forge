@@ -135,7 +135,7 @@ const Application = ({ api, workspaceApi }: { api: IApiClient; workspaceApi: IWo
 	const route = resolveRoute(location.pathname);
 	const presentation = useTicketPresentation();
 	const docked = new URLSearchParams(location.search).has("ticket") && presentation === "docked";
-	const constrained = route.page === "tasks" || (route.page === "repo" && route.section === "agents");
+	const constrained = route.page === "tasks";
 	const [viewport, setViewport] = useState({ height: window.visualViewport?.height ?? window.innerHeight, top: 0 });
 	useEffect(() => {
 		const update = () =>

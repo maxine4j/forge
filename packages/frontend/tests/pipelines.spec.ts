@@ -145,7 +145,7 @@ test("branch-dependent workflows, default events, submission, live states, histo
 	expect(state.reads()).toBe(reads);
 	await page.reload();
 	await expect(page.getByRole("region", { name: "Selected pipeline run" })).toContainText("succeeded");
-	await page.getByRole("tab", { name: "Agents", exact: true }).click();
+	await page.getByRole("tab", { name: "Code", exact: true }).click();
 	const navigated = state.reads();
 	await page.waitForTimeout(2200);
 	expect(state.reads()).toBe(navigated);

@@ -2,7 +2,6 @@ import { workspaceSchema, workspacesSchema, type Project, type Workspace } from 
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import { useLocation } from "react-router";
 
-import { AgentChat } from "../agents/agent-chat.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { InterfaceIcon } from "../navigation/interface-icon.tsx";
 import { resolveRoute } from "../navigation/routes.ts";
@@ -122,7 +121,6 @@ export const Workbench = ({
 				{(
 					[
 						["Code", "code"],
-						["Agents", "agents"],
 						["Pipelines", "pipelines"],
 						["Terminals", "terminals"],
 					] as const
@@ -156,9 +154,7 @@ export const Workbench = ({
 					dirtyChange={dirtyChange}
 				/>
 			</section>
-			<section id='panel-Agents' role='tabpanel' aria-labelledby='tab-Agents' hidden={tab !== "Agents"}>
-				{navigation.opened.includes("agents") && <AgentChat projectId={project.id} api={api} />}
-			</section>
+			<section id='panel-Agents' role='tabpanel' aria-labelledby='tab-Agents' hidden={tab !== "Agents"}></section>
 			<section id='panel-Pipelines' role='tabpanel' aria-labelledby='tab-Pipelines' hidden={tab !== "Pipelines"}>
 				{tab === "Pipelines" && <Pipelines key={project.id} projectId={project.id} api={api} />}
 			</section>

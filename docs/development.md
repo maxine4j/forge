@@ -54,7 +54,7 @@ turn identity, output counts (including reasoning once), first-token timing and
 saved measurements after reversed duplicate export delivery. The tests require
 no provider credentials or additional dependencies.
 
-Browser checks cover standalone, ticket planning, implementation and read-only
+Browser checks cover ticket planning, implementation and read-only
 chat footers, live reset/partial/unavailable states, reopening and mobile tooltip
 access. See [the measurement contract](agents.md#latest-turn-inference-performance)
 and [private persistence boundary](architecture.md#private-request-telemetry).
@@ -162,7 +162,7 @@ also closing its surrounding modal. See [navigation](foundation.md#navigation).
 ## Responsive ticket verification
 
 TASK-36 uses the pinned Node 24.22.0 and pnpm 10.34.7 toolchain. Chromium checks
-cover Board, Backlog, Notifications, Costs, Config, Repos and repository sections
+cover Board, Backlog, Notifications, Agents, Costs, Config, Repos and repository sections
 at 390, 690, 820, 1023, 1024 and 1280px. Geometry assertions check full-screen
 coverage, centred placement, the 580px panel below navigation and the reduced
 task area. Interaction checks cover board scrolling, keyboard traversal, dropdown
@@ -436,12 +436,21 @@ node ollama-relay/tests/image-smoke.mjs
 
 ## Named-provider upgrades
 
-TASK-39 keeps planner selections in the existing top-level execution settings and
+Startup runs the `task-agents-v1` migration after `named-model-providers-v1` and
+before recovery. It creates reusable Agents from legacy provider defaults and
+per-ticket configurations, converts saved phase selections to independent IDs and
+preserves existing routing pins and thread settings. It removes superseded execution
+fields from provider records in the same transaction as the migration marker.
+Implicit Codex model choices can remain unresolved in migrated records until dispatch.
+Existing conversations, credentials, and recorded turn prices are preserved.
+See [named Agents](tickets.md#named-agents) and [provider configuration](foundation.md#model-providers).
+
+TASK-39 kept planner selections in the existing top-level execution settings and
 adds optional implementation selections in the same JSON column. Missing settings
 inherit the planner. Workflow reads normalize legacy attempt-wide provider snapshots
 to both phase snapshots before recovery and subsequent saves. Existing agent
 records and inference routing remain unchanged; no turns are replayed. New phases
-pin independently, while linked implementation reuses pinned planner routing.
+pinned independently, while linked implementation reused pinned planner routing.
 See [ticket settings](tickets.md#ticket-execution-settings),
 [default resolution](agents.md#codex-harness-and-lifecycle) and
 [architecture](architecture.md#persistent-resources).

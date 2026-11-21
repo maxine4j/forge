@@ -44,8 +44,6 @@ const Harness = () => {
 					send={() => {}}
 					disabled={false}
 					sendable
-					settings={{}}
-					configurable={false}
 					completions={false}
 				/>
 			</div>

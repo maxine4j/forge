@@ -3,21 +3,14 @@ import {
 	agentOptionsSchema,
 	type AgentContextWindow,
 	type AgentOptions,
-	type AgentSettings,
 } from "@forge/contracts/agents";
 import { useContext, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { useErrorState, useToastAnchor, useToast } from "../toasts/toasts.tsx";
-import { AgentOptionsRevision, ExecutionSettings } from "./execution-settings.tsx";
+import { AgentOptionsRevision } from "./execution-settings.tsx";
 
 const number = new Intl.NumberFormat("en-AU");
-
-const composerSettings = ({ model, reasoningEffort, permissions }: AgentSettings): AgentSettings => ({
-	model,
-	reasoningEffort,
-	permissions: permissions ?? "ask",
-});
 
 const ContextWindow = ({ used, max }: AgentContextWindow) => {
 	const tooltipId = useId();
@@ -62,31 +55,19 @@ export const AgentComposer = ({
 	interrupt,
 	disabled,
 	sendable,
-	settings,
 	contextWindow,
-	configurable = true,
 	completions = true,
-	settingsChanged,
-	settingsDisabled = false,
-	selectionDisabled = false,
-	providerDefault = false,
 }: {
 	id: string;
 	api: IWorkspaceApi;
 	draft: string;
 	change: (value: string) => void;
-	send: (settings: AgentSettings) => void;
+	send: () => void;
 	interrupt?: { action: () => void; disabled: boolean };
 	disabled: boolean;
 	sendable: boolean;
-	settings: AgentSettings;
 	contextWindow?: AgentContextWindow;
-	configurable?: boolean;
 	completions?: boolean;
-	settingsChanged?: (settings: AgentSettings) => void;
-	settingsDisabled?: boolean;
-	selectionDisabled?: boolean;
-	providerDefault?: boolean;
 }) => {
 	const inputId = useId();
 	const listId = useId();
@@ -101,25 +82,13 @@ export const AgentComposer = ({
 	const optionsRevision = useContext(AgentOptionsRevision);
 	const [error, setError] = useErrorState();
 	const [attempt, setAttempt] = useState(0);
-	const settingsKey = JSON.stringify([settings.model, settings.reasoningEffort, settings.permissions]);
-	const [localSelection, setSelection] = useState<{ source: string; value: AgentSettings }>({
-		source: settingsKey,
-		value: composerSettings(settings),
-	});
-	const selection =
-		settingsChanged || localSelection.source !== settingsKey ? composerSettings(settings) : localSelection.value;
-	const selectSettings = (updated: AgentSettings) => {
-		const value = composerSettings(updated);
-		setSelection({ source: settingsKey, value });
-		settingsChanged?.(value);
-	};
 	const [cursor, setCursor] = useState(0);
 	const [dismissed, setDismissed] = useState(false);
 	const [selected, setSelected] = useState(0);
 	const [fileResult, setFileResult] = useState<{ query: string; files: string[]; error: string }>();
 	const { notify } = useToast();
 	useEffect(() => {
-		if (!configurable && !completions) return;
+		if (!completions) return;
 		let current = true;
 		void api
 			.read(`agents/${id}/options`, agentOptionsSchema)
@@ -135,7 +104,7 @@ export const AgentComposer = ({
 		return () => {
 			current = false;
 		};
-	}, [api, id, attempt, configurable, completions, optionsRevision, setError]);
+	}, [api, id, attempt, completions, optionsRevision, setError]);
 	const match = /(?:^|\s)([$@])([^\s$@]*)$/.exec(draft.slice(0, cursor));
 	const trigger = !dismissed && completions ? match?.[1] : undefined;
 	const query = match?.[2] ?? "";
@@ -213,7 +182,7 @@ export const AgentComposer = ({
 	const stop = hasMessage ? undefined : interrupt;
 	const actionLabel = stop ? "Interrupt" : "Send message";
 	const submit = () => {
-		if (sendable && !disabled && hasMessage) send(composerSettings(selection));
+		if (sendable && !disabled && hasMessage) send();
 	};
 	return (
 		<form
@@ -310,18 +279,7 @@ export const AgentComposer = ({
 				}}
 			/>
 			<div className='agent-composer-footer'>
-				{configurable ? (
-					<ExecutionSettings
-						settings={selection}
-						options={options}
-						disabled={disabled || settingsDisabled}
-						selectionDisabled={selectionDisabled}
-						providerDefault={providerDefault}
-						change={selectSettings}
-					/>
-				) : (
-					<div />
-				)}
+				<div />
 				<div className='agent-composer-actions'>
 					{contextWindow && <ContextWindow {...contextWindow} />}
 					<button

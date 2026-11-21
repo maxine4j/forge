@@ -221,12 +221,11 @@ discard uncommitted code is guarded.
 
 Repos opens directly to the repository list. Create repo opens the
 [creation and import dialog](foundation.md). Ready repository cards link to
-`/repos/:repositoryId/code`. Repository sections are Code, Agents, Pipelines and
+`/repos/:repositoryId/code`. Repository sections are Code, Pipelines and
 Terminals. The global header's home link opens Tasks, and `/` replaces its
 history entry with `/tasks`. The [global ticket board](tickets.md#agentic-ticket-board)
 is independent of the
-repository workbench. Code is the default repository section; Agents provides
-[interactive chats](agents.md#interactive-agents), and Pipelines provides
+repository workbench. Code is the default repository section. Pipelines provides
 [local workflows](git-and-ci.md#manual-local-pipelines).
 Tab navigation stays usable on narrow screens without widening the page.
 Repository tabs share the Tasks tab styling and pair each label with an icon.
@@ -241,14 +240,11 @@ long selected names truncate while popup options wrap to show complete names.
 Sync uses content-driven width and wraps long target names within the viewport,
 including the same minimum height for its disabled empty-repository variant.
 Breadcrumbs, file rows and editor tabs retain their specialized presentation.
-All repository tabs share the Agents spacing below the global header:
+Repository tabs share spacing below the global header:
 16px on desktop and 8px at widths up to 700px, with matching tab padding and
 spacing below the tab bar.
-Agents and Tasks fill the remaining visible viewport on laptop, slab-phone and
-square folding-phone layouts without vertical page scrolling. Opening a virtual
-keyboard shrinks the entire layout, including secondary chat columns. Only the
-chat thread list and conversation log scroll vertically in Agents; requests are
-part of the conversation log and the composer remains visible. Task columns
+Tasks fills the remaining visible viewport on laptop, slab-phone and square folding-phone
+layouts. Task columns
 scroll vertically independently with their headings fixed at the top; the board
 scrolls horizontally to reach other statuses.
 Ticket creation dialogs fit the visible viewport and scroll internally while the
@@ -260,10 +256,10 @@ log scrolls within the chat view. Planning history remains readable after starti
 the fresh implementation conversation.
 
 React Router uses the browser History API for `/repos/:repositoryId/code`,
-`/agents`, `/pipelines` and `/terminals` under the same repository prefix.
-An individual chat uses `/repos/:repositoryId/agents/:threadId`.
+`/pipelines` and `/terminals` under the same repository prefix.
+The [Agents catalog](tickets.md#named-agents) is at `/tasks?view=agents`.
 Task selection uses `/tasks?ticket=:id`. Removed `/projects` browser routes and
-repository Tasks/Cost sections show not-found without redirects. Code selection
+repository Tasks, Cost, and Agents sections show not-found without redirects. Code selection
 uses URL query parameters: `branch` is the exact Git branch name, `path` is the
 directory, `file` is the repository-relative active file, and `view=history` opens
 branch commit history. Query values are URL encoded, including slashes in branch
@@ -272,22 +268,12 @@ unavailable projects/branches show explicit states rather than a different view.
 Project cards and section tabs expose real links, supporting new tabs and copied
 URLs. Direct links, reloads and browser Back/Forward restore the URL's view;
 Android Back uses the same browser history. Navigation never replays messages or
-approvals. Opening Agents may resume the selected chat to load history; opening
-Terminals uses the documented automatic terminal inspection/create flow. Reload
+approvals. Opening Terminals uses the documented automatic terminal inspection/create flow. Reload
 reattaches its retained live shell without creating a duplicate.
 
 Clicking Code opens the directory listing for the last selected branch and
-directory. The Code tab does this even when already selected. Returning to Agents
-restores its last chat URL, which also determines the [mobile Agents screen](agents.md#interactive-agents):
-at widths up to 700 CSS pixels, `/agents` shows the chat list and
-`/agents/:threadId` shows the conversation with **Back to chats**. Direct links,
-reloads and browser Back/Forward honor that screen. Returning from Code restores
-the last Agents screen, including the list. Wider screens show both panes and
-select the first chat from the base URL. Resizing an open chat preserves it;
-widening the list selects the first chat. Visited conversations remain mounted
-and running through list and section navigation, retaining drafts and reading
-position. Only the visible pane participates in keyboard navigation.
-URL navigation within a repository and to Tasks, Config or Costs retains local editor/chat drafts and
+directory. The Code tab does this even when already selected.
+URL navigation within a repository and to Tasks, Config or Costs retains local editor drafts and
 visited terminals. Project exit, including browser history and global navigation,
 blocks while code drafts remain uncommitted; commit or discard them first.
 Reload/unload retains the native unsaved-code warning. Draft contents are not

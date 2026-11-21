@@ -22,7 +22,6 @@ import type { ICodexAgentClient } from "../codex/codex-agent-client.ts";
 import type { IAgentPerformance } from "../codex/performance-telemetry.ts";
 import type { TicketUsageScope } from "../cost/types.ts";
 import { ModelProviderError } from "../model-providers/errors.ts";
-import { inferenceConfiguration, type IModelProviderService } from "../model-providers/model-provider-service.ts";
 import type { ModelProviderSnapshot } from "../model-providers/types.ts";
 import type { IProjectService } from "../projects/project-service.ts";
 import type { ITicketAgentHistory } from "../tickets/ticket-history-store.ts";
@@ -110,11 +109,10 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		private readonly generateId: () => string,
 		private readonly now: () => Date,
 		private readonly tracker: IAgentExecutionTracker,
-		private readonly defaults: () => Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = () => ({}),
 		private readonly provider: () => InferenceProvider = () => ({ kind: "openai" }),
 		private readonly history?: ITicketAgentHistory,
 		private readonly performance?: IAgentPerformance,
-		private readonly providers?: IModelProviderService,
+		private readonly ticketOnly = false,
 	) {
 		this.unsubscribePerformance = performance?.subscribe((codexId) => {
 			const id = this.identities.get(codexId);
@@ -130,23 +128,9 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			}).catch((err: unknown) => this.log.error({ err }, "Could not persist agent activity"));
 		});
 	}
-	async create(actor: Actor, projectId: string, title: string, providerId?: string): Promise<AgentView> {
-		const provider = this.providers ? await this.providers.require(actor, providerId) : undefined;
-		return this.createThread(
-			actor,
-			projectId,
-			title,
-			false,
-			undefined,
-			undefined,
-			provider
-				? {
-						providerId: provider.id,
-						providerName: provider.name,
-						configuration: inferenceConfiguration(provider),
-					}
-				: undefined,
-		);
+	async create(actor: Actor, projectId: string, title: string): Promise<AgentView> {
+		if (this.ticketOnly) throw new AgentError("agent-not-found");
+		return this.createThread(actor, projectId, title, false);
 	}
 	async createTicketThread(
 		actor: Actor,
@@ -173,12 +157,12 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		this.authorize(actor);
 		const record = await this.require(id);
 		const location = await this.workspaces.resolve(actor, record.workspaceId);
-		return this.providerOptions(record.provider, location.path, actor, record.providerId);
+		return this.client.options(location.path, record.provider);
 	}
 	async catalogOptions(actor: Actor, threadId?: string): Promise<AgentOptions> {
 		this.authorize(actor);
 		const record = threadId ? await this.require(threadId) : undefined;
-		return this.providerOptions(record?.provider ?? this.provider(), undefined, actor, record?.providerId);
+		return this.client.options(undefined, record?.provider ?? this.provider());
 	}
 	async assertRepositoryReady(actor: Actor, id: string): Promise<void> {
 		this.authorize(actor);
@@ -275,12 +259,10 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				},
 			);
 			if (!selection.success) throw new AgentError("invalid-request");
-			const catalog = await this.providerOptions(record.provider, undefined, actor, record.providerId).catch(
-				(cause: unknown) => {
-					this.tracker.observe(id, previousStatus);
-					throw new AgentCatalogError(cause);
-				},
-			);
+			const catalog = await this.client.options(undefined, record.provider).catch((cause: unknown) => {
+				this.tracker.observe(id, previousStatus);
+				throw new AgentCatalogError(cause);
+			});
 			const resolved = resolveAgentSettings(catalog, selection.data);
 			if (!resolved.supported) {
 				this.tracker.observe(id, previousStatus);
@@ -503,6 +485,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			await Promise.all((await this.projects.list(actor)).map((project) => this.store.list(project.id)))
 		).flat();
 		for (const record of records) {
+			if (this.ticketOnly && !record.managed) continue;
 			this.tracker.observe(record.id, record.status);
 			if (record.managed) this.ticketThreads.add(record.id);
 		}
@@ -514,7 +497,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			await Promise.all((await this.projects.list(actor)).map((project) => this.store.list(project.id)))
 		).flat();
 		for (const record of records) {
-			if (record.status !== "uncertain") continue;
+			if (record.status !== "uncertain" || (this.ticketOnly && !record.managed)) continue;
 			try {
 				await this.serialize(record.id, async () => this.reconcile(actor, await this.require(record.id)));
 			} catch (err) {
@@ -549,7 +532,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		snapshot?: ModelProviderSnapshot,
 	): Promise<AgentView> {
 		this.authorize(actor);
-		if (this.providers && !snapshot) throw new ModelProviderError("provider-required");
+		if (this.ticketOnly && !snapshot) throw new ModelProviderError("provider-required");
 		const input = createAgentSchema.shape.title.safeParse(title);
 		if (!input.success) throw new AgentError("invalid-request");
 		const id = this.generateId();
@@ -586,25 +569,17 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			providerName:
 				record.providerName ?? (record.provider?.kind === "ollama" ? "Ollama (legacy)" : "OpenAI (legacy)"),
 			configuration: record.provider ?? { kind: "openai" },
+			model: record.model,
+			reasoningEffort: record.reasoningEffort,
 		};
 	}
 	private authorize(actor: Actor): void {
 		this.access.assertOwner(actor);
 		if (this.closed) throw new AgentError("agent-unavailable");
 	}
-	private async providerOptions(
-		provider?: InferenceProvider,
-		path?: string,
-		actor?: Actor,
-		providerId?: string,
-	): Promise<AgentOptions> {
-		if (provider?.kind === "ollama") return this.client.options(path, provider);
-		const defaults = actor && this.providers ? await this.providers.defaults(actor, providerId) : this.defaults();
-		return { ...(await this.client.options(path)), ...defaults };
-	}
 	private async require(id: string): Promise<AgentThreadRecord> {
 		const record = await this.store.get(id);
-		if (!record) throw new AgentError("agent-not-found");
+		if (!record || (this.ticketOnly && !record.managed)) throw new AgentError("agent-not-found");
 		return record;
 	}
 	private publicThread(record: AgentThreadRecord): AgentThread {

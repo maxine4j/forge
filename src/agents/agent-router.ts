@@ -1,15 +1,7 @@
 import { PassThrough } from "node:stream";
 
 import type { ISleep } from "@forge/backend-infrastructure/sleep";
-import {
-	agentMessageSchema,
-	agentReplySchema,
-	agentThreadsSchema,
-	agentViewSchema,
-	createAgentSchema,
-	agentOptionsSchema,
-	agentFilesSchema,
-} from "@forge/contracts/agents";
+import { agentReplySchema, agentViewSchema, agentOptionsSchema, agentFilesSchema } from "@forge/contracts/agents";
 import Router from "@koa/router";
 import { z } from "zod";
 
@@ -41,22 +33,6 @@ export class AgentRouter {
 				ctx.body = { error: error.code };
 			}
 		});
-		router.get("/api/projects/:projectId/agents", async (ctx) => {
-			ctx.body = agentThreadsSchema.parse(await this.service.list(ctx.state.actor, ctx.params["projectId"]!));
-		});
-		router.post("/api/projects/:projectId/agents", async (ctx) => {
-			const input = createAgentSchema.safeParse(ctx.request.body);
-			if (!input.success) throw new AgentError("invalid-request");
-			ctx.body = agentViewSchema.parse(
-				await this.service.create(
-					ctx.state.actor,
-					ctx.params["projectId"]!,
-					input.data.title,
-					input.data.providerId,
-				),
-			);
-			ctx.status = 201;
-		});
 		router.param("id", (id, _ctx, next) => {
 			if (!z.uuid().safeParse(id).success) throw new AgentError("invalid-request");
 			return next();
@@ -74,14 +50,6 @@ export class AgentRouter {
 				.safeParse(ctx.query["query"] ?? "");
 			if (!query.success) throw new AgentError("invalid-request");
 			ctx.body = agentFilesSchema.parse(await this.service.files(ctx.state.actor, ctx.params["id"]!, query.data));
-		});
-		router.post("/api/agents/:id/messages", async (ctx) => {
-			const input = agentMessageSchema.safeParse(ctx.request.body);
-			if (!input.success) throw new AgentError("invalid-request");
-			const { text, ...settings } = input.data;
-			ctx.body = agentViewSchema.parse(
-				await this.service.send(ctx.state.actor, ctx.params["id"]!, text, settings),
-			);
 		});
 		router.post("/api/agents/:id/replies", async (ctx) => {
 			const input = agentReplySchema.safeParse(ctx.request.body);

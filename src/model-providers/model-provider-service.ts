@@ -1,4 +1,4 @@
-import { resolveAgentSettings, type AgentOptions } from "@forge/contracts/agents";
+import { type AgentOptions } from "@forge/contracts/agents";
 import {
 	modelProviderInputSchema,
 	modelProviderPatchSchema,
@@ -8,6 +8,7 @@ import type { InferenceProvider } from "@forge/contracts/settings";
 
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
+import { modelRates } from "../cost/api-pricing.ts";
 import { ModelProviderError } from "./errors.ts";
 import type { IModelProviderStore } from "./model-provider-store.ts";
 
@@ -18,13 +19,12 @@ export interface IModelProviderService {
 	remove(actor: Actor, id: string): Promise<void>;
 	require(actor: Actor, id?: string): Promise<ModelProvider>;
 	options(actor: Actor, id: string): Promise<AgentOptions>;
-	snapshotOptions(actor: Actor, configuration: InferenceProvider, id?: string): Promise<AgentOptions>;
-	defaults(actor: Actor, id?: string): Promise<Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort">>;
+	snapshotOptions(actor: Actor, configuration: InferenceProvider): Promise<AgentOptions>;
 }
-export function inferenceConfiguration(provider: ModelProvider): InferenceProvider {
-	return provider.kind === "ollama"
-		? { kind: "ollama", endpoint: provider.endpoint!, model: provider.model! }
-		: { kind: "openai" };
+export function inferenceConfiguration(provider: ModelProvider, model?: string): InferenceProvider {
+	if (provider.kind === "openai") return { kind: "openai" };
+	if (!model || !provider.endpoint) throw new ModelProviderError("invalid-provider");
+	return { kind: "ollama", endpoint: provider.endpoint, model };
 }
 export class ModelProviderService implements IModelProviderService {
 	constructor(
@@ -37,14 +37,6 @@ export class ModelProviderService implements IModelProviderService {
 		this.access.assertOwner(actor);
 		return this.store.list();
 	}
-	async defaults(actor: Actor, id?: string): Promise<Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort">> {
-		this.access.assertOwner(actor);
-		const provider = id ? await this.store.get(id) : (await this.store.list(true)).find((p) => p.kind === "openai");
-		return {
-			defaultModel: provider?.defaultAgentModel,
-			defaultReasoningEffort: provider?.defaultAgentReasoningEffort,
-		};
-	}
 	async require(actor: Actor, id?: string): Promise<ModelProvider> {
 		this.access.assertOwner(actor);
 		if (!id) throw new ModelProviderError("provider-required");
@@ -55,12 +47,12 @@ export class ModelProviderService implements IModelProviderService {
 	}
 	async options(actor: Actor, id: string): Promise<AgentOptions> {
 		const provider = await this.require(actor, id);
-		return this.snapshotOptions(actor, inferenceConfiguration(provider), provider.id);
+		if (provider.kind === "ollama") throw new ModelProviderError("invalid-provider");
+		return this.snapshotOptions(actor, inferenceConfiguration(provider));
 	}
-	async snapshotOptions(actor: Actor, configuration: InferenceProvider, id?: string): Promise<AgentOptions> {
+	async snapshotOptions(actor: Actor, configuration: InferenceProvider): Promise<AgentOptions> {
 		this.access.assertOwner(actor);
-		const options = await this.catalog(configuration);
-		return configuration.kind === "openai" ? { ...options, ...(await this.defaults(actor, id)) } : options;
+		return this.catalog(configuration);
 	}
 	async create(actor: Actor, input: unknown): Promise<ModelProvider> {
 		this.access.assertOwner(actor);
@@ -71,35 +63,21 @@ export class ModelProviderService implements IModelProviderService {
 		const patch = modelProviderPatchSchema.safeParse(input);
 		if (!patch.success) throw new ModelProviderError("invalid-provider");
 		const merged = { ...previous, ...patch.data };
-		if (merged.defaultAgentModel === null) merged.defaultAgentModel = undefined;
-		if (merged.defaultAgentReasoningEffort === null) merged.defaultAgentReasoningEffort = undefined;
+		if (merged.comparisonModel === null) merged.comparisonModel = undefined;
 		if (merged.kind !== previous.kind) throw new ModelProviderError("invalid-provider");
 		const { id: _id, retired: _retired, ...configuration } = merged;
-		return this.save(id, configuration, previous);
+		return this.save(id, configuration);
 	}
 	async remove(actor: Actor, id: string): Promise<void> {
 		const value = await this.require(actor, id);
 		await this.store.save({ ...value, retired: true });
 	}
-	private async save(id: string, input: unknown, previous?: ModelProvider): Promise<ModelProvider> {
+	private async save(id: string, input: unknown): Promise<ModelProvider> {
 		const parsed = modelProviderInputSchema.safeParse(input);
 		if (!parsed.success) throw new ModelProviderError("invalid-provider");
 		const value = { ...parsed.data, id, retired: false };
-		if (
-			value.kind === "openai"
-			&& (value.defaultAgentModel || value.defaultAgentReasoningEffort)
-			&& (value.defaultAgentModel !== previous?.defaultAgentModel
-				|| value.defaultAgentReasoningEffort !== previous?.defaultAgentReasoningEffort)
-		) {
-			const options = await this.catalog({ kind: "openai" });
-			if (
-				!resolveAgentSettings(options, {
-					model: value.defaultAgentModel,
-					reasoningEffort: value.defaultAgentReasoningEffort,
-				}).supported
-			)
-				throw new ModelProviderError("invalid-provider");
-		}
+		if (value.kind === "ollama" && value.comparisonModel && !modelRates(value.comparisonModel))
+			throw new ModelProviderError("invalid-provider");
 		try {
 			await this.store.save(value);
 		} catch {

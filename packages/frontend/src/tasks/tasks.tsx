@@ -26,6 +26,7 @@ import { backlogFiltersKey, readBacklogFilters, type BacklogFilters } from "./ba
 import { BoardSettingsDialog, useBoardSettings } from "./board-settings-dialog.tsx";
 import { EpicDetails, EpicSelection } from "./epic-details.tsx";
 import { RepositorySelection } from "./repository-selection.tsx";
+import { TaskAgents } from "./task-agents.tsx";
 import { TaskBacklog } from "./task-backlog.tsx";
 import { TaskBoard } from "./task-board.tsx";
 import { TaskNotifications } from "./task-notifications.tsx";
@@ -229,12 +230,8 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		epicLink ?? undefined,
 	);
 
-	const view =
-		search.get("view") === "notifications"
-			? "notifications"
-			: search.get("view") === "backlog"
-				? "backlog"
-				: "board";
+	const views = ["board", "backlog", "notifications", "agents"] as const;
+	const view = views.find((name) => name === search.get("view")) ?? "board";
 	const [dragging, setDragging] = useState(false);
 	const actionsBusy = busy || loading || (view === "board" && dragging);
 	const opener = useRef<HTMLElement | null>(null);
@@ -290,7 +287,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 		<div className='tasks'>
 			<div className='tasks-toolbar'>
 				<SectionTabs aria-label='Task views' className='tasks-tabs'>
-					{(["board", "backlog", "notifications"] as const).map((name, index) => (
+					{views.map((name, index) => (
 						<SectionTab
 							key={name}
 							className={
@@ -307,27 +304,29 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 							onClick={() => selectView(name)}
 							onKeyDown={(event) => {
 								const next = {
-									ArrowLeft: (index + 2) % 3,
-									ArrowRight: (index + 1) % 3,
+									ArrowLeft: (index + views.length - 1) % views.length,
+									ArrowRight: (index + 1) % views.length,
 									Home: 0,
-									End: 2,
+									End: views.length - 1,
 								}[event.key];
 								if (next === undefined) return;
 								event.preventDefault();
-								selectView(["board", "backlog", "notifications"][next]!, true);
+								selectView(views[next]!, true);
 							}}
 						>
 							{name === "board"
 								? "Board"
 								: name === "backlog"
 									? "Backlog"
-									: `Notifications (${notificationsLoaded ? notifications.length : "…"})`}
+									: name === "agents"
+										? "Agents"
+										: `Notifications (${notificationsLoaded ? notifications.length : "…"})`}
 						</SectionTab>
 					))}
 				</SectionTabs>
 				<div
 					className='task-board-actions'
-					hidden={view === "notifications"}
+					hidden={view === "notifications" || view === "agents"}
 					role='group'
 					aria-label={view === "board" ? "Board actions" : "Backlog actions"}
 				>
@@ -373,7 +372,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 					</ToolbarButton>
 				</div>
 			</div>
-			{(["board", "backlog", "notifications"] as const).map((name) => (
+			{views.map((name) => (
 				<div
 					key={name}
 					id={`tasks-panel-${name}`}
@@ -384,7 +383,9 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 					tabIndex={0}
 				>
 					{view === name
-						&& (name === "notifications" ? (
+						&& (name === "agents" ? (
+							<TaskAgents api={api} />
+						) : name === "notifications" ? (
 							<TaskNotifications
 								items={notifications}
 								api={api}

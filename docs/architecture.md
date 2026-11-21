@@ -126,9 +126,9 @@ DTOs and excludes archived tickets and abandoned/superseded attempts. See
   retirement records. Partial unique indexes enforce active names and one OpenAI
   provider. Versioned migration runs before scheduler recovery; phase-specific
   snapshots keep inference routing private and immutable once each phase starts.
-  Legacy attempt snapshots normalize to both phases before recovery. Selections
-  remain in the ticket execution-settings JSON, with linked implementation resolving
-  planner overrides per turn. See [ticket settings](tickets.md#ticket-execution-settings),
+  Reusable named Agents live in SQLite and reference providers. Tickets store independent
+  Planner and Implementer IDs in their execution-settings JSON. Phase pins preserve the
+  resolved model and thinking level with provider routing before external setup. See [ticket settings](tickets.md#ticket-execution-settings),
   [provider APIs](foundation.md#model-providers), [execution](agents.md#codex-harness-and-lifecycle)
   and [upgrades](development.md#named-provider-upgrades).
 - SQLite holds repositories (internally `projects`), board-owned tickets and ordered

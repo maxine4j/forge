@@ -2,8 +2,7 @@
 
 ## Chat inference speed
 
-Ticket planning and implementation share the standalone-chat footer's latest-turn
-`tokens/s` stat, including reopened and read-only completed/archived chats. Values
+Ticket Chat shows the latest-turn `tokens/s` stat for planning and implementation, including reopened and read-only completed/archived chats. Values
 round to one decimal. Hover, keyboard focus or tapping the button reveals output
 tokens, model-request time, time to first token, generation speed and effective
 rate. The tooltip describes client-observed requests including transport latency.
@@ -17,7 +16,7 @@ estimates are not displayed. Worktree cleanup preserves measurements. See
 
 ## Pending notifications
 
-Tasks has Board, Backlog and **🔔 Notifications (N)** tabs. The notification view
+Tasks has Board, Backlog, **🔔 Notifications (N)** and [Agents](#named-agents) tabs. The notification view
 is `/tasks?view=notifications`; ticket and epic modal links preserve that parent
 through reload and Back/Forward. Arrow keys wrap across all three tabs; Home and
 End select the first and last. The count stays visible at zero and uses orange
@@ -96,9 +95,9 @@ Retry and reconciliation controls remain available after expiry; saved failure
 snapshots announce once on display or change. Historical ticket events remain in
 History. Native confirmation dialogs host the same notification viewport.
 
-Tasks has nested Board, Backlog and [Notifications](#pending-notifications) tabs.
+Tasks has nested Board, Backlog, [Notifications](#pending-notifications) and [Agents](#named-agents) tabs.
 `/tasks` opens Board by default; `/tasks?view=backlog` selects Backlog and
-`/tasks?view=notifications` selects Notifications. Missing or unknown `view` values
+`/tasks?view=notifications` selects Notifications and `/tasks?view=agents` selects Agents. Missing or unknown `view` values
 select Board. All preserve `?ticket=:id` for details, reload and browser history,
 including existing archived-ticket links from [Costs](#ticket-cost).
 Board and Backlog actions sit beside the tabs and wrap below them when space is limited.
@@ -299,7 +298,7 @@ another Ready ticket only when occupancy falls below the new limit. Pause new
 tickets keeps Ready
 tickets queued while in-progress tickets continue. The Board toolbar and Board
 settings dialog share the pause and resume control state. Stop all agents requests
-interruption of active ticket and standalone turns in parallel, reports any
+interruption of active ticket turns in parallel, reports any
 failures, and holds ticket dispatch until explicitly resumed. Completed turns
 and queued Git merges can still settle. Standalone chats can be started manually
 after the stop request.
@@ -355,8 +354,7 @@ Browser contracts are exported from `@forge/contracts/tickets`:
 | `POST /api/board/settings/stop`                                     | Stop ticket dispatch and return interruption request and failure counts.                                                                                   |
 
 Ticket conversations reuse the private agent read, resume, interrupt, reply and
-SSE APIs. Idle and failed ticket messages dispatch through the scheduler, and ticket threads stay
-out of the standalone Agents list. Mutations require owner access and exact-origin
+SSE APIs. Idle and failed ticket messages dispatch through the scheduler. Mutations require owner access and exact-origin
 checks. Transition conflicts return 409. Board and ticket details refresh while
 execution continues. The global board opens at `/tasks`; selection uses `/tasks?ticket=:id`. Details,
 workflow, model options and cost load by ticket ID even outside active board
@@ -519,7 +517,7 @@ It remains available with no running containers. The daemon stays running for
 subsequent workloads. Cleanup rechecks and reports remaining containers, images,
 volumes, networks and build cache. Agents can create workloads concurrently, so
 completion does not promise an empty daemon. Docker workload data is disposable.
-Both cleanup modes leave agents, standalone chats and dispatch settings unchanged;
+Both cleanup modes leave agent executions and dispatch settings unchanged;
 Stop all agents remains a separate control.
 
 See [deployment and storage](development.md#docker-workloads), the
@@ -532,82 +530,44 @@ ticket cleanup.
 Tickets use the exported `TicketExecutionSettings` type and
 `ticketExecutionSettingsSchema`, extending agent settings with optional boolean
 `skipPlanning` and `acceptRecommendations`. Missing flags mean false.
-Tickets accept optional `executionSettings: {providerId?, model?, reasoningEffort?, implementation?, permissions?, skipPlanning?, acceptRecommendations?}`
+Tickets accept optional `executionSettings: {plannerAgentId?, implementerAgentId?, permissions?, skipPlanning?, acceptRecommendations?}`
 on creation and return the saved selection on reads. Owner-authorized
-`PATCH /api/tickets/:id/settings` replaces that selection independently of Backlog
-scope editing, with exact-origin checks. The title above the ticket tabs saves
-independently of other Backlog edits. Click the Backlog description to edit it.
-The floating controls save or discard the draft. Escape dismisses the dialog,
-subject to [draft protection](foundation.md#navigation).
-Repository selection in Agent Settings saves immediately in selection order.
-The repository multiselect uses the [shared dropdown surface](foundation.md#shared-selection-dropdowns)
-with checkboxes, chips in selection order, Clear repositories, and loading and
-retryable error states. Toggling or clearing keeps the popup open; Escape, Tab or
-an outside click dismisses it. Keyboard navigation and typeahead match repository
-names. Busy controls and disabled fieldsets prevent changes.
-The top-level provider, model and reasoning effort select the **Planning agent**.
-Optional `implementation` is `{mode: "same-as-planner"}` or
-`{mode: "custom", providerId, model?, reasoningEffort?}`. Missing implementation
-means Same as planner, preserving legacy tickets. **Implementing agent** starts
-linked and shows inherited selections read-only; choosing a named provider enables
-independent overrides, initially **Provider default**. Planning overrides also
-start at Provider default. Permissions remain shared across both phases.
-Details and Chat save immediately through the same settings endpoint and retain
-selections across polling and reopening. Chat edits target the active phase.
-Two independent checkboxes beneath the repository picker save immediately:
-**Skip planning** starts implementation with a saved plan when available or the
-current scope otherwise. **Accept recommendations** instructs every dispatched
-ticket turn, including feedback and rebase, to choose the recommended
-option, make reasonable assumptions and continue without preference or
-clarification questions. Manual plan approval and tool permissions still apply.
-Controls are disabled while saving, resetting, Done or archived; failures show the
-existing save error. Details and Chat updates preserve the other phase's settings.
-All selections persist in the existing executionSettings JSON column; existing records
-need no database migration. Standalone chat settings remain unchanged.
+`PATCH /api/tickets/:id/settings` replaces those settings independently of scope,
+with exact-origin checks. The Planner and Implementer selectors save immediately
+and can both select the same [Agent](#named-agents). Retired agents and agents with
+unavailable providers remain visible where already assigned. The repository
+multiselect saves its ordered selection independently. Skip planning starts
+implementation using a saved plan or the current ticket scope. Accept recommendations
+applies to each dispatched turn, including feedback and rebase. Manual plan approval
+and ticket-wide tool permissions still apply.
 
-Initial phase selection uses implementation when a saved plan exists or Skip
-planning is enabled, and planning otherwise. Selection runs under workflow
-serialization on entering Ready, after abandonment and immediately before initial
-agent setup. Once a planner or implementer exists, the phase is locked for that
-execution. Changing Skip planning then affects the next fresh execution and does
-not approve a pending plan or interrupt work.
+Drafts may omit assignees. Moving to Todo requires an active Implementer and, when
+planning is needed, an active Planner. Dispatch rechecks the relevant selection.
+Before external setup, each phase persists its own pin with the assignee ID,
+provider identity, inference configuration, model and resolved thinking level.
+Feedback and rebase reuse the corresponding pin after agent edits, provider edits,
+or retirement. Each phase's assignment is editable until it pins or creates a
+thread. Public workflow summaries expose only provider identity and lock metadata.
+See [migration and recovery](development.md#named-provider-upgrades) and
+[Codex execution](agents.md#codex-harness-and-lifecycle).
 
-Draft tickets may omit `providerId`. Moving to Todo requires a valid active
-[named provider](foundation.md#model-providers), and dispatch rechecks selection.
-Missing/retired selections produce an actionable error without falling back.
-Details and Chat use the shared provider dropdown and selected provider's
-model catalog. Switching providers clears explicit model/thinking overrides while
-preserving flags and validating permission compatibility.
+### Named agents
 
-Each phase pins provider identity and inference configuration immediately before
-its first thread creation, under workflow serialization, persisting before external
-setup. Implementation selection can change until its own snapshot exists.
-Changes that reroute a pinned phase conflict; model/thinking edits still apply to
-subsequent turns. Linked implementation reuses pinned planner routing when available.
-Skip planning resolves planner configuration without creating a planner thread and
-pins it for implementation, preventing later planner-provider edits from rerouting it.
-Planning feedback uses planner settings; implementation feedback and rebases use
-implementer settings. Provider edits/retirement cannot reroute a pinned phase.
-Public summaries expose only `planningProvider` and `implementationProvider`
-identity/name/lock metadata, never endpoint configuration. Legacy attempt-wide
-snapshots normalize to both phases before recovery, preserving implicit OpenAI
-and unmapped historical routing;
-see [upgrade](development.md#named-provider-upgrades).
+The fourth Tasks tab at `/tasks?view=agents` lists reusable configurations.
+Each Agent has a stable UUID, name, [provider](foundation.md#model-providers),
+model and optional thinking level. Choose an OpenAI model and supported thinking
+level from the provider catalog, or leave thinking at the model default. Enter an
+Ollama tag as text. Saving an Ollama Agent makes no network request to the provider.
 
-Other model, reasoning, permission and ticket flag changes retain their next-turn
-behavior. OpenAI defaults live in its provider editor; Ollama inherits its single
-configured tag. Same as planner resolves the saved planner selection on every turn;
-unset overrides remain unset through dispatch so current provider defaults resolve
-on every turn in either phase. Explicit overrides remain fixed. Provider-default
-edits refresh both UI catalogs without materializing inherited selections. See
-[agent default resolution](agents.md#codex-harness-and-lifecycle) and
-[persistence architecture](architecture.md#persistent-resources).
-Explicit settings are validated against each phase's provider.
-Unsupported settings require choosing Default or a compatible permission mode.
-Only model, reasoning effort and permissions reach the runtime. Capacity,
-reservations, pause/stop and standalone concurrency remain unchanged.
-Ticket chats retain the shared composer, completion controls, mobile header,
-scrolling timeline and viewport-bounded popups.
+Owner-only `GET/POST /api/task-agents` lists all records and creates a record
+with status 201. `PATCH /api/task-agents/:id` replaces the full configuration.
+`DELETE /api/task-agents/:id` retires a record with status 204. Mutations use the
+existing exact-origin checks. Names are trimmed, 1–120 characters and unique among
+active Agents ignoring case. Model identifiers are trimmed and 1–256 characters.
+An invalid configuration returns 400, an unknown record returns 404, and an active
+name collision or modification of a retired record returns 409. Retirement retains
+the record and excludes it from new selections. Retiring a provider leaves its
+Agents visible for reassignment to an active provider or retirement.
 
 ### Ticket cost
 

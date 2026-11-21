@@ -1,9 +1,7 @@
-import { agentOptionsSchema, type AgentOptions } from "@forge/contracts/agents";
 import { modelProviderSchema, modelProvidersSchema, type ModelProvider } from "@forge/contracts/model-providers";
-import { useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useLocation, useNavigate, useSearchParams } from "react-router";
 
-import { AgentOptionsRevision, ExecutionSettings } from "../agents/execution-settings.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
 import {
@@ -15,60 +13,6 @@ import {
 	useModalNavigation,
 } from "../navigation/controller.tsx";
 import { ToastVisibility, useToast } from "../toasts/toasts.tsx";
-
-export function ProviderSelection({
-	api,
-	value,
-	change,
-	disabled = false,
-	name,
-	label = "Model provider",
-	emptyLabel = "Select a provider",
-}: {
-	api: IWorkspaceApi;
-	value?: string;
-	change: (id: string) => void;
-	disabled?: boolean;
-	name?: string;
-	label?: string;
-	emptyLabel?: string;
-}) {
-	const [providers, setProviders] = useState<ModelProvider[]>([]);
-	const revision = useContext(AgentOptionsRevision);
-	const { notify } = useToast();
-	useEffect(() => {
-		let active = true;
-		void api.read("model-providers", modelProvidersSchema).then(
-			(values) => {
-				if (active) setProviders(values);
-			},
-			() => {
-				if (active) notify("Could not load model providers. Reopen to retry.");
-			},
-		);
-		return () => {
-			active = false;
-		};
-	}, [api, notify, revision]);
-	return (
-		<label>
-			{label}
-			<Dropdown aria-label={label} value={value ?? ""} disabled={disabled} onChange={change}>
-				<DropdownOption value=''>{disabled && name ? name : emptyLabel}</DropdownOption>
-				{value && !providers.some((p) => p.id === value) && (
-					<DropdownOption value={value} disabled>
-						{name ?? "Unavailable provider"}
-					</DropdownOption>
-				)}
-				{providers.map((p) => (
-					<DropdownOption key={p.id} value={p.id}>
-						{disabled && p.id === value && name ? name : p.name}
-					</DropdownOption>
-				))}
-			</Dropdown>
-		</label>
-	);
-}
 
 export function ModelProviders({
 	api,
@@ -140,7 +84,7 @@ export function ModelProviders({
 						<p>
 							{p.endpoint}
 							<br />
-							{p.model}
+							{p.comparisonModel && `Comparison model: ${p.comparisonModel}`}
 						</p>
 					)}
 					<button
@@ -159,7 +103,7 @@ export function ModelProviders({
 					</button>
 				</article>
 			))}
-			{loaded && !providers.length && <p>No model providers. Add one to run tickets or create chats.</p>}
+			{loaded && !providers.length && <p>No model providers. Add one to configure agents.</p>}
 			{!loaded && !loadError && <p role='status'>Loading model providers…</p>}
 			{loadError && (
 				<button type='button' onClick={() => setRevision((v) => v + 1)}>
@@ -219,14 +163,7 @@ function ProviderEditor({
 	const [name, setName] = useState(provider?.name ?? "");
 	const [kind, setKind] = useState(provider?.kind ?? (hasOpenAI ? "ollama" : "openai"));
 	const [endpoint, setEndpoint] = useState(provider?.endpoint ?? "");
-	const [model, setModel] = useState(provider?.model ?? "");
-	const [defaults, setDefaults] = useState({
-		model: provider?.defaultAgentModel,
-		reasoningEffort: provider?.defaultAgentReasoningEffort,
-	});
-	const [options, setOptions] = useState<AgentOptions>();
-	const [optionsError, setOptionsError] = useState(false);
-	const [optionsAttempt, setOptionsAttempt] = useState(0);
+	const [comparisonModel, setComparisonModel] = useState(provider?.comparisonModel ?? "");
 	const [busy, setBusy] = useState(false);
 	const [persisted, setPersisted] = useState(provider);
 	const [dirty, setDirty] = useState(false);
@@ -236,24 +173,6 @@ function ProviderEditor({
 	const release = useModalDraft(dirty, busy);
 	const { notify } = useToast();
 	useModalDialog(dialog);
-	useEffect(() => {
-		if (persisted?.kind !== "openai") return;
-		let active = true;
-		void api.read(`model-providers/${persisted.id}/model-options`, agentOptionsSchema).then(
-			(value) => {
-				if (active) setOptions(value);
-			},
-			() => {
-				if (active) {
-					setOptionsError(true);
-					notify("Could not load model options.");
-				}
-			},
-		);
-		return () => {
-			active = false;
-		};
-	}, [api, persisted, optionsAttempt, notify]);
 	const save = async () => {
 		setBusy(true);
 		try {
@@ -266,13 +185,13 @@ function ProviderEditor({
 			}
 			const input =
 				kind === "ollama"
-					? { name, kind, endpoint, model }
-					: {
+					? {
 							name,
 							kind,
-							defaultAgentModel: defaults.model ?? (persisted ? null : undefined),
-							defaultAgentReasoningEffort: defaults.reasoningEffort ?? (persisted ? null : undefined),
-						};
+							endpoint,
+							comparisonModel: comparisonModel.trim() || (persisted ? null : undefined),
+						}
+					: { name, kind };
 			const value = await api.read(
 				persisted ? `model-providers/${persisted.id}` : "model-providers",
 				modelProviderSchema,
@@ -353,36 +272,15 @@ function ProviderEditor({
 									/>
 								</label>
 								<label>
-									Model tag
-									<input required value={model} onChange={(e) => setModel(e.target.value)} />
+									Comparison model (optional)
+									<input
+										value={comparisonModel}
+										onChange={(e) => setComparisonModel(e.target.value)}
+									/>
 								</label>
 							</>
 						)}
-						{kind === "openai" && persisted && (
-							<>
-								{account}
-								{optionsError && (
-									<button
-										type='button'
-										onClick={() => {
-											setOptionsError(false);
-											setOptionsAttempt((v) => v + 1);
-										}}
-									>
-										Retry loading models
-									</button>
-								)}
-								<ExecutionSettings
-									configureDefaults
-									options={options}
-									settings={defaults}
-									change={(value) => {
-										setDefaults({ model: value.model, reasoningEffort: value.reasoningEffort });
-										setDirty(true);
-									}}
-								/>
-							</>
-						)}
+						{kind === "openai" && persisted && account}
 						<button className='primary' type='submit'>
 							{busy ? "Saving…" : kind === "openai" && !persisted ? "Continue" : "Save provider"}
 						</button>

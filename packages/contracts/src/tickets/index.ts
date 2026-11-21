@@ -3,6 +3,8 @@ import { z } from "zod";
 import { agentSettingsSchema, agentRequestSchema } from "../agents/index.ts";
 
 export const ticketExecutionSettingsSchema = agentSettingsSchema.extend({
+	plannerAgentId: z.uuid().optional(),
+	implementerAgentId: z.uuid().optional(),
 	providerId: z.uuid().optional(),
 	implementation: z
 		.discriminatedUnion("mode", [
@@ -15,6 +17,8 @@ export const ticketExecutionSettingsSchema = agentSettingsSchema.extend({
 });
 export type TicketExecutionSettings = z.infer<typeof ticketExecutionSettingsSchema>;
 export type TicketAgentPhase = "planning" | "implementation";
+export const ticketAgentId = (settings: TicketExecutionSettings | undefined, phase: TicketAgentPhase) =>
+	phase === "planning" ? settings?.plannerAgentId : settings?.implementerAgentId;
 /** Preserve omitted overrides so dispatch can inherit current provider defaults. */
 export function ticketPhaseSettings(settings: TicketExecutionSettings = {}, phase: TicketAgentPhase) {
 	const selection =

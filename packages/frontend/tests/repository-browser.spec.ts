@@ -145,6 +145,8 @@ for (const width of [1280, 820, 390]) {
 		await page.setViewportSize({ width, height: 900 });
 		await page.route("**/api/tickets?includeArchived=true", (route) => route.fulfill({ json: [] }));
 		await page.route("**/api/epics", (route) => route.fulfill({ json: [] }));
+		await page.route("**/api/task-agents", (route) => route.fulfill({ json: [] }));
+		await page.route("**/api/model-providers", (route) => route.fulfill({ json: [] }));
 		await page.route("**/api/board/settings", (route) =>
 			route.fulfill({ json: { dispatch: "stopped", maxAgents: 3 } }),
 		);
@@ -162,7 +164,7 @@ for (const width of [1280, 820, 390]) {
 		await page.goto("/tasks");
 		const tasks = await metrics("Task views");
 		await page.getByRole("tab", { name: "Board", exact: true }).press("End");
-		await expect(page.getByRole("tab", { name: /^Notifications/ })).toBeFocused();
+		await expect(page.getByRole("tab", { name: "Agents", exact: true })).toBeFocused();
 		await page.screenshot({ path: `../../artifacts/forge/tasks-toolbar-${width}.png` });
 		await page.goto(`/repos/${projectId}/code`);
 		await expect(page.getByRole("combobox", { name: "Branch" })).toBeVisible();

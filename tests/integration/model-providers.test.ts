@@ -13,10 +13,13 @@ import { SqliteDatabase } from "../../src/database/sqlite-database.ts";
 import { migrateModelProviders } from "../../src/model-providers/model-provider-migration.ts";
 import { ModelProviderService } from "../../src/model-providers/model-provider-service.ts";
 import { ModelProviderStore } from "../../src/model-providers/model-provider-store.ts";
+import { migrateTaskAgents } from "../../src/task-agents/task-agent-migration.ts";
+import { TaskAgentService } from "../../src/task-agents/task-agent-service.ts";
+import { TaskAgentStore } from "../../src/task-agents/task-agent-store.ts";
 
 const actor = { username: "owner" };
 const access = new AccessService({ owner: "owner", origin: "https://forge.test" });
-const ollama = { name: "Local", kind: "ollama", endpoint: "http://ollama/v1", model: "local:latest" };
+const ollama = { name: "Local", kind: "ollama", endpoint: "http://ollama/v1" };
 
 async function fixture() {
 	const root = await files.mkdtemp(join(tmpdir(), "forge-providers-"));
@@ -94,8 +97,8 @@ test("names, immutable kinds, explicit selections, catalogs and concurrent OpenA
 		await expect(f.service.update(actor, local.id, { kind: "openai" })).rejects.toMatchObject({
 			code: "invalid-provider",
 		});
-		await f.service.options(actor, local.id);
-		expect(f.catalog).toHaveBeenCalledWith({ kind: "ollama", endpoint: ollama.endpoint, model: ollama.model });
+		await expect(f.service.options(actor, local.id)).rejects.toThrow("invalid-provider");
+		expect(f.catalog).not.toHaveBeenCalled();
 		const results = await Promise.allSettled([
 			f.service.create(actor, { name: "One", kind: "openai" }),
 			f.service.create(actor, { name: "Two", kind: "openai" }),
@@ -111,45 +114,64 @@ test("names, immutable kinds, explicit selections, catalogs and concurrent OpenA
 	}
 });
 
-test("OpenAI defaults can be validated, renamed without a catalog and cleared explicitly during an outage", async () => {
+test("Ollama comparisons validate against pricing and can be cleared", async () => {
 	const f = await fixture();
 	try {
+		await expect(f.service.create(actor, { ...ollama, comparisonModel: "missing" })).rejects.toThrow(
+			"invalid-provider",
+		);
+		const local = await f.service.create(actor, { ...ollama, comparisonModel: " gpt-5.4 " });
+		expect(local.comparisonModel).toBe("gpt-5.4");
+		await expect(f.service.update(actor, local.id, { comparisonModel: null })).resolves.toMatchObject({
+			comparisonModel: undefined,
+		});
+		await f.service.update(actor, local.id, { comparisonModel: "gpt-5.5" });
+		await f.service.remove(actor, local.id);
+		expect(await f.store.get(local.id)).toMatchObject({ retired: true, comparisonModel: "gpt-5.5" });
+		expect(f.catalog).not.toHaveBeenCalled();
+	} finally {
+		await f.close();
+	}
+});
+
+test("task agents validate catalogs, retain retired records and enforce active names", async () => {
+	const f = await fixture();
+	try {
+		const store = new TaskAgentStore(f.database);
+		await store.initialize();
+		const agents = new TaskAgentService(store, f.service, access, randomUUID);
+		const local = await f.service.create(actor, ollama);
+		const input = { name: " Local agent ", providerId: local.id, model: " local:latest " };
+		const agent = await agents.save(actor, input);
+		expect(agent).toMatchObject({ name: "Local agent", model: "local:latest" });
+		await expect(agents.save(actor, { ...input, name: "local AGENT" })).rejects.toMatchObject({ status: 409 });
+		await expect(agents.save(actor, { ...input, reasoningEffort: "high" }, agent.id)).rejects.toMatchObject({
+			status: 400,
+		});
+		expect(f.catalog).not.toHaveBeenCalled();
+		const account = await f.service.create(actor, { name: "Account", kind: "openai" });
 		f.catalog.mockResolvedValue({
 			models: [
 				{
-					id: "model-a",
-					name: "Model A",
+					id: "model",
+					name: "Model",
 					isDefault: true,
 					supportedReasoningEfforts: [{ reasoningEffort: "high", description: "High" }],
 				},
 			],
 			skills: [],
 		});
-		const provider = await f.service.create(actor, {
-			kind: "openai",
-			name: "Account",
-			defaultAgentModel: "model-a",
-			defaultAgentReasoningEffort: "high",
-		});
-		await expect(f.service.update(actor, provider.id, { defaultAgentModel: "missing" })).rejects.toThrow(
-			"invalid-provider",
-		);
-		f.catalog.mockRejectedValue(new Error("offline"));
-		await expect(f.service.update(actor, provider.id, { name: "Renamed" })).resolves.toMatchObject({
-			name: "Renamed",
-			defaultAgentModel: "model-a",
-		});
-		const cleared = await f.service.update(actor, provider.id, {
-			defaultAgentModel: null,
-			defaultAgentReasoningEffort: null,
-		});
-		expect(cleared.defaultAgentModel).toBeUndefined();
-		expect(cleared.defaultAgentReasoningEffort).toBeUndefined();
-		await f.service.remove(actor, provider.id);
-		await expect(f.service.defaults(actor, provider.id)).resolves.toEqual({
-			defaultModel: undefined,
-			defaultReasoningEffort: undefined,
-		});
+		await expect(
+			agents.save(actor, { name: "Planner", providerId: account.id, model: "missing" }),
+		).rejects.toMatchObject({ status: 400 });
+		await expect(
+			agents.save(actor, { name: "Planner", providerId: account.id, model: "model", reasoningEffort: "low" }),
+		).rejects.toMatchObject({ status: 400 });
+		await agents.save(actor, { name: "Planner", providerId: account.id, model: "model", reasoningEffort: "high" });
+		await f.service.remove(actor, local.id);
+		await agents.retire(actor, agent.id);
+		expect(await store.get(agent.id)).toMatchObject({ retired: true });
+		await expect(agents.save(actor, input, agent.id)).rejects.toMatchObject({ status: 409 });
 	} finally {
 		await f.close();
 	}
@@ -162,7 +184,7 @@ test("migration routes unstarted tickets and seeds attempts from agents without 
 			...defaultForgeSettings,
 			inferenceProvider: "ollama",
 			ollamaEndpoint: ollama.endpoint,
-			ollamaModel: ollama.model,
+			ollamaModel: "local:latest",
 			defaultAgentModel: "gpt-test",
 			defaultAgentReasoningEffort: "high",
 		};
@@ -176,16 +198,13 @@ test("migration routes unstarted tickets and seeds attempts from agents without 
 			{ sql: "INSERT INTO ticket_workflows VALUES('TASK-2','{\"plannerId\":\"agent\"}')" },
 			{ sql: "INSERT INTO ticket_workflows VALUES('TASK-3','{\"implementerId\":\"legacy\"}')" },
 			{
-				sql: 'INSERT INTO ticket_workflows VALUES(\'TASK-4\',\'{"plannerId":"agent","implementerId":"legacy"}\')',
+				sql: `INSERT INTO ticket_workflows VALUES('TASK-4','{"plannerId":"agent","implementerId":"legacy"}')`,
 			},
 		]);
 		await migrateModelProviders(f.database, randomUUID, false);
 		const providers = await f.store.list();
 		expect(providers).toHaveLength(2);
-		expect(providers.find((p) => p.kind === "openai")).toMatchObject({
-			defaultAgentModel: "gpt-test",
-			defaultAgentReasoningEffort: "high",
-		});
+
 		const tickets = (await f.database.all("SELECT executionSettings FROM tickets WHERE id='TASK-1'")) as {
 			executionSettings: string;
 		}[];
@@ -205,6 +224,28 @@ test("migration routes unstarted tickets and seeds attempts from agents without 
 		await migrateModelProviders(f.database, randomUUID, false);
 		expect(await f.store.list()).toEqual(providers);
 		expect(await f.database.all("SELECT record FROM ticket_workflows ORDER BY ticketId")).toEqual(jobs);
+		const agents = new TaskAgentStore(f.database);
+		await agents.initialize();
+		await migrateTaskAgents(f.database, randomUUID);
+		const catalog = await agents.list();
+		const local = catalog.find((entry) => entry.model === "local:latest")!;
+		expect(catalog).toContainEqual(expect.objectContaining({ model: "gpt-test", reasoningEffort: "high" }));
+		const [migrated] = (await f.database.all("SELECT executionSettings FROM tickets WHERE id='TASK-1'")) as {
+			executionSettings: string;
+		}[];
+		expect(JSON.parse(migrated!.executionSettings)).toEqual({
+			skipPlanning: true,
+			plannerAgentId: local.id,
+			implementerAgentId: local.id,
+		});
+		const [pinned] = (await f.database.all("SELECT record FROM ticket_workflows WHERE ticketId='TASK-2'")) as {
+			record: string;
+		}[];
+		expect(JSON.parse(pinned!.record).planningProviderSnapshot.configuration).toEqual(agent.provider);
+		await migrateTaskAgents(f.database, () => {
+			throw new Error("migration ran again");
+		});
+		expect(await agents.list()).toEqual(catalog);
 	} finally {
 		await f.close();
 	}

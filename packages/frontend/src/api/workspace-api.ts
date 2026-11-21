@@ -33,11 +33,15 @@ export class WorkspaceApi implements IWorkspaceApi {
 		if (!response.ok) {
 			const error = typeof value === "object" && value !== null && "error" in value ? value.error : undefined;
 			const messages: Record<string, string> = {
-				"provider-required": "Select a model provider in ticket settings before continuing.",
+				"provider-required": "Select an available agent in ticket settings before continuing.",
 				"provider-retired": "This model provider was removed. Select an active provider and retry.",
 				"provider-not-found": "Model provider no longer exists. Select an active provider.",
 				"provider-conflict": "A provider with this name or an OpenAI provider already exists.",
-				"invalid-provider": "Check the provider name, URL ending in /v1, model tag and defaults.",
+				"invalid-task-agent": "Check the agent name, provider, model, and thinking level.",
+				"task-agent-conflict": "An active agent already has this name, or the agent was retired.",
+				"task-agent-not-found": "This agent could not be found.",
+				"task-agent-retired": "This agent has been retired.",
+				"invalid-provider": "Check the provider name, URL ending in /v1, or comparison model.",
 				"pipeline-invalid": "Branch, workflow or event is invalid. Refresh the pipeline selection.",
 				"pipeline-busy": "Another pipeline is running. Wait for it to finish before retrying.",
 				"pipeline-not-found": "Pipeline run no longer exists. Refresh recent runs.",

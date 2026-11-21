@@ -117,16 +117,7 @@ test("dark project tabs hide infrastructure and keep account setup in Config", a
 	expect(preparations).toBe(0);
 	await expect(page.getByText(/workspace/i)).toHaveCount(0);
 	await expect(page.getByText(head, { exact: false })).toHaveCount(0);
-	await page.getByRole("tab", { name: "Agents", exact: true }).click();
-	await expect(page.getByRole("tab", { name: "Agents", exact: true })).toHaveAttribute(
-		"href",
-		`/repos/${projectId}/agents`,
-	);
-	await expect(page).toHaveURL(`/repos/${projectId}/agents`);
-	await page.reload();
-	await expect(page.getByRole("tab", { name: "Agents", exact: true })).toHaveAttribute("aria-selected", "true");
-	await expect(page.getByRole("button", { name: "Create chat", exact: true })).toBeVisible();
-	expect(preparations).toBe(0);
+	await expect(page.getByRole("tab", { name: "Agents", exact: true })).toHaveCount(0);
 	for (const name of ["Pipelines"]) {
 		await page.getByRole("tab", { name, exact: true }).click();
 		await expect(page.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true");
@@ -165,8 +156,11 @@ test("dark project tabs hide infrastructure and keep account setup in Config", a
 		{ width: 820, height: 820 },
 	]) {
 		await page.setViewportSize(size);
-		await page.getByRole("tab", { name: "Agents", exact: true }).click();
-		await expect(page.getByRole("tab", { name: "Agents", exact: true })).toHaveAttribute("aria-selected", "true");
+		await page.getByRole("tab", { name: "Pipelines", exact: true }).click();
+		await expect(page.getByRole("tab", { name: "Pipelines", exact: true })).toHaveAttribute(
+			"aria-selected",
+			"true",
+		);
 		const spacing = () =>
 			page.getByRole("tablist", { name: "Repository sections" }).evaluate((tabs) => {
 				const bounds = tabs.getBoundingClientRect();

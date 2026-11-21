@@ -66,8 +66,6 @@ async function setup(page: Page, verified = false) {
 		}
 		if (request.method() === "PATCH" && provider) {
 			Object.assign(provider, request.postDataJSON());
-			if ((provider.defaultAgentModel as unknown) === null) delete provider.defaultAgentModel;
-			if ((provider.defaultAgentReasoningEffort as unknown) === null) delete provider.defaultAgentReasoningEffort;
 			return route.fulfill({ json: provider });
 		}
 		if (request.method() === "DELETE" && provider) {
@@ -104,7 +102,7 @@ test("a replacement OpenAI provider reuses a verified account without starting a
 
 test("Config retains billing, instructions and Git identity", async ({ page }) => {
 	const f = await setup(page);
-	await expect(page.getByText("No model providers. Add one to run tickets or create chats.")).toBeVisible();
+	await expect(page.getByText("No model providers. Add one to configure agents.")).toBeVisible();
 	await page.getByLabel("Planning instructions").fill("Check migrations.");
 	await page.getByLabel("Implementation instructions").fill("Run tests.");
 	await page.getByLabel("Git name").fill("Forge Developer");
@@ -120,7 +118,7 @@ test("Config retains billing, instructions and Git identity", async ({ page }) =
 });
 
 for (const width of [1280, 390]) {
-	test(`provider flows, cards, defaults, retirement and modal navigation at ${width}px`, async ({ page }) => {
+	test(`provider flows, comparison pricing, retirement and modal navigation at ${width}px`, async ({ page }) => {
 		await page.setViewportSize({ width, height: 900 });
 		const f = await setup(page);
 		await page.getByRole("button", { name: "Add provider", exact: true }).click();
@@ -154,10 +152,14 @@ for (const width of [1280, 390]) {
 		await expect(dialog).toBeVisible();
 		await dialog.getByLabel("Name", { exact: true }).fill("Local");
 		await dialog.getByLabel("Responses API base URL").fill("http://ollama/v1");
-		await dialog.getByLabel("Model tag").fill("local:latest");
+		await dialog.getByLabel("Comparison model (optional)").fill("gpt-5.4");
 		await dialog.getByRole("button", { name: "Save provider", exact: true }).click();
 		await expect(dialog).toHaveCount(0);
-		expect(f.providers[1]).toMatchObject({ name: "Local", endpoint: "http://ollama/v1", model: "local:latest" });
+		expect(f.providers[1]).toMatchObject({
+			name: "Local",
+			endpoint: "http://ollama/v1",
+			comparisonModel: "gpt-5.4",
+		});
 		await page.getByRole("button", { name: "Edit Local", exact: true }).click();
 		await dialog.getByLabel("Name", { exact: true }).fill("Renamed");
 		await dialog.getByRole("button", { name: "Close", exact: true }).click();
@@ -170,18 +172,10 @@ for (const width of [1280, 390]) {
 			.getByRole("button", { name: "Remove provider", exact: true })
 			.click();
 		await expect(page.getByRole("heading", { name: "Renamed", exact: true })).toHaveCount(0);
-		await page.getByRole("button", { name: "Edit Account", exact: true }).click();
-		await chooseDropdown(dialog.getByRole("combobox", { name: "Default model", exact: true }), "model-a");
-		await chooseDropdown(dialog.getByRole("combobox", { name: "Default thinking", exact: true }), "high");
-		await dialog.getByRole("button", { name: "Save provider", exact: true }).click();
-		expect(f.providers[0]).toMatchObject({ defaultAgentModel: "model-a", defaultAgentReasoningEffort: "high" });
 		await page.goto(`/config?provider=${f.providers[0]!.id}`);
 		await expect(dialog.getByLabel("Name", { exact: true })).toHaveValue("Account");
-		await chooseDropdown(dialog.getByRole("combobox", { name: "Default thinking", exact: true }), "");
-		await chooseDropdown(dialog.getByRole("combobox", { name: "Default model", exact: true }), "");
 		await dialog.getByRole("button", { name: "Save provider", exact: true }).click();
 		await expect(dialog).toHaveCount(0);
-		expect(f.providers[0]!.defaultAgentModel).toBeUndefined();
 		await page.getByRole("button", { name: "Add provider", exact: true }).click();
 		await page.goBack();
 		await expect(dialog).toHaveCount(0);

@@ -127,7 +127,7 @@ test("pinned Codex streams through the relay and resumes after restart without s
 		() => new Date(),
 		async () => ({ localCurrency: "EUR", monthlyPlanLocal: 30, usdToAud: 1.5 }),
 		sample,
-		async () => benchmark,
+		async (providerId) => (providerId === "local" ? benchmark : undefined),
 	);
 	const bearer = "Bearer synthetic-ollama-pairing-token";
 	const relay = new RelayHttp(new RelayService(sleep), Buffer.from(bearer), sleep, new PairingLimiter(Date.now), {

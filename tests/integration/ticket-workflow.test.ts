@@ -94,20 +94,23 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			async () => ({ localCurrency: "AUD", monthlyPlanLocal: 30, usdToLocal: 1.44 }),
 			async () => {},
 		);
-		const client = new CodexAgentClient(connection, files.realpath, randomUUID, usage);
 		const rpc = vi.spyOn(connection, "request");
 		let defaults: Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = {};
-		const readDefaults = () => defaults;
+		const makeClient = () => {
+			const client = new CodexAgentClient(connection, files.realpath, randomUUID, usage);
+			const options = client.options.bind(client);
+			client.options = async (...args) => ({ ...(await options(...args)), ...defaults });
+			return client;
+		};
 		agents = new AgentService(
 			agentStore,
-			client,
+			makeClient(),
 			workspaces,
 			projects,
 			access,
 			randomUUID,
 			() => new Date(),
 			pool,
-			readDefaults,
 		);
 		const ticketStore = new TicketStore(db);
 		await ticketStore.initialize();
@@ -146,14 +149,13 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			pool = new AgentExecutionTracker();
 			agents = new AgentService(
 				agentStore,
-				new CodexAgentClient(connection, files.realpath, randomUUID, usage),
+				makeClient(),
 				workspaces,
 				projects,
 				access,
 				randomUUID,
 				() => new Date(),
 				pool,
-				readDefaults,
 			);
 			await agents.seed(owner);
 			await agents.recover(owner);

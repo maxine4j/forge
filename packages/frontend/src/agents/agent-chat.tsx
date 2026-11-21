@@ -1,13 +1,9 @@
-import { agentThreadsSchema, agentViewSchema, type AgentThread, type AgentView } from "@forge/contracts/agents";
+import { agentViewSchema, type AgentView } from "@forge/contracts/agents";
 import { ticketWorkflowSchema, type TicketWorkflow } from "@forge/contracts/tickets";
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { useLocation, useNavigate } from "react-router";
 
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
-import { navigationState } from "../navigation/controller.tsx";
-import { resolveRoute } from "../navigation/routes.ts";
-import { ProviderSelection } from "../settings/model-providers.tsx";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { AgentActivity } from "./agent-activity.tsx";
 import { AgentComposer } from "./agent-composer.tsx";
@@ -28,10 +24,6 @@ export const Conversation = ({
 	changed,
 	selected,
 	messagePath,
-	executionSettings,
-	settingsChanged,
-	settingsDisabled,
-	selectionDisabled = false,
 	blocked = false,
 	readOnly = false,
 	drafts,
@@ -52,10 +44,6 @@ export const Conversation = ({
 	changed: () => void;
 	selected: boolean;
 	messagePath?: string;
-	executionSettings?: import("@forge/contracts/agents").AgentSettings;
-	settingsChanged?: (settings: import("@forge/contracts/agents").AgentSettings) => void;
-	settingsDisabled?: boolean;
-	selectionDisabled?: boolean;
 	blocked?: boolean;
 	readOnly?: boolean;
 	drafts?: Map<string, string>;
@@ -229,7 +217,8 @@ export const Conversation = ({
 	const ticketChat = Boolean(messagePath);
 	const active = status === "running" || status === "waiting";
 	const sendable =
-		status
+		ticketChat
+		&& status
 		&& !blocked
 		&& !readOnly
 		&& !loadingHistory
@@ -420,25 +409,18 @@ export const Conversation = ({
 							? { action: () => act("interrupt", {}), disabled: !view.thread.turnId }
 							: undefined
 					}
-					settings={executionSettings ?? view.thread}
-					settingsChanged={settingsChanged}
-					settingsDisabled={settingsDisabled}
-					selectionDisabled={selectionDisabled}
-					providerDefault={!!messagePath}
 					completions={!readOnly}
 					contextWindow={messagePath ? view.contextWindow : undefined}
-					configurable={!readOnly}
 					change={(value) => {
 						setDraft(value);
 						drafts?.set(draftKey, value);
 					}}
-					send={(settings) =>
+					send={() =>
 						act(
 							"messages",
 							{
 								text: draft,
 								...(steer && status === "running" ? { expectedTurnId: view.thread.turnId } : {}),
-								...(!messagePath ? settings : {}),
 							},
 							true,
 						)
@@ -446,189 +428,5 @@ export const Conversation = ({
 				/>
 			)}
 		</section>
-	);
-};
-
-export const AgentChat = ({ projectId, api }: { projectId: string; api: IWorkspaceApi }) => {
-	const location = useLocation();
-	const navigate = useNavigate();
-	const route = resolveRoute(location.pathname);
-	const [mobile, setMobile] = useState(() => window.matchMedia("(max-width: 700px)").matches);
-	useEffect(() => {
-		const query = window.matchMedia("(max-width: 700px)");
-		const update = () => setMobile(query.matches);
-		query.addEventListener("change", update);
-		update();
-		return () => query.removeEventListener("change", update);
-	}, []);
-	const selectFirst = route.page === "repo" && route.section === "agents" && !route.threadId;
-	const [threads, setThreads] = useState<AgentThread[]>([]);
-	const [loaded, setLoaded] = useState(false);
-	const [opened, setOpened] = useState<string[]>([]);
-	const [retained, setRetained] = useState("");
-	const selected = route.page === "repo" && route.section === "agents" ? (route.threadId ?? "") : retained;
-	const main = useRef<HTMLDivElement>(null);
-	const createButton = useRef<HTMLButtonElement>(null);
-	const chatButtons = useRef(new Map<string, HTMLButtonElement>());
-	const lastSelected = useRef("");
-	const visible = route.page === "repo" && route.section === "agents";
-	useLayoutEffect(() => {
-		if (selected) lastSelected.current = selected;
-		if (!mobile || !visible) return;
-		if (selected) main.current?.focus({ preventScroll: true });
-		else (chatButtons.current.get(lastSelected.current) ?? createButton.current)?.focus({ preventScroll: true });
-	}, [selected, mobile, visible]);
-	if (retained !== selected) setRetained(selected);
-	if (selected && !opened.includes(selected)) setOpened([...opened, selected]);
-	const [error, setError] = useErrorState();
-	const [creating, setCreating] = useState(false);
-	const [providerId, setProviderId] = useState("");
-	const acting = useRef(false);
-	const poller = useRef<ResourcePoller<AgentThread[]> | undefined>(undefined);
-	const [refresh] = useState(() => () => poller.current?.refresh());
-	useEffect(() => {
-		const resource = new ResourcePoller(
-			() => api.read(`projects/${projectId}/agents`, agentThreadsSchema),
-			(values) => {
-				setThreads(values);
-				setLoaded(true);
-				setError("");
-			},
-			setError,
-		);
-		poller.current = resource;
-		resource.refresh();
-		return () => {
-			resource.stop();
-			poller.current = undefined;
-		};
-	}, [api, projectId, setError]);
-	const firstId = threads.at(0)?.id;
-	useEffect(() => {
-		if (!mobile && selectFirst && firstId) {
-			void navigate(`/repos/${projectId}/agents/${firstId}`, { replace: true });
-		}
-	}, [mobile, selectFirst, firstId, projectId, navigate]);
-	const open = (id: string) => {
-		if (id === selected) return;
-		const url = `/repos/${projectId}/agents`;
-		const ancestor = navigationState(location).chatList;
-		const chatList = selectFirst
-			? { url, depth: 1 }
-			: ancestor?.url === url
-				? { url, depth: ancestor.depth + 1 }
-				: undefined;
-		void navigate(`${url}/${id}`, { state: { chatList } });
-	};
-	const back = (
-		<button
-			className='agent-back'
-			type='button'
-			onClick={() => {
-				const url = `/repos/${projectId}/agents`;
-				const ancestor = navigationState(location).chatList;
-				if (ancestor?.url === url) void navigate(-ancestor.depth);
-				else void navigate(url, { replace: true });
-			}}
-		>
-			Back to chats
-		</button>
-	);
-	return (
-		<div className='agent-panel'>
-			<aside className='agent-sidebar' aria-label='Chats' hidden={mobile && Boolean(selected)}>
-				<ProviderSelection api={api} value={providerId} change={setProviderId} disabled={creating} />
-				<button
-					ref={createButton}
-					disabled={creating}
-					onClick={() => {
-						if (!providerId) {
-							setError("Select a model provider before creating a chat.");
-							return;
-						}
-						if (acting.current) return;
-						acting.current = true;
-						setCreating(true);
-						setError("");
-						void api
-							.read(`projects/${projectId}/agents`, agentViewSchema, "POST", {
-								title: `Chat ${threads.length + 1}`,
-								providerId,
-							})
-							.then((view) => {
-								setThreads((values) => [...values, view.thread]);
-								open(view.thread.id);
-								refresh();
-							})
-							.catch((cause: unknown) =>
-								setError(cause instanceof Error ? cause.message : "Could not create chat."),
-							)
-							.finally(() => {
-								acting.current = false;
-								setCreating(false);
-							});
-					}}
-				>
-					{creating ? "Creating…" : "Create chat"}
-				</button>
-
-				<nav aria-label='Chat threads'>
-					{threads.map((thread) => (
-						<button
-							key={thread.id}
-							ref={(element) => {
-								if (element) chatButtons.current.set(thread.id, element);
-								else chatButtons.current.delete(thread.id);
-							}}
-							aria-label={`Open chat ${thread.title}`}
-							aria-current={selected === thread.id ? "true" : undefined}
-							onClick={() => open(thread.id)}
-						>
-							<span>{thread.title}</span>
-							{thread.providerName && <small>{thread.providerName}</small>}
-							{thread.status !== "uncertain" && (
-								<small className={`agent-status agent-status-${thread.status}`}>{thread.status}</small>
-							)}
-						</button>
-					))}
-				</nav>
-				{!threads.length && <p className='agent-notice'>No chats yet.</p>}
-			</aside>
-			<div
-				ref={main}
-				className='agent-main'
-				tabIndex={-1}
-				aria-label='Open conversation'
-				hidden={mobile && !selected}
-			>
-				{selected && !threads.some((thread) => thread.id === selected) && (
-					<div className='agent-welcome'>
-						{back}
-						<h3>{loaded || error ? "Chat unavailable" : "Loading chat…"}</h3>
-						<p>Select another chat or create a new one.</p>
-					</div>
-				)}
-				{!selected && (
-					<div className='agent-welcome'>
-						<h3>Work with Codex</h3>
-						<p>Create or open a chat to get started.</p>
-						<p>Chats keep working while you browse other repository sections.</p>
-					</div>
-				)}
-				{opened
-					.filter((id) => threads.some((thread) => thread.id === id))
-					.map((id) => (
-						<div key={id} hidden={selected !== id}>
-							<Conversation
-								id={id}
-								navigation={back}
-								api={api}
-								changed={refresh}
-								selected={selected === id && route.page === "repo" && route.section === "agents"}
-							/>
-						</div>
-					))}
-			</div>
-		</div>
 	);
 };

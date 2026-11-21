@@ -245,22 +245,25 @@ try {
 	const providerResponse = request("/api/model-providers", {
 		method: "POST",
 		headers,
-		body: JSON.stringify({ name: "Persistent OpenAI", kind: "openai" }),
+		body: JSON.stringify({
+			name: "Persistent Ollama",
+			kind: "ollama",
+			endpoint: "http://ollama.invalid/v1",
+			comparisonModel: "gpt-5.4",
+		}),
 	});
 	assert.equal(providerResponse.status, 201);
 	const provider = JSON.parse(providerResponse.body);
-	const chatResponse = request(`/api/projects/${project.id}/agents`, {
+	assert.deepEqual(JSON.parse(request("/api/task-agents", { headers }).body), []);
+	const agentResponse = request("/api/task-agents", {
 		method: "POST",
 		headers,
-		body: JSON.stringify({ title: "Persistent chat", providerId: provider.id }),
+		body: JSON.stringify({ name: "Persistent agent", providerId: provider.id, model: "local:latest" }),
 	});
-	assert.equal(chatResponse.status, 201);
-	const chat = JSON.parse(chatResponse.body);
-	assert.equal(chat.thread.status, "idle");
-	assert.equal(chat.thread.providerId, provider.id);
-	assert.equal(request(`/api/model-providers/${provider.id}`, { method: "DELETE", headers }).status, 204);
-	assert.deepEqual(chat.items, []);
-	assert.equal(request(`/api/workspaces/${chat.thread.workspaceId}`, { headers }).status, 200);
+	assert.equal(agentResponse.status, 201);
+	const agent = JSON.parse(agentResponse.body);
+	assert.equal(agent.providerId, provider.id);
+	assert.equal(agent.retired, false);
 	assert.equal(
 		docker(
 			"exec",
@@ -274,15 +277,7 @@ try {
 		),
 		`${settings.gitName}|${settings.gitEmail}|${settings.gitName}|${settings.gitEmail}`,
 	);
-	assert.equal(
-		request(`/api/agents/${chat.thread.id}/messages`, {
-			method: "POST",
-			headers,
-			body: JSON.stringify({ text: "" }),
-		}).status,
-		400,
-	);
-	assert.equal(JSON.parse(request(`/api/projects/${project.id}/agents`, { headers }).body)[0].id, chat.thread.id);
+	assert.equal(request(`/api/projects/${project.id}/agents`, { headers }).status, 404);
 	const createdEpic = request("/api/epics", {
 		method: "POST",
 		headers,
@@ -300,9 +295,12 @@ try {
 			description: "Simple scope",
 			repositoryIds: [project.id],
 			epicId: epic.id,
+			executionSettings: { plannerAgentId: agent.id, implementerAgentId: agent.id },
 		}),
 	});
 	assert.equal(createdTicket.status, 201);
+	assert.equal(request(`/api/model-providers/${provider.id}`, { method: "DELETE", headers }).status, 204);
+	assert.equal(request(`/api/task-agents/${agent.id}`, { method: "DELETE", headers }).status, 204);
 	const ticket = JSON.parse(createdTicket.body);
 	assert.equal(ticket.id, "TASK-1");
 	assert.equal(ticket.status, "backlog");
@@ -443,11 +441,14 @@ try {
 	assert.equal(nested("image", "ls", "-aq"), "");
 	assert.equal(JSON.parse(request(`/api/terminals/${terminal.id}`, { headers }).body).status, "closed");
 	assert.equal(JSON.parse(request("/api/projects", { headers }).body)[0].id, project.id);
-	assert.equal(JSON.parse(request(`/api/agents/${chat.thread.id}`, { headers }).body).thread.status, "idle");
-	assert.equal(JSON.parse(request(`/api/agents/${chat.thread.id}`, { headers }).body).thread.providerId, provider.id);
+	assert.deepEqual(JSON.parse(request("/api/task-agents", { headers }).body), [{ ...agent, retired: true }]);
 	assert.deepEqual(JSON.parse(request("/api/model-providers", { headers }).body), []);
 	assert.equal(JSON.parse(request(`/api/tickets/${ticket.id}`, { headers }).body).status, "backlog");
 	assert.equal(JSON.parse(request(`/api/tickets/${ticket.id}`, { headers }).body).epicId, epic.id);
+	assert.deepEqual(JSON.parse(request(`/api/tickets/${ticket.id}`, { headers }).body).executionSettings, {
+		plannerAgentId: agent.id,
+		implementerAgentId: agent.id,
+	});
 	assert.equal(JSON.parse(request(`/api/epics/${epic.id}`, { headers }).body).total, 1);
 	const persistedPr = request(`/api/pull-requests/${pr.id}`, { headers });
 	assert.equal(persistedPr.status, 200);
