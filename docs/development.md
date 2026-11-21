@@ -48,11 +48,11 @@ See [tool contract](agents.md#worktree-typescript-tools),
 duplicate/reordered exports, delayed token counts, missing timing, retries,
 warmups, isolation, contract validation and real SQLite restart recovery.
 `telemetry-receiver.test.ts` verifies authentication, paths, size limits and drain.
-Credential-free integration tests launch the pinned Codex 0.164.0 against controlled
+Credential-free integration tests launch the pinned Codex CLI against controlled
 HTTP streaming and WebSocket inference endpoints, asserting runtime transport,
 turn identity, output counts (including reasoning once), first-token timing and
-saved measurements after reversed duplicate export delivery. No Codex upgrade,
-provider credentials or additional dependencies are required.
+saved measurements after reversed duplicate export delivery. The tests require
+no provider credentials or additional dependencies.
 
 Browser checks cover standalone, ticket planning, implementation and read-only
 chat footers, live reset/partial/unavailable states, reopening and mobile tooltip
@@ -281,7 +281,7 @@ The runtime uses a digest-pinned `docker/sandbox-templates:codex` base. It retai
 template's preinstalled development tooling, including Git, gh, Python, Go and uv,
 and runs the application as `agent`, UID/GID 1000, under a root Docker supervisor.
 Forge supplies its tested Node 24.22.0 runtime,
-lockfile-pinned Codex 0.164.0 (first on PATH), nvm 0.40.8 and the template's tini
+lockfile-pinned Codex 0.171.0 (first on PATH), nvm 0.40.8 and the template's tini
 as PID 1. Nvm lives at
 `/opt/nvm`, writable by the runtime user, with Node 24.22.0 preinstalled and set
 as its default. The global Bash login profile loads it even with Codex's

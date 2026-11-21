@@ -272,7 +272,7 @@ Startup must set `umask(0o077)`, create/restrict the data directory to `0700`, a
 complete database/schema initialization and project recovery before listening.
 The runtime must retain the single-instance `recreate` deployment policy.
 
-The account backend pins `@openai/codex` to `0.164.0`. Its supported account
+The account backend pins `@openai/codex` to `0.171.0`. Its supported account
 protocol was checked against that binary's generated JSON schemas and exercised
 with a credential-free stdio initialization/account-read integration test. Live
 ChatGPT/GitHub sign-in remains a manual validation; automated tests use no live

@@ -61,7 +61,7 @@ try {
 	assert.equal(docker("exec", name, "id", "-un"), "agent");
 	for (const command of ["git", "gh", "python3", "go", "uv", "tini", "bash"])
 		assert.ok(docker("exec", name, "/bin/bash", "-c", `command -v ${command}`));
-	assert.match(docker("exec", name, "codex", "--version"), /0\.164\.0/);
+	assert.match(docker("exec", name, "codex", "--version"), /0\.171\.0/);
 	assert.equal(
 		execute(`
 		import assert from 'node:assert/strict';
@@ -417,7 +417,7 @@ try {
 	assert.equal(accounts.codex.connection, "available");
 	assert.equal(accounts.github.connection, "available");
 	assert.equal(accounts.codex.account, undefined);
-	assert.match(docker("exec", name, "./node_modules/.bin/codex", "--version"), /0\.164\.0/);
+	assert.match(docker("exec", name, "./node_modules/.bin/codex", "--version"), /0\.171\.0/);
 	assert.match(docker("exec", name, "gh", "auth", "login", "--help"), /--insecure-storage/);
 	execute(
 		`import {stat,writeFile} from '@forge/backend-infrastructure/file'; for (const path of ['/data','/data/codex','/data/github']) { const s=await stat(path); if ((s.mode & 511)!==448 || s.uid!==1000) throw Error('unsafe data permissions'); } await writeFile('/data/codex/persistence-probe','test-only',{mode:384});`,

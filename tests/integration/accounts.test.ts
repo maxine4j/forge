@@ -65,7 +65,7 @@ it("keeps HTTP health and sanitized account status usable when both CLIs are mis
 	}
 });
 
-it("initializes actual pinned Codex stdio and reads an isolated unauthenticated account", async () => {
+it("initializes pinned Codex, reads an isolated account and lists GPT-6.2 Sol", async () => {
 	const directory = await mkdtemp(join(tmpdir(), "forge-real-codex-"));
 	const database = new SqliteDatabase(join(directory, "forge.sqlite"));
 	const processes = new AccountProcess(
@@ -93,11 +93,14 @@ it("initializes actual pinned Codex stdio and reads an isolated unauthenticated 
 			outputLimit: 4096,
 		});
 		expect(await command.done).toBe(0);
-		expect(version.trim()).toBe("codex-cli 0.164.0");
+		expect(version.trim()).toBe("codex-cli 0.171.0");
 		await connection.initialize();
 		expect(await new CodexAccountClient(connection, attempts).status()).toEqual({
 			connection: "available",
 			login: { state: "idle" },
+		});
+		expect(await connection.request("model/list", { limit: 100 })).toMatchObject({
+			data: expect.arrayContaining([expect.objectContaining({ model: "gpt-6.2-sol" })]),
 		});
 	} finally {
 		await connection.close();

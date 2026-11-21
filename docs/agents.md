@@ -57,7 +57,7 @@ ticket planning, implementation and standalone chats, including Ollama. It carri
 or `unavailable`). Rates are derived from these totals. It is independent of
 billing: Ollama remains excluded from OpenAI costs.
 
-The private Codex 0.164.0 OTLP JSON adapter correlates transport spans through
+The private Codex OTLP JSON adapter correlates transport spans through
 `stream_request` and the sampling-attempt parent with `codex.sampling` thread and
 turn identities. Successful `codex.sse_event` completion records supply source
 timestamps, output counts and runtime first-token timing on HTTP and WebSockets.
@@ -195,7 +195,7 @@ thread or worktree. Each endpoint rechecks owner access.
 Ollama exposes the saved model tag as its only model, with no selectable thinking
 levels. Worktree skills still come from app-server.
 
-The Agents tab and backend reuse the one private, pinned Codex `0.164.0` stdio
+The Agents tab and backend reuse the one private, pinned Codex `0.171.0` stdio
 process and existing persistent ChatGPT login.
 `AgentService` owns thread/workspace coordination, authorization and per-thread
 serialization; `CodexAgentClient` owns execution and maps validated harness events
@@ -225,7 +225,7 @@ Background reconciliation resumes thread metadata without loading conversation
 items: history pagination failures cannot prevent execution recovery. Confirmed active
 turns remain tracked and are not interrupted at startup. Confirmed idle threads
 and authoritative missing rollouts settle as interrupted/recoverable; records,
-branches and worktrees remain. In pinned Codex 0.164.0, only the structured
+branches and worktrees remain. In Codex 0.164.0, only the structured
 `-32600` response `no rollout found for thread id <id>` from resume establishes
 absence. `thread not loaded`, authentication failures, timeouts and other RPC
 errors remain unresolved and tracked.
@@ -446,7 +446,7 @@ Managed ticket implementation and rebase turns support owner steering. Forge
 verifies workspace ownership, serializes per-thread operations, and submits
 `turn/steer` with `{threadId,expectedTurnId,input:[{type:"text",text,text_elements:[]}]}`.
 The response is `{turnId}` and must match the expected active turn. These shapes
-were verified with `codex app-server generate-ts` from pinned Codex `0.164.0`
+were verified with `codex app-server generate-ts` from Codex `0.164.0`
 against the [official steering documentation](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn).
 Steering starts no turn and adds no execution. Runtime completion remains
 authoritative even if it precedes the steering response. Stale or inactive turns
