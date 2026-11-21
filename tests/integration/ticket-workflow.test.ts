@@ -130,7 +130,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		const provider = await providers.create(owner, { kind: "openai", name: "OpenAI" });
 		const taskAgentStore = new TaskAgentStore(db);
 		await taskAgentStore.initialize();
-		const taskAgents = new TaskAgentService(taskAgentStore, providers, access, randomUUID);
+		const taskAgents = new TaskAgentService(taskAgentStore, providers, access, randomUUID, () => 0);
 		const agent = await taskAgents.save(owner, {
 			name: "Developer",
 			models: [{ providerId: provider.id, model: "gpt-5.4", reasoningEffort: "high" }],
@@ -202,7 +202,10 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await tickets.move(owner, ticket.id, { status: "todo" });
 		await workflow.tick(owner);
 		expect((await jobs.get(ticket.id))?.plannerId).toBeUndefined();
-		expect((await tickets.list(owner)).at(0)?.agentStatus).toBe("queued");
+		expect((await tickets.list(owner)).at(0)).toMatchObject({
+			agentStatus: "queued",
+			assignee: { name: agent.name, avatarColour: "Coral" },
+		});
 		await agents.interrupt(owner, standalone[0]!.thread.id);
 		dispatch = "paused";
 		await workflow.tick(owner);

@@ -1,4 +1,4 @@
-import type { TaskAgent } from "@forge/contracts/task-agents";
+import { taskAgentSchema, type TaskAgent } from "@forge/contracts/task-agents";
 import { ticketPhaseSettings, type TicketExecutionSettings } from "@forge/contracts/tickets";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
@@ -53,13 +53,13 @@ export async function migrateTaskAgents(database: IDatabase, id: () => string): 
 			const ending = ` (${suffix})`;
 			name = base.slice(0, 120 - ending.length).trimEnd() + ending;
 		}
-		const agent = {
+		const agent = taskAgentSchema.parse({
 			id: id(),
 			name,
 			models: [{ providerId: provider.id, model, reasoningEffort: effort }],
 			retired: false,
 			maxConcurrentTickets: 1,
-		};
+		});
 		agents.set(key, agent);
 		names.add(name.toLowerCase());
 		return agent.id;

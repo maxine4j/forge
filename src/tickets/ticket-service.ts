@@ -42,19 +42,22 @@ export class TicketService implements ITicketService {
 			this.store.list(includeArchived),
 			this.workflow.boardSummary(actor),
 		]);
-		return Promise.all(
-			tickets.map(async (ticket) => {
-				if (ticket.archivedAt || ticket.status === "done") return ticket;
-				return {
+		// Leave room in the SQLite worker queue for the concurrent notification poll.
+		const result: Ticket[] = [];
+		for (let offset = 0; offset < tickets.length; offset += 32) {
+			const batch = await Promise.all(
+				tickets.slice(offset, offset + 32).map(async (ticket) => ({
 					...ticket,
 					...(await this.workflow.capabilities(actor, ticket)),
-					...(ticket.status === "backlog"
+					...(ticket.archivedAt || ticket.status === "done" || ticket.status === "backlog"
 						? {}
 						: (summary.get(ticket.id)
 							?? (ticket.status === "todo" ? { agentStatus: "queued" as const } : {}))),
-				};
-			}),
-		);
+				})),
+			);
+			result.push(...batch);
+		}
+		return result;
 	}
 	async create(actor: Actor, input: CreateTicket): Promise<Ticket> {
 		this.access.assertOwner(actor);

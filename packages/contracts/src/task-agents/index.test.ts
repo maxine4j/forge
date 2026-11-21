@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 
-import { taskAgentInputSchema, taskAgentSchema } from "./index.ts";
+import { agentAvatarColours, taskAgentInputSchema, taskAgentSchema } from "./index.ts";
 
 test("agent inputs trim names and models and reject unknown fields", () => {
 	const providerId = "123e4567-e89b-42d3-a456-426614174001";
@@ -24,4 +24,21 @@ test("agent inputs trim names and models and reject unknown fields", () => {
 		taskAgentSchema.parse({ id: providerId, name: "Migrated", models: [{ providerId }], retired: false })
 			.maxConcurrentTickets,
 	).toBe(1);
+});
+
+test("legacy agents get a stable preset and inputs accept only the twelve preset colours", () => {
+	const legacy = {
+		id: "123e4567-e89b-42d3-a456-426614174001",
+		name: "Migrated",
+		models: [{ providerId: "123e4567-e89b-42d3-a456-426614174002" }],
+		retired: false,
+	};
+	expect(new Set(agentAvatarColours).size).toBe(12);
+	const saved = taskAgentSchema.parse(legacy);
+	expect(agentAvatarColours).toContain(saved.avatarColour);
+	expect(taskAgentSchema.parse(legacy).avatarColour).toBe(saved.avatarColour);
+	expect(taskAgentSchema.parse({ ...legacy, avatarColour: "Mint" }).avatarColour).toBe("Mint");
+	expect(
+		taskAgentInputSchema.safeParse({ name: legacy.name, models: legacy.models, avatarColour: "red" }).success,
+	).toBe(false);
 });

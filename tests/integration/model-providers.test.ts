@@ -6,6 +6,7 @@ import * as files from "@forge/backend-infrastructure/file";
 import type { AgentOptions } from "@forge/contracts/agents";
 import type { InferenceProvider } from "@forge/contracts/settings";
 import { defaultForgeSettings } from "@forge/contracts/settings";
+import { agentAvatarColours } from "@forge/contracts/task-agents";
 import { expect, test, vi } from "vitest";
 
 import { AccessService } from "../../src/auth/access-service.ts";
@@ -114,13 +115,15 @@ test("reservation upgrade keeps existing assignments, routes and unfinished over
 			abandonment: { implementerId },
 		});
 		for (const id of ["TASK-3", "TASK-4", "TASK-5"]) expect((await workflows.get(id))?.reservation).toBeUndefined();
-		expect(await catalog.get(agentId)).toEqual({
+		const savedAgent = await catalog.get(agentId);
+		expect(savedAgent).toMatchObject({
 			id: agentId,
 			name: "Codex default",
 			retired: true,
 			models: [{ providerId: provider.id }],
 			maxConcurrentTickets: 1,
 		});
+		expect(agentAvatarColours).toContain(savedAgent?.avatarColour);
 		expect(await f.store.get(provider.id)).toMatchObject({ maxConcurrentAgents: 1 });
 		expect(await f.database.all("SELECT DISTINCT executionSettings FROM tickets")).toEqual([
 			{ executionSettings: settings },
@@ -259,7 +262,7 @@ test("task agents validate catalogs, retain retired records and enforce active n
 	try {
 		const store = new TaskAgentStore(f.database);
 		await store.initialize();
-		const agents = new TaskAgentService(store, f.service, access, randomUUID);
+		const agents = new TaskAgentService(store, f.service, access, randomUUID, (length) => length - 1);
 		const local = await f.service.create(actor, ollama);
 		const input = { name: " Local agent ", models: [{ providerId: local.id, model: " local:latest " }] };
 		const agent = await agents.save(actor, input);
@@ -267,10 +270,16 @@ test("task agents validate catalogs, retain retired records and enforce active n
 			name: "Local agent",
 			models: [{ model: "local:latest" }],
 			maxConcurrentTickets: 1,
+			avatarColour: "Peach",
 		});
-		await agents.save(actor, { ...input, maxConcurrentTickets: 3 }, agent.id);
+		expect(await store.get(agent.id)).toMatchObject({ avatarColour: "Peach" });
+		await agents.save(actor, { ...input, maxConcurrentTickets: 3, avatarColour: "Mint" }, agent.id);
 		await agents.save(actor, { ...input, name: "Renamed agent" }, agent.id);
-		expect(await store.get(agent.id)).toMatchObject({ name: "Renamed agent", maxConcurrentTickets: 3 });
+		expect(await store.get(agent.id)).toMatchObject({
+			name: "Renamed agent",
+			maxConcurrentTickets: 3,
+			avatarColour: "Mint",
+		});
 		await agents.save(actor, input, agent.id);
 		await expect(agents.save(actor, { ...input, name: "local AGENT" })).rejects.toMatchObject({ status: 409 });
 		await expect(

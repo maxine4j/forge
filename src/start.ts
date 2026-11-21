@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -367,6 +367,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		providers,
 		access,
 		randomUUID,
+		randomInt,
 		serializeAdmission,
 		wakeScheduler,
 	);

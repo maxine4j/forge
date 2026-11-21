@@ -284,9 +284,11 @@ planner or implementer in `waiting` for input or permission requires attention.
 Completed plans ready for review, failures, uncertain execution and unreadable
 agent state also require attention. These cards have an orange background and
 border, including on hover, and a solid orange dot labelled and titled “Action required”.
-Attention takes precedence over the queued clock and working spinner: only one
-indicator appears. Idle and merge-queued workflows without attention have no
+Attention takes precedence over the queued clock and working spinner.
+Idle and merge-queued workflows without attention have no
 status icon; Backlog and Done never show one. Git merge activity is excluded.
+Ticket list and detail responses include an optional `assignee` with the
+[Agent's name and avatar colour](#named-agents).
 Notifications remain until the underlying condition resolves; opening or closing
 a ticket does not dismiss them. Approving a plan clears its review notification
 once implementation is queued. Resolved cards return to normal styling and show
@@ -580,6 +582,12 @@ and preserves the saved limit when the request omits it.
 `DELETE /api/task-agents/:id` retires a record with status 204. Mutations use the
 existing exact-origin checks. Names are trimmed, 1–120 characters and unique among
 active Agents ignoring case. Model identifiers are trimmed and 1–256 characters.
+New Agents receive a random robot avatar colour from twelve presets. Edit an
+Agent to choose another preset. A PATCH that omits `avatarColour` keeps the saved
+colour. Agents saved before this field was added receive a stable preset based on
+their ID. Board cards and backlog rows show
+the avatar beside the activity indicator. The avatar follows the active phase
+when planning and implementation have different assignees.
 An invalid configuration returns 400, an unknown record returns 404, and an active
 name collision or modification of a retired record returns 409. Retirement retains
 the name on existing assignments and hides the Agent from the Agents tab and

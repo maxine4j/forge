@@ -78,6 +78,7 @@ function namedFixture(dispatchMode?: Parameters<typeof fixture>[0], quotaExhaust
 		providers,
 		new AccessService({ owner: "owner", origin: "https://forge.example" }),
 		() => `123e4567-e89b-42d3-a456-${String(recordsById.size + 100).padStart(12, "0")}`,
+		() => 0,
 	);
 	const f = fixture(dispatchMode, providers, taskAgents, quotaExhausted);
 	f.agents.catalogOptions.mockImplementation(async (_actor, id) => {
@@ -100,6 +101,26 @@ function namedFixture(dispatchMode?: Parameters<typeof fixture>[0], quotaExhaust
 	};
 	return { ...f, planner, implementer, providers, taskAgents, addAgent, ready };
 }
+
+test("ticket avatars follow the workflow phase and retain retired assignees", async () => {
+	const f = namedFixture();
+	const planner = await f.addAgent("Planner");
+	const implementer = await f.addAgent("Implementer");
+	const ticket = f.create();
+	await f.service.settings(actor, ticket, { plannerAgentId: planner.id, implementerAgentId: implementer.id });
+	const assigned = () => f.service.capabilities(actor, f.tickets.get(ticket.id)!);
+	expect((await assigned()).assignee).toEqual({ name: planner.name, avatarColour: planner.avatarColour });
+	await f.service.move(actor, ticket, { status: "todo" });
+	const job = f.jobs.get(ticket.id)!;
+	f.jobs.set(ticket.id, { ...job, phase: "implementation", state: "running" });
+	await f.taskAgents.save(
+		actor,
+		{ name: implementer.name, models: implementer.models, avatarColour: "Teal" },
+		implementer.id,
+	);
+	await f.taskAgents.retire(actor, implementer.id);
+	expect((await assigned()).assignee).toEqual({ name: implementer.name, avatarColour: "Teal" });
+});
 
 test("independent assignees pin model and provider for feedback, recovery and rebase", async () => {
 	const f = namedFixture();

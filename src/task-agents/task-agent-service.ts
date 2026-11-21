@@ -1,6 +1,11 @@
 import { resolveAgentSettings, type AgentSettings } from "@forge/contracts/agents";
 import { inferenceProviderSchema } from "@forge/contracts/settings";
-import { taskAgentInputSchema, type TaskAgent, type TaskAgentModel } from "@forge/contracts/task-agents";
+import {
+	agentAvatarColours,
+	taskAgentInputSchema,
+	type TaskAgent,
+	type TaskAgentModel,
+} from "@forge/contracts/task-agents";
 
 import { AgentError } from "../agents/errors.ts";
 import type { IAccessService } from "../auth/access-service.ts";
@@ -21,6 +26,8 @@ export class TaskAgentError extends Error {
 
 export interface ITaskAgents {
 	list(actor: Actor): Promise<TaskAgent[]>;
+	/** Includes retired agents so existing assignments keep their display identity. */
+	get(actor: Actor, id: string): Promise<TaskAgent | undefined>;
 	save(actor: Actor, input: unknown, id?: string): Promise<TaskAgent>;
 	retire(actor: Actor, id: string): Promise<void>;
 	resolve(actor: Actor, id?: string, permissions?: AgentSettings["permissions"]): Promise<ModelProviderSnapshot>;
@@ -37,12 +44,17 @@ export class TaskAgentService implements ITaskAgents {
 		private readonly providers: IModelProviderService,
 		private readonly access: IAccessService,
 		private readonly id: () => string,
+		private readonly randomIndex: (length: number) => number,
 		private readonly serialize: <T>(operation: () => Promise<T>) => Promise<T> = (operation) => operation(),
 		private readonly wake: () => void = () => {},
 	) {}
 	list(actor: Actor): Promise<TaskAgent[]> {
 		this.access.assertOwner(actor);
 		return this.store.list();
+	}
+	get(actor: Actor, id: string): Promise<TaskAgent | undefined> {
+		this.access.assertOwner(actor);
+		return this.store.get(id);
 	}
 	async save(actor: Actor, input: unknown, id?: string): Promise<TaskAgent> {
 		this.access.assertOwner(actor);
@@ -66,6 +78,10 @@ export class TaskAgentService implements ITaskAgents {
 				...parsed.data,
 				id: id ?? this.id(),
 				retired: false,
+				avatarColour:
+					parsed.data.avatarColour
+					?? previous?.avatarColour
+					?? agentAvatarColours.at(this.randomIndex(agentAvatarColours.length))!,
 				maxConcurrentTickets: parsed.data.maxConcurrentTickets ?? previous?.maxConcurrentTickets ?? 1,
 			};
 			await this.write(agent);

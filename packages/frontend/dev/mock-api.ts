@@ -160,6 +160,8 @@ export class MockApi implements IMockApi {
 	private readonly routes = new Map<string, (url: URL) => unknown>();
 
 	constructor() {
+		const planner = { name: "Planner", avatarColour: "Sky" } as const;
+		const implementer = { name: "Local implementer", avatarColour: "Mint" } as const;
 		this.routes.set("/api/projects", () => projects);
 		this.routes.set("/api/settings", () => defaultForgeSettings);
 		this.routes.set("/api/model-providers", () => [
@@ -183,7 +185,7 @@ export class MockApi implements IMockApi {
 		this.routes.set("/api/task-agents", () => [
 			{
 				id: "123e4567-e89b-42d3-a456-426614174090",
-				name: "Planner",
+				...planner,
 				models: [
 					{
 						providerId: "123e4567-e89b-42d3-a456-426614174099",
@@ -197,7 +199,7 @@ export class MockApi implements IMockApi {
 			},
 			{
 				id: "123e4567-e89b-42d3-a456-426614174091",
-				name: "Local implementer",
+				...implementer,
 				models: [{ providerId: "123e4567-e89b-42d3-a456-426614174098", model: "local:latest" }],
 				retired: false,
 			},
@@ -388,6 +390,7 @@ export class MockApi implements IMockApi {
 					description: "Support keyboard shortcuts.",
 					status: "todo",
 					agentStatus: "queued",
+					assignee: planner,
 					createdAt: date,
 				},
 				{
@@ -397,6 +400,7 @@ export class MockApi implements IMockApi {
 					description: "Implement search ranking.",
 					status: "in-progress",
 					agentStatus: "working",
+					assignee: planner,
 					createdAt: date,
 				},
 				{
@@ -417,6 +421,7 @@ export class MockApi implements IMockApi {
 						"Review the completed navigation plan. The orange card and notification dot remain until the plan is approved.",
 					status: "in-progress",
 					needsAttention: true,
+					assignee: planner,
 					createdAt: date,
 				},
 				{

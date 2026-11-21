@@ -831,13 +831,8 @@
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-.backlog-title-content .ticket-agent-status {
-	position: static;
+.backlog-title-content > :is(.ticket-indicators, .ticket-agent-status) {
 	margin-inline-start: auto;
-	flex-shrink: 0;
-	display: inline-grid;
-	place-items: center;
-	line-height: 16px;
 }
 .backlog-open {
 	display: inline-flex;
@@ -1085,6 +1080,9 @@
 .ticket-open:hover {
 	background: transparent;
 }
+.ticket-open:has(.ticket-agent-status + .agent-avatar) {
+	padding-right: 64px;
+}
 .ticket-title {
 	display: block;
 	font-size: 14px;
@@ -1126,12 +1124,27 @@
 	border-radius: 50%;
 	background: #f59e42;
 }
-.ticket-agent-status {
+.ticket-indicators {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	flex-shrink: 0;
+}
+.ticket-open > :is(.ticket-indicators, .ticket-agent-status) {
 	position: absolute;
 	right: 12px;
 	bottom: 12px;
+}
+.ticket-open > .ticket-indicators {
+	bottom: 8px;
+}
+.ticket-agent-status {
+	display: inline-grid;
+	place-items: center;
+	flex-shrink: 0;
 	width: 16px;
 	height: 16px;
+	line-height: 16px;
 	color: #8b949e;
 }
 .ticket-agent-status.is-working {
@@ -2350,9 +2363,116 @@ small {
 	position: relative;
 }
 .task-agent-summary h3 {
+	display: flex;
+	align-items: center;
+	gap: 8px;
 	margin: 0 130px 12px 0;
 	font-size: 20px;
 	line-height: 1.35;
+}
+.agent-avatar {
+	display: inline-grid;
+	flex: none;
+	place-items: center;
+	width: 24px;
+	height: 24px;
+	border-radius: 50%;
+	background: var(--avatar-colour);
+	color: #171923;
+}
+.agent-avatar[data-colour="Coral"] {
+	--avatar-colour: #ff807c;
+}
+.agent-avatar[data-colour="Rose"] {
+	--avatar-colour: #ffa4be;
+}
+.agent-avatar[data-colour="Berry"] {
+	--avatar-colour: #ea80cf;
+}
+.agent-avatar[data-colour="Violet"] {
+	--avatar-colour: #bc8af3;
+}
+.agent-avatar[data-colour="Lavender"] {
+	--avatar-colour: #cab8ff;
+}
+.agent-avatar[data-colour="Indigo"] {
+	--avatar-colour: #8f9bf5;
+}
+.agent-avatar[data-colour="Sky"] {
+	--avatar-colour: #7bc5fb;
+}
+.agent-avatar[data-colour="Teal"] {
+	--avatar-colour: #61d0ce;
+}
+.agent-avatar[data-colour="Mint"] {
+	--avatar-colour: #83dfa8;
+}
+.agent-avatar[data-colour="Lime"] {
+	--avatar-colour: #c1dd7d;
+}
+.agent-avatar[data-colour="Amber"] {
+	--avatar-colour: #f8cb6e;
+}
+.agent-avatar[data-colour="Peach"] {
+	--avatar-colour: #ffb180;
+}
+.agent-avatar-head {
+	position: relative;
+	width: 14px;
+	height: 10px;
+	margin-top: 3px;
+	border: 1.5px solid;
+	border-radius: 3px;
+}
+.agent-avatar-head::before,
+.agent-avatar-head::after {
+	content: "";
+	position: absolute;
+	background: currentColor;
+}
+.agent-avatar-head::before {
+	width: 2px;
+	height: 4px;
+	bottom: 100%;
+	left: calc(50% - 1px);
+	border-radius: 2px;
+}
+.agent-avatar-head::after {
+	width: 2px;
+	height: 2px;
+	top: 2px;
+	left: calc(50% - 3px);
+	border-radius: 50%;
+	box-shadow: 4px 0 currentColor;
+}
+.task-agent-editor .agent-colour-picker {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	border: 0;
+	padding: 0;
+	margin: 0;
+	min-width: 0;
+}
+.agent-colour-picker legend {
+	margin-bottom: 4px;
+}
+.agent-colour-picker label {
+	position: relative;
+	display: grid;
+	place-items: center;
+	width: 36px;
+	height: 36px;
+	margin: 0;
+	cursor: pointer;
+}
+.agent-colour-picker input:checked + .agent-avatar {
+	outline: 2px solid #a4b0bf;
+	outline-offset: 2px;
+}
+.agent-colour-picker input:focus-visible + .agent-avatar {
+	outline: 2px solid #79c0ff;
+	outline-offset: 3px;
 }
 .task-agent-summary ol {
 	margin: 0;

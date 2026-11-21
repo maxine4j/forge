@@ -1,10 +1,17 @@
 import { agentOptionsSchema, type AgentOptions } from "@forge/contracts/agents";
 import { modelProvidersSchema, type ModelProvider } from "@forge/contracts/model-providers";
-import { taskAgentSchema, taskAgentsSchema, type TaskAgent, type TaskAgentModel } from "@forge/contracts/task-agents";
+import {
+	agentAvatarColours,
+	taskAgentSchema,
+	taskAgentsSchema,
+	type TaskAgent,
+	type TaskAgentModel,
+} from "@forge/contracts/task-agents";
 import { useEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { useDialogDismissal, useModalDialog, useModalDraft, useModalNavigation } from "../navigation/controller.tsx";
+import { AgentAvatar } from "./agent-avatar.tsx";
 
 export function TaskAgents({
 	api,
@@ -99,7 +106,10 @@ export function TaskAgents({
 			{catalog.agents.map((agent) => (
 				<article className='account-card model-provider-card' key={agent.id}>
 					<div className='task-agent-summary'>
-						<h3>{agent.name}</h3>
+						<h3>
+							<AgentAvatar colour={agent.avatarColour} />
+							{agent.name}
+						</h3>
 						<ol aria-label={`${agent.name} model priority`}>
 							{agent.models.map((model, index) => (
 								<li key={index}>
@@ -199,6 +209,7 @@ function AgentEditor({
 }) {
 	const [name, setName] = useState(agent?.name ?? "");
 	const [nameDraft, setNameDraft] = useState<string>();
+	const [avatarColour, setAvatarColour] = useState(agent?.avatarColour);
 	const [maxConcurrentTickets, setMaxConcurrentTickets] = useState(String(agent?.maxConcurrentTickets ?? 1));
 	const [rows, setRows] = useState(() =>
 		(agent?.models ?? [{ providerId: "" }]).map((value, key) => ({ key, value })),
@@ -213,6 +224,7 @@ function AgentEditor({
 	const dirty =
 		!!agent
 		&& ((nameDraft !== undefined && nameDraft !== agent.name)
+			|| avatarColour !== agent.avatarColour
 			|| maxConcurrentTickets !== String(agent.maxConcurrentTickets)
 			|| JSON.stringify(rows.map(({ value }) => value)) !== JSON.stringify(agent.models));
 	const release = useModalDraft(dirty, busy, undefined, "task-agent");
@@ -256,6 +268,7 @@ function AgentEditor({
 						name,
 						models: rows.map(({ value }) => value),
 						maxConcurrentTickets: Number(maxConcurrentTickets),
+						avatarColour,
 					},
 				),
 			);
@@ -325,6 +338,24 @@ function AgentEditor({
 				<h3>Create agent</h3>
 			)}
 			<fieldset disabled={busy}>
+				{agent && (
+					<fieldset className='agent-colour-picker'>
+						<legend>Avatar colour</legend>
+						{agentAvatarColours.map((colour) => (
+							<label key={colour} title={colour}>
+								<input
+									className='visually-hidden'
+									type='radio'
+									name='avatar-colour'
+									aria-label={colour}
+									checked={avatarColour === colour}
+									onChange={() => setAvatarColour(colour)}
+								/>
+								<AgentAvatar colour={colour} />
+							</label>
+						))}
+					</fieldset>
+				)}
 				{!agent && (
 					<label>
 						Name

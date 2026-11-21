@@ -6,7 +6,7 @@ const openai = "123e4567-e89b-42d3-a456-426614174000";
 const ollama = "123e4567-e89b-42d3-a456-426614174001";
 const id = "123e4567-e89b-42d3-a456-426614174002";
 
-test("Tasks Agents adds, reorders, removes models and hides retired agents", async ({ page }) => {
+test("Tasks Agents manages models and avatar colours and shows the assignee on tickets", async ({ page }) => {
 	let agent: TaskAgent | undefined;
 	const writes: TaskAgentInput[] = [];
 	const modelReads: string[] = [];
@@ -17,6 +17,24 @@ test("Tasks Agents adds, reorders, removes models and hides retired agents", asy
 			const method = route.request().method();
 			if (path === "/api/board/settings") return route.fulfill({ json: defaultBoardSettings });
 			if (path === "/api/accounts") return route.fulfill({ status: 503, json: { error: "internal-error" } });
+			if (path === "/api/tickets" && agent) {
+				const assignee = { name: agent.name, avatarColour: agent.avatarColour };
+				const ticket = { repositoryIds: [], description: "", createdAt: "2026-11-03T00:00:00.000Z" };
+				return route.fulfill({
+					json: [
+						{ ...ticket, id: "TASK-1", title: "Assigned", status: "backlog", assignee },
+						{
+							...ticket,
+							id: "TASK-2",
+							title: "Active",
+							status: "in-progress",
+							agentStatus: "working",
+							assignee,
+						},
+						{ ...ticket, id: "TASK-3", title: "Unassigned", status: "backlog" },
+					],
+				});
+			}
 			if (path === "/api/task-agents" && method === "GET") return route.fulfill({ json: agent ? [agent] : [] });
 			if (path === "/api/model-providers")
 				return route.fulfill({
@@ -48,7 +66,13 @@ test("Tasks Agents adds, reorders, removes models and hides retired agents", asy
 			if (path.startsWith("/api/task-agents") && (method === "POST" || method === "PATCH")) {
 				const input = route.request().postDataJSON() as TaskAgentInput;
 				writes.push(input);
-				agent = { ...input, id, retired: false, maxConcurrentTickets: input.maxConcurrentTickets ?? 1 };
+				agent = {
+					...input,
+					id,
+					retired: false,
+					maxConcurrentTickets: input.maxConcurrentTickets ?? 1,
+					avatarColour: input.avatarColour ?? agent?.avatarColour ?? "Sky",
+				};
 				return route.fulfill({ json: agent, status: method === "POST" ? 201 : 200 });
 			}
 			if (path === `/api/task-agents/${id}` && method === "DELETE" && agent) {
@@ -73,6 +97,10 @@ test("Tasks Agents adds, reorders, removes models and hides retired agents", asy
 	await page.getByRole("combobox", { name: "Thinking level", exact: true }).selectOption("high");
 	await page.getByRole("button", { name: "Save agent" }).click();
 	await expect(page.getByRole("heading", { name: "Reviewer", exact: true })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "Reviewer", exact: true }).locator(".agent-avatar")).toHaveAttribute(
+		"data-colour",
+		"Sky",
+	);
 	await expect(page.getByText("OpenAI · codex · high")).toBeVisible();
 	await expect(page.getByRole("button", { name: "Save agent" })).toHaveCount(0);
 	await expect(page.getByRole("button", { name: "Add model" })).toHaveCount(0);
@@ -80,6 +108,11 @@ test("Tasks Agents adds, reorders, removes models and hides retired agents", asy
 	await expect(page.getByRole("dialog", { name: "Edit Reviewer" })).toBeVisible();
 	const primary = { providerId: openai, model: "codex", reasoningEffort: "high" };
 	expect(writes).toEqual([{ name: "Reviewer", models: [primary], maxConcurrentTickets: 1 }]);
+	const colours = page.getByRole("group", { name: "Avatar colour" });
+	await expect(colours.getByRole("radio")).toHaveCount(12);
+	await expect(colours.getByRole("radio", { name: "Sky" })).toBeChecked();
+	await colours.getByTitle("Mint").click();
+	await expect(colours.getByRole("radio", { name: "Mint" })).toBeChecked();
 	await expect(page.getByLabel("Max concurrent tickets")).toHaveValue("1");
 	await page.getByLabel("Max concurrent tickets").fill("2");
 
@@ -140,20 +173,52 @@ test("Tasks Agents adds, reorders, removes models and hides retired agents", asy
 	await expect(page.getByText("Local · local:latest")).toBeVisible();
 	await expect(page.getByRole("button", { name: "Save agent" })).toHaveCount(0);
 	const local = { providerId: ollama, model: "local:latest" };
-	expect(writes.at(-1)).toEqual({ name: "Reviewer updated", models: [local, primary], maxConcurrentTickets: 2 });
+	expect(writes.at(-1)).toEqual({
+		name: "Reviewer updated",
+		models: [local, primary],
+		maxConcurrentTickets: 2,
+		avatarColour: "Mint",
+	});
 	await page.getByRole("button", { name: "Edit Reviewer updated" }).click();
 	await expect(page.getByLabel("Max concurrent tickets")).toHaveValue("2");
-	await page.getByLabel("Max concurrent tickets").fill("3");
+	await colours.getByTitle("Amber").click();
 	await page.getByRole("button", { name: "Cancel", exact: true }).click();
 	await page.getByRole("button", { name: "Discard changes" }).click();
 	await expect(page.getByText("OpenAI · codex · high")).toBeVisible();
 	await page.getByRole("button", { name: "Edit Reviewer updated" }).click();
+	await expect(colours.getByRole("radio", { name: "Mint" })).toBeChecked();
 	await expect(page.getByLabel("Max concurrent tickets")).toHaveValue("2");
 	await page.getByRole("button", { name: "Remove model 2" }).click();
 	await page.getByRole("button", { name: "Save agent" }).click();
 	await expect(page.getByRole("button", { name: "Archive Reviewer updated" })).toBeEnabled();
-	expect(writes.at(-1)).toEqual({ name: "Reviewer updated", models: [local], maxConcurrentTickets: 2 });
+	expect(writes.at(-1)).toEqual({
+		name: "Reviewer updated",
+		models: [local],
+		maxConcurrentTickets: 2,
+		avatarColour: "Mint",
+	});
 	expect([...new Set(modelReads)]).toEqual([`/api/model-providers/${openai}/model-options`]);
+
+	await page.getByRole("tab", { name: "Board", exact: true }).click();
+	const assigned = page.getByRole("button", { name: "TASK-1 Assigned" });
+	await expect(assigned.getByRole("img", { name: "Reviewer updated" })).toHaveAttribute("data-colour", "Mint");
+	const active = page.getByRole("button", { name: "TASK-2 Active" });
+	await expect(active.getByRole("img", { name: "Agent working" })).toBeVisible();
+	await expect(active.locator(".ticket-agent-status + .agent-avatar")).toHaveAttribute("data-colour", "Mint");
+	await expect(active.getByRole("img", { name: "Reviewer updated" })).toHaveCSS(
+		"background-color",
+		"rgb(131, 223, 168)",
+	);
+	await page.setViewportSize({ width: 390, height: 844 });
+	const indicators = (await active.locator(".ticket-indicators").boundingBox())!;
+	const key = (await active.locator(".ticket-key").boundingBox())!;
+	expect(key.x + key.width).toBeLessThan(indicators.x);
+	await expect(page.getByRole("button", { name: "TASK-3 Unassigned" }).locator(".agent-avatar")).toHaveCount(0);
+	await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+	await expect(
+		page.getByRole("row").filter({ hasText: "TASK-1" }).getByRole("img", { name: "Reviewer updated" }),
+	).toHaveAttribute("data-colour", "Mint");
+	await page.getByRole("tab", { name: "Agents", exact: true }).click();
 
 	await page.getByRole("button", { name: "Archive Reviewer updated" }).click();
 	await page.getByRole("button", { name: "Archive agent", exact: true }).click();

@@ -33,7 +33,7 @@ export interface ITicketWorkflowService {
 	archive(actor: Actor, ticket: Ticket, archivedAt: string): Promise<void>;
 	move(actor: Actor, ticket: Ticket, input: MoveTicket): Promise<void>;
 	clearPlan(actor: Actor, ticket: Ticket): Promise<TicketWorkflow>;
-	capabilities(actor: Actor, ticket: Ticket): Promise<Pick<Ticket, "canReturnToBacklog" | "resetting">>;
+	capabilities(actor: Actor, ticket: Ticket): Promise<Pick<Ticket, "assignee" | "canReturnToBacklog" | "resetting">>;
 	get(actor: Actor, id: string): Promise<TicketWorkflow>;
 	boardSummary(actor: Actor): Promise<Map<string, Pick<Ticket, "agentStatus" | "needsAttention">>>;
 	approve(actor: Actor, ticket: Ticket, revision: number): Promise<TicketWorkflow>;
@@ -277,15 +277,40 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			return this.summary(next);
 		});
 	}
-	async capabilities(actor: Actor, ticket: Ticket): Promise<Pick<Ticket, "canReturnToBacklog" | "resetting">> {
+	async capabilities(
+		actor: Actor,
+		ticket: Ticket,
+	): Promise<Pick<Ticket, "assignee" | "canReturnToBacklog" | "resetting">> {
 		this.access.assertOwner(actor);
-		if (ticket.archivedAt || ticket.status === "done") return {};
-		const job = await this.record(ticket.id);
-		if (job.state === "resetting") return { resetting: true };
-		return this.canReturnToBacklog(ticket, job) ? { canReturnToBacklog: true } : {};
+		const inactive = ticket.archivedAt || ticket.status === "done";
+		const settings = ticket.executionSettings;
+		const hasAssignment = settings?.plannerAgentId || settings?.implementerAgentId;
+		if (inactive && !hasAssignment) return {};
+		const job = await this.store.get(ticket.id);
+		const phase =
+			ticket.status === "done"
+				? "implementation"
+				: ticket.status === "backlog" || !job
+					? this.initialPhase(ticket, job)
+					: job.phase === "planning"
+						? "planning"
+						: "implementation";
+		const assigneeId =
+			(job && this.phaseSnapshot(job, phase)?.agentId)
+			?? ticketAgentId(settings, phase)
+			?? (ticket.status === "backlog" || inactive
+				? ticketAgentId(settings, phase === "planning" ? "implementation" : "planning")
+				: undefined);
+		const agent = assigneeId ? await this.taskAgents?.get(actor, assigneeId) : undefined;
+		const capabilities: Pick<Ticket, "assignee" | "canReturnToBacklog" | "resetting"> = {};
+		if (agent) capabilities.assignee = { name: agent.name, avatarColour: agent.avatarColour };
+		if (inactive) return capabilities;
+		if (job?.state === "resetting") capabilities.resetting = true;
+		else if (this.canReturnToBacklog(ticket, job)) capabilities.canReturnToBacklog = true;
+		return capabilities;
 	}
-	private canReturnToBacklog(ticket: Ticket, job: TicketWorkflowRecord): boolean {
-		return ["todo", "in-progress"].includes(ticket.status) && !ticket.archivedAt && job.state !== "resetting";
+	private canReturnToBacklog(ticket: Ticket, job?: TicketWorkflowRecord): boolean {
+		return ["todo", "in-progress"].includes(ticket.status) && !ticket.archivedAt && job?.state !== "resetting";
 	}
 	async get(actor: Actor, id: string): Promise<TicketWorkflow> {
 		this.access.assertOwner(actor);
@@ -666,8 +691,8 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	private phaseSnapshot(job: TicketWorkflowRecord, phase: TicketAgentPhase) {
 		return phase === "planning" ? job.planningProviderSnapshot : job.implementationProviderSnapshot;
 	}
-	private initialPhase(ticket: Ticket, job: TicketWorkflowRecord): "planning" | "implementation" {
-		return job.plan || ticket.executionSettings?.skipPlanning ? "implementation" : "planning";
+	private initialPhase(ticket: Ticket, job?: TicketWorkflowRecord): "planning" | "implementation" {
+		return job?.plan || ticket.executionSettings?.skipPlanning ? "implementation" : "planning";
 	}
 	private async observe(actor: Actor, job: TicketWorkflowRecord): Promise<void> {
 		const id = job.phase === "planning" ? job.plannerId : job.implementerId;
