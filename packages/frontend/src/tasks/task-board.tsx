@@ -181,6 +181,11 @@ export const TaskBoard = ({
 			<div ref={board} className='kanban-columns' aria-label='Ticket board' aria-busy={busy || loading}>
 				{ticketStatuses.map((status) => {
 					const values = tickets.filter((ticket) => ticket.status === status);
+					if (status === "done") {
+						const completionTime = (ticket: Ticket) =>
+							ticket.completedAt ? Date.parse(ticket.completedAt) : Number.MIN_SAFE_INTEGER;
+						values.sort((a, b) => completionTime(b) - completionTime(a));
+					}
 					return (
 						<section
 							key={status}
@@ -213,19 +218,21 @@ export const TaskBoard = ({
 												<TicketCardKey ticket={ticket} />
 												<TicketIndicator ticket={ticket} />
 											</button>
-											<button
-												className='ticket-drag-handle'
-												aria-label={`Drag ${ticket.id}`}
-												title='Drag to move ticket'
-												disabled={busy}
-												onPointerDown={(event) => startDrag(event, ticket)}
-												onPointerMove={pointerMove}
-												onPointerUp={finishDrag}
-												onPointerCancel={cancelDrag}
-												onLostPointerCapture={cancelDrag}
-											>
-												⠿
-											</button>
+											{status !== "done" && (
+												<button
+													className='ticket-drag-handle'
+													aria-label={`Drag ${ticket.id}`}
+													title='Drag to move ticket'
+													disabled={busy}
+													onPointerDown={(event) => startDrag(event, ticket)}
+													onPointerMove={pointerMove}
+													onPointerUp={finishDrag}
+													onPointerCancel={cancelDrag}
+													onLostPointerCapture={cancelDrag}
+												>
+													⠿
+												</button>
+											)}
 										</article>
 									</Fragment>
 								))}

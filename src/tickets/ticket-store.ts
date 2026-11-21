@@ -14,7 +14,15 @@ import { epicTable } from "../epics/epic-store.ts";
 import { TicketError } from "./errors.ts";
 import { historyTables } from "./ticket-history-store.ts";
 
+export const ticketCompletionsTable: SqlStatement = {
+	sql: "CREATE TABLE IF NOT EXISTS ticket_completions (ticketId TEXT PRIMARY KEY REFERENCES tickets(id), completedAt TEXT NOT NULL)",
+};
+
 const columns = `id, epicId, title, description, status, createdAt, archivedAt, executionSettings,
+ CASE WHEN status='done' THEN COALESCE(
+  (SELECT at FROM ticket_history WHERE ticketId=tickets.id AND type='status' AND status='done' AND bootstrapped=0 ORDER BY id DESC LIMIT 1),
+  (SELECT completedAt FROM ticket_completions WHERE ticketId=tickets.id)
+ ) END AS completedAt,
  (SELECT json_group_array(repositoryId) FROM (SELECT repositoryId FROM ticket_repositories WHERE ticketId=tickets.id ORDER BY position)) AS repositoryIds`;
 const rowSchema = ticketSchema.extend({
 	repositoryIds: z.string().transform((value) => JSON.parse(value)),
@@ -23,10 +31,11 @@ const rowSchema = ticketSchema.extend({
 		.nullable()
 		.transform((value) => (value === null ? undefined : ticketExecutionSettingsSchema.parse(JSON.parse(value)))),
 	archivedAt: ticketSchema.shape.archivedAt.nullable(),
+	completedAt: ticketSchema.shape.completedAt.nullable(),
 });
 const decode = (row: unknown): Ticket => {
-	const { archivedAt, ...ticket } = rowSchema.parse(row);
-	return ticketSchema.parse(archivedAt ? { ...ticket, archivedAt } : ticket);
+	const { archivedAt, completedAt, ...ticket } = rowSchema.parse(row);
+	return ticketSchema.parse({ ...ticket, ...(archivedAt && { archivedAt }), ...(completedAt && { completedAt }) });
 };
 
 /** Shared global column ordering for owner moves and workflow transitions. */
@@ -92,6 +101,7 @@ export class TicketStore implements ITicketStore {
 					sql: "CREATE TRIGGER IF NOT EXISTS tickets_capacity BEFORE INSERT ON tickets WHEN (SELECT COUNT(*) FROM tickets WHERE archivedAt IS NULL)>=1000 BEGIN SELECT RAISE(ABORT,'Board capacity reached'); END",
 				},
 				...historyTables,
+				ticketCompletionsTable,
 				{
 					sql: "INSERT INTO ticket_history(ticketId,at,status,type,outcome,bootstrapped) SELECT id,?,status,'status','completed',1 FROM tickets WHERE NOT EXISTS (SELECT 1 FROM ticket_history WHERE ticketId=tickets.id)",
 					parameters: [this.now().toISOString()],

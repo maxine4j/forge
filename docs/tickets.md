@@ -145,8 +145,10 @@ membership. The board has four columns: Backlog, Ready for development, In progr
 Done. The corresponding API statuses are `backlog`, `todo`, `in-progress` and
 `done`. The bottom-left corner of each card shows its ticket icon and key,
 prefixed by the epic icon and key followed by a slash when the ticket belongs
-to an epic. Cards support pointer and touch reordering, edge scrolling and
-cancellation. Status transitions use the board's drag controls; ticket details
+to an epic. Done shows the most recently completed tickets first. Tickets with
+the same completion time retain their saved order. Older tickets with no recorded
+completion time follow in saved order. The other columns support pointer and touch
+reordering, edge scrolling and cancellation. Status transitions use the board's drag controls; ticket details
 shows a labelled, read-only status pill beside the ticket key in the header.
 Ready and In progress tickets offer **Return to backlog** beside Archive and Close.
 The ticket header keeps epic/ticket keys, right-aligned execution status and these
@@ -407,7 +409,9 @@ reply controls. See the [agent protocol contract](agents.md#interactive-agents).
 Owner-authorized `GET /api/tickets` accepts optional `includeArchived=true|false`,
 defaulting to false. Malformed or repeated values return the existing 400
 invalid-request response. Inclusion preserves the response shape and ordering
-by position then ticket number; archived tickets receive no workflow indicator
+by position then ticket number. Done tickets include `completedAt` when Forge has
+a recorded completion, using the Done transition in [ticket history](#ticket-history)
+or the legacy workflow completion record. Archived tickets receive no workflow indicator
 enrichment. Retained archives may take the collection beyond the 1,000 active-ticket
 capacity; the response schema does not cap the combined collection. Tasks polls `tickets?includeArchived=true` for immediate local
 filtering without requests on checkbox changes. Epic-detail child lists retain

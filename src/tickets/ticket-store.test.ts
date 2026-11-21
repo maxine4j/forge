@@ -86,6 +86,33 @@ test("SQLite allocates global sequential ticket keys, preserves global order and
 	expect(await persisted.list()).toHaveLength(4);
 });
 
+test("Done tickets expose recorded completion times and ignore bootstrapped status dates", async () => {
+	const root = await mkdtemp(join(tmpdir(), "forge-tickets-"));
+	cleanups.push(() => rm(root, { recursive: true, force: true }));
+	const db = new SqliteDatabase(join(root, "forge.sqlite"));
+	cleanups.push(() => db.close());
+	await db.initialize();
+	await new ProjectStore(db).initialize();
+	const completedAt = "2026-11-05T00:00:00.000Z";
+	const legacyCompletion = "2026-11-04T00:00:00.000Z";
+	const store = new TicketStore(db, () => new Date(completedAt));
+	await store.initialize();
+	const input = { title: "Task", description: "Details", repositoryIds: [] };
+	const current = await store.insert(input, createdAt);
+	const legacy = await store.insert(input, createdAt);
+	const unfinished = await store.insert(input, createdAt);
+	await store.move(current.id, { status: "done" });
+	await store.move(legacy.id, { status: "done" });
+	await db.run("UPDATE ticket_history SET bootstrapped=1 WHERE ticketId=? AND status='done'", [legacy.id]);
+	expect(await store.get(legacy.id)).not.toHaveProperty("completedAt");
+	await db.run("INSERT INTO ticket_completions(ticketId,completedAt) VALUES (?,?)", [legacy.id, legacyCompletion]);
+	expect(await store.list()).toEqual([
+		{ ...current, status: "done", completedAt },
+		{ ...legacy, status: "done", completedAt: legacyCompletion },
+		unfinished,
+	]);
+});
+
 test("archiving an existing ticket retains its contents and frees board capacity across restarts", async () => {
 	const root = await mkdtemp(join(tmpdir(), "forge-ticket-archive-"));
 	cleanups.push(() => rm(root, { recursive: true, force: true }));

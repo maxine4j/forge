@@ -562,6 +562,7 @@ const setup = async (
 		description: string;
 		status: string;
 		createdAt: string;
+		completedAt?: string;
 		archivedAt?: string;
 		executionSettings?: import("@forge/contracts/tickets").TicketExecutionSettings;
 		needsAttention?: true;
@@ -3198,6 +3199,28 @@ test("desktop drop zones reorder cards and move to an empty column; failures pre
 	await page.mouse.up();
 	await expect(page.getByRole("alert")).toBeVisible();
 	await expect(page.getByRole("region", { name: "Backlog", exact: true }).getByText("First task")).toBeVisible();
+});
+
+test("the Done column shows the newest completions first as tickets finish", async ({ page }) => {
+	const fixture = await setup(page);
+	const tickets = fixture.tickets();
+	const first = tickets.at(0)!;
+	const second = tickets.at(1)!;
+	const earlier = "2026-11-04T00:00:00.000Z";
+	const later = "2026-11-05T00:00:00.000Z";
+	Object.assign(first, { status: "in-progress" });
+	Object.assign(second, { status: "done", completedAt: earlier });
+	tickets.push(
+		{ ...second, id: "TASK-3", title: "Unknown completion", completedAt: undefined },
+		{ ...second, id: "TASK-4", title: "Simultaneous completion" },
+	);
+	const done = page.getByRole("region", { name: "Done", exact: true });
+	const cards = done.locator(".ticket-title");
+	await expect(cards).toHaveText(["Second task", "Simultaneous completion", "Unknown completion"]);
+	tickets.push(tickets.shift()!);
+	Object.assign(first, { status: "done", completedAt: later });
+	await expect(cards).toHaveText(["First task", "Second task", "Simultaneous completion", "Unknown completion"]);
+	await expect(done.getByRole("button", { name: /^Drag / })).toHaveCount(0);
 });
 
 test("drag edge scrolling and cancellation preserve ticket state", async ({ page }) => {

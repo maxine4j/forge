@@ -15,6 +15,7 @@ export interface Ticket extends CreateTicket {
 	repositoryIds: string[];
 	status: TicketStatus;
 	createdAt: string;
+	completedAt?: string;
 	archivedAt?: string;
 	needsAttention?: true;
 	agentStatus?: "queued" | "working";

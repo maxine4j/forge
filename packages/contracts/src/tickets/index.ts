@@ -104,6 +104,7 @@ export const ticketSchema = z.strictObject({
 	description: z.string().max(4000),
 	status: ticketStatusSchema,
 	createdAt: z.iso.datetime(),
+	completedAt: z.iso.datetime().optional(),
 	archivedAt: z.iso.datetime().optional(),
 	needsAttention: z.literal(true).optional(),
 	agentStatus: z.enum(["queued", "working"]).optional(),

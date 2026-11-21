@@ -6,7 +6,7 @@ import type { SqlStatement } from "../database/types.ts";
 import { TicketError } from "./errors.ts";
 import type { INotificationStore } from "./notification-store.ts";
 import { historyMilestoneStatements, workflowMilestones } from "./ticket-history-store.ts";
-import { boardMoveStatements } from "./ticket-store.ts";
+import { boardMoveStatements, ticketCompletionsTable } from "./ticket-store.ts";
 import { normalizeTicketWorkflow, ticketWorkflowRecordSchema, type TicketWorkflowRecord } from "./types.ts";
 
 export interface ITicketWorkflowStore {
@@ -28,9 +28,7 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 	) {}
 	async initialize(): Promise<void> {
 		await this.database.transaction([
-			{
-				sql: "CREATE TABLE IF NOT EXISTS ticket_completions (ticketId TEXT PRIMARY KEY REFERENCES tickets(id), completedAt TEXT NOT NULL)",
-			},
+			ticketCompletionsTable,
 			{
 				sql: "CREATE TABLE IF NOT EXISTS ticket_workflows (ticketId TEXT PRIMARY KEY REFERENCES tickets(id), record TEXT NOT NULL)",
 			},
