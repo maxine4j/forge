@@ -54,8 +54,8 @@ replayed after failure. See [architecture](architecture.md#worktree-typescript-i
 ticket planning, implementation and standalone chats, including Ollama. It carries
 `turnId`, `outputTokens`, `requestCount`, `requestDurationMs`, optional
 `firstTokenLatencyMs` and `generationDurationMs`, and `state` (`complete`, `partial`
-or `unavailable`). Rates are derived from these totals. It is independent of
-billing: Ollama remains excluded from OpenAI costs.
+or `unavailable`). Rates are derived from these totals independently of
+[cost and usage tracking](#cost-and-usage).
 
 The private Codex OTLP JSON adapter correlates transport spans through
 `stream_request` and the sampling-attempt parent with `codex.sampling` thread and
@@ -284,8 +284,9 @@ their inference snapshots or replays dispatched turns. See
 
 The shared app-server keeps OpenAI account access while Ollama threads use a
 thread-scoped Responses provider without OpenAI credentials. Ollama permission
-restrictions remain in force. Ollama turns neither sample nor contribute to OpenAI
-costs and quotas. Provider errors follow existing recovery paths. Named providers
+restrictions remain in force. Ollama turns record usage for [API-equivalent and
+weekly allowance estimates](#cost-and-usage). OpenAI quota sampling and attribution
+remain scoped to OpenAI. Provider errors follow existing recovery paths. Named providers
 add no queues, limits, reservations or changes to board/standalone concurrency.
 Forge can also reach a local Ollama worker through the [Ollama relay](development.md#ollama-relay).
 The relay forwards Ollama's stateless Responses and SSE stream, and the worker
@@ -477,15 +478,22 @@ references and tickets without usage in the selected range. Ticket rows open
 details on Costs and show no single-repository label. Ticket usage is aggregated
 by ticket ID, independently of a turn's execution repository. See
 [board ownership and execution context](tickets.md#agentic-ticket-board).
-The provider sections show estimated OpenAI API costs in AUD, including standalone
-chats in the same total. This is the equivalent token cost at API rates. The AUD
-amount uses the saved dispatch exchange rate. Missing AUD rates, pricing or usage
-make the estimate partial or unavailable. Saved provider IDs keep named provider
-totals separate. Legacy records without an ID count toward the sole known OpenAI
-provider, or appear as OpenAI history when attribution is ambiguous. Retired
-OpenAI providers appear only when they have usage in the range. Configured Ollama
-providers show that costs are unavailable. See [model providers](foundation.md#model-providers).
-Per-ticket estimates retain local currency and quota attribution.
+The OpenAI and Ollama cards compare token counts and AUD estimates for the selected
+range, including standalone chats. OpenAI shows the live weekly allowance remaining.
+Ollama shows the OpenAI API equivalent and estimated weekly allowance saved. The
+provider table groups named providers by type and shows API estimates to the cent
+and each provider's share of recorded input plus output tokens to one decimal place.
+`GET /api/costs` returns `providerTotals` by type and `providers` with those metrics
+per named provider. Retired providers appear only when they have usage in range.
+Legacy records without an ID count toward the sole known OpenAI provider, or appear
+as OpenAI history when attribution is ambiguous. See [model providers](foundation.md#model-providers).
+
+The Ollama equivalent prices uncached input, cached input and output at the active
+OpenAI provider's explicit default model and AUD exchange rate saved at dispatch.
+The estimate is partial or unavailable when usage, benchmark pricing or FX is
+missing. Ollama turns before tracking began have no backfill. Usage charts and
+ticket token counts include both provider types. The [ticket cost estimates](tickets.md#ticket-cost)
+use OpenAI turns for monetary and quota metrics.
 The page retains manual refresh, retry, and five-minute refresh. Legacy project
 Cost URLs and API routes are unknown routes with no redirects.
 Cached input is included in input totals, and reasoning is included in output.
@@ -536,6 +544,13 @@ using each turn's saved values. Both quota attribution and effective cost are
 estimates: account-wide counters include external activity and delayed updates.
 See [billing and exchange rates](development.md#cost-settings) and
 [ticket summaries](tickets.md#ticket-cost).
+
+Ollama weekly allowance saved multiplies benchmark API-equivalent USD by observed
+weekly percentage points per USD. Forge divides the sum of OpenAI allocation
+percentages by the sum of those allocations' API-cost increments for one weekly
+bucket in the selected range. Without a single bucket and positive observed
+consumption, the estimate is unavailable for priced usage. Missing AUD FX affects
+the AUD estimate independently. Savings can exceed 100% across multiple weeks.
 
 #### Weekly budget capacity
 

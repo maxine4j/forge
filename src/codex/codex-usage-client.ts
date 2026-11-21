@@ -78,13 +78,20 @@ export class CodexUsageClient implements ICodexUsageTracker, ICodexLimits {
 		private readonly now: () => Date,
 		private readonly billing: () => Promise<BillingSnapshot>,
 		private readonly sample: () => Promise<void>,
+		private readonly benchmarkModel?: () => Promise<string | undefined>,
 	) {
 		this.unsubscribe = connection.subscribe((method, params) => this.notification(method, params));
 	}
 	async track(threadId: string, scope: UsageScope, model?: string): Promise<void> {
 		await this.writes;
-		const billing = { ...(await this.billing()), rates: modelRates(model) };
-		await this.sample();
+		const billing = { ...(await this.billing()) };
+		if (scope.providerKind === "ollama") {
+			const benchmark = await this.benchmarkModel?.();
+			if (benchmark) billing.benchmark = { model: benchmark, rates: modelRates(benchmark) };
+		} else {
+			billing.rates = modelRates(model);
+			await this.sample();
+		}
 		const previousId = this.turns.get(threadId)?.id;
 		this.turns.set(threadId, {
 			previousId,
@@ -157,7 +164,7 @@ export class CodexUsageClient implements ICodexUsageTracker, ICodexLimits {
 							? Math.max(0, turn.completedAt - turn.startedAt) * 1000
 							: undefined);
 					this.persist(tracked.data, turn.id);
-					this.writes = this.writes.then(() => this.sample());
+					if (tracked.data.providerKind !== "ollama") this.writes = this.writes.then(() => this.sample());
 				} else this.persist(tracked.data, turn.id);
 				break;
 			}

@@ -329,7 +329,8 @@ export class CodexAgentClient implements ICodexAgentClient {
 			delete view.plan;
 			delete view.turnFailure;
 			try {
-				if (usage && !ollama) await this.usageTracker?.track(id, usage, model);
+				if (usage)
+					await this.usageTracker?.track(id, { ...usage, providerKind: ollama ? "ollama" : "openai" }, model);
 				const result = z.object({ turn: turnSchema }).parse(
 					await this.runtimeRequest(path, "turn/start", {
 						threadId: id,

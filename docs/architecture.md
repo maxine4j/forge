@@ -140,7 +140,9 @@ DTOs and excludes archived tickets and abandoned/superseded attempts. See
 - Cost records have an indexed ticket ID and unique `(threadId, turnId)` identity;
   repository ID is execution metadata. Immutable dispatch snapshots retain
   provider identity, billing, model token pricing and historical FX context,
-  including the AUD rate when the billing currency differs. USD costs persist with usage.
+  including the AUD rate when the billing currency differs. OpenAI USD costs
+  persist with usage. Ollama turns retain an independent OpenAI pricing benchmark
+  and stay outside account quota allocations.
   SQLite also owns the four-hour exchange-rate cache, raw quota observations and
   idempotent interval allocations. Inject exchange client/cache interfaces and
   serialize quota collection independently of dashboard reads. See

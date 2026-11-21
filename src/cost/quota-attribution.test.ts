@@ -36,7 +36,8 @@ test("weights incremental API costs including chats and conserves fractional quo
 	const first = turn("ticket", 1);
 	const chat: UsageTurn = { ...turn("chat", 3), phase: "chat", ticketId: undefined };
 	const before = sample(start, 20, [{ ...first, input: 50, apiUsd: 0.5 }]);
-	const after = sample(end, 20.7, [first, chat]);
+	const local: UsageTurn = { ...turn("ollama"), providerKind: "ollama" };
+	const after = sample(end, 20.7, [first, chat, local]);
 	const interval = allocateQuota(before, after)!;
 	expect(interval.consumption).toBeCloseTo(0.7);
 	expect(interval.allocations[0]!.percent).toBeCloseTo(0.1);

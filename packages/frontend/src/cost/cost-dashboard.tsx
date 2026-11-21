@@ -7,10 +7,13 @@ import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownOption } from "../dropdown.tsx";
 import { nextModal } from "../navigation/controller.tsx";
 import { useToast } from "../toasts/toasts.tsx";
-import { Money, PhaseCosts, WeeklyUsage, formatPercent, money } from "./cost-metrics.tsx";
+import { Money, PhaseCosts, WeeklyUsage, formatPercent } from "./cost-metrics.tsx";
 import { WeeklyBudgetChart } from "./weekly-budget.tsx";
 
 const number = new Intl.NumberFormat("en-AU");
+const aud = new Intl.NumberFormat("en-AU", { style: "currency", currency: "AUD" });
+const workShare = new Intl.NumberFormat("en-AU", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const providerLabels = { openai: "OpenAI", ollama: "Ollama" } as const;
 const shortNumber = new Intl.NumberFormat("en-AU", { notation: "compact" });
 const day = new Intl.DateTimeFormat("en-AU", { month: "short", day: "numeric", timeZone: "UTC" });
 const hour = new Intl.DateTimeFormat("en-AU", {
@@ -184,55 +187,173 @@ const Quotas = ({ limits }: { limits: Costs["limits"] }) => (
 	</section>
 );
 
+const ProviderEstimate = ({
+	value,
+	incomplete,
+	currency = false,
+}: {
+	value?: number;
+	incomplete: number;
+	currency?: boolean;
+}) => (
+	<>
+		<span>
+			{value === undefined ? "Unavailable" : currency ? `AUD ${aud.format(value)}` : formatPercent(value)}
+		</span>
+		{incomplete > 0 && (
+			<small>
+				{incomplete} {incomplete === 1 ? "turn" : "turns"} without an estimate
+			</small>
+		)}
+	</>
+);
+
 const ProviderCosts = ({ cost }: { cost: Costs }) => {
 	const weekly = cost.limits?.windows.filter((window) => window.minutes === 10080) ?? [];
 	const current = weekly.length === 1 ? weekly.at(0) : weekly.find((window) => window.bucketId === "codex");
 	const remaining = current && Math.max(0, 100 - current.usedPercent);
-	return cost.providers.map((provider) => {
-		const heading = `cost-provider-${provider.id}`;
-		return (
-			<section key={provider.id} className='cost-provider' aria-labelledby={heading}>
-				<h3 id={heading}>{provider.name}</h3>
-				{provider.kind === "ollama" ? (
-					<p className='cost-card'>Cost tracking is unavailable.</p>
-				) : (
-					<>
-						<dl className='cost-metrics'>
-							<div className='cost-card'>
-								<dt>Estimated API cost</dt>
-								<dd>
-									<span>
-										{provider.apiAud === undefined
-											? "Unavailable"
-											: `AUD ${money(provider.apiAud, "AUD")}`}
-									</span>
-									{provider.incomplete > 0 && (
-										<small>
-											{provider.incomplete} {provider.incomplete === 1 ? "turn" : "turns"} missing
-											usage, pricing or an AUD exchange rate
-										</small>
-									)}
-								</dd>
-							</div>
-							{provider.current && (
-								<div className='cost-card'>
-									<dt>Weekly limit remaining</dt>
+	return (
+		<>
+			<div className='cost-provider-summary'>
+				{(Object.keys(providerLabels) as (keyof typeof providerLabels)[]).map((kind) => {
+					const usage = cost.providerTotals[kind];
+					return (
+						<section
+							key={kind}
+							className='cost-card cost-provider'
+							aria-labelledby={`cost-provider-${kind}`}
+						>
+							<h3 id={`cost-provider-${kind}`}>{providerLabels[kind]}</h3>
+							<dl className='cost-metrics'>
+								<div>
+									<dt>Input tokens</dt>
+									<dd>{number.format(usage.input)}</dd>
+								</div>
+								<div>
+									<dt>Cached input</dt>
+									<dd>{number.format(usage.cached)}</dd>
+								</div>
+								<div>
+									<dt>Output tokens</dt>
+									<dd>{number.format(usage.output)}</dd>
+								</div>
+								<div>
+									<dt>
+										{kind === "ollama" ? "OpenAI API equivalent (estimate)" : "Estimated API cost"}
+									</dt>
 									<dd>
-										{remaining === undefined ? "Unavailable" : `${number.format(remaining)}%`}
-										{current?.resetsAt && (
-											<small>Resets {resetTime.format(new Date(current.resetsAt))}</small>
-										)}
+										<ProviderEstimate value={usage.apiAud} incomplete={usage.incomplete} currency />
 									</dd>
 								</div>
+								{kind === "ollama" ? (
+									<div>
+										<dt>Weekly limit saved (estimate)</dt>
+										<dd>
+											<ProviderEstimate
+												value={cost.providerTotals.ollama.weeklySavedPercent}
+												incomplete={cost.providerTotals.ollama.incompleteWeekly}
+											/>
+										</dd>
+									</div>
+								) : (
+									<div>
+										<dt>Weekly limit remaining</dt>
+										<dd>
+											{remaining === undefined ? "Unavailable" : `${number.format(remaining)}%`}
+											{current?.resetsAt && (
+												<small>Resets {resetTime.format(new Date(current.resetsAt))}</small>
+											)}
+										</dd>
+									</div>
+								)}
+							</dl>
+							{usage.incompleteTokens > 0 && (
+								<small>
+									Token counts missing for {usage.incompleteTokens}{" "}
+									{usage.incompleteTokens === 1 ? "turn" : "turns"}.
+								</small>
 							)}
-						</dl>
-						{provider.current && <WeeklyBudgetChart budget={cost.weeklyBudget} />}
-						{provider.current && <Quotas limits={cost.limits} />}
+						</section>
+					);
+				})}
+			</div>
+			<section className='cost-card'>
+				<h3>Usage and cost by provider</h3>
+				{cost.providers.length ? (
+					<>
+						<p className='cost-muted'>
+							Work share uses recorded input and output tokens. Input includes cached tokens. Ollama
+							estimates use the OpenAI default model at dispatch and observed weekly quota usage in this
+							range.
+						</p>
+						<div className='cost-table-scroll' role='region' aria-label='Provider costs' tabIndex={0}>
+							<table className='cost-table'>
+								<thead>
+									<tr>
+										<th>Provider</th>
+										<th>Input</th>
+										<th>Cached input</th>
+										<th>Output</th>
+										<th>Work share</th>
+										<th>Estimated API cost</th>
+										<th>Weekly limit saved (estimate)</th>
+									</tr>
+								</thead>
+								{(Object.keys(providerLabels) as (keyof typeof providerLabels)[]).map((kind) => {
+									const providers = cost.providers.filter((provider) => provider.kind === kind);
+									if (!providers.length) return null;
+									return (
+										<tbody key={kind}>
+											<tr>
+												<th scope='rowgroup' colSpan={7}>
+													{providerLabels[kind]}
+												</th>
+											</tr>
+											{providers.map((provider) => (
+												<tr key={provider.id}>
+													<th scope='row'>
+														{provider.name}
+														{provider.incompleteTokens > 0 && (
+															<small>Incomplete token counts</small>
+														)}
+													</th>
+													<td>{number.format(provider.input)}</td>
+													<td>{number.format(provider.cached)}</td>
+													<td>{number.format(provider.output)}</td>
+													<td>{workShare.format(provider.workSharePercent)}%</td>
+													<td>
+														<ProviderEstimate
+															value={provider.apiAud}
+															incomplete={provider.incomplete}
+															currency
+														/>
+													</td>
+													<td>
+														{provider.kind === "ollama" ? (
+															<ProviderEstimate
+																value={provider.weeklySavedPercent}
+																incomplete={provider.incompleteWeekly}
+															/>
+														) : (
+															"—"
+														)}
+													</td>
+												</tr>
+											))}
+										</tbody>
+									);
+								})}
+							</table>
+						</div>
 					</>
+				) : (
+					<p className='cost-muted'>No providers with recorded usage or active configuration.</p>
 				)}
 			</section>
-		);
-	});
+			<WeeklyBudgetChart budget={cost.weeklyBudget} />
+			<Quotas limits={cost.limits} />
+		</>
+	);
 };
 
 const TicketCosts = ({ cost }: { cost: Costs }) => {
@@ -284,7 +405,7 @@ const TicketCosts = ({ cost }: { cost: Costs }) => {
 							<tr>
 								<th>Ticket</th>
 								<th>Tokens</th>
-								<th>Estimated API cost</th>
+								<th>Estimated OpenAI API cost</th>
 								<th>Weekly limit spent (estimate)</th>
 								<th>Effective cost (estimate)</th>
 							</tr>

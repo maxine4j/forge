@@ -7,6 +7,7 @@ import type { ICodexLimits } from "../codex/codex-usage-client.ts";
 import { TicketError } from "../tickets/errors.ts";
 import type { ICostHistory } from "./cost-store.ts";
 import { summarizeCosts } from "./cost-summary.ts";
+import { observedWeeklyPercentPerUsd, openaiProviderTotals, summarizeProviderCosts } from "./provider-costs.ts";
 import type { QuotaInterval } from "./quota-attribution.ts";
 import type { IQuotaStore } from "./quota-store.ts";
 import type { CostWindow, TokenCounts, UsageTurn } from "./types.ts";
@@ -36,17 +37,6 @@ const phases = (turns: UsageTurn[], intervals: QuotaInterval[], chat = false) =>
 				intervals,
 			),
 		}));
-
-const openaiCost = (id: string, name: string, current: boolean, turns: UsageTurn[]): Costs["providers"][number] => {
-	let incomplete = 0;
-	let apiAud = turns.length ? undefined : 0;
-	for (const turn of turns) {
-		const rate = turn.billing.localCurrency === "AUD" ? turn.billing.usdToLocal : turn.billing.usdToAud;
-		if (rate === undefined || turn.apiUsd === undefined) incomplete++;
-		else apiAud = (apiAud ?? 0) + turn.apiUsd * rate;
-	}
-	return { id, name, kind: "openai", current, apiAud, incomplete };
-};
 
 export class CostService implements ICostService {
 	constructor(
@@ -91,10 +81,11 @@ export class CostService implements ICostService {
 		}
 		return {
 			since,
-			providers: this.providerCosts(
+			...this.providerCosts(
 				providers,
 				turns,
 				Boolean(limits?.windows.length || history?.observations.length),
+				observedWeeklyPercentPerUsd(intervals),
 			),
 			limits,
 			days,
@@ -136,31 +127,61 @@ export class CostService implements ICostService {
 		providers: Awaited<ReturnType<ICostProviders["list"]>>,
 		turns: UsageTurn[],
 		hasQuota: boolean,
-	): Costs["providers"] {
+		weeklyPercentPerUsd: number | undefined,
+	): Pick<Costs, "providers" | "providerTotals"> {
 		const openai = providers.filter((provider) => provider.kind === "openai");
-		const byProvider = new Map<string | undefined, UsageTurn[]>();
+		const byProvider = new Map<string, UsageTurn[]>();
+		const openaiTurns: UsageTurn[] = [];
+		const ollamaTurns: UsageTurn[] = [];
 		for (const turn of turns) {
+			const kind = turn.providerKind ?? "openai";
 			const id =
-				openai.find((provider) => provider.id === turn.providerId)?.id
-				?? (!turn.providerId && openai.length === 1 ? openai.at(0)?.id : undefined);
+				providers.find((provider) => provider.kind === kind && provider.id === turn.providerId)?.id
+				?? (kind === "openai" && !turn.providerId && openai.length === 1 ? openai.at(0)?.id : undefined)
+				?? `${kind}-history`;
+			(kind === "ollama" ? ollamaTurns : openaiTurns).push(turn);
 			const group = byProvider.get(id) ?? [];
 			group.push(turn);
 			byProvider.set(id, group);
 		}
-		const result: Costs["providers"] = providers.flatMap(({ id, name, kind, retired }) => {
-			const group = byProvider.get(id) ?? [];
-			if (retired && !group.length) return [];
-			return [kind === "openai" ? openaiCost(id, name, !retired, group) : { id, name, kind }];
-		});
-		const history = byProvider.get(undefined) ?? [];
+		const providerTotals = {
+			openai: openaiProviderTotals(openaiTurns),
+			ollama: summarizeProviderCosts(ollamaTurns, weeklyPercentPerUsd),
+		};
+		const totalTokens =
+			providerTotals.openai.input
+			+ providerTotals.openai.output
+			+ providerTotals.ollama.input
+			+ providerTotals.ollama.output;
+		const rows = providers.filter((provider) => !provider.retired || byProvider.has(provider.id));
 		const hasCurrent = openai.some((provider) => !provider.retired);
-		if (!openai.length && (hasQuota || history.length))
-			result.push(openaiCost("openai-account", "OpenAI account", true, history));
-		else {
-			if (!hasCurrent && hasQuota) result.push(openaiCost("openai-account", "OpenAI account", true, []));
-			if (history.length) result.push(openaiCost("openai-history", "OpenAI history", false, history));
+		if (!openai.length && (hasQuota || byProvider.has("openai-history"))) {
+			rows.push({ id: "openai-account", name: "OpenAI account", kind: "openai", retired: false });
+			byProvider.set("openai-account", byProvider.get("openai-history") ?? []);
+			byProvider.delete("openai-history");
+		} else if (!hasCurrent && hasQuota) {
+			rows.push({ id: "openai-account", name: "OpenAI account", kind: "openai", retired: false });
 		}
-		return result;
+		if (byProvider.has("openai-history"))
+			rows.push({ id: "openai-history", name: "OpenAI history", kind: "openai", retired: true });
+		if (byProvider.has("ollama-history"))
+			rows.push({ id: "ollama-history", name: "Ollama history", kind: "ollama", retired: true });
+		return {
+			providerTotals,
+			providers: rows.map(({ id, name, kind, retired }) => {
+				const group = byProvider.get(id) ?? [];
+				const usage =
+					kind === "ollama"
+						? { kind, ...summarizeProviderCosts(group, weeklyPercentPerUsd) }
+						: { kind, current: !retired, ...openaiProviderTotals(group) };
+				return {
+					id,
+					name,
+					workSharePercent: totalTokens ? (100 * (usage.input + usage.output)) / totalTokens : 0,
+					...usage,
+				};
+			}),
+		};
 	}
 
 	private window(range: string, now: Date): CostWindow {

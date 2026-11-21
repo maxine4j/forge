@@ -4,10 +4,16 @@ import type { IDatabase } from "../database/sqlite-database.ts";
 import { apiCostUsd } from "./api-pricing.ts";
 import type { CostWindow, UsageTurn } from "./types.ts";
 
+const tokenRates = z.object({
+	input: z.number().nonnegative(),
+	cached: z.number().nonnegative(),
+	output: z.number().nonnegative(),
+});
 const recordSchema = z
 	.object({
 		projectId: z.string(),
 		providerId: z.string().optional(),
+		providerKind: z.enum(["openai", "ollama"]).optional(),
 		threadId: z.string(),
 		turnId: z.string(),
 		startedAt: z.iso.datetime(),
@@ -23,13 +29,8 @@ const recordSchema = z
 			usdToAud: z.number().positive().optional(),
 			rateDate: z.iso.date().optional(),
 			fetchedAt: z.iso.datetime().optional(),
-			rates: z
-				.object({
-					input: z.number().nonnegative(),
-					cached: z.number().nonnegative(),
-					output: z.number().nonnegative(),
-				})
-				.optional(),
+			rates: tokenRates.optional(),
+			benchmark: z.object({ model: z.string(), rates: tokenRates.optional() }).optional(),
 		}),
 		pricingUnavailable: z.boolean().optional(),
 		apiUsd: z
@@ -109,7 +110,8 @@ export class CostStore implements ICostStore {
 	async save(turn: UsageTurn): Promise<void> {
 		const record = recordSchema.parse(turn);
 		record.apiUsd =
-			record.pricingUnavailable
+			record.providerKind === "ollama"
+			|| record.pricingUnavailable
 			|| record.input === undefined
 			|| record.cached === undefined
 			|| record.output === undefined
@@ -129,6 +131,7 @@ export class CostStore implements ICostStore {
      '$.durationMs', COALESCE(json_extract(excluded.record, '$.durationMs'), json_extract(codex_usage.record, '$.durationMs')),
      '$.pricingUnavailable', json(CASE WHEN json_extract(excluded.record, '$.pricingUnavailable') OR json_extract(codex_usage.record, '$.pricingUnavailable') THEN 'true' ELSE 'false' END),
      '$.apiUsd', CASE WHEN json_extract(codex_usage.record, '$.billing.rates') IS NULL
+       OR json_extract(codex_usage.record, '$.providerKind') = 'ollama'
        OR json_extract(excluded.record, '$.input') IS NULL
        OR json_extract(excluded.record, '$.cached') IS NULL
        OR json_extract(excluded.record, '$.output') IS NULL

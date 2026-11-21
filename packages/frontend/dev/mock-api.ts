@@ -20,17 +20,49 @@ const previewUsage = (turns: number) =>
 		(1.17 * turns) / 8,
 		(0.075 * turns) / 8,
 	);
-const previewProviders = (apiAud: number): Costs["providers"] => [
-	{
-		id: "123e4567-e89b-42d3-a456-426614174099",
-		name: "OpenAI",
-		kind: "openai",
-		current: true,
-		apiAud,
+const previewProviders = (usage: ReturnType<typeof previewUsage>): Pick<Costs, "providers" | "providerTotals"> => {
+	const { input, cached, output, turns, localCurrencies } = usage;
+	const openai = {
+		input,
+		cached,
+		output,
+		turns,
+		apiAud: localCurrencies.at(0)?.api ?? 0,
 		incomplete: 0,
-	},
-	{ id: "123e4567-e89b-42d3-a456-426614174098", name: "Local Ollama", kind: "ollama" },
-];
+		incompleteTokens: 0,
+	};
+	const ollama = {
+		input: 0,
+		cached: 0,
+		output: 0,
+		turns: 0,
+		apiAud: 0,
+		incomplete: 0,
+		incompleteTokens: 0,
+		weeklySavedPercent: 0,
+		incompleteWeekly: 0,
+	};
+	return {
+		providerTotals: { openai, ollama },
+		providers: [
+			{
+				id: "123e4567-e89b-42d3-a456-426614174099",
+				name: "OpenAI",
+				kind: "openai",
+				current: true,
+				workSharePercent: turns ? 100 : 0,
+				...openai,
+			},
+			{
+				id: "123e4567-e89b-42d3-a456-426614174098",
+				name: "Local Ollama",
+				kind: "ollama",
+				workSharePercent: 0,
+				...ollama,
+			},
+		],
+	};
+};
 const previewDays = (days: Costs["days"], cutoff: number): Costs["days"] =>
 	days
 		.filter(
@@ -172,7 +204,7 @@ export class MockApi implements IMockApi {
 						return { ...row, ...summary, phases: phaseFixtures(summary) };
 					}),
 				),
-				providers: previewProviders(account.localCurrencies.at(0)?.api ?? 0),
+				...previewProviders(account),
 				totals: account,
 				chats,
 				ticketEstimates: totals,
@@ -375,7 +407,7 @@ export class MockApi implements IMockApi {
 				output: index >= 22 ? 2624 : 0,
 			}));
 			const cost: Costs = {
-				providers: previewProviders(usage.localCurrencies.at(0)?.api ?? 0),
+				...previewProviders(usage),
 				ticketEstimates: usage,
 				chats: costFixture({ input: 0, cached: 0, output: 0, turns: 0 }),
 				quotaAttribution: [{ bucketId: "codex", consumption: 2, allocated: 1.17, unallocated: 0.83 }],

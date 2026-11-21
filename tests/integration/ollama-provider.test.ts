@@ -18,6 +18,9 @@ import { WorkerSession } from "../../ollama-relay/src/worker-session.ts";
 import { AccountProcess } from "../../src/accounts/account-process.ts";
 import { CodexConnection } from "../../src/accounts/codex-connection.ts";
 import { CodexAgentClient } from "../../src/codex/codex-agent-client.ts";
+import { CodexUsageClient } from "../../src/codex/codex-usage-client.ts";
+import { CostStore } from "../../src/cost/cost-store.ts";
+import { SqliteDatabase } from "../../src/database/sqlite-database.ts";
 
 test("pinned Codex streams through the relay and resumes after restart without sending OpenAI auth", async () => {
 	const root = await files.mkdtemp(join(tmpdir(), "forge-provider-test-"));
@@ -91,7 +94,12 @@ test("pinned Codex streams through the relay and resumes after restart without s
 						id,
 						status: "completed",
 						output: [output],
-						usage: { input_tokens: 20, output_tokens: 5, total_tokens: 25 },
+						usage: {
+							input_tokens: 20,
+							input_tokens_details: { cached_tokens: 8 },
+							output_tokens: 5,
+							total_tokens: 25,
+						},
 					},
 				},
 			];
@@ -109,12 +117,26 @@ test("pinned Codex streams through the relay and resumes after restart without s
 		sleep,
 	);
 	const connection = new CodexConnection(processes, sleep);
+	const db = new SqliteDatabase(join(root, "forge.sqlite"));
+	const costs = new CostStore(db);
+	const sample = vi.fn(async () => {});
+	let benchmark = "gpt-5.4";
+	const usage = new CodexUsageClient(
+		connection,
+		(turn) => costs.save(turn),
+		() => new Date(),
+		async () => ({ localCurrency: "EUR", monthlyPlanLocal: 30, usdToAud: 1.5 }),
+		sample,
+		async () => benchmark,
+	);
 	const bearer = "Bearer synthetic-ollama-pairing-token";
 	const relay = new RelayHttp(new RelayService(sleep), Buffer.from(bearer), sleep, new PairingLimiter(Date.now), {
 		warn: () => {},
 	});
 	let socket: WebSocket | undefined;
 	try {
+		await db.initialize();
+		await costs.initialize(new Date().toISOString());
 		await processes.initialize();
 		const claims = Buffer.from(
 			JSON.stringify({
@@ -175,8 +197,7 @@ test("pinned Codex streams through the relay and resumes after restart without s
 			endpoint: `http://127.0.0.1:${relay.ports.inference}/v1`,
 			model: "fixture:latest",
 		} as const;
-		const track = vi.fn(async () => {});
-		const client = new CodexAgentClient(connection, files.realpath, randomUUID, { track });
+		const client = new CodexAgentClient(connection, files.realpath, randomUUID, usage);
 		const path = await files.realpath(root);
 		await connection.initialize();
 		// Codex requires HTTPS for discovered ChatGPT origins. Observe the signed-in
@@ -188,7 +209,7 @@ test("pinned Codex streams through the relay and resumes after restart without s
 			path,
 			"Run the fixture command.",
 			{ permissions: "ask" },
-			{ projectId: "fixture", phase: "chat" },
+			{ projectId: "fixture", providerId: "local", phase: "chat" },
 		);
 		await vi.waitFor(
 			() => expect(client.read(id).requests).toEqual([expect.objectContaining({ kind: "command" })]),
@@ -196,6 +217,22 @@ test("pinned Codex streams through the relay and resumes after restart without s
 		);
 		client.reply(id, { requestId: client.read(id).requests.at(0)!.id, decision: "accept" });
 		await vi.waitFor(() => expect(client.read(id).status).toBe("completed"), { timeout: 5000 });
+		await vi.waitFor(async () =>
+			expect((await costs.read()).turns).toMatchObject([
+				{
+					providerId: "local",
+					providerKind: "ollama",
+					phase: "chat",
+					input: 40,
+					cached: 16,
+					output: 10,
+					billing: {
+						usdToAud: 1.5,
+						benchmark: { model: "gpt-5.4", rates: { input: 2.5, cached: 0.25, output: 15 } },
+					},
+				},
+			]),
+		);
 		const autoId = await client.start(path, provider);
 		const beforeAuto = requests.length;
 		await expect(
@@ -208,6 +245,7 @@ test("pinned Codex streams through the relay and resumes after restart without s
 			),
 		).toBe(true);
 		await connection.restart();
+		benchmark = "gpt-6.1-sol";
 		expect((await client.resume(id, path, provider)).items).toContainEqual(
 			expect.objectContaining({ text: "Fixture answer" }),
 		);
@@ -218,12 +256,29 @@ test("pinned Codex streams through the relay and resumes after restart without s
 			{ permissions: "ask" },
 			{
 				projectId: "fixture",
+				providerId: "local",
 				ticketId: "TASK-1",
 				phase: "planning",
 			},
 		);
 		await vi.waitFor(() => expect(client.read(id).status).toBe("completed"), { timeout: 5000 });
 		expect(client.read(id).plan).toContain("# Greeting");
+		await vi.waitFor(async () => {
+			const { turns } = await costs.read();
+			expect(turns).toMatchObject([
+				{ input: 40, cached: 16, output: 10, billing: { benchmark: { model: "gpt-5.4" } } },
+				{
+					providerKind: "ollama",
+					phase: "planning",
+					ticketId: "TASK-1",
+					input: 20,
+					cached: 8,
+					output: 5,
+					billing: { benchmark: { model: "gpt-6.1-sol" } },
+				},
+			]);
+			expect(turns.map((turn) => turn.apiUsd)).toEqual([undefined, undefined]);
+		});
 		const beforeCompact = requests.length;
 		const compactionItems: unknown[] = [];
 		const unsubscribe = connection.subscribe((method, params) => {
@@ -251,7 +306,7 @@ test("pinned Codex streams through the relay and resumes after restart without s
 		await vi.waitFor(() => expect(client.read(id).status).toBe("failed"), { timeout: 40000, interval: 100 });
 		expect(client.read(id).turnFailure).toBe("provider-request");
 		expect(JSON.stringify(client.read(id))).not.toContain("Private template error");
-		expect(track).not.toHaveBeenCalled();
+		expect(sample).not.toHaveBeenCalled();
 		expect(requests.length).toBeGreaterThanOrEqual(2);
 		for (const headers of workerRequests) {
 			expect(headers.has("authorization")).toBe(false);
@@ -265,7 +320,9 @@ test("pinned Codex streams through the relay and resumes after restart without s
 			expect(JSON.parse(request.body)).toMatchObject({ model: provider.model, stream: true });
 		}
 	} finally {
+		await usage.close();
 		await connection.close();
+		await db.close();
 		socket?.terminate();
 		await relay.close();
 		server.closeAllConnections();

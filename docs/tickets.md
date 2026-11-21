@@ -620,7 +620,8 @@ The [Costs page](agents.md#cost-and-usage) attributes each turn to the
 ticket and phase at dispatch, including rebase turns on an implementation thread
 and historical review turns. The ticket's Cost tab shows its recorded input,
 cached input and output tokens, turn count and three metrics: estimated API cost
-in USD, estimated weekly limit spent, and estimated effective USD cost. Planning,
+in USD, estimated weekly limit spent, and estimated effective USD cost. Token counts
+include OpenAI and Ollama. The three cost metrics use OpenAI turns. Planning,
 implementation, review and rebase have separate summaries using the same contract
 as ticket and board totals. Standalone chats remain outside ticket totals.
 Owner-only, project-independent `GET /api/tickets/:id/cost` returns only that

@@ -14,6 +14,11 @@ export function summarizeCosts(turns: UsageTurn[], intervals: QuotaInterval[]): 
 		localCurrencies: [],
 	};
 	if (!turns.length) return { ...summary, apiUsd: 0, weeklyUsagePercent: 0, effectiveUsd: 0 };
+	if (turns.every((turn) => turn.providerKind === "ollama")) {
+		summary.apiUsd = 0;
+		summary.weeklyUsagePercent = 0;
+		summary.effectiveUsd = 0;
+	}
 	const allocations = new Map<
 		string,
 		{ bucketId: string; percent: number; effectiveUsd?: number; apiUsd: number }[]
@@ -31,6 +36,7 @@ export function summarizeCosts(turns: UsageTurn[], intervals: QuotaInterval[]): 
 		summary.output += turn.output ?? 0;
 		if (turn.input === undefined || turn.cached === undefined || turn.output === undefined)
 			summary.incomplete.tokens++;
+		if (turn.providerKind === "ollama") continue;
 		const local = summary.localCurrencies.find((value) => value.currency === turn.billing.localCurrency) ?? {
 			currency: turn.billing.localCurrency,
 			incomplete: 0,
@@ -66,6 +72,7 @@ export function summarizeCosts(turns: UsageTurn[], intervals: QuotaInterval[]): 
 		}
 	}
 	if (summary.weeklyBuckets.length === 1) summary.weeklyUsagePercent = summary.weeklyBuckets[0]!.percent;
-	if (summary.weeklyBuckets.length > 1) summary.incomplete.weekly = turns.length;
+	if (summary.weeklyBuckets.length > 1)
+		summary.incomplete.weekly = turns.filter((turn) => turn.providerKind !== "ollama").length;
 	return summary;
 }

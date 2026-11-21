@@ -48,7 +48,9 @@ export class QuotaStore implements IQuotaStore {
 				observedAt,
 				observations,
 				weekly: selected,
-				turns: this.costs ? (await this.costs.read()).turns : [],
+				turns: this.costs
+					? (await this.costs.read()).turns.filter((turn) => turn.providerKind !== "ollama")
+					: [],
 			};
 			const rows = await this.database.all(
 				"SELECT record FROM quota_samples WHERE observedAt < ? ORDER BY observedAt DESC LIMIT 1",

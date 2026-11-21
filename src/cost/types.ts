@@ -11,6 +11,7 @@ export interface BillingSnapshot extends CostSettings {
 	rateDate?: string;
 	fetchedAt?: string;
 	rates?: TokenCounts;
+	benchmark?: { model: string; rates?: TokenCounts };
 }
 
 export interface TicketUsageScope {
@@ -18,7 +19,7 @@ export interface TicketUsageScope {
 	ticketId: string;
 }
 
-export type UsageScope = { projectId: string; providerId?: string } & (
+export type UsageScope = { projectId: string; providerId?: string; providerKind?: "openai" | "ollama" } & (
 	| { phase: "chat"; ticketId?: undefined }
 	| TicketUsageScope
 );

@@ -61,18 +61,21 @@ export const ticketCostSchema = z.object({
 	phases: z.array(phaseSummary),
 });
 export type TicketCost = z.infer<typeof ticketCostSchema>;
-const costProvider = z.object({ id: z.string(), name: z.string() });
+const providerMetrics = tokens.extend({
+	turns: count,
+	apiAud: amount.optional(),
+	incomplete: count,
+	incompleteTokens: count,
+});
+const ollamaMetrics = providerMetrics.extend({ weeklySavedPercent: amount.optional(), incompleteWeekly: count });
+const costProvider = z.object({ id: z.string(), name: z.string(), workSharePercent: amount });
 export const costsSchema = z.object({
 	since: z.iso.datetime(),
+	providerTotals: z.object({ openai: providerMetrics, ollama: ollamaMetrics }),
 	providers: z.array(
 		z.discriminatedUnion("kind", [
-			costProvider.extend({
-				kind: z.literal("openai"),
-				current: z.boolean(),
-				apiAud: amount.optional(),
-				incomplete: count,
-			}),
-			costProvider.extend({ kind: z.literal("ollama") }),
+			costProvider.extend({ ...providerMetrics.shape, kind: z.literal("openai"), current: z.boolean() }),
+			costProvider.extend({ ...ollamaMetrics.shape, kind: z.literal("ollama") }),
 		]),
 	),
 	weeklyBudget: weeklyBudgetSchema.optional(),

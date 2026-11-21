@@ -50,7 +50,7 @@ export const CostMetrics = ({ summary }: { summary: CostSummary }) => (
 	<>
 		<dl className='cost-metrics'>
 			<div className='cost-card'>
-				<dt>Estimated API cost</dt>
+				<dt>Estimated OpenAI API cost</dt>
 				<dd>
 					<Money summary={summary} metric='api' />
 				</dd>
@@ -82,7 +82,7 @@ export const PhaseCosts = ({ phases }: { phases: TicketCost["phases"] }) => (
 			<thead>
 				<tr>
 					<th>Phase</th>
-					<th>Estimated API cost</th>
+					<th>Estimated OpenAI API cost</th>
 					<th>Weekly limit spent (estimate)</th>
 					<th>Effective cost (estimate)</th>
 					<th>Tokens / turns</th>

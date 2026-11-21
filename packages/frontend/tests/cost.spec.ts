@@ -7,10 +7,23 @@ const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const since = "2026-11-03T00:00:00.000Z";
 const tokens = costFixture({ input: 1800, cached: 600, output: 200, turns: 2 }, 0.0625, 0.123456, 0.015 / 1.44);
 tokens.incomplete.api = 1;
+const emptyProvider = { input: 0, cached: 0, output: 0, turns: 0, apiAud: 0, incomplete: 0, incompleteTokens: 0 };
+const openai = { ...emptyProvider, input: 1400, cached: 450, output: 100, turns: 1, apiAud: 0.125, incomplete: 1 };
+const ollama = {
+	...emptyProvider,
+	input: 400,
+	cached: 150,
+	output: 100,
+	turns: 1,
+	apiAud: 0.2456,
+	weeklySavedPercent: 1.234,
+	incompleteWeekly: 0,
+};
 const cost = {
+	providerTotals: { openai, ollama },
 	providers: [
-		{ id: "cloud", name: "OpenAI", kind: "openai", current: true, apiAud: 0.125, incomplete: 1 },
-		{ id: "local", name: "Local Ollama", kind: "ollama" },
+		{ id: "cloud", name: "OpenAI Primary", kind: "openai", current: true, workSharePercent: 75, ...openai },
+		{ id: "local", name: "Local Ollama", kind: "ollama", workSharePercent: 25, ...ollama },
 	],
 	weeklyBudget: {
 		defaultBucketId: "codex",
@@ -95,7 +108,23 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 				if (requestedRange === "-1hr") {
 					const empty = costFixture({ input: 0, cached: 0, output: 0, turns: 0 });
 					return route.fulfill({
-						json: { ...cost, totals: empty, ticketEstimates: empty, days: [], hours: [] },
+						json: {
+							...cost,
+							totals: empty,
+							ticketEstimates: empty,
+							days: [],
+							hours: [],
+							providerTotals: {
+								openai: emptyProvider,
+								ollama: { ...emptyProvider, weeklySavedPercent: 0, incompleteWeekly: 0 },
+							},
+							providers: cost.providers.map((provider) => ({
+								...provider,
+								...emptyProvider,
+								workSharePercent: 0,
+								weeklySavedPercent: 0,
+							})),
+						},
 					});
 				}
 				return route.fulfill({ json: cost });
@@ -111,9 +140,15 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	unavailable = false;
 	await page.getByRole("button", { name: "Retry" }).click();
 	const openai = page.getByRole("region", { name: "OpenAI", exact: true });
-	await expect(openai.getByText("AUD $0.125", { exact: true })).toBeVisible();
+	await expect(openai.getByText("AUD $0.13", { exact: true })).toBeVisible();
 	await expect(openai.getByText("33%", { exact: true })).toBeVisible();
-	await expect(page.getByRole("region", { name: "Local Ollama" })).toContainText("Cost tracking is unavailable.");
+	const ollamaCard = page.getByRole("region", { name: "Ollama", exact: true });
+	await expect(ollamaCard).toContainText("AUD $0.25");
+	await expect(ollamaCard).toContainText("1.23%");
+	const providerTable = page.getByRole("region", { name: "Provider costs" });
+	await expect(providerTable.getByRole("row", { name: /OpenAI Primary/ })).toContainText("75.0%");
+	const localRow = providerTable.getByRole("row", { name: /Local Ollama/ });
+	await expect(localRow.getByRole("cell")).toHaveText(["400", "150", "100", "25.0%", "AUD $0.25", "1.23%"]);
 	await expect(page.getByText("Account usage including standalone chats")).toHaveCount(0);
 	await expect(page.getByText("Standalone chats", { exact: true })).toHaveCount(0);
 	await expect(page.getByText("Recorded timestamp and remaining allowance")).toHaveCount(0);
@@ -127,6 +162,7 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	expect(requestedRange).toBe("-7d");
 	await chooseDropdown(period, "-1hr");
 	await expect(page.getByText("No tokens recorded in this period.")).toBeVisible();
+	await expect(localRow).toContainText("0.0%");
 	await expect(page.getByRole("link", { name: "TASK-2 Search" })).toHaveAttribute(
 		"href",
 		"/costs?range=-1hr&ticket=TASK-2",
@@ -168,7 +204,7 @@ test("Cost deep links render charts, ticket estimates and account windows on mob
 	await expect(page.getByRole("row", { name: /TASK-1 Cleanup/ })).toContainText("Archived");
 	await expect(ticket).toContainText("0.123%");
 	await chooseDropdown(page.getByRole("combobox", { name: "Sort tickets", exact: true }), "ticket");
-	await expect(page.getByRole("row").nth(1)).toContainText("TASK-1");
+	await expect(page.getByRole("region", { name: "Ticket costs" }).getByRole("row").nth(1)).toContainText("TASK-1");
 	expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
 	await expect(ticket.getByRole("link")).toHaveAttribute("href", `/costs?ticket=TASK-2`);
 	const previousReads = costReads;

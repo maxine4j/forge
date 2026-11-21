@@ -317,7 +317,7 @@ test("registers usage attribution and the runtime default model before submittin
 	const id = await client.start("/data/worktrees/one");
 	const scope = { projectId: "project", ticketId: "TASK-1", phase: "implementation" } as const;
 	await client.send(id, "/data/worktrees/one", "Work", undefined, scope);
-	expect(track).toHaveBeenCalledWith(id, scope, "runtime-default");
+	expect(track).toHaveBeenCalledWith(id, { ...scope, providerKind: "openai" }, "runtime-default");
 	expect(track.mock.invocationCallOrder[0]).toBeLessThan(rpc.mock.invocationCallOrder[1]!);
 });
 

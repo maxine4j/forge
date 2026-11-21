@@ -191,6 +191,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			};
 		},
 		() => collector.sample(),
+		async () => (await providerStore.list()).find((provider) => provider.kind === "openai")?.defaultAgentModel,
 	);
 	lifecycle.register(() => usage.close());
 	const agentClient = new CodexAgentClient(connection, files.realpath, randomUUID, usage, {

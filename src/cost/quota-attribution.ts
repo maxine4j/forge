@@ -58,6 +58,7 @@ export function allocateQuota(previous: QuotaSample, current: QuotaSample): Quot
 	const old = new Map(previous.turns.map((turn) => [turnKey(turn), turn]));
 	const weights: { turn: UsageTurn; weight: number }[] = [];
 	for (const turn of current.turns) {
+		if (turn.providerKind === "ollama") continue;
 		const before = old.get(turnKey(turn));
 		const changed =
 			!before
