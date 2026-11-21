@@ -84,8 +84,11 @@ for (const width of [1280, 390]) {
 		await page.setViewportSize({ width, height: 900 });
 		const state = await setupNotifications(page, [notificationFixture("1"), notificationFixture("2", "TASK-2")]);
 		const tab = page.getByRole("tab", { name: "Notifications (2)", exact: true });
-		await page.getByRole("tab", { name: "Board", exact: true }).focus();
-		await page.keyboard.press("End");
+		const agentsTab = page.getByRole("tab", { name: "Agents", exact: true });
+		await page.getByRole("tab", { name: "Board", exact: true }).press("End");
+		await expect(agentsTab).toBeFocused();
+		await expect(agentsTab).toHaveAttribute("aria-selected", "true");
+		await agentsTab.press("ArrowLeft");
 		await expect(tab).toBeFocused();
 		await expect(page).toHaveURL("/tasks?view=notifications");
 		await expect(page.getByRole("button", { name: "Create ticket", exact: true })).toHaveCount(0);
@@ -1070,6 +1073,7 @@ for (const view of ["Board", "Backlog"]) {
 for (const width of [1280, 768, 600, 390, 320]) {
 	test(`ticket details title, tabs and status align at ${width}px`, async ({ page }) => {
 		await page.setViewportSize({ width, height: 850 });
+		await page.emulateMedia({ reducedMotion: "reduce" });
 		const f = await setup(page);
 		f.epics.push({ id: "EPIC-1", title: "Full epic title", description: "", createdAt });
 		f.tickets()[0]!.epicId = "EPIC-1";
@@ -1803,11 +1807,11 @@ test("inline ticket title saves independently and supports keyboard save and but
 	const title = dialog.getByRole("textbox", { name: "Title", exact: true });
 	await expect(edit).toHaveText("First task");
 	await expect(title).toHaveCount(0);
-	const model = settings.getByRole("combobox", { name: "Model", exact: true }).first();
+	const planner = settings.getByRole("combobox", { name: "Planner", exact: true });
 	const repositories = settings.getByRole("button", { name: "Repositories", exact: true });
-	await expect(model).toBeVisible();
+	await expect(planner).toBeVisible();
 	await expect(repositories).toBeVisible();
-	expect((await repositories.boundingBox())!.y).toBeGreaterThan((await model.boundingBox())!.y);
+	expect((await repositories.boundingBox())!.y).toBeGreaterThan((await planner.boundingBox())!.y);
 	await details.getByRole("button", { name: "Edit description" }).click();
 	await description.fill("Unsaved scope");
 	await edit.click();
