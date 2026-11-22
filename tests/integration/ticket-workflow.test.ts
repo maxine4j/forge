@@ -467,6 +467,31 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect((await jobs.get(returning.id))?.plan).toBeUndefined();
 		expect((await cost.read(owner)).tickets.find(({ id }) => id === returning.id)).toEqual(usageBeforeClear);
 		const prepare = workspaceClient.prepare.bind(workspaceClient);
+		const contextTicket = await tickets.create(owner, {
+			repositoryIds: [project.id],
+			title: "Context handoff",
+			description: "TASK67_CONTROLLED",
+			executionSettings: { ...executionSettings, skipPlanning: true },
+		});
+		await tickets.move(owner, contextTicket.id, { status: "todo" });
+		await workflow.tick(owner);
+		const initialContextJob = (await jobs.get(contextTicket.id))!;
+		await expect
+			.poll(
+				async () => {
+					await workflow.tick(owner);
+					return (await ticketStore.get(contextTicket.id))?.status;
+				},
+				{ timeout: 10000 },
+			)
+			.toBe("done");
+		const successor = (await jobs.get(contextTicket.id))!;
+		expect(successor.workspaceId).toBe(initialContextJob.workspaceId);
+		expect(successor.implementerId).not.toBe(initialContextJob.implementerId);
+		const handoverCall = rpc.mock.calls.find(
+			([method, params]) => method === "turn/start" && JSON.stringify(params).includes("Finish controlled work"),
+		);
+		expect(JSON.stringify(handoverCall)).toContain("TASK67_CONTROLLED");
 		for (const stage of ["before", "after"] as const) {
 			const failedTicket = await tickets.create(owner, {
 				repositoryIds: [project.id],

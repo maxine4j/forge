@@ -350,6 +350,74 @@ test("context usage follows the latest window sample and can decrease after comp
 	expect(client.read(id).contextWindow).toEqual({ used: 4000, max: 128000 });
 });
 
+test("turn context retains a threshold crossing after compaction", async () => {
+	const { client, notify } = setup();
+	const id = await client.start("/data/worktrees/one");
+	await client.send(id, "/data/worktrees/one", "Work");
+	for (const used of [96000, 4000])
+		notify("thread/tokenUsage/updated", {
+			threadId: id,
+			turnId: "turn-1",
+			tokenUsage: { last: { totalTokens: used }, modelContextWindow: 128000 },
+		});
+	expect(client.contextSample(id, "turn-1")).toEqual({ used: 4000, max: 128000, crossed: true });
+	expect(client.contextSample(id, "other")).toBeUndefined();
+});
+
+test("equal samples retain their turn identity even before a start reply", async () => {
+	const { client, notify } = setup();
+	const id = await client.start("/data/worktrees/one");
+	for (const turnId of ["old", "new"])
+		notify("thread/tokenUsage/updated", {
+			threadId: id,
+			turnId,
+			tokenUsage: { last: { totalTokens: 96000 }, modelContextWindow: 128000 },
+		});
+	expect(client.contextSample(id, "new")).toEqual({ used: 96000, max: 128000, crossed: true });
+	expect(client.contextSample(id, "old")).toEqual({ used: 96000, max: 128000, crossed: true });
+});
+
+test("captures only the completed turn's final answer", async () => {
+	const { client, notify } = setup();
+	const id = await client.start("/data/worktrees/one");
+	await client.send(id, "/data/worktrees/one", "Report");
+	notify("item/completed", {
+		threadId: id,
+		turnId: "turn-1",
+		item: { id: "a", type: "agentMessage", phase: "commentary", text: "Working" },
+	});
+	notify("item/completed", {
+		threadId: id,
+		turnId: "turn-1",
+		item: { id: "b", type: "agentMessage", phase: "final_answer", text: '{"status":"complete"}' },
+	});
+	notify("turn/completed", { threadId: id, turn: { id: "turn-1", status: "completed", items: [] } });
+	expect(client.read(id).finalAnswer).toBe('{"status":"complete"}');
+});
+
+test("history captures the final answer belonging to the latest completed turn", async () => {
+	const { client, rpc } = setup();
+	const id = await client.start("/data/worktrees/one");
+	rpc.mockResolvedValueOnce({
+		thread: { id, cwd: "/data/worktrees/one", historyMode: "paginated", turns: [], status: { type: "idle" } },
+	});
+	rpc.mockResolvedValueOnce({
+		data: [
+			{ id: "new", status: "completed", items: [] },
+			{ id: "old", status: "completed", items: [] },
+		],
+		nextCursor: null,
+	});
+	rpc.mockResolvedValueOnce({
+		data: [
+			{ turnId: "new", item: { id: "new-answer", type: "agentMessage", phase: "final_answer", text: "new" } },
+			{ turnId: "old", item: { id: "old-answer", type: "agentMessage", phase: "final_answer", text: "old" } },
+		],
+		nextCursor: null,
+	});
+	expect((await client.resume(id, "/data/worktrees/one")).finalAnswer).toBe("new");
+});
+
 test("reads paginated history without resuming or needing a working directory", async () => {
 	const { client, rpc } = setup();
 	const view = await client.loadHistory("codex-1");

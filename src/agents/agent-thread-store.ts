@@ -14,6 +14,7 @@ export interface IAgentThreadStore {
 	list(projectId: string): Promise<AgentThreadRecord[]>;
 	/** Startup invalidates live execution/approval handles without replaying work. */
 	recover(): Promise<void>;
+	role?(id: string): Promise<"planning" | "implementation" | undefined>;
 }
 export class AgentThreadStore implements IAgentThreadStore {
 	constructor(
@@ -28,6 +29,22 @@ export class AgentThreadStore implements IAgentThreadStore {
 				)
 				.then(() => {}),
 		);
+	}
+	async role(id: string): Promise<"planning" | "implementation" | undefined> {
+		if (
+			!(
+				await this.database.all(
+					"SELECT name FROM sqlite_master WHERE type='table' AND name='ticket_workflows'",
+					[],
+				)
+			).length
+		)
+			return undefined;
+		const rows = await this.database.all(
+			"SELECT CASE WHEN json_extract(record,'$.implementerId')=? THEN 'implementation' ELSE 'planning' END AS role FROM ticket_workflows WHERE json_extract(record,'$.implementerId')=? OR json_extract(record,'$.plannerId')=? LIMIT 1",
+			[id, id, id],
+		);
+		return rows.length ? z.object({ role: z.enum(["planning", "implementation"]) }).parse(rows[0]).role : undefined;
 	}
 	async insert(record: AgentThreadRecord): Promise<void> {
 		await this.guard(async () => {
@@ -111,6 +128,7 @@ export class AgentThreadStore implements IAgentThreadStore {
 }
 const recordSchema = agentThreadSchema.extend({
 	managed: z.boolean().optional(),
+	managedRole: z.enum(["planning", "implementation"]).optional(),
 	abandoned: z.boolean().optional(),
 	codexId: z.string().min(1).max(256).optional(),
 	requests: z.array(agentRequestSchema).max(32),

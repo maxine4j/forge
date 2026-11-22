@@ -91,6 +91,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 	}
 	if (method === "turn/start") {
 		const thread = threads.get(params.threadId);
+		const prompt = params.input.map((part) => part.text ?? "").join("\n");
+		const highContext = prompt.includes("TASK67_CONTROLLED") && !prompt.includes("Handover:");
 		const turn = {
 			id: `turn-${++sequence}`,
 			status: "inProgress",
@@ -109,7 +111,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		const usage = {
 			threadId: thread.id,
 			turnId: turn.id,
-			tokenUsage: { total: breakdown(thread.turns.length), last: breakdown(1), modelContextWindow: 128000 },
+			tokenUsage: {
+				total: breakdown(thread.turns.length),
+				last: { ...breakdown(1), totalTokens: highContext ? 96000 : 1100 },
+				modelContextWindow: 128000,
+			},
 		};
 		notify("thread/tokenUsage/updated", usage);
 		notify("thread/tokenUsage/updated", usage);
@@ -120,10 +126,28 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			delta: "Working",
 		});
 		result = { turn };
-		const prompt = params.input.map((part) => part.text ?? "").join("\n");
+		if (highContext) thread.checkpointScenario = true;
+		if (prompt.startsWith("Using the conversation") && thread.checkpointScenario) {
+			const item = {
+				id: `answer-${sequence}`,
+				type: "agentMessage",
+				phase: "final_answer",
+				text: JSON.stringify({ status: "handoff", handover: "Finish controlled work" }),
+			};
+			turn.items.push(item);
+			turn.status = "completed";
+			thread.status = { type: "idle" };
+			notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
+			notify("turn/completed", { threadId: thread.id, turn });
+		}
 		const planning = params.collaborationMode?.mode === "plan";
 		const rebase = prompt.startsWith("Rebase this branch");
-		if (planning || rebase || prompt.startsWith("Implement the approved plan")) {
+		if (
+			planning
+			|| rebase
+			|| (!highContext
+				&& (prompt.startsWith("Implement the approved plan") || prompt.includes("TASK67_CONTROLLED")))
+		) {
 			if (planning) {
 				if (thread.turns.length > 1 && !prompt.startsWith("Include filtering\n\n"))
 					throw new Error("Planner feedback must precede guidance");
@@ -181,6 +205,23 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		const item = { id: `steer-${++sequence}`, type: "userMessage", content: params.input };
 		turn.items.push(item);
 		notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
+		if (thread.checkpointScenario) {
+			execFileSync("git", [
+				"-C",
+				thread.cwd,
+				"-c",
+				"user.name=Controlled Agent",
+				"-c",
+				"user.email=agent@example.com",
+				"commit",
+				"--allow-empty",
+				"-m",
+				"Controlled checkpoint",
+			]);
+			turn.status = "completed";
+			thread.status = { type: "idle" };
+			notify("turn/completed", { threadId: thread.id, turn });
+		}
 		result = { turnId: turn.id };
 	}
 	if (method === "turn/interrupt") {

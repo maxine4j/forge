@@ -156,6 +156,7 @@ const setup = (
 		get: async (key: string) => structuredClone(records.get(key)),
 		list: async () => [...records.values()],
 		recover: async () => {},
+		role: vi.fn(async (_id: string): Promise<"planning" | "implementation" | undefined> => undefined),
 	};
 	const pool = new AgentExecutionTracker();
 	const history = {
@@ -725,6 +726,39 @@ test("ticket phases retain one worktree, use separate Codex contexts and reject 
 	await service.dispatch(owner, planning.thread.id, "Plan");
 	expect((await service.list(owner, projectId)).map((thread) => thread.id)).not.toContain(planning.thread.id);
 	await service.shutdown();
+});
+
+test("implementer threads omit the saved compaction override", async () => {
+	const f = setup(undefined, () => ({ kind: "openai", compactionThresholdTokens: 8000 }));
+	const { thread } = await f.service.createTicketThread(
+		owner,
+		projectId,
+		"Implementer",
+		undefined,
+		undefined,
+		undefined,
+		"implementation",
+	);
+	await f.service.dispatch(owner, thread.id, "Work");
+	expect(f.client.start).toHaveBeenCalledWith(expect.any(String), { kind: "openai" });
+	await f.service.resume(owner, thread.id);
+	expect(f.client.resume).toHaveBeenCalledWith(expect.any(String), expect.any(String), { kind: "openai" });
+	f.records.get(thread.id)!.status = "uncertain";
+	await f.service.recover(owner);
+	expect(f.client.reconcile).toHaveBeenCalledWith(expect.any(String), expect.any(String), { kind: "openai" });
+	expect((await f.service.get(owner, thread.id)).compactionThresholdTokens).toBeUndefined();
+	await f.service.shutdown();
+});
+
+test("legacy managed role is resolved before recovery reconciles its provider", async () => {
+	const f = setup(undefined, () => ({ kind: "openai", compactionThresholdTokens: 8000 }));
+	const { thread } = await f.service.createTicketThread(owner, projectId, "Legacy");
+	await f.service.dispatch(owner, thread.id, "Work");
+	f.records.get(thread.id)!.status = "uncertain";
+	f.store.role.mockResolvedValue("implementation");
+	await f.service.recover(owner);
+	expect(f.client.reconcile).toHaveBeenCalledWith(expect.any(String), expect.any(String), { kind: "openai" });
+	expect(f.records.get(thread.id)?.managedRole).toBe("implementation");
 });
 
 test("ticket setup does not restrict concurrent standalone submissions", async () => {

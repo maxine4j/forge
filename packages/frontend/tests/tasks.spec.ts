@@ -2785,6 +2785,24 @@ test("ticket Cost shows this ticket's estimates and token counts", async ({ page
 	await expect(cost.getByText("A$1.99")).toHaveCount(0);
 });
 
+test("Ticket Chat shows context recovery guidance and accepts retry", async ({ page }) => {
+	const fixture = await setup(page, false, true);
+	fixture.setAgentStatus(undefined, true);
+	fixture.setWorkflow({
+		phase: "implementation",
+		state: "failed",
+		implementerId: "123e4567-e89b-42d3-a456-426614174010",
+		contextFailure: "checkpoint",
+	});
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const panel = page.getByRole("dialog");
+	await panel.getByRole("tab", { name: "Chat", exact: true }).click();
+	await expect(panel.getByRole("alert")).toContainText("worktree checkpoint could not be verified");
+	await panel.getByLabel("Message", { exact: true }).fill("Please continue");
+	await panel.getByRole("button", { name: "Send message", exact: true }).click();
+	await expect.poll(fixture.messages).toBe(1);
+});
+
 for (const size of [
 	{ width: 1280, height: 900 },
 	{ width: 820, height: 820 },

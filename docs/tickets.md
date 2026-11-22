@@ -1,5 +1,11 @@
 # Forge ticket and PR workflow
 
+## Implementation context handover
+
+Managed Implementers use Codex's default automatic compaction; see [agent execution](agents.md#codex-harness-and-lifecycle). For implementation work, Forge observes samples for the current turn. At 75% of the reported window it waits for pending requests, checks for 4,096 free tokens, persists one steering attempt, and requests a committed checkpoint and end to the turn. Forge never replays an ambiguous steer.
+
+After settlement Forge verifies a clean worktree on the expected branch and checks the remaining reported headroom before asking the same thread for a short structured completion or handover report. It verifies the checkpoint again before accepting the report. A handover requires a new commit and starts a fresh Implementer on the same worktree and branch with the original assignment and latest handover. The subtask advances only after a completion report. Context telemetry, headroom, checkpoint, report and no-progress failures stop automatic merge; Ticket Chat shows the reason and accepts retry guidance after settlement. Work and provider pins are preserved.
+
 ## Chat inference speed
 
 Ticket Chat shows the latest-turn `tokens/s` stat for planning and implementation, including reopened and read-only completed/archived chats. Values

@@ -21,7 +21,7 @@ import type { ITicketMergeClient } from "../workspaces/workspace-merge-client.ts
 import type { IMergedWorkspaceCleanup, IAbandonedWorkspaceCleanup } from "../workspaces/workspace-service.ts";
 import { TicketError } from "./errors.ts";
 import { parseTicketPlan } from "./ticket-plan-format.ts";
-import type { ITicketPrompts } from "./ticket-prompts.ts";
+import { ticketContextReportPrompt, type ITicketPrompts } from "./ticket-prompts.ts";
 import type { ITicketStore } from "./ticket-store.ts";
 import type { ITicketWorkflowStore } from "./ticket-workflow-store.ts";
 import { ticketWorkflowSummary, type TicketWorkflowRecord } from "./types.ts";
@@ -387,7 +387,11 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		this.access.assertOwner(actor);
 		return this.serialize(async () => {
 			const job = await this.inProgress(ticket.id);
-			if (!job.resultSha || !((job.phase === "review" && job.state === "idle") || job.state === "failed"))
+			if (
+				job.contextFailure
+				|| !job.resultSha
+				|| !((job.phase === "review" && job.state === "idle") || job.state === "failed")
+			)
 				throw new TicketError("ticket-conflict");
 			const next: TicketWorkflowRecord = { ...job, state: "merge-queued", mergeAttempts: 0, message: undefined };
 			await this.store.save(next);
@@ -430,6 +434,23 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				...job,
 				state: "queued",
 				message: text.trim(),
+				...(job.contextFailure && job.context
+					? {
+							implementerId: undefined,
+							previousImplementerIds: [
+								...(job.previousImplementerIds ?? []),
+								...(job.implementerId ? [job.implementerId] : []),
+							],
+							turnId: undefined,
+							previousTurnId: undefined,
+							contextFailure: undefined,
+							context: {
+								prompt: job.context.prompt,
+								handover: job.context.handover,
+								stage: "work" as const,
+							},
+						}
+					: {}),
 				mergeAttempts: job.phase === "rebase" ? 0 : job.mergeAttempts,
 			};
 			await this.store.save(next);
@@ -506,7 +527,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				try {
 					const { thread } = await this.agents.get(actor, id);
 					if (["interrupted", "failed"].includes(thread.status)) {
-						await this.store.save({ ...job, state: "failed" });
+						await this.observe(actor, job);
 						continue;
 					}
 					await this.agents.resume(actor, id);
@@ -677,6 +698,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 						await this.store.save(job);
 					},
 					job[snapshotKey],
+					phase,
 				);
 				id = view.thread.id;
 				if (planning) {
@@ -688,6 +710,37 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				}
 			}
 			if (!job.baseSha && job.workspaceId) job.baseSha = await this.merges.base(actor, job.workspaceId);
+			if (job.phase === "implementation" && job.workspaceId && job.context?.stage !== "report") {
+				job.context = {
+					prompt: job.context?.prompt ?? this.prompts.build(current, job),
+					handover: job.context?.handover,
+					baseline: await this.merges.head(actor, job.workspaceId),
+					stage: "work",
+				};
+			}
+			if (job.context?.stage === "report") {
+				try {
+					if (
+						!job.workspaceId
+						|| !job.context.checkpoint
+						|| (await this.merges.candidate(actor, job.workspaceId)) !== job.context.checkpoint
+					)
+						throw new Error("Checkpoint changed");
+				} catch {
+					await this.store.save({ ...job, state: "failed", contextFailure: "checkpoint" });
+					return;
+				}
+				const sample =
+					job.context.workTurn && (await this.agents.contextSample?.(actor, id, job.context.workTurn));
+				if (!sample || sample.max - sample.used < 4096) {
+					await this.store.save({
+						...job,
+						state: "failed",
+						contextFailure: sample ? "headroom" : "telemetry",
+					});
+					return;
+				}
+			}
 			job.previousTurnId = (await this.agents.get(actor, id)).thread.turnId;
 			job.turnId = undefined;
 			job.state = "dispatching";
@@ -695,7 +748,15 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			const view = await this.agents.dispatch(
 				actor,
 				id,
-				this.prompts.build(current, job),
+				job.phase === "implementation" && job.context
+					? job.context.stage === "report"
+						? ticketContextReportPrompt
+						: job.context.prompt
+							+ (job.context.handover ? `\n\nHandover:\n${job.context.handover}` : "")
+							+ (job.message && job.message !== job.context.prompt
+								? `\n\nOwner guidance: ${job.message}`
+								: "")
+					: this.prompts.build(current, job),
 				{ ticketId: current.id, phase: job.phase },
 				() => this.canDispatch(current),
 				pin?.model ? { ...settings, pinned: true } : settings,
@@ -718,21 +779,80 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	private async observe(actor: Actor, job: TicketWorkflowRecord): Promise<void> {
 		const id = job.phase === "planning" ? job.plannerId : job.implementerId;
 		if (!id) return;
-		const { thread } = await this.agents.get(actor, id);
+		if (job.phase === "implementation" && !job.context) {
+			const ticket = await this.tickets.get(job.ticketId);
+			if (!ticket) throw new TicketError("ticket-not-found");
+			job.context = { prompt: this.prompts.build(ticket, job), stage: "work" };
+			await this.store.save(job);
+		}
+		const { thread, requests } = await this.agents.get(actor, id);
 		if (thread.status === "uncertain") {
 			await this.store.save({ ...job, state: "uncertain" });
 			return;
 		}
 		if (["interrupted", "failed"].includes(thread.status)) {
-			await this.store.save({ ...job, state: "failed" });
+			const sample =
+				job.context?.stage === "work" && thread.turnId
+					? await this.agents.contextSample?.(actor, id, thread.turnId)
+					: undefined;
+			const contextFailure =
+				job.context?.stage === "report"
+					? ("report" as const)
+					: job.context?.insufficient
+						? ("headroom" as const)
+						: job.context && !sample
+							? ("telemetry" as const)
+							: job.context?.attempted || sample?.crossed
+								? ("report" as const)
+								: undefined;
+			await this.store.save({
+				...job,
+				state: "failed",
+				...(contextFailure ? { contextFailure } : { context: undefined }),
+			});
 			return;
 		}
 		if (!thread.turnId || thread.turnId === job.previousTurnId || (job.turnId && thread.turnId !== job.turnId)) {
-			if (thread.status !== "running" && thread.status !== "waiting")
-				await this.store.save({ ...job, state: "uncertain" });
+			if (thread.status !== "running" && thread.status !== "waiting") {
+				if (job.context?.stage === "report" && thread.turnId === job.previousTurnId)
+					await this.store.save({ ...job, state: "failed", contextFailure: "report" });
+				else await this.store.save({ ...job, state: "uncertain" });
+			}
 			return;
 		}
 		if (thread.status === "running" || thread.status === "waiting") {
+			if (job.phase === "implementation" && job.context?.stage === "work") {
+				const sample = await this.agents.contextSample?.(actor, id, thread.turnId);
+				if (sample?.crossed && !job.context.attempted && !job.context.insufficient && !requests.length) {
+					if (sample.max - sample.used < 4096) {
+						job.context.insufficient = true;
+						await this.store.save(job);
+					} else {
+						job.context.attempted = thread.turnId;
+						await this.store.save(job);
+						try {
+							await this.agents.steer(
+								actor,
+								id,
+								thread.turnId,
+								"Finish the current operation, safely checkpoint and commit work in progress, avoid starting another task or broad verification pass, and end this turn.",
+							);
+						} catch (err) {
+							this.log.warn({ err, ticketId: job.ticketId }, "Checkpoint steer outcome is uncertain");
+							await this.store.save({ ...job, state: "uncertain" });
+							try {
+								await this.agents.resume(actor, id);
+							} catch (reconcileError) {
+								this.log.warn(
+									{ err: reconcileError, ticketId: job.ticketId },
+									"Could not reconcile checkpoint turn",
+								);
+							}
+							return;
+						}
+					}
+				}
+			}
 			if (job.state !== "running" || !job.turnId)
 				await this.store.save({ ...job, state: "running", turnId: thread.turnId });
 			return;
@@ -740,6 +860,88 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		if (thread.status !== "completed") {
 			await this.store.save({ ...job, state: "failed" });
 			return;
+		}
+		if (job.phase === "implementation" && job.context) {
+			if (job.context.stage === "work") {
+				const sample = await this.agents.contextSample?.(actor, id, thread.turnId);
+				if (!sample || job.context.insufficient) {
+					await this.store.save({
+						...job,
+						state: "failed",
+						contextFailure: sample ? "headroom" : "telemetry",
+					});
+					return;
+				}
+				if (sample.crossed || job.context.attempted) {
+					if (sample.max - sample.used < 4096) {
+						await this.store.save({ ...job, state: "failed", contextFailure: "headroom" });
+						return;
+					}
+					try {
+						if (!job.workspaceId) throw new Error("Missing workspace");
+						const checkpoint = await this.merges.candidate(actor, job.workspaceId);
+						await this.store.save({
+							...job,
+							state: "queued",
+							context: { ...job.context, stage: "report", checkpoint, workTurn: thread.turnId },
+						});
+						this.wake();
+					} catch {
+						await this.store.save({ ...job, state: "failed", contextFailure: "checkpoint" });
+					}
+					return;
+				}
+			} else {
+				let report: unknown;
+				try {
+					report = JSON.parse((await this.agents.finalAnswer?.(actor, id, thread.turnId)) ?? "");
+				} catch {}
+				const value =
+					report && typeof report === "object" && !Array.isArray(report)
+						? (report as Record<string, unknown>)
+						: undefined;
+				const complete = value?.["status"] === "complete" && Object.keys(value).length === 1;
+				const handoff =
+					value?.["status"] === "handoff"
+					&& Object.keys(value).length === 2
+					&& typeof value["handover"] === "string"
+					&& !!value["handover"].trim()
+					&& value["handover"].length <= 12000;
+				if (!complete && !handoff) {
+					await this.store.save({ ...job, state: "failed", contextFailure: "report" });
+					return;
+				}
+				try {
+					if (
+						!job.workspaceId
+						|| !job.context.checkpoint
+						|| (await this.merges.candidate(actor, job.workspaceId)) !== job.context.checkpoint
+					)
+						throw new Error("Checkpoint changed");
+				} catch {
+					await this.store.save({ ...job, state: "failed", contextFailure: "checkpoint" });
+					return;
+				}
+				if (handoff) {
+					if (!job.context.baseline || job.context.baseline === job.context.checkpoint) {
+						await this.store.save({ ...job, state: "failed", contextFailure: "no-progress" });
+						return;
+					}
+					await this.store.save({
+						...job,
+						implementerId: undefined,
+						previousImplementerIds: [...(job.previousImplementerIds ?? []), id],
+						turnId: undefined,
+						previousTurnId: undefined,
+						message: undefined,
+						state: "queued",
+						context: { prompt: job.context.prompt, handover: value!["handover"] as string, stage: "work" },
+					});
+					this.wake();
+					return;
+				}
+			}
+			job.context = undefined;
 		}
 		if (job.phase === "planning") {
 			const text = await this.agents.plan(actor, id, thread.turnId);
@@ -771,6 +973,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 					...job,
 					subtaskIndex: (job.subtaskIndex ?? 0) + 1,
 					implementerId: undefined,
+					previousImplementerIds: [...(job.previousImplementerIds ?? []), id],
 					state: "queued",
 					turnId: undefined,
 					previousTurnId: undefined,

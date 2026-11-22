@@ -159,11 +159,13 @@ export const ticketWorkflowSchema = z.strictObject({
 		})
 		.optional(),
 	providerSelectionError: z.boolean().optional(),
+	contextFailure: z.enum(["telemetry", "headroom", "checkpoint", "report", "no-progress"]).optional(),
 	ticketId: ticketIdSchema,
 	executionRepositoryId: z.uuid().optional(),
 	workspaceId: z.uuid().optional(),
 	plannerId: z.uuid().optional(),
 	implementerId: z.uuid().optional(),
+	previousImplementerIds: z.array(z.uuid()).optional(),
 	phase: z.enum(["planning", "implementation", "review", "rebase"]),
 	state: z.enum([
 		"idle",

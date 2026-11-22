@@ -136,7 +136,7 @@ Agent records, conversations and historical cost attribution survive abandonment
 
 ## Codex harness and lifecycle
 
-A phase pins the provider's optional [automatic compaction threshold](foundation.md#model-providers). Forge supplies it as `model_auto_compact_token_limit` on thread start and resume, including reconciliation; existing pins retain their saved value or absence. Codex owns automatic compaction and may clamp the configured value to the model window. Ticket Chat displays the configured threshold separately from the latest context usage and model window reported by Codex. The threshold is neither the model capacity nor a hard limit for each request.
+A phase pins the provider's optional [automatic compaction threshold](foundation.md#model-providers). Forge supplies it as `model_auto_compact_token_limit` on thread start and resume, including reconciliation, except for managed Implementer threads, which use Codex's default throughout their lifetime. Historical pins remain intact. Codex owns automatic compaction and may clamp configured values to the model window. Ticket Chat displays an applicable configured threshold separately from the latest context usage and model window reported by Codex. See [implementation checkpointing and recovery](tickets.md#implementation-context-handover).
 
 Use Codex CLI's app-server as the built-in harness. Forge orchestrates tickets and
 reviews; Codex owns model interaction, tools, agent execution, and conversations.

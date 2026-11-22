@@ -361,6 +361,7 @@ export const TicketDetails = ({
 	};
 	const canQueueMerge =
 		ticket.status === "in-progress"
+		&& !job?.contextFailure
 		&& job?.resultSha
 		&& ((job.phase === "review" && job.state === "idle") || job.state === "failed");
 	const act = (path: string, body: unknown, onSuccess?: () => void) => {
@@ -764,6 +765,20 @@ export const TicketDetails = ({
 				{ticket.status !== "backlog" && <p>Scope is fixed after execution starts. Discuss changes in chat.</p>}
 			</div>
 			<div className='ticket-chat' {...panel("chat")}>
+				{job?.contextFailure && (
+					<p role='alert'>
+						{
+							{
+								telemetry: "Context telemetry was unavailable.",
+								headroom: "There was not enough context remaining for a safe checkpoint report.",
+								checkpoint: "The worktree checkpoint could not be verified.",
+								report: "The checkpoint report was missing or invalid.",
+								"no-progress": "The handover did not include a new checkpoint.",
+							}[job.contextFailure]
+						}{" "}
+						Review the worktree and send retry guidance in Chat to continue.
+					</p>
+				)}
 				{currentId ? (
 					<Conversation
 						key={currentId}
@@ -788,19 +803,33 @@ export const TicketDetails = ({
 						feedbackPending={job?.phase === "planning" ? setFeedbackPending : undefined}
 						planAction={approvePlan && <div className='ticket-chat-plan-actions'>{approvePlan}</div>}
 						prefix={
-							job?.implementerId && job.plannerId ? (
+							job?.implementerId && (job.plannerId || job.previousImplementerIds?.length) ? (
 								<>
-									<Conversation
-										id={job.plannerId}
-										api={api}
-										changed={refresh}
-										selected={tab === "chat"}
-										readOnly
-										historyOnly
-										planText={plan?.text}
-										planMarkdown={planMarkdown}
-										snapshots={snapshots}
-									/>
+									{job.plannerId && (
+										<Conversation
+											id={job.plannerId}
+											api={api}
+											changed={refresh}
+											selected={tab === "chat"}
+											readOnly
+											historyOnly
+											planText={plan?.text}
+											planMarkdown={planMarkdown}
+											snapshots={snapshots}
+										/>
+									)}
+									{job.previousImplementerIds?.map((id) => (
+										<Conversation
+											key={id}
+											id={id}
+											api={api}
+											changed={refresh}
+											selected={tab === "chat"}
+											readOnly
+											historyOnly
+											snapshots={snapshots}
+										/>
+									))}
 									{implementation}
 								</>
 							) : undefined

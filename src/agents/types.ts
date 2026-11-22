@@ -4,6 +4,7 @@ export interface AgentThreadRecord extends AgentThread {
 	codexId?: string;
 	requests: AgentRequest[];
 	managed?: boolean;
+	managedRole?: "planning" | "implementation";
 	abandoned?: boolean;
 	contextWindow?: AgentContextWindow;
 	provider?: InferenceProvider;

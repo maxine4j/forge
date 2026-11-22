@@ -14,6 +14,7 @@ export interface ITicketMergeClient {
 	verify(actor: Actor, workspaceId: string, candidate: string): Promise<void>;
 	candidate(actor: Actor, workspaceId: string): Promise<string>;
 	base(actor: Actor, workspaceId: string): Promise<string>;
+	head(actor: Actor, workspaceId: string): Promise<string>;
 }
 
 export class WorkspaceMergeClient implements ITicketMergeClient {
@@ -37,6 +38,10 @@ export class WorkspaceMergeClient implements ITicketMergeClient {
 		const { workspace } = await this.workspaces.resolve(actor, workspaceId);
 		if (!workspace.baseSha) throw new TicketError("ticket-unavailable");
 		return workspace.baseSha;
+	}
+	async head(actor: Actor, workspaceId: string): Promise<string> {
+		const { path } = await this.workspaces.resolve(actor, workspaceId);
+		return gitShaSchema.parse((await this.git.run(["-C", path, "rev-parse", "--verify", "HEAD^{commit}"])).trim());
 	}
 	async verify(actor: Actor, workspaceId: string, candidate: string): Promise<void> {
 		if ((await this.candidate(actor, workspaceId)) !== candidate) throw new TicketError("ticket-conflict");

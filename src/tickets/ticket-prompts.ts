@@ -6,6 +6,9 @@ import type { TicketWorkflowRecord } from "./types.ts";
 
 type TicketInstructions = Pick<ForgeSettings, "planningInstructions" | "implementationInstructions">;
 
+export const ticketContextReportPrompt =
+	'Using the conversation, leave the worktree unchanged and return exactly one JSON object: {"status":"complete"} or {"status":"handoff","handover":"..."}. Limit the handover to 2,000 tokens covering completed work, outstanding requirements, relevant files, and verification status.';
+
 export interface ITicketPrompts {
 	build(ticket: Ticket, job: TicketWorkflowRecord): string;
 }

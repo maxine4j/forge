@@ -69,6 +69,7 @@ export interface ITicketAgents {
 		workspaceId?: string,
 		allocated?: (workspaceId: string) => Promise<void>,
 		snapshot?: ModelProviderSnapshot,
+		role?: "planning" | "implementation",
 	): Promise<AgentView>;
 	dispatch(
 		actor: Actor,
@@ -79,6 +80,12 @@ export interface ITicketAgents {
 		settings?: AgentSettings & { pinned?: true },
 	): Promise<AgentView>;
 	plan(actor: Actor, id: string, turnId: string): Promise<string | undefined>;
+	finalAnswer?(actor: Actor, id: string, turnId: string): Promise<string | undefined>;
+	contextSample?(
+		actor: Actor,
+		id: string,
+		turnId: string,
+	): Promise<{ used: number; max: number; crossed: boolean } | undefined>;
 	get(actor: Actor, id: string): Promise<AgentView>;
 	resume(actor: Actor, id: string): Promise<AgentView>;
 }
@@ -138,8 +145,9 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		workspaceId?: string,
 		allocated?: (workspaceId: string) => Promise<void>,
 		snapshot?: ModelProviderSnapshot,
+		role?: "planning" | "implementation",
 	): Promise<AgentView> {
-		return this.createThread(actor, projectId, title, true, workspaceId, allocated, snapshot);
+		return this.createThread(actor, projectId, title, true, workspaceId, allocated, snapshot, role);
 	}
 	async list(actor: Actor, projectId: string): Promise<AgentThread[]> {
 		this.authorize(actor);
@@ -229,6 +237,23 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			return runtime.status === "completed" && runtime.turnId === turnId ? runtime.plan : undefined;
 		});
 	}
+	async finalAnswer(actor: Actor, id: string, turnId: string): Promise<string | undefined> {
+		this.authorize(actor);
+		return this.serialize(id, async () => {
+			const record = await this.require(id);
+			if (!record.managed || !record.codexId) throw new AgentError("agent-conflict");
+			const runtime = this.client.read(record.codexId);
+			return runtime.status === "completed" && runtime.turnId === turnId ? runtime.finalAnswer : undefined;
+		});
+	}
+	async contextSample(actor: Actor, id: string, turnId: string) {
+		this.authorize(actor);
+		return this.serialize(id, async () => {
+			const record = await this.require(id);
+			if (!record.managed || !record.codexId) throw new AgentError("agent-conflict");
+			return this.client.contextSample?.(record.codexId, turnId);
+		});
+	}
 	private async execute(
 		actor: Actor,
 		id: string,
@@ -282,7 +307,11 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				const location = await this.workspaces.resolve(actor, record.workspaceId);
 				contactedRuntime = true;
 				if (record.codexId) {
-					const runtime = await this.client.resume(record.codexId, location.path, record.provider);
+					const runtime = await this.client.resume(
+						record.codexId,
+						location.path,
+						this.runtimeProvider(record),
+					);
 					this.identities.set(record.codexId, id);
 					if (["creating", "running", "waiting", "uncertain"].includes(runtime.status))
 						throw new AgentError("agent-conflict");
@@ -290,7 +319,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				if (!record.codexId) {
 					record.status = "creating";
 					await this.store.update(record);
-					record.codexId = await this.client.start(location.path, record.provider);
+					record.codexId = await this.client.start(location.path, this.runtimeProvider(record));
 					this.identities.set(record.codexId, id);
 				}
 				record.status = "running";
@@ -350,7 +379,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				return this.view(record);
 			}
 			const location = await this.workspaces.resolve(actor, record.workspaceId);
-			await this.client.resume(record.codexId, location.path, record.provider);
+			await this.client.resume(record.codexId, location.path, this.runtimeProvider(record));
 			this.identities.set(record.codexId, id);
 			return this.sync(record);
 		});
@@ -511,7 +540,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 	}
 	private async reconcile(actor: Actor, record: AgentThreadRecord) {
 		const path = record.codexId ? (await this.workspaces.resolve(actor, record.workspaceId)).path : undefined;
-		const result = await this.client.reconcile(record.codexId, path, record.provider);
+		const result = await this.client.reconcile(record.codexId, path, this.runtimeProvider(record));
 		if (result.state === "unavailable") throw new AgentError("agent-unavailable");
 		if (record.codexId) this.identities.set(record.codexId, record.id);
 		const updated: AgentThreadRecord =
@@ -531,6 +560,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		workspaceId?: string,
 		allocated?: (workspaceId: string) => Promise<void>,
 		snapshot?: ModelProviderSnapshot,
+		role?: "planning" | "implementation",
 	): Promise<AgentView> {
 		this.authorize(actor);
 		if (this.ticketOnly && !snapshot) throw new ModelProviderError("provider-required");
@@ -553,6 +583,7 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 				status: "idle",
 				requests: [],
 				managed,
+				managedRole: role,
 				provider: snapshot?.configuration ?? this.provider(),
 				providerId: snapshot?.providerId,
 				providerName: snapshot?.providerName,
@@ -569,12 +600,25 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 	private async require(id: string): Promise<AgentThreadRecord> {
 		const record = await this.store.get(id);
 		if (!record || (this.ticketOnly && !record.managed)) throw new AgentError("agent-not-found");
+		if (record.managed && !record.managedRole) {
+			const role = await this.store.role?.(id);
+			if (role) {
+				record.managedRole = role;
+				await this.store.update(record);
+			}
+		}
 		return record;
+	}
+	private runtimeProvider(record: AgentThreadRecord): InferenceProvider | undefined {
+		if (record.managedRole !== "implementation" || !record.provider) return record.provider;
+		const { compactionThresholdTokens: _threshold, ...provider } = record.provider;
+		return provider;
 	}
 	private publicThread(record: AgentThreadRecord): AgentThread {
 		const {
 			codexId: _codexId,
 			managed: _managed,
+			managedRole: _role,
 			provider: _provider,
 			abandoned: _abandoned,
 			requests: _requests,
@@ -602,9 +646,10 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			requests: runtime?.requests ?? record.requests,
 			truncated: runtime?.truncated ?? false,
 			...(contextWindow && { contextWindow }),
-			...(record.provider?.compactionThresholdTokens !== undefined && {
-				compactionThresholdTokens: record.provider.compactionThresholdTokens,
-			}),
+			...(record.managedRole !== "implementation"
+				&& record.provider?.compactionThresholdTokens !== undefined && {
+					compactionThresholdTokens: record.provider.compactionThresholdTokens,
+				}),
 			...(performance && { performance }),
 			...(thread.status === "failed" && runtime?.turnFailure && { turnFailure: runtime.turnFailure }),
 		};

@@ -25,6 +25,7 @@ export interface ICodexAgentClient {
 	/** Loads stored history without starting or subscribing to a runtime thread. Throws AgentError. */
 	loadHistory(id: string): Promise<AgentRuntimeView>;
 	read(id: string): AgentRuntimeView;
+	contextSample?(id: string, turnId: string): { used: number; max: number; crossed: boolean } | undefined;
 	send(id: string, path: string, text: string, settings?: AgentSettings, usage?: UsageScope): Promise<void>;
 	options(path?: string, provider?: InferenceProvider): Promise<AgentOptions>;
 	files(path: string, query: string): Promise<string[]>;
@@ -36,6 +37,7 @@ export interface ICodexAgentClient {
 const ollamaProviderId = "forge_ollama";
 
 export class CodexAgentClient implements ICodexAgentClient {
+	private readonly contextSamples = new Map<string, Map<string, { used: number; max: number; crossed: boolean }>>();
 	private readonly log = createLogger(CodexAgentClient.name);
 	private readonly views = new Map<string, AgentRuntimeView>();
 	private readonly pending = new Map<string, { threadId: string; turnId: string; rpcId: string | number }>();
@@ -187,6 +189,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 				view.turnId = live.turnId;
 				view.turnFailure = live.turnFailure;
 				if (live.plan !== undefined) view.plan = live.plan;
+				if (live.finalAnswer !== undefined) view.finalAnswer = live.finalAnswer;
 				view.truncated ||= live.truncated;
 				for (const item of live.items) if (before.get(item.id) !== item.text) this.put(view, item);
 			}
@@ -226,6 +229,10 @@ export class CodexAgentClient implements ICodexAgentClient {
 		const view = this.views.get(id);
 		if (!view) throw new AgentError("agent-unavailable");
 		return structuredClone(view);
+	}
+	contextSample(id: string, turnId: string): { used: number; max: number; crossed: boolean } | undefined {
+		const sample = this.contextSamples.get(id)?.get(turnId);
+		return sample && { ...sample };
 	}
 	async options(path?: string, provider?: InferenceProvider): Promise<AgentOptions> {
 		return this.guard(async () => {
@@ -327,6 +334,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 			this.settled.delete(id);
 			delete view.turnId;
 			delete view.plan;
+			delete view.finalAnswer;
 			delete view.turnFailure;
 			try {
 				if (usage)
@@ -608,6 +616,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 				const itemView: AgentRuntimeView = { status: view.status, items: [], requests: [], truncated: false };
 				this.item(itemView, entry.item, entry.turnId === view.turnId && status === "completed");
 				if (itemView.plan !== undefined) view.plan ??= itemView.plan;
+				if (itemView.finalAnswer !== undefined) view.finalAnswer ??= itemView.finalAnswer;
 				this.finishTools(itemView, this.status(status));
 				view.truncated ||= itemView.truncated;
 				const item = itemView.items[0]!;
@@ -652,6 +661,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 				id: z.string().min(1).max(256),
 				type: z.string(),
 				text: z.string().optional(),
+				phase: z.string().nullish(),
 				command: z.string().optional(),
 				aggregatedOutput: z.string().nullish(),
 				status: z.string().optional(),
@@ -678,6 +688,8 @@ export class CodexAgentClient implements ICodexAgentClient {
 		if (item.type === "mcpToolCall" && toolFailure) item.status = "failed";
 		if (capturePlan && item.type === "plan" && item.text?.trim() && item.text.length <= 32000)
 			view.plan = item.text.trim();
+		if (capturePlan && item.type === "agentMessage" && item.phase === "final_answer" && item.text !== undefined)
+			view.finalAnswer = item.text;
 		const role: AgentItem["role"] =
 			item.type === "userMessage"
 				? "user"
@@ -752,14 +764,25 @@ export class CodexAgentClient implements ICodexAgentClient {
 		const envelope = z.object({ threadId: z.string() }).safeParse(params);
 		if (!envelope.success) return;
 		const id = envelope.data.threadId;
-		if (this.settled.has(id)) return;
+		if (this.settled.has(id) && method !== "thread/tokenUsage/updated") return;
 		const view = this.views.get(id);
 		if (!view) return;
 		try {
 			if (method === "thread/tokenUsage/updated") {
 				const sample = contextUpdate.safeParse(params);
-				if (!sample.success || (view.turnId && view.turnId !== sample.data.turnId)) return;
+				if (!sample.success) return;
+				if (this.settled.has(id) && sample.data.turnId !== view.turnId) return;
 				const { last, modelContextWindow } = sample.data.tokenUsage;
+				const samples = this.contextSamples.get(id) ?? new Map();
+				const previous = samples.get(sample.data.turnId);
+				samples.set(sample.data.turnId, {
+					used: last.totalTokens,
+					max: modelContextWindow,
+					crossed: !!previous?.crossed || last.totalTokens >= Math.ceil(modelContextWindow * 0.75),
+				});
+				if (samples.size > 100) samples.delete(samples.keys().next().value!);
+				this.contextSamples.set(id, samples);
+				if (view.turnId && view.turnId !== sample.data.turnId) return;
 				if (view.contextWindow?.used === last.totalTokens && view.contextWindow.max === modelContextWindow)
 					return;
 				view.contextWindow = { used: last.totalTokens, max: modelContextWindow };
@@ -796,6 +819,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 				if (view.turnId && view.turnId !== turn.id) {
 					if (method === "turn/completed") return;
 					delete view.plan;
+					delete view.finalAnswer;
 				}
 				view.turnId = turn.id;
 				view.status = this.status(turn.status);

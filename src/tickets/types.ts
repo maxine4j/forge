@@ -10,6 +10,18 @@ export const ticketWorkflowRecordSchema = ticketWorkflowSchema.extend({
 	previousTurnId: z.string().min(1).max(256).optional(),
 	subtaskIndex: z.number().int().nonnegative().optional(),
 	turnId: z.string().min(1).max(256).optional(),
+	context: z
+		.object({
+			prompt: z.string(),
+			handover: z.string().optional(),
+			baseline: z.string().optional(),
+			workTurn: z.string().optional(),
+			attempted: z.string().optional(),
+			insufficient: z.boolean().optional(),
+			checkpoint: z.string().optional(),
+			stage: z.enum(["work", "report"]),
+		})
+		.optional(),
 	workspaceCleaned: z.literal(true).optional(),
 	cleanupFailed: z.literal(true).optional(),
 	abandonment: z
@@ -28,6 +40,7 @@ export function ticketWorkflowSummary({
 	previousTurnId: _previous,
 	subtaskIndex: _subtaskIndex,
 	turnId: _turn,
+	context: _context,
 	workspaceCleaned: _cleaned,
 	cleanupFailed: _cleanupFailed,
 	abandonment: _abandonment,

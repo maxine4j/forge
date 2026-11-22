@@ -13,6 +13,7 @@ export interface AgentRuntimeView {
 	status: AgentStatus;
 	turnId?: string;
 	plan?: string;
+	finalAnswer?: string;
 	items: AgentItem[];
 	requests: AgentRequest[];
 	truncated: boolean;
