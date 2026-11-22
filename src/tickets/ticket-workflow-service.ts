@@ -4,6 +4,7 @@ import {
 	ticketExecutionSettingsSchema,
 	ticketPhaseSettings,
 	ticketAgentId,
+	resolveTicketWorkflowPreset,
 	type TicketAgentPhase,
 	type TicketExecutionSettings,
 } from "@forge/contracts/tickets";
@@ -96,7 +97,8 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		if (!parsed.success) throw new TicketError("invalid-request");
 		await this.serialize(async () => {
 			const current = await this.tickets.get(ticket.id);
-			if (!current || current.archivedAt || current.status === "done") throw new TicketError("ticket-conflict");
+			if (!current || current.archivedAt || current.status !== "backlog")
+				throw new TicketError("ticket-conflict");
 			if ((await this.record(ticket.id)).state === "resetting") throw new TicketError("ticket-conflict");
 			const job = await this.record(ticket.id);
 			if (this.taskAgents) await this.validateAssignees(actor, parsed.data, current.executionSettings ?? {}, job);
@@ -115,7 +117,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		if (settings.providerId || settings.model || settings.reasoningEffort || settings.implementation)
 			throw new TicketError("invalid-request");
 		for (const phase of ["planning", "implementation"] as const) {
-			if (ready && phase === "planning" && (settings.skipPlanning || job?.plan)) continue;
+			if (phase === "planning" && (resolveTicketWorkflowPreset(settings) === "one-shot" || job?.plan)) continue;
 			const id = ticketAgentId(settings, phase);
 			const changed = previous && id !== ticketAgentId(previous, phase);
 			const pin = job && this.phaseSnapshot(job, phase);
@@ -363,9 +365,8 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			const job = await this.inProgress(ticket.id);
 			if (
 				job.phase !== "planning"
-				|| job.state !== "idle"
+				|| !["idle", "failed"].includes(job.state)
 				|| job.plan?.revision !== revision
-				|| job.message
 				|| job.approvedRevision
 			)
 				throw new TicketError("ticket-conflict");
@@ -375,6 +376,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				state: "queued",
 				reservation: undefined,
 				approvedRevision: revision,
+				message: undefined,
 			};
 			await this.store.save(next);
 			this.wake();
@@ -709,7 +711,9 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		return phase === "planning" ? job.planningProviderSnapshot : job.implementationProviderSnapshot;
 	}
 	private initialPhase(ticket: Ticket, job?: TicketWorkflowRecord): "planning" | "implementation" {
-		return job?.plan || ticket.executionSettings?.skipPlanning ? "implementation" : "planning";
+		return job?.plan || resolveTicketWorkflowPreset(ticket.executionSettings) === "one-shot"
+			? "implementation"
+			: "planning";
 	}
 	private async observe(actor: Actor, job: TicketWorkflowRecord): Promise<void> {
 		const id = job.phase === "planning" ? job.plannerId : job.implementerId;
@@ -740,7 +744,13 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		if (job.phase === "planning") {
 			const text = await this.agents.plan(actor, id, thread.turnId);
 			const structured = text && parseTicketPlan(text);
-			if (!text || !structured) {
+			const preset = (await this.tickets.get(job.ticketId))?.executionSettings?.workflowPreset;
+			if (
+				!text
+				|| !structured
+				|| (preset === "planner-subtasks" && !structured.subtasks.length)
+				|| (preset === "planner-implementer" && structured.subtasks.length > 0)
+			) {
 				this.log.warn({ ticketId: job.ticketId }, "Planner returned a missing or invalid plan");
 				await this.store.save({ ...job, state: "failed" });
 				return;
@@ -749,6 +759,26 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			await this.store.save({ ...job, plan, state: "idle", message: undefined });
 		} else {
 			if (!job.workspaceId) throw new TicketError("ticket-conflict");
+			const ticket = await this.tickets.get(job.ticketId);
+			const subtasks = job.plan?.structured?.subtasks;
+			if (
+				job.phase === "implementation"
+				&& resolveTicketWorkflowPreset(ticket?.executionSettings) === "planner-subtasks"
+				&& subtasks
+				&& (job.subtaskIndex ?? 0) + 1 < subtasks.length
+			) {
+				await this.store.save({
+					...job,
+					subtaskIndex: (job.subtaskIndex ?? 0) + 1,
+					implementerId: undefined,
+					state: "queued",
+					turnId: undefined,
+					previousTurnId: undefined,
+					message: undefined,
+				});
+				this.wake();
+				return;
+			}
 			const resultSha = await this.merges.candidate(actor, job.workspaceId);
 			if (resultSha === job.baseSha || resultSha === job.resultSha) throw new TicketError("ticket-conflict");
 			// Persist the verified candidate before the nontransactional Git update.

@@ -142,11 +142,13 @@ test("independent assignees pin model and provider for feedback, recovery and re
 		models: [{ providerId: f.implementer.id, model: "local" }],
 	});
 	const ticket = f.create();
-	await f.service.settings(actor, ticket, { plannerAgentId: planner.id, implementerAgentId: planner.id });
+	await f.service.settings(actor, ticket, { plannerAgentId: planner.id, implementerAgentId: implementer.id });
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
 	const plannerId = f.jobs.get(ticket.id)!.plannerId!;
-	await f.service.settings(actor, ticket, { plannerAgentId: planner.id, implementerAgentId: implementer.id });
+	await expect(
+		f.service.settings(actor, ticket, { plannerAgentId: planner.id, implementerAgentId: implementer.id }),
+	).rejects.toThrow("ticket-conflict");
 	await f.taskAgents.retire(actor, planner.id);
 	await f.providers.remove(actor, f.planner.id);
 	await expect(
@@ -197,11 +199,51 @@ test("skip planning needs only an implementer and retirement blocks unpinned dis
 	expect(f.agents.createTicketThread).not.toHaveBeenCalled();
 	expect(ticket.status).toBe("todo");
 	const replacement = await f.addAgent("Replacement");
+	await f.service.move(actor, ticket, { status: "backlog" });
 	await f.service.settings(actor, ticket, { implementerAgentId: replacement.id, skipPlanning: true });
-	await f.service.recover(actor, ticket.id);
+	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "running", reservation: f.planner.id });
 });
+
+test("explicit one-shot wins over the legacy flag and does not validate a retained planner", async () => {
+	const f = namedFixture();
+	const planner = await f.addAgent("Planner");
+	const implementer = await f.addAgent("Implementer");
+	const ticket = f.create();
+	await f.service.settings(actor, ticket, { plannerAgentId: planner.id, implementerAgentId: implementer.id });
+	await f.taskAgents.retire(actor, planner.id);
+	await f.service.settings(actor, ticket, {
+		plannerAgentId: planner.id,
+		implementerAgentId: implementer.id,
+		workflowPreset: "one-shot",
+		skipPlanning: false,
+	});
+	await f.service.move(actor, ticket, { status: "todo" });
+	await expect(f.service.settings(actor, ticket, {})).rejects.toThrow("ticket-conflict");
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)).toMatchObject({ phase: "implementation", state: "running" });
+});
+
+test.each(["planner-subtasks", "planner-implementer", "one-shot"] as const)(
+	"%s reuses a saved plan without planning or another approval",
+	async (workflowPreset) => {
+		const f = fixture();
+		const ticket = f.create();
+		await f.service.settings(actor, ticket, { workflowPreset });
+		f.jobs.set(ticket.id, {
+			ticketId: ticket.id,
+			phase: "planning",
+			state: "idle",
+			mergeAttempts: 0,
+			plan: { revision: 3, text: "Saved legacy plan" },
+		});
+		await f.service.move(actor, ticket, { status: "todo" });
+		await f.service.tick(actor);
+		expect(f.jobs.get(ticket.id)).toMatchObject({ phase: "implementation", approvedRevision: 3, state: "running" });
+		expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Saved legacy plan");
+	},
+);
 
 test("ordered fallbacks skip full and incompatible providers and the scheduler scans past a busy ticket", async () => {
 	const f = namedFixture();
@@ -260,9 +302,9 @@ test("plan feedback rejects stale and approved revisions without queuing a turn"
 test("queued settings select direct implementation and recovery never dispatches twice", async () => {
 	const f = fixture();
 	const ticket = f.create();
-	await f.service.move(actor, ticket, { status: "todo" });
-	expect(f.jobs.get(ticket.id)?.phase).toBe("planning");
 	await f.service.settings(actor, ticket, { skipPlanning: true, acceptRecommendations: true, permissions: "ask" });
+	await f.service.move(actor, ticket, { status: "todo" });
+	expect(f.jobs.get(ticket.id)?.phase).toBe("implementation");
 	await f.service.tick(actor);
 	const job = f.jobs.get(ticket.id)!;
 	expect(job).toMatchObject({ phase: "implementation", state: "running" });
@@ -276,7 +318,7 @@ test("queued settings select direct implementation and recovery never dispatches
 		reasoningEffort: undefined,
 		permissions: "ask",
 	});
-	await f.service.settings(actor, ticket, {});
+	await expect(f.service.settings(actor, ticket, {})).rejects.toThrow("ticket-conflict");
 	await f.service.recover(actor);
 	await f.service.tick(actor);
 	expect(f.agents.dispatch).toHaveBeenCalledTimes(1);
@@ -288,7 +330,7 @@ test("skip planning never approves an existing planner and restart uses the curr
 	const ticket = f.create();
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
-	await f.service.settings(actor, ticket, { skipPlanning: true });
+	await expect(f.service.settings(actor, ticket, { skipPlanning: true })).rejects.toThrow("ticket-conflict");
 	f.complete(f.jobs.get(ticket.id)!.plannerId!, "Saved plan");
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)).toMatchObject({ phase: "planning", state: "idle" });
@@ -296,6 +338,7 @@ test("skip planning never approves an existing planner and restart uses the curr
 	await f.service.move(actor, ticket, { status: "backlog" });
 	await f.service.recover(actor, ticket.id);
 	await f.service.clearPlan(actor, ticket);
+	await f.service.settings(actor, ticket, { skipPlanning: true });
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)).toMatchObject({ phase: "implementation", state: "running" });
@@ -306,10 +349,12 @@ test("skip planning never approves an existing planner and restart uses the curr
 test("recommendations use current settings on the next feedback and rebase turns", async () => {
 	const f = fixture();
 	const ticket = f.create();
-	await f.service.settings(actor, ticket, { skipPlanning: true });
+	await f.service.settings(actor, ticket, { skipPlanning: true, acceptRecommendations: true });
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
-	await f.service.settings(actor, ticket, { skipPlanning: false, acceptRecommendations: true });
+	await expect(
+		f.service.settings(actor, ticket, { skipPlanning: false, acceptRecommendations: true }),
+	).rejects.toThrow("ticket-conflict");
 	const job = f.jobs.get(ticket.id)!;
 	await f.service.message(actor, ticket, "Adjust scope", job.turnId);
 	expect(f.agents.steer.mock.calls[0]?.[3]).toBe("Adjust scope");
@@ -552,7 +597,6 @@ test("unclaimed Ready returns while paused and revalidates edited scope", async 
 test("return winning serialization prevents a concurrent scheduler dispatch", async () => {
 	const f = fixture();
 	const ticket = f.create();
-	await f.service.move(actor, ticket, { status: "todo" });
 	let release!: () => void;
 	let entered!: () => void;
 	const started = new Promise<void>((resolve) => {
@@ -568,10 +612,11 @@ test("return winning serialization prevents a concurrent scheduler dispatch", as
 	});
 	const blocker = f.service.settings(actor, ticket, {});
 	await started;
+	const ready = f.service.move(actor, { ...ticket }, { status: "todo" });
 	const returning = f.service.move(actor, { ...ticket }, { status: "backlog" });
 	const ticking = f.service.tick(actor);
 	release();
-	await Promise.all([blocker, returning, ticking]);
+	await Promise.all([blocker, ready, returning, ticking]);
 	expect(ticket.status).toBe("backlog");
 	expect(f.agents.createTicketThread).not.toHaveBeenCalled();
 });
@@ -883,7 +928,7 @@ test("ticket settings validate before saving and each phase snapshots the curren
 	expect(f.agents.dispatch.mock.calls[0]?.[5]).toEqual(settings);
 	await f.service.options(actor, ticket.id);
 	expect(f.agents.catalogOptions).toHaveBeenLastCalledWith(actor, f.jobs.get(ticket.id)?.plannerId);
-	await f.service.settings(actor, ticket, {});
+	await expect(f.service.settings(actor, ticket, {})).rejects.toThrow("ticket-conflict");
 	expect(f.agents.dispatch.mock.calls[0]?.[5]).toEqual(settings);
 	f.complete(f.jobs.get(ticket.id)!.plannerId!, "# Plan");
 	await f.service.tick(actor);
@@ -891,11 +936,11 @@ test("ticket settings validate before saving and each phase snapshots the curren
 	await f.service.options(actor, ticket.id);
 	expect(f.agents.catalogOptions).toHaveBeenLastCalledWith(actor, undefined);
 	await f.service.tick(actor);
-	expect(f.agents.dispatch.mock.calls[1]?.[5]).toEqual({});
-	await f.service.settings(actor, ticket, settings);
+	expect(f.agents.dispatch.mock.calls[1]?.[5]).toEqual(settings);
+	await expect(f.service.settings(actor, ticket, settings)).rejects.toThrow("ticket-conflict");
 	const job = f.jobs.get(ticket.id)!;
 	await f.service.message(actor, f.tickets.get(ticket.id)!, "Steer", job.turnId);
-	expect(f.agents.dispatch.mock.calls[1]?.[5]).toEqual({});
+	expect(f.agents.dispatch.mock.calls[1]?.[5]).toEqual(settings);
 	expect(f.agents.steer).toHaveBeenCalledWith(actor, job.implementerId, job.turnId, "Steer");
 });
 
@@ -1121,7 +1166,6 @@ test("invalid planning output retains the last revision and allows correction on
 	f.complete(planner, "Second");
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", plan: first, plannerId: planner });
-	await expect(f.service.approve(actor, ticket, 1)).rejects.toThrow("ticket-conflict");
 	await f.service.message(actor, ticket, "Fix it", undefined, 1);
 	await f.service.tick(actor);
 	f.complete(planner, "Second");
@@ -1131,6 +1175,70 @@ test("invalid planning output retains the last revision and allows correction on
 	await f.service.approve(actor, ticket, 2);
 	await f.service.tick(actor);
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("### 1. Work");
+});
+
+test("a failed feedback revision leaves the prior plan approvable", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	const planner = f.jobs.get(ticket.id)!.plannerId!;
+	f.complete(planner, "First");
+	await f.service.tick(actor);
+	await f.service.message(actor, ticket, "Revise", undefined, 1);
+	await f.service.tick(actor);
+	f.agents.plan.mockResolvedValueOnce("invalid");
+	f.complete(planner, "Second");
+	await f.service.tick(actor);
+	await f.service.approve(actor, ticket, 1);
+	await f.service.tick(actor);
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("approved plan");
+});
+
+test("planner-implementer accepts a five-section plan and sends it in full", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.settings(actor, ticket, { workflowPreset: "planner-implementer" });
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	const planner = f.jobs.get(ticket.id)!.plannerId!;
+	const text =
+		"## Goals\nGoal\n## Scope\nScope\n## Decisions\nDecision\n## Acceptance criteria\nCriteria\n## Tests\nTests";
+	f.agents.plan.mockResolvedValueOnce(text);
+	f.complete(planner, "Plan");
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)?.plan?.structured?.subtasks).toEqual([]);
+	await f.service.approve(actor, ticket, 1);
+	await f.service.tick(actor);
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toMatch(/## Goals\nGoal[\s\S]*## Tests\nTests/);
+});
+
+test("structured subtasks use fresh implementers in order and recover the queued handoff", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.settings(actor, ticket, { workflowPreset: "planner-subtasks" });
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	const planner = f.jobs.get(ticket.id)!.plannerId!;
+	const text = `## Goals\nGoal\n## Scope\nScope\n## Decisions\nDecision\n## Acceptance criteria\nCriteria\n## Tests\nTests\n## Ordered subtasks\n### 1. First\n- Files: a\n- Dependencies: None\n- Expected changes: First\n- Exclusions: None\n- Completion criteria: Done\n### 2. Second\n- Files: b\n- Dependencies: 1\n- Expected changes: Second\n- Exclusions: None\n- Completion criteria: Done`;
+	f.agents.plan.mockResolvedValueOnce(text);
+	f.complete(planner, "Plan");
+	await f.service.tick(actor);
+	await f.service.approve(actor, ticket, 1);
+	await f.service.tick(actor);
+	const first = f.jobs.get(ticket.id)!.implementerId!;
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("only subtask 1: First");
+	f.complete(first);
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "queued", subtaskIndex: 1 });
+	expect(f.merges.candidate).not.toHaveBeenCalled();
+	await f.makeService().tick(actor);
+	const second = f.jobs.get(ticket.id)!.implementerId!;
+	expect(second).not.toBe(first);
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("only subtask 2: Second");
+	f.complete(second);
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)?.state).toBe("merge-queued");
 });
 
 const implement = async (f: ReturnType<typeof fixture>, ticket: Ticket) => {

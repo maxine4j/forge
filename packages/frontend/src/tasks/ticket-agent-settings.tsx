@@ -1,6 +1,10 @@
 import { modelProvidersSchema } from "@forge/contracts/model-providers";
 import { taskAgentsSchema, type TaskAgent } from "@forge/contracts/task-agents";
-import type { TicketExecutionSettings, TicketWorkflow } from "@forge/contracts/tickets";
+import {
+	resolveTicketWorkflowPreset,
+	type TicketExecutionSettings,
+	type TicketWorkflow,
+} from "@forge/contracts/tickets";
 import { useEffect, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
@@ -49,33 +53,38 @@ export function TicketAgentSettings({
 					["Planner", "plannerAgentId", job?.planningProvider, job?.plannerId],
 					["Implementer", "implementerAgentId", job?.implementationProvider, job?.implementerId],
 				] as const
-			).map(([label, key, pin, thread]) => {
-				const value = settings[key] ?? "";
-				const saved = catalog?.agents.find((agent) => agent.id === value);
-				return (
-					<label key={key}>
-						{label}
-						<select
-							value={value}
-							disabled={disabled || !catalog || !!pin || !!thread}
-							onChange={(event) => change({ [key]: event.target.value || undefined })}
-						>
-							<option value=''>{pin?.providerName ?? "Select an agent"}</option>
-							{value && !choices.some((agent) => agent.id === value) && (
-								<option value={value} disabled>
-									{saved?.name ?? pin?.providerName ?? "Unavailable agent"}
-									{saved?.retired ? " (retired)" : ""}
-								</option>
-							)}
-							{choices.map((agent) => (
-								<option key={agent.id} value={agent.id}>
-									{agent.name}
-								</option>
-							))}
-						</select>
-					</label>
-				);
-			})}
+			)
+				.filter(
+					([label]) =>
+						label !== "Planner" || (resolveTicketWorkflowPreset(settings) !== "one-shot" && !job?.plan),
+				)
+				.map(([label, key, pin, thread]) => {
+					const value = settings[key] ?? "";
+					const saved = catalog?.agents.find((agent) => agent.id === value);
+					return (
+						<label key={key}>
+							{label}
+							<select
+								value={value}
+								disabled={disabled || !catalog || !!pin || !!thread}
+								onChange={(event) => change({ [key]: event.target.value || undefined })}
+							>
+								<option value=''>{pin?.providerName ?? "Select an agent"}</option>
+								{value && !choices.some((agent) => agent.id === value) && (
+									<option value={value} disabled>
+										{saved?.name ?? pin?.providerName ?? "Unavailable agent"}
+										{saved?.retired ? " (retired)" : ""}
+									</option>
+								)}
+								{choices.map((agent) => (
+									<option key={agent.id} value={agent.id}>
+										{agent.name}
+									</option>
+								))}
+							</select>
+						</label>
+					);
+				})}
 			<label>
 				Permissions
 				<select

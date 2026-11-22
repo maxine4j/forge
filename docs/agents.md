@@ -262,7 +262,7 @@ Forge uses [named model providers](foundation.md#model-providers) and
 the first setup of each ticket phase, Forge pins its assigned Agent’s model and
 thinking level with the provider identity and routing. Planning and plan feedback
 reuse the Planner pin. Implementation, implementation feedback, and rebase reuse
-the Implementer pin. Skip planning starts implementation directly. Existing pins
+the Implementer pin. The One shot workflow starts implementation directly. Existing pins
 survive Agent or provider edits, retirement, setup retries and recovery. Public
 summaries expose provider identity and keep inference endpoints private.
 Legacy agent records without a provider still mean OpenAI; upgrade never rewrites

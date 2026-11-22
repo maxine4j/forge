@@ -5,6 +5,7 @@ import {
 	type StructuredTicketPlan,
 } from "@forge/contracts/tickets";
 export const ticketPlanGuidance = `Return a complete native Markdown plan with exactly these level-two headings in order: ${headings.join(", ")}. Include nonblank bodies describing goals, in-scope and excluded work, settled decisions and assumptions, verifiable acceptance criteria, and test cases and commands. Optionally begin with one level-one title. Under Ordered subtasks use consecutive headings like ### 1. Title. For each, include exactly one nonblank entry for ${labels.map((label) => `- ${label}: value`).join(", ")}. Indent continuation lines. Give repository-relative paths and relevant symbols; name dependencies by earlier subtask number or None.`;
+export const ticketSinglePlanGuidance = `Return a complete native Markdown plan with exactly these level-two headings in order: ${headings.slice(0, 5).join(", ")}. Include nonblank bodies describing goals, in-scope and excluded work, settled decisions and assumptions, verifiable acceptance criteria, and test cases and commands. Optionally begin with one level-one title. Give repository-relative paths and relevant symbols.`;
 
 export function parseTicketPlan(text: string): StructuredTicketPlan | undefined {
 	if (text.length > 32000) return undefined;

@@ -440,15 +440,18 @@ test("ticket creation omits agent settings and changing assignees retains ticket
 	};
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
-	await expect(dialog.getByRole("checkbox", { name: "Skip planning", exact: true })).toBeChecked();
+	await expect(dialog.getByRole("combobox", { name: "Workflow", exact: true })).toHaveValue("one-shot");
+	await dialog.getByRole("combobox", { name: "Workflow", exact: true }).selectOption("planner-implementer");
+	await expect(dialog.getByRole("combobox", { name: "Planner", exact: true })).toBeEnabled();
 	await dialog.getByRole("combobox", { name: "Planner", exact: true }).selectOption(other);
 	await expect.poll(() => f.tickets()[0]!.executionSettings?.plannerAgentId).toBe(other);
 	expect(f.tickets()[0]!.executionSettings).toMatchObject({
 		permissions: "ask",
-		skipPlanning: true,
+		workflowPreset: "planner-implementer",
 		acceptRecommendations: true,
 	});
 	expect(f.tickets()[0]!.executionSettings?.implementerAgentId).toBe(projectId);
+	expect(f.tickets()[0]!.executionSettings).not.toHaveProperty("skipPlanning");
 	await dialog.getByRole("tab", { name: "Chat", exact: true }).click();
 	await expect(
 		dialog
@@ -2227,28 +2230,25 @@ test("Backlog execution settings save before moving to Ready and survive reopeni
 	const open = page.getByRole("button", { name: "TASK-1 First task", exact: true });
 	await open.click();
 	const panel = page.getByRole("dialog");
-	const skip = panel.getByRole("checkbox", { name: "Skip planning", exact: true });
-	const recommendations = panel.getByRole("checkbox", { name: "Accept recommendations", exact: true });
-	await expect(skip).not.toBeChecked();
-	await expect(recommendations).not.toBeChecked();
-	await skip.check();
+	const skip = panel.getByRole("combobox", { name: "Workflow", exact: true });
+	const recommendations = panel.getByRole("combobox", { name: "Agent input", exact: true });
+	await expect(skip).toHaveValue("planner-implementer");
+	await expect(recommendations).toHaveValue("ask");
+	await skip.selectOption("one-shot");
 	await expect(skip).toBeEnabled();
-	await expect(recommendations).not.toBeChecked();
-	await recommendations.check();
+	await recommendations.selectOption("recommendations");
 	await expect(recommendations).toBeEnabled();
-	await skip.uncheck();
-	await expect(skip).toBeEnabled();
-	await expect(recommendations).toBeChecked();
-	await skip.check();
-	await expect(skip).toBeEnabled();
 	await panel.getByRole("combobox", { name: "Implementer", exact: true }).selectOption(projectId);
 	await panel.getByRole("combobox", { name: "Permissions", exact: true }).selectOption("approve-for-me");
+	await expect(panel.getByRole("combobox", { name: "Permissions", exact: true })).toBeEnabled();
 	await dragToReady(page);
 	await panel.getByRole("button", { name: "Close ticket" }).click();
 	await open.click();
 	await expect(panel.getByRole("combobox", { name: "Implementer", exact: true })).toHaveValue(projectId);
-	await expect(skip).toBeChecked();
-	await expect(recommendations).toBeChecked();
+	await expect(skip).toHaveValue("one-shot");
+	await expect(recommendations).toHaveValue("recommendations");
+	await expect(skip).toBeDisabled();
+	await expect(recommendations).toBeDisabled();
 });
 
 test("ticket Details retains settings and Chat supports skill and file completion", async ({ page }) => {
@@ -2257,12 +2257,9 @@ test("ticket Details retains settings and Chat supports skill and file completio
 	const panel = page.getByRole("dialog");
 	await expect(panel.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
 	await panel.getByRole("tab", { name: "Details", exact: true }).click();
-	await panel.getByRole("checkbox", { name: "Skip planning", exact: true }).check();
-	await expect(panel.getByRole("checkbox", { name: "Skip planning", exact: true })).toBeEnabled();
-	await panel.getByRole("checkbox", { name: "Accept recommendations", exact: true }).check();
-	await expect(panel.getByRole("checkbox", { name: "Accept recommendations", exact: true })).toBeEnabled();
-	await panel.getByRole("combobox", { name: "Permissions", exact: true }).selectOption("full-access");
-	await expect(panel.getByRole("combobox", { name: "Permissions", exact: true })).toHaveValue("full-access");
+	await expect(panel.getByRole("combobox", { name: "Workflow", exact: true })).toBeDisabled();
+	await expect(panel.getByRole("combobox", { name: "Agent input", exact: true })).toBeDisabled();
+	await expect(panel.getByRole("combobox", { name: "Permissions", exact: true })).toBeDisabled();
 	await panel.getByRole("tab", { name: "Chat", exact: true }).click();
 	const message = panel.getByRole("textbox", { name: "Message", exact: true });
 	await message.fill("Use $rev");
@@ -2273,8 +2270,8 @@ test("ticket Details retains settings and Chat supports skill and file completio
 	await message.press("Tab");
 	await expect(message).toHaveValue("Use $review @src/main.ts ");
 	await panel.getByRole("tab", { name: "Details", exact: true }).click();
-	await expect(panel.getByRole("checkbox", { name: "Skip planning", exact: true })).toBeChecked();
-	await expect(panel.getByRole("checkbox", { name: "Accept recommendations", exact: true })).toBeChecked();
+	await expect(panel.getByRole("combobox", { name: "Workflow", exact: true })).toBeDisabled();
+	await expect(panel.getByRole("combobox", { name: "Agent input", exact: true })).toBeDisabled();
 	await panel.getByRole("tab", { name: "Chat", exact: true }).click();
 	await expect(message).toHaveValue("Use $review @src/main.ts ");
 });
@@ -2283,8 +2280,8 @@ test("ticket flags retain saved values on failure and disable during saving and 
 	const fixture = await setup(page);
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const panel = page.getByRole("dialog");
-	const skip = panel.getByRole("checkbox", { name: "Skip planning", exact: true });
-	const recommendations = panel.getByRole("checkbox", { name: "Accept recommendations", exact: true });
+	const skip = panel.getByRole("combobox", { name: "Workflow", exact: true });
+	const recommendations = panel.getByRole("combobox", { name: "Agent input", exact: true });
 	let release = () => {};
 	const pending = new Promise<void>((resolve) => {
 		release = resolve;
@@ -2293,16 +2290,16 @@ test("ticket flags retain saved values on failure and disable during saving and 
 		await pending;
 		await route.fulfill({ status: 503, json: { error: "ticket-unavailable" } });
 	});
-	await skip.click();
+	await skip.selectOption("one-shot");
 	await expect(skip).toBeDisabled();
 	await expect(recommendations).toBeDisabled();
 	release();
 	await expect(page.getByRole("alert")).toBeVisible();
 	await expect(skip).toBeEnabled();
-	await expect(skip).not.toBeChecked();
-	await expect(recommendations).not.toBeChecked();
+	await expect(skip).toHaveValue("planner-implementer");
+	await expect(recommendations).toHaveValue("ask");
 	await page.unroute("**/api/tickets/TASK-1/settings");
-	await recommendations.check();
+	await recommendations.selectOption("recommendations");
 	await expect(recommendations).toBeEnabled();
 	const ticket = fixture.tickets()[0]!;
 	ticket.resetting = true;
@@ -2317,7 +2314,7 @@ test("ticket flags retain saved values on failure and disable during saving and 
 	await expect(panel.getByText("Archived · Read only", { exact: true })).toBeVisible();
 	await expect(skip).toBeDisabled();
 	await expect(recommendations).toBeDisabled();
-	await expect(recommendations).toBeChecked();
+	await expect(recommendations).toHaveValue("recommendations");
 });
 
 test("ticket archive requires confirmation and removes the card only after success", async ({ page }) => {

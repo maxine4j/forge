@@ -216,8 +216,6 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 			})
 		).status,
 	).toBe(200);
-	const moved = await request(`tickets/${ticket.id}/move`, "POST", { status: "todo" });
-	expect(await moved.json()).toMatchObject({ title: "Edited", status: "todo" });
 	const executionSettings = { permissions: "full-access", skipPlanning: false, acceptRecommendations: true };
 	expect((await request(`tickets/${ticket.id}/settings`, "PATCH", executionSettings)).status).toBe(200);
 	expect((await (await request(`tickets/${ticket.id}`)).json()).executionSettings).toEqual({
@@ -230,6 +228,9 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	}
 	expect((await request(`tickets/${ticket.id}/settings`, "PATCH", { model: "invented" })).status).toBe(400);
 	expect((await request(`tickets/${ticket.id}/settings`, "PATCH", { reasoningEffort: "invented" })).status).toBe(400);
+	const moved = await request(`tickets/${ticket.id}/move`, "POST", { status: "todo" });
+	expect(await moved.json()).toMatchObject({ title: "Edited", status: "todo" });
+	expect((await request(`tickets/${ticket.id}/settings`, "PATCH", executionSettings)).status).toBe(409);
 	expect(await (await request(`tickets/${ticket.id}/workflow`)).json()).toMatchObject({
 		state: "queued",
 		phase: "planning",

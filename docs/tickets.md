@@ -92,8 +92,8 @@ presentation. See [site-wide navigation](foundation.md#navigation).
 ### Structured Planner revisions
 
 The Planner returns a complete native Markdown plan with level-two headings Goals,
-Scope, Decisions, Acceptance criteria, Tests, and Ordered subtasks, once each in
-that order. The first five have nonblank bodies. An optional level-one title may
+Scope, Decisions, Acceptance criteria and Tests, once each in that order. The
+Planner + subtasks preset adds Ordered subtasks. The first five have nonblank bodies. An optional level-one title may
 precede them. Ordered subtasks have consecutive `### 1. Title` headings and nonblank
 Files, Dependencies, Expected changes, Exclusions, and Completion criteria entries.
 Continuation lines are indented. The Planner supplies repository paths, symbols,
@@ -107,9 +107,9 @@ Structured data can also represent a five-section plan with an empty subtask lis
 rendering that form omits the Ordered subtasks section.
 Invalid or missing output fails planning without replacing the prior
 revision or releasing the Planner reservation; the owner can send feedback to the
-same pinned thread. Approval applies only to the current accepted revision. Forge
-renders the entire stored structure into one Implementer prompt; older text-only
-records use their original text. Subtasks are not dispatched or tracked separately.
+same pinned thread or approve the prior valid revision. Planner + subtasks runs each
+structured subtask in order in a fresh Implementer conversation on the same branch.
+Other presets send the entire plan to one Implementer; text-only records use their original text.
 See [agent lifecycle](agents.md#codex-harness-and-lifecycle).
 
 Board, backlog, editing, validation, execution settings, recovery, history, Docker
@@ -222,8 +222,8 @@ plan without another planning or approval turn. **Clear plan** appears beside a
 saved plan only on non-archived Backlog tickets. Owner-only
 `POST /api/tickets/:id/clear-plan` returns the updated workflow and idempotently
 clears the plan and approval after cleanup, preserving scope and usage. Restarting
-after clearing uses the current scope, starting implementation when Skip planning
-is enabled and planning otherwise. Abandoned threads and
+after clearing uses the current scope, starting implementation for One shot and
+planning otherwise. Abandoned threads and
 worktrees are never reused. See [ticket cancellation](agents.md#ticket-cancellation).
 
 Tickets belong to the global board, independently of repositories. SQLite allocates
@@ -256,12 +256,12 @@ ticket and workflow remain readable by ID.
 Queued work can be archived before it starts. A running turn, unresolved dispatch
 or pending merge must settle before archiving.
 
-| Stage                 | Behavior                                                                                                                                                                                                                                                                                               |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Backlog               | The owner writes the scope.                                                                                                                                                                                                                                                                            |
-| Ready for development | The scheduler checks Ready tickets in board order and can skip tickets waiting for Agent or provider capacity. It persists In progress and the phase reservation together before workspace setup. An unusable assignment leaves the ticket in Ready with Retry setup.                                  |
-| In progress           | A fresh Codex planner proposes a plan. The card shows an orange notification dot and Chat renders the Markdown plan and accepts feedback. Approve plan applies to the latest completed revision and queues a fresh implementer in the same worktree. Completed implementation goes to the merge queue. |
-| Done                  | Forge moves the ticket here after confirming its commit is in local main.                                                                                                                                                                                                                              |
+| Stage                 | Behavior                                                                                                                                                                                                                                                                                                             |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Backlog               | The owner writes the scope.                                                                                                                                                                                                                                                                                          |
+| Ready for development | The scheduler checks Ready tickets in board order and can skip tickets waiting for Agent or provider capacity. It persists In progress and the phase reservation together before workspace setup. An unusable assignment leaves the ticket in Ready with Retry setup.                                                |
+| In progress           | When planning is needed, a fresh Codex planner proposes a plan. The card shows an orange notification dot and Chat renders the Markdown plan and accepts feedback. Approve plan applies to the latest accepted revision. Implementation uses the same worktree and completed implementation goes to the merge queue. |
+| Done                  | Forge moves the ticket here after confirming its commit is in local main.                                                                                                                                                                                                                                            |
 
 The serialized scheduler walks the assigned Agent's models in order. It skips
 retired providers, unresolved models, selections incompatible with ticket
@@ -335,7 +335,7 @@ The planner receives a short ticket instruction and uses native Codex Plan mode
 for every turn. Forge saves completed plan items as numbered revisions. Followup
 messages contain the owner's text, plus recommendation guidance when enabled.
 The implementer receives the saved plan once, or the current ticket ID, title and
-description when Skip planning starts implementation without a plan, with an
+description when One shot starts implementation without a plan, with an
 instruction to implement and commit on the worktree branch. No plan or approved
 revision is fabricated for direct implementation.
 The owner can add separate planning and implementation instructions in
@@ -562,16 +562,20 @@ ticket cleanup.
 Each new phase pin captures the provider's current [automatic compaction threshold](foundation.md#model-providers), if set. Retries, linked implementation, retirement, and recovery retain the pinned value or its absence.
 
 Tickets use the exported `TicketExecutionSettings` type and
-`ticketExecutionSettingsSchema`, extending agent settings with optional boolean
-`skipPlanning` and `acceptRecommendations`. Missing flags mean false.
-Tickets accept optional `executionSettings: {plannerAgentId?, implementerAgentId?, permissions?, skipPlanning?, acceptRecommendations?}`
+`ticketExecutionSettingsSchema`, extending agent settings with optional `workflowPreset`
+and boolean `skipPlanning` and `acceptRecommendations`. The explicit preset wins;
+legacy `skipPlanning: true` resolves to `one-shot` and otherwise the default is
+`planner-implementer`.
+Tickets accept optional `executionSettings: {plannerAgentId?, implementerAgentId?, permissions?, workflowPreset?, skipPlanning?, acceptRecommendations?}`
 on creation and return the saved selection on reads. Owner-authorized
 `PATCH /api/tickets/:id/settings` replaces those settings independently of scope,
 with exact-origin checks. The Planner and Implementer selectors save immediately
 and can both select the same [Agent](#named-agents). Retired agents and agents with
 unavailable providers remain visible where already assigned. The repository
-multiselect saves its ordered selection independently. Skip planning starts
-implementation using a saved plan or the current ticket scope. Accept recommendations
+multiselect saves its ordered selection independently. Workflow and Agent input save
+immediately in Backlog. Settings lock in Ready until the ticket returns to Backlog
+and cleanup finishes. One shot starts implementation using a saved plan or the
+current ticket scope. All presets reuse saved plans. Accept recommendations
 applies to each dispatched turn, including feedback and rebase. Manual plan approval
 and ticket-wide tool permissions still apply.
 
@@ -581,8 +585,7 @@ model and provider availability for the assigned Agent.
 Before external setup, each phase persists its own pin with the assignee ID,
 provider identity, inference configuration, model and resolved thinking level.
 Feedback and rebase reuse the corresponding pin after agent edits, provider edits,
-or retirement. Each phase's assignment is editable until it pins or creates a
-thread. Public workflow summaries expose only provider identity and lock metadata.
+or retirement. Public workflow summaries expose only provider identity and lock metadata.
 See [migration and recovery](development.md#named-provider-upgrades) and
 [Codex execution](agents.md#codex-harness-and-lifecycle).
 

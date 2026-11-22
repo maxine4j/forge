@@ -1,5 +1,10 @@
 import type { AgentView } from "@forge/contracts/agents";
-import { updateTicketSchema, ticketSchema, renderTicketPlan } from "@forge/contracts/tickets";
+import {
+	updateTicketSchema,
+	ticketSchema,
+	renderTicketPlan,
+	resolveTicketWorkflowPreset,
+} from "@forge/contracts/tickets";
 import {
 	ticketWorkflowSchema,
 	type Ticket,
@@ -244,10 +249,11 @@ export const TicketDetails = ({
 	const [, setMoveError] = useErrorState();
 	const [savingSettings, setSavingSettings] = useState(false);
 	const [, setSettingsError] = useErrorState();
-	const settingsDisabled = archived || savingSettings || !!resetting || ticket.status === "done";
+	const settingsDisabled = archived || savingSettings || !!resetting || ticket.status !== "backlog";
 	const changeSettings = (value: TicketExecutionSettings) => {
 		if (settingsDisabled) return;
 		const next = { ...settings, ...value };
+		if (value.workflowPreset) delete next.skipPlanning;
 		setSettingsError("");
 		setSavingSettings(true);
 		setPendingSettings(next);
@@ -293,9 +299,8 @@ export const TicketDetails = ({
 	const reviewPlan =
 		ticket.status === "in-progress"
 		&& job?.phase === "planning"
-		&& job.state === "idle"
+		&& (job.state === "idle" || job.state === "failed")
 		&& !job.approvedRevision
-		&& !job.message
 		&& !feedbackPending
 			? plan
 			: undefined;
@@ -724,34 +729,37 @@ export const TicketDetails = ({
 						change={(ids) => void changeRepositories(ids)}
 						disabled={!editable || busy}
 					/>
-					{(
-						[
-							[
-								"skipPlanning",
-								"Skip planning",
-								"Start implementation directly, using a saved plan or the current ticket scope.",
-							],
-							[
-								"acceptRecommendations",
-								"Accept recommendations",
-								"Let the agent choose its recommended approach without preference or clarification questions. Plan approval and tool permissions still apply.",
-							],
-						] as const
-					).map(([key, label, description]) => (
-						<div key={key} className='ticket-execution-flag'>
-							<label>
-								<input
-									type='checkbox'
-									checked={settings[key] ?? false}
-									disabled={settingsDisabled}
-									aria-describedby={`${fieldId}-${key}`}
-									onChange={(event) => changeSettings({ [key]: event.target.checked })}
-								/>
-								{label}
-							</label>
-							<p id={`${fieldId}-${key}`}>{description}</p>
-						</div>
-					))}
+					<label>
+						Workflow
+						<select
+							value={resolveTicketWorkflowPreset(settings)}
+							disabled={settingsDisabled}
+							onChange={(event) =>
+								changeSettings({
+									workflowPreset: event.target.value as NonNullable<
+										TicketExecutionSettings["workflowPreset"]
+									>,
+								})
+							}
+						>
+							<option value='planner-subtasks'>Planner + subtasks</option>
+							<option value='planner-implementer'>Planner + implementer</option>
+							<option value='one-shot'>One shot, no planner</option>
+						</select>
+					</label>
+					<label>
+						Agent input
+						<select
+							value={settings.acceptRecommendations ? "recommendations" : "ask"}
+							disabled={settingsDisabled}
+							onChange={(event) =>
+								changeSettings({ acceptRecommendations: event.target.value === "recommendations" })
+							}
+						>
+							<option value='ask'>Ask me</option>
+							<option value='recommendations'>Accept recommendations</option>
+						</select>
+					</label>
 				</fieldset>
 				{ticket.status !== "backlog" && <p>Scope is fixed after execution starts. Discuss changes in chat.</p>}
 			</div>

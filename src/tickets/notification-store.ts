@@ -9,7 +9,7 @@ export function workflowNotificationKeys(job: TicketWorkflowRecord, status = "in
 	if (["setup-failed", "failed", "uncertain"].includes(job.state)) keys.push(`${job.state}:${attempt}`);
 	if (
 		status === "in-progress"
-		&& job.state === "idle"
+		&& (job.state === "idle" || job.state === "failed")
 		&& job.phase === "planning"
 		&& job.plan
 		&& !job.approvedRevision

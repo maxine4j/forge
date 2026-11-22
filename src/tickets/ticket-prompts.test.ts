@@ -1,7 +1,10 @@
 import type { Ticket, TicketWorkflow } from "@forge/contracts/tickets";
 import { expect, test } from "vitest";
 
-import { ticketPlanGuidance } from "./ticket-plan-format.ts";
+import {
+	ticketPlanGuidance as subtaskGuidance,
+	ticketSinglePlanGuidance as ticketPlanGuidance,
+} from "./ticket-plan-format.ts";
 import { TicketPrompts } from "./ticket-prompts.ts";
 
 test("initial phase prompts include only the scope needed for that phase and followups are verbatim", () => {
@@ -17,6 +20,9 @@ test("initial phase prompts include only the scope needed for that phase and fol
 	const job: TicketWorkflow = { ticketId: ticket.id, phase: "planning", state: "queued", mergeAttempts: 0 };
 	expect(prompts.build(ticket, job)).toBe(
 		`Propose an implementation plan for TASK-1 Search files. Filter by extension.\n\n${ticketPlanGuidance}`,
+	);
+	expect(prompts.build({ ...ticket, executionSettings: { workflowPreset: "planner-subtasks" } }, job)).toContain(
+		subtaskGuidance,
 	);
 	const plan = { revision: 2, text: "# Plan\nFilter by extension." };
 	const structured = {

@@ -8,6 +8,7 @@ export const ticketWorkflowRecordSchema = ticketWorkflowSchema.extend({
 	implementationProviderSnapshot: providerSnapshotSchema.optional(),
 	reservation: z.string().min(1).optional(),
 	previousTurnId: z.string().min(1).max(256).optional(),
+	subtaskIndex: z.number().int().nonnegative().optional(),
 	turnId: z.string().min(1).max(256).optional(),
 	workspaceCleaned: z.literal(true).optional(),
 	cleanupFailed: z.literal(true).optional(),
@@ -25,6 +26,7 @@ export type TicketWorkflowRecord = z.infer<typeof ticketWorkflowRecordSchema>;
 /** One public projection for workflow reads and notification payloads. */
 export function ticketWorkflowSummary({
 	previousTurnId: _previous,
+	subtaskIndex: _subtaskIndex,
 	turnId: _turn,
 	workspaceCleaned: _cleaned,
 	cleanupFailed: _cleanupFailed,
