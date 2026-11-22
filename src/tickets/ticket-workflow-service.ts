@@ -361,7 +361,13 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		this.access.assertOwner(actor);
 		return this.serialize(async () => {
 			const job = await this.inProgress(ticket.id);
-			if (job.phase !== "planning" || job.state !== "idle" || job.plan?.revision !== revision)
+			if (
+				job.phase !== "planning"
+				|| job.state !== "idle"
+				|| job.plan?.revision !== revision
+				|| job.message
+				|| job.approvedRevision
+			)
 				throw new TicketError("ticket-conflict");
 			const next: TicketWorkflowRecord = {
 				...job,

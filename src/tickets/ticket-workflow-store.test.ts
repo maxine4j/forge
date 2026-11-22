@@ -70,7 +70,7 @@ test("workflow intent and board movement are atomic, durable, and scheduled in b
 		const savedPlan = { revision: 1, text: "Original", structured };
 		await jobs.save({ ...job, plan: savedPlan });
 		expect((await jobs.get(one.id))?.plan).toEqual(savedPlan);
-		expect(ticketWorkflowSummary((await jobs.get(one.id))!).plan).toEqual({ revision: 1, text: "Original" });
+		expect(ticketWorkflowSummary((await jobs.get(one.id))!).plan).toEqual(savedPlan);
 		await jobs.save({ ...job, plan: { revision: 1, text: "Legacy" } });
 		expect((await jobs.get(one.id))?.plan).toEqual({ revision: 1, text: "Legacy" });
 		await jobs.save({ ...job, state: "idle" });

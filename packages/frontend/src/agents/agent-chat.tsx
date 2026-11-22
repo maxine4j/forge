@@ -34,6 +34,8 @@ export const Conversation = ({
 	suffix,
 	steer = false,
 	planText,
+	planMarkdown,
+	feedbackPending,
 	planAction,
 	snapshots,
 	scrollState,
@@ -54,6 +56,8 @@ export const Conversation = ({
 	suffix?: ReactNode;
 	steer?: boolean;
 	planText?: string;
+	planMarkdown?: string;
+	feedbackPending?: (pending: boolean) => void;
 	planAction?: ReactNode;
 	snapshots?: Map<string, AgentView>;
 	scrollState?: ConversationScroll;
@@ -187,6 +191,7 @@ export const Conversation = ({
 	const act = (suffix: string, body: unknown, sent = false) => {
 		if (acting.current || !poller.current || readOnly) return;
 		acting.current = true;
+		if (sent && messagePath) feedbackPending?.(true);
 		setBusy(true);
 		setError("");
 		void poller.current
@@ -209,6 +214,7 @@ export const Conversation = ({
 				}
 			})
 			.finally(() => {
+				if (sent && messagePath) feedbackPending?.(false);
 				acting.current = false;
 				setBusy(false);
 			});
@@ -251,7 +257,17 @@ export const Conversation = ({
 					</button>
 				)}
 				{loadingHistory && <p role='status'>Loading planning history…</p>}
-				<AgentActivity items={view?.items ?? []} />
+				<AgentActivity items={view?.items ?? []} planText={planText} planMarkdown={planMarkdown} />
+				{planText
+					&& view
+					&& !loadingHistory
+					&& !view.items.some((item) => item.kind === "plan" && item.text.trim() === planText.trim()) && (
+						<AgentActivity
+							items={[{ id: "saved-plan", role: "assistant", kind: "plan", text: planText }]}
+							planText={planText}
+							planMarkdown={planMarkdown}
+						/>
+					)}
 			</>
 		);
 	return (
@@ -338,15 +354,19 @@ export const Conversation = ({
 							<AgentActivity
 								items={view?.items ?? []}
 								planText={planText}
+								planMarkdown={planMarkdown}
 								planAction={eligiblePlanAction}
 							/>
 							{planText
 								&& view
 								&& !loadingHistory
-								&& !view.items.some((item) => item.kind === "plan") && (
+								&& !view.items.some(
+									(item) => item.kind === "plan" && item.text.trim() === planText.trim(),
+								) && (
 									<AgentActivity
 										items={[{ id: "saved-plan", role: "assistant", kind: "plan", text: planText }]}
 										planText={planText}
+										planMarkdown={planMarkdown}
 										planAction={eligiblePlanAction}
 									/>
 								)}

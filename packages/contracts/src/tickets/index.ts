@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { agentSettingsSchema, agentRequestSchema } from "../agents/index.ts";
 import { ticketAssigneeSchema } from "../task-agents/index.ts";
+import { structuredTicketPlanSchema } from "./plan.ts";
+export * from "./plan.ts";
 
 export const ticketExecutionSettingsSchema = agentSettingsSchema.extend({
 	plannerAgentId: z.uuid().optional(),
@@ -169,7 +171,13 @@ export const ticketWorkflowSchema = z.strictObject({
 	]),
 	resetStage: z.enum(["stopping", "cleanup"]).optional(),
 	resetError: z.string().optional(),
-	plan: z.strictObject({ revision: z.number().int().positive(), text: z.string().min(1).max(32000) }).optional(),
+	plan: z
+		.strictObject({
+			revision: z.number().int().positive(),
+			text: z.string().min(1).max(32000),
+			structured: structuredTicketPlanSchema.optional(),
+		})
+		.optional(),
 	approvedRevision: z.number().int().positive().optional(),
 	message: z.string().max(8000).optional(),
 	baseSha: z

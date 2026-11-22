@@ -1,7 +1,7 @@
 import type { ForgeSettings } from "@forge/contracts/settings";
-import type { Ticket } from "@forge/contracts/tickets";
+import { renderTicketPlan, type Ticket } from "@forge/contracts/tickets";
 
-import { renderTicketPlan, ticketPlanGuidance } from "./ticket-plan-format.ts";
+import { ticketPlanGuidance } from "./ticket-plan-format.ts";
 import type { TicketWorkflowRecord } from "./types.ts";
 
 type TicketInstructions = Pick<ForgeSettings, "planningInstructions" | "implementationInstructions">;

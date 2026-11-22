@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import * as files from "@forge/backend-infrastructure/file";
 import { sleep } from "@forge/backend-infrastructure/sleep";
 import type { AgentOptions } from "@forge/contracts/agents";
+import { ticketWorkflowSchema } from "@forge/contracts/tickets";
 import { expect, test, vi } from "vitest";
 
 import { AccountProcess } from "../../src/accounts/account-process.ts";
@@ -285,6 +286,8 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await workflow.tick(owner);
 		await expect.poll(idle).toBe("idle");
 		expect((await jobs.get(ticket.id))?.plan?.revision).toBe(2);
+		const revisedPlan = ticketWorkflowSchema.parse(await workflow.get(owner, ticket.id)).plan!;
+		expect(revisedPlan.structured?.subtasks.map((task) => task.number)).toEqual([1, 2]);
 		expect((await jobs.get(ticket.id))?.plan?.structured?.subtasks[0]?.expectedChanges).toBe(
 			"Implement search revision 2",
 		);
@@ -324,6 +327,10 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect((await tickets.list(owner)).at(0)).toMatchObject({ agentStatus: "queued" });
 		expect((await tickets.list(owner)).at(0)?.needsAttention).toBeUndefined();
 		await restart();
+		expect(ticketWorkflowSchema.parse(await workflow.get(owner, ticket.id))).toMatchObject({
+			plan: revisedPlan,
+			approvedRevision: 2,
+		});
 		await workflow.tick(owner);
 		await expect.poll(idle).toBe("merge-queued");
 		const implementerStarts = rpc.mock.calls.filter(

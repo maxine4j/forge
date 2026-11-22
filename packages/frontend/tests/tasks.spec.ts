@@ -2885,8 +2885,40 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	let uncertain = false;
 	let resumes = 0;
 	let reject = false;
+	let releaseFeedback: (() => void) | undefined;
+	const feedbackHeld = new Promise<void>((resolve) => {
+		releaseFeedback = resolve;
+	});
 	const submissions: unknown[] = [];
 	const plans = [{ id: "plan-1", role: "assistant", kind: "plan", text: "# Initial plan\n\nAdd **search**." }];
+	const structured = {
+		title: "Revised plan",
+		goals: "Search goals",
+		scope: "Search scope",
+		decisions: "Search decisions",
+		acceptanceCriteria: "Search criteria",
+		tests: "Search tests",
+		subtasks: [
+			{
+				number: 1,
+				title: "Search",
+				files: "search.ts",
+				dependencies: "None",
+				expectedChanges: "Add search",
+				exclusions: "No delete",
+				completionCriteria: "Search works",
+			},
+			{
+				number: 2,
+				title: "Filter",
+				files: "filter.ts",
+				dependencies: "1",
+				expectedChanges: "Add filter",
+				exclusions: "No sorting",
+				completionCriteria: "Filter works",
+			},
+		],
+	};
 	const activity: { id: string; role: string; text: string }[] = [];
 	const workflow = () => ({
 		ticketId: "TASK-1",
@@ -2895,7 +2927,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 		phase,
 		state,
 		mergeAttempts: 0,
-		plan: { revision, text: plans[revision - 1]!.text },
+		plan: { revision, text: plans[revision - 1]!.text, ...(revision === 2 ? { structured } : {}) },
 		...(phase !== "planning" ? { approvedRevision: revision } : {}),
 	});
 	await page.route("**/api/tickets/TASK-1/{workflow,messages,approve}", async (route) => {
@@ -2909,8 +2941,10 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 			const input = route.request().postDataJSON();
 			submissions.push(input);
 			if (reject) return route.fulfill({ status: 409, json: { error: "ticket-conflict" } });
-			if (phase === "planning") state = "queued";
-			else activity.push({ id: `steer-${submissions.length}`, role: "user", text: input.text });
+			if (phase === "planning") {
+				await feedbackHeld;
+				state = "queued";
+			} else activity.push({ id: `steer-${submissions.length}`, role: "user", text: input.text });
 		}
 		return route.fulfill({ json: workflow() });
 	});
@@ -2949,7 +2983,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 								role: "assistant",
 								text: `Retained planning message ${i}`,
 							})),
-							...plans,
+							...(revision === 2 && phase === "planning" ? plans.slice(0, 1) : plans),
 						]
 					: activity,
 				// A stale planner callback must never acquire live controls in the combined view.
@@ -2973,6 +3007,11 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	await message.press("Enter");
 	await expect.poll(() => submissions.length).toBe(1);
 	await expect(modal.getByRole("button", { name: "Approve plan" })).toHaveCount(0);
+	await modal.getByRole("tab", { name: "Details", exact: true }).click();
+	await expect(modal.getByRole("button", { name: "Approve plan" })).toHaveCount(0);
+	await modal.getByRole("tab", { name: "Chat", exact: true }).click();
+	releaseFeedback!();
+	await expect.poll(() => state).toBe("queued");
 	state = "running";
 	await expect(interrupt).toBeEnabled();
 	await expect(modal.getByText("Messages unavailable while running.", { exact: true })).toHaveCount(0);
@@ -2983,6 +3022,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	plans[1]!.text = "# Revised plan\n\nAdd **filtering**.";
 	state = "idle";
 	await expect(modal.getByRole("button", { name: "Approve plan" })).toBeVisible();
+	await expect(modal.locator(".agent-message").getByText("Filter works", { exact: false })).toBeVisible();
 	await expect(modal.getByRole("heading", { name: "Initial plan" })).toBeAttached();
 	await message.fill("Retain this draft across approval");
 	const history = modal.getByLabel("Conversation history", { exact: true });
@@ -2997,6 +3037,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	await expect(latest).not.toHaveClass(/agent-scroll-unseen/);
 	expect(await history.evaluate((element) => element.scrollTop)).toBe(80);
 	await modal.getByRole("tab", { name: "Details", exact: true }).click();
+	await expect(modal.locator(".ticket-plan-markdown").getByText("Filter works", { exact: false })).toBeVisible();
 	await modal.getByRole("tab", { name: "Chat", exact: true }).click();
 	await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(80);
 	await modal.getByRole("button", { name: "Approve plan" }).click();

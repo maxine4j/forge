@@ -1,5 +1,5 @@
 import type { AgentView } from "@forge/contracts/agents";
-import { updateTicketSchema, ticketSchema } from "@forge/contracts/tickets";
+import { updateTicketSchema, ticketSchema, renderTicketPlan } from "@forge/contracts/tickets";
 import {
 	ticketWorkflowSchema,
 	type Ticket,
@@ -99,6 +99,7 @@ export const TicketDetails = ({
 	const fieldId = useId();
 	const poller = useRef<ResourcePoller<TicketWorkflow> | undefined>(undefined);
 	const [job, setJob] = useState<TicketWorkflow>();
+	const [feedbackPending, setFeedbackPending] = useState(false);
 	const section = ["details", "chat", "history", "cost"].includes(explicitTab ?? "")
 		? (explicitTab as TicketTab)
 		: undefined;
@@ -288,8 +289,14 @@ export const TicketDetails = ({
 	}, [api, ticket.id, setError]);
 	const currentId = job?.implementerId ?? job?.plannerId;
 	const plan = job?.plan;
+	const planMarkdown = plan?.structured ? renderTicketPlan(plan.structured) : plan?.text;
 	const reviewPlan =
-		ticket.status === "in-progress" && job?.phase === "planning" && job.state === "idle" && !job.approvedRevision
+		ticket.status === "in-progress"
+		&& job?.phase === "planning"
+		&& job.state === "idle"
+		&& !job.approvedRevision
+		&& !job.message
+		&& !feedbackPending
 			? plan
 			: undefined;
 	const tabs: TicketTab[] = ["details", "chat", "history", "cost"];
@@ -690,7 +697,7 @@ export const TicketDetails = ({
 							</button>
 						)}
 						<div className='ticket-plan-markdown'>
-							<PlanMarkdown text={plan.text} />
+							<PlanMarkdown text={planMarkdown!} />
 						</div>
 						{approvePlan && (
 							<div className='ticket-plan-actions'>
@@ -769,6 +776,8 @@ export const TicketDetails = ({
 						draftKey={`ticket:${ticket.id}`}
 						drafts={drafts}
 						planText={!job?.implementerId ? plan?.text : undefined}
+						planMarkdown={!job?.implementerId ? planMarkdown : undefined}
+						feedbackPending={job?.phase === "planning" ? setFeedbackPending : undefined}
 						planAction={approvePlan && <div className='ticket-chat-plan-actions'>{approvePlan}</div>}
 						prefix={
 							job?.implementerId && job.plannerId ? (
@@ -780,6 +789,8 @@ export const TicketDetails = ({
 										selected={tab === "chat"}
 										readOnly
 										historyOnly
+										planText={plan?.text}
+										planMarkdown={planMarkdown}
 										snapshots={snapshots}
 									/>
 									{implementation}

@@ -101,8 +101,9 @@ dependencies, and test commands; Forge validates structure, not their accuracy.
 Plans are limited to 32,000 characters.
 
 Each accepted revision stores original Markdown and parsed sections and subtasks
-together in the workflow record. The public response exposes only revision and
-original text. Invalid or missing output fails planning without replacing the prior
+together in the workflow record. The public workflow response includes revision,
+original text, and optional structured data; legacy plans contain text alone.
+Invalid or missing output fails planning without replacing the prior
 revision or releasing the Planner reservation; the owner can send feedback to the
 same pinned thread. Approval applies only to the current accepted revision. Forge
 renders the entire stored structure into one Implementer prompt; older text-only
@@ -384,7 +385,7 @@ checks. Transition conflicts return 409. Board and ticket details refresh while
 execution continues. The global board opens at `/tasks`; selection uses `/tasks?ticket=:id`. Details,
 workflow, model options and cost load by ticket ID even outside active board
 membership. Removed repository ticket APIs return not-found. The ticket modal has keyboard-accessible Details, Chat, History and Cost
-tabs. Details shows the latest saved Markdown plan below Description, including
+tabs. Details shows the complete latest saved plan below Description, including
 after approval. The tabs share a row with the live execution label on the right.
 The header epic link shows its icon and key, with the full title in its tooltip
 and membership picker. The larger ticket title aligns with the Details tab content.
@@ -392,9 +393,11 @@ Agent Settings places the repository picker below the model
 controls. While a plan awaits approval, Details offers Approve plan and
 Request changes, which opens Chat. Chat opens by default once execution starts.
 One scroll container shows the planner conversation and native Markdown plan
-revisions chronologically. Approve plan applies to the latest completed plan
-only while the workflow is idle;
-feedback queues a revision and disables approval until it finishes. The saved
+revisions chronologically. Both views render all saved sections and ordered subtask
+fields, falling back to original Markdown for legacy plans. Approve plan applies to
+the latest completed plan only while planning is idle and no feedback is pending;
+submitting feedback disables approval immediately and keeps the prior plan readable
+through queued, running, and failed revisions. The saved
 workflow revision remains the approval authority.
 Chat places Approve plan beneath the plan, aligned to the right edge of its
 message content, for both conversation plans and saved-plan fallback rendering.

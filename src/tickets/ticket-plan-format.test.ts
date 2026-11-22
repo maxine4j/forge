@@ -1,6 +1,7 @@
+import { renderTicketPlan } from "@forge/contracts/tickets";
 import { expect, test } from "vitest";
 
-import { parseTicketPlan, renderTicketPlan } from "./ticket-plan-format.ts";
+import { parseTicketPlan } from "./ticket-plan-format.ts";
 
 const plan = `# Title
 ## Goals

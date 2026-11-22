@@ -66,12 +66,14 @@ export const AgentActivity = ({
 	items,
 	planAction,
 	planText,
+	planMarkdown,
 }: {
 	items: AgentItem[];
 	planAction?: ReactNode;
 	planText?: string;
+	planMarkdown?: string;
 }) => {
-	const latestPlan = items.findLast((item) => item.kind === "plan");
+	const latestPlan = items.findLast((item) => item.kind === "plan" && item.text.trim() === planText?.trim());
 	const groups: AgentItem[][] = [];
 	for (const item of items) {
 		const last = groups.at(-1);
@@ -88,8 +90,12 @@ export const AgentActivity = ({
 				className={`agent-message agent-message-${item.role}`}
 				aria-label={item.role === "user" ? "You" : "Codex"}
 			>
-				{item.kind === "plan" ? <PlanMarkdown text={item.text} /> : <div>{item.text}</div>}
-				{item === latestPlan && item.text.trim() === planText && planAction}
+				{item.kind === "plan" ? (
+					<PlanMarkdown text={item === latestPlan ? (planMarkdown ?? item.text) : item.text} />
+				) : (
+					<div>{item.text}</div>
+				)}
+				{item === latestPlan && planAction}
 			</article>
 		);
 	});

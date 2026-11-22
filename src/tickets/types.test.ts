@@ -1,6 +1,42 @@
+import { ticketWorkflowSchema } from "@forge/contracts/tickets";
 import { expect, test } from "vitest";
 
 import { normalizeTicketWorkflow, ticketWorkflowSummary } from "./types.ts";
+
+test("public workflow preserves structured and legacy plans", () => {
+	const structured = {
+		title: "Plan",
+		goals: "Goals",
+		scope: "Scope",
+		decisions: "Decisions",
+		acceptanceCriteria: "Criteria",
+		tests: "Tests",
+		subtasks: [
+			{
+				number: 1,
+				title: "First",
+				files: "a",
+				dependencies: "None",
+				expectedChanges: "Change",
+				exclusions: "None",
+				completionCriteria: "Done",
+			},
+		],
+	};
+	for (const plan of [
+		{ revision: 1, text: "Original" },
+		{ revision: 2, text: "Revised", structured },
+	]) {
+		const record = normalizeTicketWorkflow({
+			ticketId: "TASK-1",
+			phase: "planning",
+			state: "idle",
+			mergeAttempts: 0,
+			plan,
+		});
+		expect(ticketWorkflowSchema.parse(ticketWorkflowSummary(record)).plan).toEqual(plan);
+	}
+});
 
 test("legacy snapshots normalize both phases and public projections expose only phase identities", () => {
 	const snapshot = {

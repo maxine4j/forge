@@ -1,31 +1,9 @@
-import { z } from "zod";
-
-const nonblank = z.string().refine((value) => value.trim().length > 0);
-export const structuredTicketPlanSchema = z.object({
-	title: nonblank.optional(),
-	goals: nonblank,
-	scope: nonblank,
-	decisions: nonblank,
-	acceptanceCriteria: nonblank,
-	tests: nonblank,
-	subtasks: z
-		.array(
-			z.object({
-				number: z.number().int().positive(),
-				title: nonblank,
-				files: nonblank,
-				dependencies: nonblank,
-				expectedChanges: nonblank,
-				exclusions: nonblank,
-				completionCriteria: nonblank,
-			}),
-		)
-		.min(1),
-});
-export type StructuredTicketPlan = z.infer<typeof structuredTicketPlanSchema>;
-
-const headings = ["Goals", "Scope", "Decisions", "Acceptance criteria", "Tests", "Ordered subtasks"] as const;
-const labels = ["Files", "Dependencies", "Expected changes", "Exclusions", "Completion criteria"] as const;
+import {
+	structuredTicketPlanSchema,
+	ticketPlanHeadings as headings,
+	ticketPlanLabels as labels,
+	type StructuredTicketPlan,
+} from "@forge/contracts/tickets";
 export const ticketPlanGuidance = `Return a complete native Markdown plan with exactly these level-two headings in order: ${headings.join(", ")}. Include nonblank bodies describing goals, in-scope and excluded work, settled decisions and assumptions, verifiable acceptance criteria, and test cases and commands. Optionally begin with one level-one title. Under Ordered subtasks use consecutive headings like ### 1. Title. For each, include exactly one nonblank entry for ${labels.map((label) => `- ${label}: value`).join(", ")}. Indent continuation lines. Give repository-relative paths and relevant symbols; name dependencies by earlier subtask number or None.`;
 
 export function parseTicketPlan(text: string): StructuredTicketPlan | undefined {
@@ -116,15 +94,4 @@ export function parseTicketPlan(text: string): StructuredTicketPlan | undefined 
 		subtasks: tasks,
 	});
 	return result.success ? result.data : undefined;
-}
-
-export function renderTicketPlan(plan: StructuredTicketPlan): string {
-	const sections = [plan.goals, plan.scope, plan.decisions, plan.acceptanceCriteria, plan.tests];
-	return [
-		plan.title && `# ${plan.title}`,
-		...sections.map((body, i) => `## ${headings[i]}\n${body}`),
-		`## Ordered subtasks\n${plan.subtasks.map((task) => `### ${task.number}. ${task.title}\n${[task.files, task.dependencies, task.expectedChanges, task.exclusions, task.completionCriteria].map((value, i) => `- ${labels[i]}: ${value}`).join("\n")}`).join("\n\n")}`,
-	]
-		.filter(Boolean)
-		.join("\n\n");
 }

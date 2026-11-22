@@ -1056,13 +1056,22 @@ test("planning starts in progress and approves only the displayed revision", asy
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)?.plan).toMatchObject({ revision: 1, structured: { subtasks: [{ number: 1 }] } });
 	await f.service.message(actor, ticket, "Include filtering");
+	await expect(f.service.approve(actor, ticket, 1)).rejects.toThrow("ticket-conflict");
 	await f.service.tick(actor);
+	await expect(f.service.approve(actor, ticket, 1)).rejects.toThrow("ticket-conflict");
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[1]).toBe(planner);
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toMatch(/^Include filtering/);
 	f.complete(planner, "# Revised plan");
 	await f.service.tick(actor);
 	await expect(f.service.approve(actor, ticket, 1)).rejects.toThrow("ticket-conflict");
+	const revisedPlan = f.jobs.get(ticket.id)!.plan;
 	await f.service.approve(actor, ticket, 2);
+	expect(f.jobs.get(ticket.id)).toMatchObject({
+		plan: revisedPlan,
+		approvedRevision: 2,
+		phase: "implementation",
+		state: "queued",
+	});
 	await f.service.tick(actor);
 	const implementation = f.jobs.get(ticket.id)!;
 	expect(implementation).toMatchObject({
@@ -1074,6 +1083,19 @@ test("planning starts in progress and approves only the displayed revision", asy
 	expect(implementation.implementerId).not.toBe(planner);
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("# Revised plan");
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).not.toContain("FORGE_RESULT");
+});
+
+test("legacy Markdown plans approve and dispatch unchanged", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	const job = f.jobs.get(ticket.id)!;
+	const text = "# Legacy plan\n\nOriginal **Markdown**.";
+	f.jobs.set(ticket.id, { ...job, state: "idle", plan: { revision: 1, text } });
+	await f.service.approve(actor, ticket, 1);
+	await f.service.tick(actor);
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain(text);
 });
 
 test("invalid planning output retains the last revision and allows correction on the same thread", async () => {
