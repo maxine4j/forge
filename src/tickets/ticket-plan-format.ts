@@ -83,7 +83,7 @@ export function parseTicketPlan(text: string): StructuredTicketPlan | undefined 
 			fields![field]!.push(line);
 		}
 	}
-	if (fence || section !== 5 || !finish()) return undefined;
+	if (fence || (section !== 4 && section !== 5) || (section === 5 && !finish())) return undefined;
 	const result = structuredTicketPlanSchema.safeParse({
 		title,
 		goals: bodies[0]!.join("\n").trim(),

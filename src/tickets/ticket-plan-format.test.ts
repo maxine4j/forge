@@ -36,6 +36,14 @@ test("parses and renders independently addressable subtasks", () => {
 	expect(parseTicketPlan(renderTicketPlan(parsed!))).toEqual(parsed);
 });
 
+test("parses and renders a five-section plan without subtasks", () => {
+	const text = plan.split("\n## Ordered subtasks")[0]!;
+	const parsed = parseTicketPlan(text);
+	expect(parsed?.subtasks).toEqual([]);
+	expect(renderTicketPlan(parsed!)).not.toContain("Ordered subtasks");
+	expect(parseTicketPlan(renderTicketPlan(parsed!))).toEqual(parsed);
+});
+
 test("rejects malformed and oversized plans while ignoring fenced headings", () => {
 	expect(parseTicketPlan(plan.replace("### 2.", "### 3."))).toBeUndefined();
 	expect(parseTicketPlan(plan.replace("- Files: a.ts", "- Files: "))).toBeUndefined();

@@ -103,6 +103,8 @@ Plans are limited to 32,000 characters.
 Each accepted revision stores original Markdown and parsed sections and subtasks
 together in the workflow record. The public workflow response includes revision,
 original text, and optional structured data; legacy plans contain text alone.
+Structured data can also represent a five-section plan with an empty subtask list;
+rendering that form omits the Ordered subtasks section.
 Invalid or missing output fails planning without replacing the prior
 revision or releasing the Planner reservation; the owner can send feedback to the
 same pinned thread. Approval applies only to the current accepted revision. Forge

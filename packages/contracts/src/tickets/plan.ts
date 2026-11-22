@@ -8,19 +8,17 @@ export const structuredTicketPlanSchema = z.object({
 	decisions: nonblank,
 	acceptanceCriteria: nonblank,
 	tests: nonblank,
-	subtasks: z
-		.array(
-			z.object({
-				number: z.number().int().positive(),
-				title: nonblank,
-				files: nonblank,
-				dependencies: nonblank,
-				expectedChanges: nonblank,
-				exclusions: nonblank,
-				completionCriteria: nonblank,
-			}),
-		)
-		.min(1),
+	subtasks: z.array(
+		z.object({
+			number: z.number().int().positive(),
+			title: nonblank,
+			files: nonblank,
+			dependencies: nonblank,
+			expectedChanges: nonblank,
+			exclusions: nonblank,
+			completionCriteria: nonblank,
+		}),
+	),
 });
 export type StructuredTicketPlan = z.infer<typeof structuredTicketPlanSchema>;
 
@@ -44,7 +42,8 @@ export function renderTicketPlan(plan: StructuredTicketPlan): string {
 	return [
 		plan.title && `# ${plan.title}`,
 		...sections.map((body, i) => `## ${ticketPlanHeadings[i]}\n${body}`),
-		`## Ordered subtasks\n${plan.subtasks.map((task) => `### ${task.number}. ${task.title}\n${[task.files, task.dependencies, task.expectedChanges, task.exclusions, task.completionCriteria].map((value, i) => `- ${ticketPlanLabels[i]}: ${value}`).join("\n")}`).join("\n\n")}`,
+		plan.subtasks.length > 0
+			&& `## Ordered subtasks\n${plan.subtasks.map((task) => `### ${task.number}. ${task.title}\n${[task.files, task.dependencies, task.expectedChanges, task.exclusions, task.completionCriteria].map((value, i) => `- ${ticketPlanLabels[i]}: ${value}`).join("\n")}`).join("\n\n")}`,
 	]
 		.filter(Boolean)
 		.join("\n\n");

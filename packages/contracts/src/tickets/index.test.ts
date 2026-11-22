@@ -9,7 +9,19 @@ import {
 	ticketStatuses,
 	ticketExecutionSettingsSchema,
 	ticketPhaseSettings,
+	resolveTicketWorkflowPreset,
 } from "./index.ts";
+
+test("workflow presets validate and resolve legacy settings", () => {
+	for (const workflowPreset of ["planner-subtasks", "planner-implementer", "one-shot"])
+		expect(ticketExecutionSettingsSchema.safeParse({ workflowPreset }).success).toBe(true);
+	expect(ticketExecutionSettingsSchema.safeParse({ workflowPreset: "invalid" }).success).toBe(false);
+	expect(resolveTicketWorkflowPreset()).toBe("planner-implementer");
+	expect(resolveTicketWorkflowPreset({ skipPlanning: true })).toBe("one-shot");
+	expect(resolveTicketWorkflowPreset({ workflowPreset: "planner-subtasks", skipPlanning: true })).toBe(
+		"planner-subtasks",
+	);
+});
 
 test("phase selections parse strictly and legacy tickets inherit without materializing defaults", () => {
 	const providerId = "123e4567-e89b-42d3-a456-426614174001";

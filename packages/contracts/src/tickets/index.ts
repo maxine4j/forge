@@ -5,7 +5,9 @@ import { ticketAssigneeSchema } from "../task-agents/index.ts";
 import { structuredTicketPlanSchema } from "./plan.ts";
 export * from "./plan.ts";
 
+export const ticketWorkflowPresetSchema = z.enum(["planner-subtasks", "planner-implementer", "one-shot"]);
 export const ticketExecutionSettingsSchema = agentSettingsSchema.extend({
+	workflowPreset: ticketWorkflowPresetSchema.optional(),
 	plannerAgentId: z.uuid().optional(),
 	implementerAgentId: z.uuid().optional(),
 	providerId: z.uuid().optional(),
@@ -19,6 +21,11 @@ export const ticketExecutionSettingsSchema = agentSettingsSchema.extend({
 	acceptRecommendations: z.boolean().optional(),
 });
 export type TicketExecutionSettings = z.infer<typeof ticketExecutionSettingsSchema>;
+export function resolveTicketWorkflowPreset(
+	settings?: TicketExecutionSettings,
+): z.infer<typeof ticketWorkflowPresetSchema> {
+	return settings?.workflowPreset ?? (settings?.skipPlanning ? "one-shot" : "planner-implementer");
+}
 export type TicketAgentPhase = "planning" | "implementation";
 export const ticketAgentId = (settings: TicketExecutionSettings | undefined, phase: TicketAgentPhase) =>
 	phase === "planning" ? settings?.plannerAgentId : settings?.implementerAgentId;
