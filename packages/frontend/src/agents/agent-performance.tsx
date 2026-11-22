@@ -11,8 +11,9 @@ export const AgentPerformanceStat = ({ view }: { view: AgentView }) => {
 	const [dismissed, setDismissed] = useState(false);
 	const p = view.performance?.turnId === view.thread.turnId ? view.performance : undefined;
 	const measured = p && p.state !== "unavailable" && p.requestDurationMs > 0 && p.outputTokens > 0;
+	const generationMs = measured && p.generationDurationMs && p.generationDurationMs > 0 ? p.generationDurationMs : undefined;
 	const label = measured
-		? `${rate(p.outputTokens, p.requestDurationMs)}${p.state === "partial" ? " · Partial" : ""}`
+		? `${generationMs !== undefined ? rate(p.outputTokens, generationMs) : rate(p.outputTokens, p.requestDurationMs)}${p.state === "partial" ? " · Partial" : ""}`
 		: ["running", "waiting"].includes(view.thread.status) && !p?.requestCount
 			? "Measuring…"
 			: "Unavailable";
