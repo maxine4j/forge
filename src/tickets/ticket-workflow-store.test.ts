@@ -8,6 +8,7 @@ import { SqliteDatabase } from "../database/sqlite-database.ts";
 import { ProjectStore } from "../projects/project-store.ts";
 import { TicketStore } from "./ticket-store.ts";
 import { TicketWorkflowStore } from "./ticket-workflow-store.ts";
+import { ticketWorkflowSummary } from "./types.ts";
 
 test("workflow intent and board movement are atomic, durable, and scheduled in board order", async () => {
 	const root = await mkdtemp(join(tmpdir(), "forge-workflow-store-"));
@@ -47,6 +48,31 @@ test("workflow intent and board movement are atomic, durable, and scheduled in b
 		tickets = new TicketStore(db);
 		expect(await jobs.get(one.id)).toEqual(job);
 		expect((await tickets.get(one.id))?.status).toBe("todo");
+		await jobs.save({ ...job, state: "idle" });
+		const structured = {
+			goals: "Goal",
+			scope: "Scope",
+			decisions: "Decision",
+			acceptanceCriteria: "Criteria",
+			tests: "Tests",
+			subtasks: [
+				{
+					number: 1,
+					title: "Work",
+					files: "a.ts",
+					dependencies: "None",
+					expectedChanges: "Change",
+					exclusions: "None",
+					completionCriteria: "Done",
+				},
+			],
+		};
+		const savedPlan = { revision: 1, text: "Original", structured };
+		await jobs.save({ ...job, plan: savedPlan });
+		expect((await jobs.get(one.id))?.plan).toEqual(savedPlan);
+		expect(ticketWorkflowSummary((await jobs.get(one.id))!).plan).toEqual({ revision: 1, text: "Original" });
+		await jobs.save({ ...job, plan: { revision: 1, text: "Legacy" } });
+		expect((await jobs.get(one.id))?.plan).toEqual({ revision: 1, text: "Legacy" });
 		await jobs.save({ ...job, state: "idle" });
 		expect((await jobs.list()).map((record) => record.ticketId)).toEqual([two.id]);
 

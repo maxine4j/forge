@@ -243,6 +243,10 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		};
 		await expect.poll(idle).toBe("idle");
 		expect((await jobs.get(ticket.id))?.plan?.revision).toBe(1);
+		expect((await jobs.get(ticket.id))?.plan?.structured?.subtasks[1]).toMatchObject({
+			number: 2,
+			dependencies: "1",
+		});
 		const next = await tickets.create(owner, {
 			repositoryIds: [project.id],
 			title: "Next",
@@ -254,6 +258,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await workflow.tick(owner);
 		expect((await ticketStore.get(next.id))?.status).toBe("todo");
 		await restart();
+		expect((await jobs.get(ticket.id))?.plan?.structured?.subtasks[1]?.files).toBe("src/filter.ts");
 		await workflow.tick(owner);
 		expect((await ticketStore.get(next.id))?.status).toBe("todo");
 		await tickets.archive(owner, next.id);
@@ -280,6 +285,10 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await workflow.tick(owner);
 		await expect.poll(idle).toBe("idle");
 		expect((await jobs.get(ticket.id))?.plan?.revision).toBe(2);
+		expect((await jobs.get(ticket.id))?.plan?.structured?.subtasks[0]?.expectedChanges).toBe(
+			"Implement search revision 2",
+		);
+		expect((await jobs.get(ticket.id))?.plannerId).toBe(planning.plannerId);
 		expect(rpc.mock.calls.filter(([method]) => method === "turn/start").at(-1)?.[1]).toMatchObject({
 			model: "gpt-5.4",
 			effort: "high",
@@ -317,6 +326,13 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await restart();
 		await workflow.tick(owner);
 		await expect.poll(idle).toBe("merge-queued");
+		const implementerStarts = rpc.mock.calls.filter(
+			([method, params]) =>
+				method === "turn/start" && JSON.stringify(params).includes("Implement the approved plan"),
+		);
+		expect(implementerStarts).toHaveLength(1);
+		expect(JSON.stringify(implementerStarts[0])).toContain("Implement search revision 2");
+		expect(JSON.stringify(implementerStarts[0])).toContain("### 2. Filter");
 		expect((await tickets.list(owner)).at(0)?.agentStatus).toBeUndefined();
 		const implemented = (await jobs.get(ticket.id))!;
 		expect(implemented.workspaceId).toBe(planning.workspaceId);

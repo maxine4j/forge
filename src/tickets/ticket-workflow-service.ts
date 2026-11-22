@@ -19,6 +19,7 @@ import type { ITaskAgents } from "../task-agents/task-agent-service.ts";
 import type { ITicketMergeClient } from "../workspaces/workspace-merge-client.ts";
 import type { IMergedWorkspaceCleanup, IAbandonedWorkspaceCleanup } from "../workspaces/workspace-service.ts";
 import { TicketError } from "./errors.ts";
+import { parseTicketPlan } from "./ticket-plan-format.ts";
 import type { ITicketPrompts } from "./ticket-prompts.ts";
 import type { ITicketStore } from "./ticket-store.ts";
 import type { ITicketWorkflowStore } from "./ticket-workflow-store.ts";
@@ -732,11 +733,13 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		}
 		if (job.phase === "planning") {
 			const text = await this.agents.plan(actor, id, thread.turnId);
-			if (!text) {
+			const structured = text && parseTicketPlan(text);
+			if (!text || !structured) {
+				this.log.warn({ ticketId: job.ticketId }, "Planner returned a missing or invalid plan");
 				await this.store.save({ ...job, state: "failed" });
 				return;
 			}
-			const plan = { revision: (job.plan?.revision ?? 0) + 1, text };
+			const plan = { revision: (job.plan?.revision ?? 0) + 1, text, structured };
 			await this.store.save({ ...job, plan, state: "idle", message: undefined });
 		} else {
 			if (!job.workspaceId) throw new TicketError("ticket-conflict");

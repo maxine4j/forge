@@ -89,6 +89,26 @@ presentation. See [site-wide navigation](foundation.md#navigation).
 
 ## Agentic ticket board
 
+### Structured Planner revisions
+
+The Planner returns a complete native Markdown plan with level-two headings Goals,
+Scope, Decisions, Acceptance criteria, Tests, and Ordered subtasks, once each in
+that order. The first five have nonblank bodies. An optional level-one title may
+precede them. Ordered subtasks have consecutive `### 1. Title` headings and nonblank
+Files, Dependencies, Expected changes, Exclusions, and Completion criteria entries.
+Continuation lines are indented. The Planner supplies repository paths, symbols,
+dependencies, and test commands; Forge validates structure, not their accuracy.
+Plans are limited to 32,000 characters.
+
+Each accepted revision stores original Markdown and parsed sections and subtasks
+together in the workflow record. The public response exposes only revision and
+original text. Invalid or missing output fails planning without replacing the prior
+revision or releasing the Planner reservation; the owner can send feedback to the
+same pinned thread. Approval applies only to the current accepted revision. Forge
+renders the entire stored structure into one Implementer prompt; older text-only
+records use their original text. Subtasks are not dispatched or tracked separately.
+See [agent lifecycle](agents.md#codex-harness-and-lifecycle).
+
 Board, backlog, editing, validation, execution settings, recovery, history, Docker
 and cost failures use [shared notifications](foundation.md#shared-notifications).
 Retry and reconciliation controls remain available after expiry; saved failure

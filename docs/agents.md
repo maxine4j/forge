@@ -1,5 +1,11 @@
 # Codex and interactive agents
 
+Ticket planning keeps the assigned Planner thread and its pinned settings across
+feedback and recovery. Accepted native plans are validated and stored alongside
+their parsed structure; invalid output leaves the previous revision intact for
+corrective feedback. Approval sends the complete rebuilt plan in one Implementer
+turn. See [structured Planner revisions](tickets.md#structured-planner-revisions).
+
 ## Worktree TypeScript tools
 
 Planning and implementation threads receive the reserved

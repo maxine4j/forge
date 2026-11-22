@@ -2,8 +2,16 @@ import { ticketWorkflowSchema, type TicketWorkflow } from "@forge/contracts/tick
 import { z } from "zod";
 
 import { providerSnapshotSchema } from "../model-providers/types.ts";
+import { structuredTicketPlanSchema } from "./ticket-plan-format.ts";
 
 export const ticketWorkflowRecordSchema = ticketWorkflowSchema.extend({
+	plan: z
+		.object({
+			revision: z.number().int().positive(),
+			text: z.string().min(1).max(32000),
+			structured: structuredTicketPlanSchema.optional(),
+		})
+		.optional(),
 	planningProviderSnapshot: providerSnapshotSchema.optional(),
 	implementationProviderSnapshot: providerSnapshotSchema.optional(),
 	reservation: z.string().min(1).optional(),
@@ -42,6 +50,7 @@ export function ticketWorkflowSummary({
 		};
 	return {
 		...workflow,
+		plan: workflow.plan && { revision: workflow.plan.revision, text: workflow.plan.text },
 		planningProvider: identity(planningProviderSnapshot),
 		implementationProvider: identity(implementationProviderSnapshot),
 	};

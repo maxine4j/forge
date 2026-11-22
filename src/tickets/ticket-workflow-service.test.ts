@@ -471,7 +471,11 @@ const fixture = (
 	const complete = (id: string, plan?: string) => {
 		const view = views.get(id)!;
 		view.thread.status = "completed";
-		if (plan) plans.set(id, plan);
+		if (plan)
+			plans.set(
+				id,
+				`${plan.startsWith("# ") ? plan : `# ${plan}`}\n\n## Goals\nGoal\n## Scope\nScope\n## Decisions\nDecision\n## Acceptance criteria\nCriteria\n## Tests\nTests\n## Ordered subtasks\n### 1. Work\n- Files: src/a.ts\n- Dependencies: None\n- Expected changes: Change\n- Exclusions: None\n- Completion criteria: Done`,
+			);
 		else plans.delete(id);
 		pool.observe(id, "completed");
 	};
@@ -1050,10 +1054,11 @@ test("planning starts in progress and approves only the displayed revision", asy
 	const planner = planning.plannerId!;
 	f.complete(planner, "# Plan");
 	await f.service.tick(actor);
-	expect(f.jobs.get(ticket.id)?.plan).toEqual({ revision: 1, text: "# Plan" });
+	expect(f.jobs.get(ticket.id)?.plan).toMatchObject({ revision: 1, structured: { subtasks: [{ number: 1 }] } });
 	await f.service.message(actor, ticket, "Include filtering");
 	await f.service.tick(actor);
-	expect(f.agents.dispatch.mock.calls.at(-1)?.slice(1, 3)).toEqual([planner, "Include filtering"]);
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[1]).toBe(planner);
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toMatch(/^Include filtering/);
 	f.complete(planner, "# Revised plan");
 	await f.service.tick(actor);
 	await expect(f.service.approve(actor, ticket, 1)).rejects.toThrow("ticket-conflict");
@@ -1069,6 +1074,41 @@ test("planning starts in progress and approves only the displayed revision", asy
 	expect(implementation.implementerId).not.toBe(planner);
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("# Revised plan");
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).not.toContain("FORGE_RESULT");
+});
+
+test("invalid planning output retains the last revision and allows correction on the same thread", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	const planner = f.jobs.get(ticket.id)!.plannerId!;
+	f.agents.plan.mockResolvedValueOnce("invalid");
+	f.complete(planner, "First");
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)?.state).toBe("failed");
+	expect(f.jobs.get(ticket.id)?.plan).toBeUndefined();
+	await f.service.message(actor, ticket, "Correct the format");
+	await f.service.tick(actor);
+	f.complete(planner, "First");
+	await f.service.tick(actor);
+	const first = f.jobs.get(ticket.id)!.plan;
+	expect(first).toMatchObject({ revision: 1, structured: { subtasks: [{ number: 1 }] } });
+	await f.service.message(actor, ticket, "Revise", undefined, 1);
+	await f.service.tick(actor);
+	f.agents.plan.mockResolvedValueOnce("invalid follow-up");
+	f.complete(planner, "Second");
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", plan: first, plannerId: planner });
+	await expect(f.service.approve(actor, ticket, 1)).rejects.toThrow("ticket-conflict");
+	await f.service.message(actor, ticket, "Fix it", undefined, 1);
+	await f.service.tick(actor);
+	f.complete(planner, "Second");
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)).toMatchObject({ plannerId: planner, plan: { revision: 2 } });
+	await expect(f.service.approve(actor, ticket, 1)).rejects.toThrow("ticket-conflict");
+	await f.service.approve(actor, ticket, 2);
+	await f.service.tick(actor);
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("### 1. Work");
 });
 
 const implement = async (f: ReturnType<typeof fixture>, ticket: Ticket) => {

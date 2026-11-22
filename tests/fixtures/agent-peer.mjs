@@ -125,13 +125,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		const rebase = prompt.startsWith("Rebase this branch");
 		if (planning || rebase || prompt.startsWith("Implement the approved plan")) {
 			if (planning) {
-				if (thread.turns.length > 1 && prompt !== "Include filtering")
-					throw new Error("Planner feedback must arrive verbatim");
+				if (thread.turns.length > 1 && !prompt.startsWith("Include filtering\n\n"))
+					throw new Error("Planner feedback must precede guidance");
 				const item = {
 					id: `plan-${sequence}`,
 					type: "plan",
-					text:
-						"## Search plan\n\n- Implement search with filtering.\n\n" + "Acceptance detail. ".repeat(500),
+					text: `# Search plan\n\n## Goals\nSearch ${thread.turns.length}\n\n## Scope\nFiltering\n\n## Decisions\nUse existing search\n\n## Acceptance criteria\nResults are filtered\n\n## Tests\nRun tests\n\n## Ordered subtasks\n### 1. Search\n- Files: src/search.ts\n- Dependencies: None\n- Expected changes: Implement search revision ${thread.turns.length}\n- Exclusions: None\n- Completion criteria: Search works\n### 2. Filter\n- Files: src/filter.ts\n- Dependencies: 1\n- Expected changes: Add filtering\n- Exclusions: None\n- Completion criteria: Filtering works`,
 				};
 				turn.items.push(item);
 				notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
