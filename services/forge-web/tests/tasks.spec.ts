@@ -239,8 +239,12 @@ for (const width of [1280, 390]) {
 		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 		await expect(page).toHaveURL(/tab=details/);
-		for (const name of ["Chat", "History", "Cost"]) await dialog.getByRole("tab", { name, exact: true }).click();
-		for (const name of ["History", "Chat", "Details"]) {
+		for (const name of ["Chat", "History", "Cost", "Utils"]) {
+			const tab = dialog.getByRole("tab", { name, exact: true });
+			await tab.click();
+			await expect(tab).toHaveAttribute("aria-selected", "true");
+		}
+		for (const name of ["Cost", "History", "Chat", "Details"]) {
 			if (name === "History") {
 				// Exercise the native dialog cancellation path separately from a
 				// browser POP. A real Android gesture still needs device verification.
@@ -254,12 +258,12 @@ for (const width of [1280, 390]) {
 		}
 		await page.goBack();
 		await expect(dialog).toHaveCount(0);
-		for (const name of ["Details", "Chat", "History", "Cost"]) {
+		for (const name of ["Details", "Chat", "History", "Cost", "Utils"]) {
 			await page.goForward();
 			await expect(dialog.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true");
 		}
 		await page.reload();
-		await expect(dialog.getByRole("tab", { name: "Cost", exact: true })).toHaveAttribute("aria-selected", "true");
+		await expect(dialog.getByRole("tab", { name: "Utils", exact: true })).toHaveAttribute("aria-selected", "true");
 		await dialog.getByRole("button", { name: "Close ticket", exact: true }).click();
 		await expect(page).toHaveURL("/tasks?view=backlog");
 		await page.goBack();
@@ -484,7 +488,8 @@ test("running ticket assignee stays locked in Details and Chat", async ({ page }
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 	await dialog.getByRole("tab", { name: "Details", exact: true }).click();
-	await expect(dialog.getByRole("combobox", { name: "Planner", exact: true })).toBeDisabled();
+	await expect(dialog.getByRole("combobox", { name: "Implementer", exact: true })).toBeDisabled();
+	await expect(dialog.getByRole("combobox", { name: "Planner", exact: true })).toHaveCount(0);
 	await dialog.getByRole("tab", { name: "Chat", exact: true }).click();
 	await expect(
 		dialog
@@ -1149,7 +1154,7 @@ for (const width of [1280, 768, 600, 390, 320]) {
 		await tab.press("ArrowRight");
 		await expect(details.getByRole("tab", { name: "Chat", exact: true })).toBeFocused();
 		await page.keyboard.press("End");
-		await expect(details.getByRole("tab", { name: "Cost", exact: true })).toBeFocused();
+		await expect(details.getByRole("tab", { name: "Utils", exact: true })).toBeFocused();
 	});
 }
 
@@ -2608,7 +2613,8 @@ test("ticket sections are keyboard navigable tabs with a labelled active panel",
 	const details = tablist.getByRole("tab", { name: "Details" });
 	const cost = tablist.getByRole("tab", { name: "Cost" });
 	const history = tablist.getByRole("tab", { name: "History" });
-	await expect(tablist.getByRole("tab")).toHaveCount(4);
+	const utils = tablist.getByRole("tab", { name: "Utils" });
+	await expect(tablist.getByRole("tab")).toHaveCount(5);
 	await expect(chat).toHaveAttribute("aria-selected", "true");
 	await details.focus();
 	await details.press("ArrowRight");
@@ -2620,13 +2626,74 @@ test("ticket sections are keyboard navigable tabs with a labelled active panel",
 	await expect(modal.getByRole("tabpanel", { name: "History" })).toBeVisible();
 	await history.press("ArrowRight");
 	await expect(cost).toBeFocused();
+	await expect(cost).toHaveAttribute("aria-selected", "true");
 	await cost.press("ArrowRight");
+	await expect(utils).toBeFocused();
+	await expect(modal.getByRole("tabpanel", { name: "Utils" })).toBeVisible();
+	await utils.press("ArrowRight");
 	await expect(details).toBeFocused();
 	await expect(details).toHaveAttribute("aria-selected", "true");
 	await details.press("End");
-	await expect(cost).toBeFocused();
-	await cost.press("Home");
+	await expect(utils).toBeFocused();
+	await expect(utils).toHaveAttribute("aria-selected", "true");
+	await utils.press("Home");
 	await expect(modal.getByRole("tabpanel", { name: "Details" })).toBeVisible();
+});
+
+test("ticket Utils confirms recovery actions and refreshes Done with Chat unavailable", async ({ page }) => {
+	const f = await setup(page, false, true);
+	const ticket = f.tickets().find(({ id }) => id === "TASK-1")!;
+	ticket.status = "in-progress";
+	const workflow: Partial<TicketWorkflow> = { phase: "implementation", state: "uncertain", workspaceId: projectId };
+	f.setWorkflow(workflow);
+	await page.route("**/api/agents/**", (route) =>
+		route.fulfill({ status: 503, json: { error: "agent-unavailable" } }),
+	);
+	const sha = "a".repeat(40);
+	const checkpoint = Promise.withResolvers<void>();
+	let checkpointCalls = 0;
+	await page.route("**/api/tickets/TASK-1/commit-checkpoint", async (route) => {
+		checkpointCalls++;
+		expect(route.request().postDataJSON()).toEqual({});
+		await checkpoint.promise;
+		await route.fulfill({ json: { outcome: "committed", sha } });
+	});
+	let mergeCalls = 0;
+	await page.route("**/api/tickets/TASK-1/merge-into-main", (route) => {
+		if (++mergeCalls === 1) return route.fulfill({ status: 409, json: { error: "ticket-branch-diverged" } });
+		ticket.status = "done";
+		const done = { ...workflow, state: "idle", resultSha: sha, cleanupPending: true } as const;
+		f.setWorkflow(done);
+		return route.fulfill({ json: { sha, workflow: { ...done, ticketId: ticket.id, mergeAttempts: 0 } } });
+	});
+	await page.goto("/tasks?ticket=TASK-1&tab=utils");
+	const modal = page.getByRole("dialog", { name: "TASK-1" });
+	const panel = modal.getByRole("tabpanel", { name: "Utils" });
+	const commit = panel.getByRole("button", { name: "Commit checkpoint" });
+	const merge = panel.getByRole("button", { name: "Merge branch into main" });
+	await expect(commit).toBeEnabled();
+	page.once("dialog", async (dialog) => {
+		expect(dialog.message()).toContain("non-ignored untracked files");
+		await dialog.accept();
+	});
+	await commit.click();
+	await expect(panel.getByRole("status")).toHaveText("Committing checkpoint…");
+	await expect(commit).toBeDisabled();
+	await expect(merge).toBeDisabled();
+	await commit.dispatchEvent("click");
+	checkpoint.resolve();
+	await expect(panel.getByRole("status")).toContainText(sha);
+	expect(checkpointCalls).toBe(1);
+	page.on("dialog", async (dialog) => {
+		expect(dialog.message()).toContain("mark this ticket Done");
+		await dialog.accept();
+	});
+	await merge.click();
+	await expect(panel.getByRole("alert")).toContainText("has diverged");
+	await merge.click();
+	await expect(panel.getByRole("status")).toContainText(`Merged into main · ${sha}`);
+	await expect(panel.getByText("Workspace cleanup pending.")).toBeVisible();
+	await expect(modal.locator(".ticket-status-done")).toHaveText("Done");
 });
 
 test("History retains nested visits, failed attempts, live state and reading position", async ({ page }) => {
@@ -3033,7 +3100,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	const message = modal.getByLabel("Message", { exact: true });
 	const send = modal.getByRole("button", { name: "Send message", exact: true });
 	const interrupt = modal.getByRole("button", { name: "Interrupt", exact: true });
-	await expect(modal.getByRole("tab")).toHaveCount(4);
+	await expect(modal.getByRole("tab")).toHaveCount(5);
 	await expect(modal.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
 	await expect(modal.getByRole("heading", { name: "Initial plan" })).toBeVisible();
 	await message.fill("Include filtering");

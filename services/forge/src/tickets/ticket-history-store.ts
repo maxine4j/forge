@@ -66,7 +66,7 @@ export function workflowMilestones(old: TicketWorkflowRecord | undefined, next: 
 		add(next.phase === "planning" ? "planning" : next.phase === "rebase" ? "rebasing" : "implementing", "queued");
 	if (next.state === "dispatching" && old?.state !== "dispatching")
 		add(next.phase === "planning" ? "planning" : next.phase === "rebase" ? "rebasing" : "implementing", "working");
-	if (next.resultSha && next.resultSha !== old?.resultSha) add("implemented");
+	if (next.resultSha && next.resultSha !== old?.resultSha && !next.manualCleanupThreads) add("implemented");
 	if (next.state === "merge-queued" && old?.state !== "merge-queued") add("merge-queued", "queued");
 	if (["failed", "setup-failed"].includes(next.state) && next.state !== old?.state)
 		add(

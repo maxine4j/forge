@@ -196,6 +196,19 @@ integration; entry points must never serialize it. Future PR services can inspec
 workspace identity/head through the same service interface. Startup initializes
 the workspace store and completes recovery before listening.
 
+## Ticket recovery workspaces
+
+The [ticket Utils actions](tickets.md#recovering-ticket-work-from-utils) use the
+existing owned checkout and share the workspace write guard with Forge editor
+and staging requests. Finish or abort any in-progress Git operation before using
+either action. A failed checkpoint can leave staged changes available for retry.
+An external process can continue to write until it settles.
+
+After a [manual fast-forward](git-and-ci.md#manual-ticket-fast-forward), Forge
+keeps the worktree and branch until ticket execution has settled. Cleanup checks
+reachability, the exact ticket branch tip, and the checkout for local changes
+before removal. Later commits and local files keep the checkout available.
+
 ## Ticket abandonment cleanup
 
 The dedicated injected abandonment cleanup interface is separate from merged

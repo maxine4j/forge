@@ -167,6 +167,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			|| (!highContext
 				&& (prompt.startsWith("Implement the approved plan")
 					|| prompt.includes("TASK67_CONTROLLED")
+					|| (thread.completionScenario && prompt.startsWith("Finish the integration\n\n"))
 					|| prompt.includes("TASK84_CONTROLLED")))
 		) {
 			if (planning) {

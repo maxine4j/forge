@@ -1570,6 +1570,8 @@
 	border-bottom: 1px solid #30363d;
 }
 .ticket-sections-row .section-tabs {
+	flex-shrink: 1;
+	min-width: 0;
 	border-bottom: 0;
 }
 .ticket-details-status {
@@ -1647,8 +1649,17 @@
 	flex-direction: column;
 }
 .ticket-cost,
-.ticket-fields {
+.ticket-fields,
+.ticket-utils {
 	overflow: auto;
+}
+.ticket-utils {
+	overflow-wrap: anywhere;
+}
+.ticket-utils-actions {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
 }
 .ticket-plan-markdown {
 	overflow-wrap: anywhere;

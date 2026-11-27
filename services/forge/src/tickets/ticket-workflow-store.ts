@@ -14,7 +14,7 @@ export interface ITicketWorkflowStore {
 	/** Active jobs in board position order, globally paginated across the board. Idle/failed jobs are read by ID. */
 	list(): Promise<TicketWorkflowRecord[]>;
 	/** Done tickets with a recorded merge candidate and worktree, including archived tickets. */
-	pendingCleanup(): Promise<TicketWorkflowRecord[]>;
+	pendingCleanup(manualOnly?: boolean): Promise<TicketWorkflowRecord[]>;
 	boardSummary(): Promise<TicketWorkflowRecord[]>;
 	countReservations(providerId: string): Promise<number>;
 	countAgentReservations(agentId: string): Promise<number>;
@@ -48,7 +48,7 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 		const jobs: TicketWorkflowRecord[] = [];
 		for (let offset = 0; ; offset += 500) {
 			const page = await this.read(
-				"SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId WHERE t.archivedAt IS NULL AND (json_extract(w.record,'$.state')='resetting' OR (t.status NOT IN ('backlog','done') AND json_extract(w.record,'$.state') IN ('queued','running','dispatching','uncertain','merge-queued'))) ORDER BY CASE json_extract(w.record,'$.state') WHEN 'running' THEN 0 WHEN 'merge-queued' THEN 1 ELSE 2 END,t.position,t.number LIMIT 500 OFFSET ?",
+				"SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId WHERE t.archivedAt IS NULL AND (json_extract(w.record,'$.state')='resetting' OR json_type(w.record,'$.manualMergeSha')='text' OR (t.status NOT IN ('backlog','done') AND json_extract(w.record,'$.state') IN ('queued','running','dispatching','uncertain','merge-queued'))) ORDER BY CASE json_extract(w.record,'$.state') WHEN 'running' THEN 0 WHEN 'merge-queued' THEN 1 ELSE 2 END,t.position,t.number LIMIT 500 OFFSET ?",
 				[String(offset)],
 			);
 			jobs.push(...page);
@@ -64,7 +64,8 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 	async countReservations(providerId: string): Promise<number> {
 		const rows = await this.database.all(
 			`SELECT COUNT(*) AS count FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId
-			 WHERE t.archivedAt IS NULL AND json_extract(w.record,'$.reservation')=?`,
+			 WHERE (t.archivedAt IS NULL OR json_array_length(w.record,'$.manualCleanupThreads')>0)
+			 AND json_extract(w.record,'$.reservation')=?`,
 			[providerId],
 		);
 		return z.object({ count: z.int().nonnegative() }).parse(rows.at(0)).count;
@@ -73,7 +74,8 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 		// Reset records use the destination phase, so identify the abandoned implementation by its thread or pin.
 		const rows = await this.database.all(
 			`SELECT COUNT(*) AS count FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId
-			 WHERE t.archivedAt IS NULL AND json_extract(w.record,'$.reservation') IS NOT NULL
+			 WHERE (t.archivedAt IS NULL OR json_array_length(w.record,'$.manualCleanupThreads')>0)
+			 AND json_extract(w.record,'$.reservation') IS NOT NULL
 			 AND CASE WHEN CASE WHEN w.record->>'$.state'='resetting'
 			   THEN w.record->>'$.abandonment.implementerId' IS NOT NULL
 			     OR w.record->>'$.implementationProviderSnapshot.providerId'=w.record->>'$.reservation'
@@ -85,13 +87,14 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 		);
 		return z.object({ count: z.int().nonnegative() }).parse(rows.at(0)).count;
 	}
-	async pendingCleanup(): Promise<TicketWorkflowRecord[]> {
+	async pendingCleanup(manualOnly = false): Promise<TicketWorkflowRecord[]> {
 		const jobs: TicketWorkflowRecord[] = [];
 		for (let offset = 0; ; offset += 500) {
 			const page = await this.read(
 				`SELECT w.record FROM ticket_workflows w JOIN tickets t ON t.id=w.ticketId
 				 WHERE t.status='done' AND json_type(w.record,'$.workspaceId')='text'
 				   AND json_type(w.record,'$.resultSha')='text' AND json_type(w.record,'$.workspaceCleaned') IS NULL
+				   ${manualOnly ? "AND json_type(w.record,'$.manualCleanupThreads')='array'" : ""}
 				 ORDER BY t.number LIMIT 500 OFFSET ?`,
 				[String(offset)],
 			);

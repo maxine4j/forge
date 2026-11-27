@@ -12,22 +12,24 @@ import {
 	type WorkspaceFile,
 	type WorkspaceTree,
 } from "@forge/contracts";
+import type { TicketCheckpoint } from "@forge/contracts/tickets";
 
 import type { IGitTransport } from "../repositories/git-transport.ts";
 import type { IRepositoryClient } from "../repositories/repository-client.ts";
+import { TicketError } from "../tickets/errors.ts";
 import { WorkspaceError } from "./errors.ts";
 import type { IWorkspaceFiles, WorkspaceRecord } from "./types.ts";
 
 export interface IWorkspaceClient {
 	/** Preceded by durable SQLite intent. Idempotent; never resets a branch or deletes data. */
 	prepare(record: WorkspaceRecord): Promise<string>;
-	verify(record: WorkspaceRecord): Promise<void>;
+	verify(record: WorkspaceRecord, requireIdle?: boolean): Promise<void>;
 	/** Removes only a clean owned checkout and the exact branch tip already reachable from main. */
-	removeMerged(record: WorkspaceRecord, candidate: string): Promise<void>;
+	removeMerged(record: WorkspaceRecord, candidate: string, preserveLocalFiles?: boolean): Promise<void>;
 	/** Discards owned ticket work after confirmed agent settlement. */
 	removeAbandoned(record: WorkspaceRecord): Promise<void>;
 	/** Verified internal runtime path; never a public response field. */
-	location(record: WorkspaceRecord): Promise<string>;
+	location(record: WorkspaceRecord, requireIdle?: boolean): Promise<string>;
 	head(record: WorkspaceRecord): Promise<string>;
 	tree(record: WorkspaceRecord, path: string): Promise<WorkspaceTree>;
 	read(record: WorkspaceRecord, path: string): Promise<WorkspaceFile>;
@@ -35,6 +37,9 @@ export interface IWorkspaceClient {
 	saveFile(record: WorkspaceRecord, input: SaveWorkspaceFile): Promise<WorkspaceFile>;
 	stage(record: WorkspaceRecord, paths: string[], unstage: boolean): Promise<void>;
 	commit(record: WorkspaceRecord, message: string, expectedHead: string): Promise<string>;
+	checkpoint(record: WorkspaceRecord, message: string): Promise<TicketCheckpoint>;
+	assertGitIdle(path: string): Promise<void>;
+	repositoryLocation(record: WorkspaceRecord): Promise<string>;
 }
 export class WorkspaceClient implements IWorkspaceClient {
 	constructor(
@@ -147,7 +152,7 @@ export class WorkspaceClient implements IWorkspaceClient {
 			return this.base(record);
 		});
 	}
-	async verify(record: WorkspaceRecord): Promise<void> {
+	async verify(record: WorkspaceRecord, requireIdle = false): Promise<void> {
 		await this.boundary(async () => {
 			this.validateRecord(record);
 			await this.repositories.verify(record.projectId);
@@ -160,25 +165,65 @@ export class WorkspaceClient implements IWorkspaceClient {
 			const common = (
 				await this.git.run(["-C", this.path(record), "rev-parse", "--path-format=absolute", "--git-common-dir"])
 			).trim();
+			if (resolve(common) !== (await this.files.realpath(this.repository(record))))
+				throw new Error("Worktree repository changed");
+			if (requireIdle) await this.assertGitIdle(this.path(record));
 			const branch = await this.currentBranch(record);
-			if (
-				resolve(common) !== (await this.files.realpath(this.repository(record)))
-				|| branch !== `refs/heads/${record.branch}`
-			)
-				throw new Error("Worktree identity changed");
+			if (branch !== `refs/heads/${record.branch}`) throw new Error("Worktree identity changed");
 		});
 	}
-	async location(record: WorkspaceRecord): Promise<string> {
-		await this.verify(record);
+	async location(record: WorkspaceRecord, requireIdle = false): Promise<string> {
+		await this.verify(record, requireIdle);
 		return this.path(record);
 	}
-	async removeMerged(record: WorkspaceRecord, candidate: string): Promise<void> {
-		return this.removeOwned(record, candidate);
+	async repositoryLocation(record: WorkspaceRecord): Promise<string> {
+		this.validateRecord(record);
+		await this.repositories.verify(record.projectId);
+		return this.repository(record);
+	}
+	async assertGitIdle(path: string): Promise<void> {
+		const gitDir = (await this.git.run(["-C", path, "rev-parse", "--absolute-git-dir"])).trim();
+		const markers = ["MERGE_HEAD", "rebase-merge", "rebase-apply", "CHERRY_PICK_HEAD", "REVERT_HEAD", "sequencer"];
+		if (
+			(await Promise.all(markers.map((marker) => this.exists(join(gitDir, marker))))).some(Boolean)
+			|| (await this.git.run(["-C", path, "ls-files", "--unmerged", "-z"]))
+		)
+			throw new TicketError("ticket-git-in-progress");
+	}
+	async checkpoint(record: WorkspaceRecord, message: string): Promise<TicketCheckpoint> {
+		const path = this.path(record);
+		const branch = `refs/heads/${record.branch}`;
+		const git = (...args: string[]) => this.git.run(["-C", path, ...args]);
+		await this.verify(record, true);
+		const assertAttached = async () => {
+			if ((await git("rev-parse", "--symbolic-full-name", "HEAD")).trim() !== branch)
+				throw new TicketError("ticket-ref-changed");
+		};
+		await assertAttached();
+		const head = gitShaSchema.parse((await git("rev-parse", "--verify", branch)).trim());
+		await git("add", "-A");
+		const tree = (await git("write-tree")).trim();
+		await this.assertGitIdle(path);
+		await assertAttached();
+		if (tree === (await git("rev-parse", `${head}^{tree}`)).trim()) {
+			if ((await git("rev-parse", "--verify", branch)).trim() !== head)
+				throw new TicketError("ticket-ref-changed");
+			return { outcome: "unchanged", sha: head };
+		}
+		const sha = await this.writeCommit(record, message, head, tree).catch((cause: unknown) => {
+			if (cause instanceof WorkspaceError && cause.code === "workspace-conflict")
+				throw new TicketError("ticket-ref-changed", { cause });
+			throw cause;
+		});
+		return { outcome: "committed", sha };
+	}
+	async removeMerged(record: WorkspaceRecord, candidate: string, preserveLocalFiles = false): Promise<void> {
+		return this.removeOwned(record, candidate, preserveLocalFiles);
 	}
 	async removeAbandoned(record: WorkspaceRecord): Promise<void> {
 		return this.removeOwned(record);
 	}
-	private async removeOwned(record: WorkspaceRecord, candidate?: string): Promise<void> {
+	private async removeOwned(record: WorkspaceRecord, candidate?: string, preserveLocalFiles = false): Promise<void> {
 		await this.boundary(async () => {
 			this.validateRecord(record);
 			if (candidate !== undefined) gitShaSchema.parse(candidate);
@@ -229,17 +274,31 @@ export class WorkspaceClient implements IWorkspaceClient {
 						: !exists && !entry.includes(`branch ${branch}`))
 				)
 					throw new Error("Merged worktree identity changed");
-				if (exists) {
-					await this.verify(record);
+				const checkCheckout = async () => {
+					await this.verify(record, preserveLocalFiles);
 					if (
 						candidate
-						&& (await this.git.run(["-C", path, "status", "--porcelain", "--untracked-files=all"])).trim()
+						&& (
+							await this.git.run([
+								"-C",
+								path,
+								"status",
+								"--porcelain",
+								"--untracked-files=all",
+								...(preserveLocalFiles ? ["--ignored"] : []),
+							])
+						).trim()
 					)
 						throw new Error("Merged worktree has local changes");
-				}
+				};
+				if (exists) await checkCheckout();
 				const locked = entry.some((field) => field === "locked" || field.startsWith("locked "));
 				// Settlement and ownership checks precede runtime release. Failure preserves files for retry.
 				await this.releaseWorktree?.(registeredPath);
+				if (exists && preserveLocalFiles) {
+					await checkCheckout();
+					if ((await this.head(record)) !== candidate) throw new Error("Merged workspace branch changed");
+				}
 				if (locked) await this.git.run([...repo, "worktree", "unlock", path]);
 				try {
 					await this.git.run([...repo, "worktree", "remove", ...(!candidate ? ["--force"] : []), path]);
@@ -362,40 +421,50 @@ export class WorkspaceClient implements IWorkspaceClient {
 			if (names.some((name) => !filePathSchema.safeParse(name).success))
 				throw new WorkspaceError("file-unsupported");
 			const tree = (await this.git.run(["-C", this.path(record), "write-tree"])).trim();
-			const commit = gitShaSchema.parse(
-				(
-					await this.git.run([
-						"-C",
-						this.path(record),
-						"-c",
-						"user.name=Forge",
-						"-c",
-						"user.email=forge@localhost",
-						"-c",
-						"commit.gpgSign=false",
-						"commit-tree",
-						tree,
-						"-p",
-						expectedHead,
-						"-m",
-						message,
-					])
-				).trim(),
-			);
-			try {
+			await this.writeCommit(record, message, expectedHead, tree);
+			return this.head(record);
+		});
+	}
+	private async writeCommit(
+		record: WorkspaceRecord,
+		message: string,
+		expectedHead: string,
+		tree: string,
+	): Promise<string> {
+		const commit = gitShaSchema.parse(
+			(
 				await this.git.run([
 					"-C",
 					this.path(record),
-					"update-ref",
-					`refs/heads/${record.branch}`,
-					commit,
+					"-c",
+					"user.name=Forge",
+					"-c",
+					"user.email=forge@localhost",
+					"-c",
+					"commit.gpgSign=false",
+					"commit-tree",
+					tree,
+					"-p",
 					expectedHead,
-				]);
-			} catch (cause) {
-				throw new WorkspaceError("workspace-conflict", { cause });
-			}
-			return this.head(record);
-		});
+					"-m",
+					message,
+				])
+			).trim(),
+		);
+		try {
+			await this.git.run([
+				"-C",
+				this.path(record),
+				"update-ref",
+				"--no-deref",
+				`refs/heads/${record.branch}`,
+				commit,
+				expectedHead,
+			]);
+		} catch (cause) {
+			throw new WorkspaceError("workspace-conflict", { cause });
+		}
+		return commit;
 	}
 	private async base(record: WorkspaceRecord): Promise<string> {
 		const meta = await this.files.lstat(this.baseMarker(record));
@@ -518,7 +587,7 @@ export class WorkspaceClient implements IWorkspaceClient {
 		try {
 			return await operation();
 		} catch (cause) {
-			if (cause instanceof WorkspaceError) throw cause;
+			if (cause instanceof WorkspaceError || cause instanceof TicketError) throw cause;
 			throw new WorkspaceError("workspace-unavailable", { cause });
 		}
 	}

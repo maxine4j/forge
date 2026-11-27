@@ -18,6 +18,17 @@ Use the local `~/repo/forgejo` source as a behavioural reference, especially Git
 hosting, bounded diff responses, expected-head validation, and merge concurrency.
 Forge remains a TypeScript implementation, not a Forgejo deployment or fork.
 
+## Manual ticket fast-forward
+
+The [ticket Utils merge](tickets.md#recovering-ticket-work-from-utils) checks that
+the clean, attached ticket branch has commits beyond its recorded base. Forge
+records the exact candidate before atomically verifying the ticket branch tip and
+the expected local main ref. It advances local main only by fast-forward or
+verifies that main already contains the candidate. Divergence and stale refs
+require owner action. This path bypasses automated rebase and completion reports.
+Restart recovery checks reachability and records the outcome without updating refs.
+See [workspace safeguards](workspaces.md#ticket-recovery-workspaces).
+
 ## Manual local pipelines
 
 Discovery, validation, request and saved run failures use the application-wide

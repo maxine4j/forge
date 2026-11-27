@@ -7,6 +7,8 @@ import {
 } from "@forge/contracts/tickets";
 import {
 	ticketWorkflowSchema,
+	ticketCheckpointSchema,
+	ticketManualMergeSchema,
 	type Ticket,
 	type MoveTicket,
 	type TicketWorkflow,
@@ -36,7 +38,8 @@ import { useTicketDialog, useDockedDismissal, type TicketPresentation } from "./
 
 export { ticketLabels } from "./ticket-labels.ts";
 
-const tabLabels = { details: "Details", chat: "Chat", history: "History", cost: "Cost" };
+const tabLabels = { details: "Details", chat: "Chat", history: "History", cost: "Cost", utils: "Utils" };
+const tabs = Object.keys(tabLabels) as TicketTab[];
 type TicketTab = keyof typeof tabLabels;
 type UpdateTicket = ReturnType<typeof updateTicketSchema.parse>;
 const tabIcons: Record<TicketTab, string> = {
@@ -44,6 +47,7 @@ const tabIcons: Record<TicketTab, string> = {
 	details: "M6 3h8l4 4v14H6z M14 3v5h4 M9 12h6 M9 16h6",
 	chat: "M4 5h16v11H9l-5 4z",
 	cost: "M12 3v18 M16 7H9a2.5 2.5 0 0 0 0 5h6a2.5 2.5 0 0 1 0 5H8",
+	utils: "M4 8h16v12H4z M8 8V4h8v4 M4 13h16 M10 13v2h4v-2",
 };
 export interface TicketReadingState {
 	snapshots: Map<string, AgentView>;
@@ -105,9 +109,8 @@ export const TicketDetails = ({
 	const poller = useRef<ResourcePoller<TicketWorkflow> | undefined>(undefined);
 	const [job, setJob] = useState<TicketWorkflow>();
 	const [feedbackPending, setFeedbackPending] = useState(false);
-	const section = ["details", "chat", "history", "cost"].includes(explicitTab ?? "")
-		? (explicitTab as TicketTab)
-		: undefined;
+	const [utility, setUtility] = useState<{ pending?: string; success?: string; error?: string }>({});
+	const section = tabs.find((name) => name === explicitTab);
 	const setTab = (nextTab: TicketTab) => {
 		if (tab === nextTab) return;
 		const next = new URLSearchParams(location.search);
@@ -304,7 +307,6 @@ export const TicketDetails = ({
 		&& !feedbackPending
 			? plan
 			: undefined;
-	const tabs: TicketTab[] = ["details", "chat", "history", "cost"];
 	const tab = section ?? state.tab ?? (currentId || job?.state === "queued" ? "chat" : "details");
 	useEffect(() => {
 		if (section || !job || navigation.modal?.owner !== "ticket") return;
@@ -365,15 +367,14 @@ export const TicketDetails = ({
 		&& !job?.completionFailure
 		&& job?.resultSha
 		&& ((job.phase === "review" && job.state === "idle") || (job.state === "failed" && job.mergeRetryEligible));
-	const act = (path: string, body: unknown, onSuccess?: () => void) => {
+	const mutate = (operation: () => Promise<TicketWorkflow | void>) => {
 		if (archived || actionPending.current || !poller.current) return;
 		actionPending.current = true;
 		setActing(true);
 		setError("");
 		void poller.current
 			.mutate(async () => {
-				const updated = await api.read(`tickets/${ticket.id}/${path}`, ticketWorkflowSchema, "POST", body);
-				onSuccess?.();
+				const updated = await operation();
 				refreshBoard();
 				return updated;
 			})
@@ -381,6 +382,53 @@ export const TicketDetails = ({
 				actionPending.current = false;
 				setActing(false);
 			});
+	};
+	const act = (path: string, body: unknown, onSuccess?: () => void) =>
+		mutate(async () => {
+			const updated = await api.read(`tickets/${ticket.id}/${path}`, ticketWorkflowSchema, "POST", body);
+			onSuccess?.();
+			return updated;
+		});
+	const utilsUnavailable =
+		archived || ticket.status !== "in-progress"
+			? "Utilities are available for unarchived tickets in progress."
+			: resetting
+				? "Wait for the ticket reset to finish."
+				: !job?.workspaceId
+					? "An assigned workspace is required."
+					: undefined;
+	const utilsBusy = busy || acting || returnPending || savingSettings || feedbackPending;
+	const utilsDisabled = !!utilsUnavailable || utilsBusy || !!job?.cleanupPending;
+	const runUtility = (action: "commit-checkpoint" | "merge-into-main") => {
+		if (utilsDisabled || actionPending.current || !poller.current) return;
+		const checkpoint = action === "commit-checkpoint";
+		if (
+			!window.confirm(
+				checkpoint
+					? "Commit a checkpoint of all changes, including non-ignored untracked files?"
+					: "Merge committed work into local main and mark this ticket Done?",
+			)
+		)
+			return;
+		setUtility({ pending: checkpoint ? "Committing checkpoint…" : "Merging branch…" });
+		mutate(async () => {
+			const path = `tickets/${ticket.id}/${action}`;
+			try {
+				if (checkpoint) {
+					const result = await api.read(path, ticketCheckpointSchema, "POST", {});
+					setUtility({
+						success: `${result.outcome === "committed" ? "Checkpoint committed" : "Checkpoint unchanged"} · ${result.sha}`,
+					});
+					return;
+				}
+				const result = await api.read(path, ticketManualMergeSchema, "POST", {});
+				setUtility({ success: `Merged into main · ${result.sha}` });
+				return result.workflow;
+			} catch (err) {
+				setUtility({ error: err instanceof Error ? err.message : "Request failed. Try again." });
+				throw err;
+			}
+		});
 	};
 	const approvePlan = !archived && reviewPlan && (
 		<PlanReviewControls busy={acting} approve={() => act("approve", { revision: reviewPlan.revision })} />
@@ -864,6 +912,23 @@ export const TicketDetails = ({
 			</div>
 			<div className='ticket-cost' {...panel("cost")}>
 				{tab === "cost" && <TicketCost api={api} ticketId={ticket.id} />}
+			</div>
+			<div className='ticket-utils' {...panel("utils")}>
+				{utilsUnavailable && <p>{utilsUnavailable}</p>}
+				{job?.cleanupPending && <p>Workspace cleanup pending.</p>}
+				{!utilsUnavailable && utilsBusy && !utility.pending && (
+					<p>Wait for the current ticket update to finish.</p>
+				)}
+				<div className='ticket-utils-actions'>
+					<button type='button' disabled={utilsDisabled} onClick={() => runUtility("commit-checkpoint")}>
+						Commit checkpoint
+					</button>
+					<button type='button' disabled={utilsDisabled} onClick={() => runUtility("merge-into-main")}>
+						Merge branch into main
+					</button>
+				</div>
+				{(utility.pending || utility.success) && <p role='status'>{utility.pending ?? utility.success}</p>}
+				{utility.error && <p role='alert'>{utility.error}</p>}
 			</div>
 		</dialog>
 	);

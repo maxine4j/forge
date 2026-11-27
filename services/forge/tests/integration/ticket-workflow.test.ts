@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -6,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import * as files from "@forge/backend-infrastructure/file";
 import { sleep } from "@forge/backend-infrastructure/sleep";
 import type { AgentOptions } from "@forge/contracts/agents";
-import { ticketWorkflowSchema } from "@forge/contracts/tickets";
+import { ticketCheckpointSchema, ticketManualMergeSchema, ticketWorkflowSchema } from "@forge/contracts/tickets";
 import { expect, test, vi } from "vitest";
 
 import { AccountProcess } from "../../src/accounts/account-process.ts";
@@ -21,8 +23,10 @@ import { CostService } from "../../src/cost/cost-service.ts";
 import { CostStore } from "../../src/cost/cost-store.ts";
 import { SqliteDatabase } from "../../src/database/sqlite-database.ts";
 import { EpicStore } from "../../src/epics/epic-store.ts";
+import { HttpApplication } from "../../src/http/http-application.ts";
 import { ModelProviderService } from "../../src/model-providers/model-provider-service.ts";
 import { ModelProviderStore } from "../../src/model-providers/model-provider-store.ts";
+import { ProjectRouter } from "../../src/projects/project-router.ts";
 import { ProjectService } from "../../src/projects/project-service.ts";
 import { ProjectStore } from "../../src/projects/project-store.ts";
 import { GitDiffClient } from "../../src/repositories/git-diff-client.ts";
@@ -30,7 +34,9 @@ import { GitTransport } from "../../src/repositories/git-transport.ts";
 import { RepositoryClient } from "../../src/repositories/repository-client.ts";
 import { TaskAgentService } from "../../src/task-agents/task-agent-service.ts";
 import { TaskAgentStore } from "../../src/task-agents/task-agent-store.ts";
+import { TicketHistoryStore } from "../../src/tickets/ticket-history-store.ts";
 import { TicketPrompts } from "../../src/tickets/ticket-prompts.ts";
+import { TicketRouter } from "../../src/tickets/ticket-router.ts";
 import { TicketService } from "../../src/tickets/ticket-service.ts";
 import { TicketStore } from "../../src/tickets/ticket-store.ts";
 import { TicketWorkflowService } from "../../src/tickets/ticket-workflow-service.ts";
@@ -565,3 +571,216 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await files.rm(root, { recursive: true, force: true });
 	}
 }, 30_000);
+
+test("owner recovery uses real Git and SQLite without the agent runtime", async () => {
+	const root = await files.mkdtemp(join(tmpdir(), "forge-ticket-recovery-"));
+	const db = new SqliteDatabase(join(root, "forge.sqlite"));
+	const git = new GitTransport(undefined, {
+		identity: () => ({ name: "Recovery Owner", email: "owner@example.com" }),
+	});
+	try {
+		await db.initialize();
+		const owner = { username: "owner" };
+		const access = new AccessService({ owner: owner.username, origin: "https://forge.example" });
+		const projectsStore = new ProjectStore(db);
+		await projectsStore.initialize();
+		const repositories = new RepositoryClient(root, [], files, git);
+		const projects = new ProjectService(projectsStore, repositories, access, randomUUID, () => new Date());
+		const project = await projects.create(owner, { name: "Project" });
+		const repository = join(root, "repositories", `${project.id}.git`);
+		const workspaceStore = new WorkspaceStore(db);
+		await workspaceStore.initialize();
+		const workspaceClient = new WorkspaceClient(root, files, git, repositories);
+		const workspaces = new WorkspaceService(
+			workspaceStore,
+			workspaceClient,
+			projects,
+			access,
+			randomUUID,
+			() => new Date(),
+			new WorkspaceDiffClient(workspaceClient, git, files, new GitDiffClient(git)),
+		);
+		const ticketStore = new TicketStore(db);
+		await ticketStore.initialize();
+		const jobs = new TicketWorkflowStore(db);
+		await jobs.initialize();
+		const runtimeUnavailable = vi.fn(async () => {
+			throw new Error("Agent runtime unavailable");
+		});
+		const agents = {
+			stopTicket: runtimeUnavailable,
+			catalogOptions: runtimeUnavailable,
+			assertRepositoryReady: runtimeUnavailable,
+			steer: runtimeUnavailable,
+			createTicketThread: runtimeUnavailable,
+			dispatch: runtimeUnavailable,
+			plan: runtimeUnavailable,
+			get: runtimeUnavailable,
+			resume: runtimeUnavailable,
+		};
+		const workflowService = () =>
+			new TicketWorkflowService(
+				jobs,
+				ticketStore,
+				agents,
+				new WorkspaceMergeClient(workspaces, git),
+				workspaces,
+				new TicketPrompts(),
+				access,
+				undefined,
+				() => "stopped",
+				workspaces,
+				undefined,
+				undefined,
+				undefined,
+				workspaces,
+			);
+		const workflow = workflowService();
+		const tickets = new TicketService(
+			ticketStore,
+			projectsStore,
+			access,
+			() => new Date(),
+			workflow,
+			new EpicStore(db),
+		);
+		const manual = await tickets.create(owner, {
+			repositoryIds: [project.id],
+			title: "Recover work",
+			description: "",
+		});
+		const workspace = await workspaces.create(owner, project.id, { name: manual.id });
+		const { path: checkout } = await workspaces.resolve(owner, workspace.id);
+		const run = (...args: string[]) => git.run(["-C", checkout, ...args]);
+		await jobs.save(
+			{
+				ticketId: manual.id,
+				phase: "implementation",
+				state: "uncertain",
+				mergeAttempts: 0,
+				workspaceId: workspace.id,
+			},
+			{ status: "in-progress" },
+		);
+		const historyStore = new TicketHistoryStore(db);
+		await using server = createServer(
+			new HttpApplication(new ProjectRouter(projects), access)
+				.create([new TicketRouter(tickets, workflow, historyStore)])
+				.callback(),
+		);
+		server.listen(0, "127.0.0.1");
+		await once(server, "listening");
+		const address = server.address();
+		if (!address || typeof address === "string") throw new Error("No listener");
+		const post = (action: string, username = "owner", origin = "https://forge.example", body = {}) =>
+			fetch(`http://127.0.0.1:${address.port}/api/tickets/${manual.id}/${action}`, {
+				method: "POST",
+				headers: { "x-webauth-user": username, origin, "content-type": "application/json" },
+				body: JSON.stringify(body),
+			});
+		const checkpoint = "commit-checkpoint";
+		const land = "merge-into-main";
+		for (const action of [checkpoint, land]) {
+			expect((await post(action, "intruder")).status).toBe(403);
+			expect((await post(action, "owner", "https://other.example")).status).toBe(403);
+			expect((await post(action, "owner", "https://forge.example", { extra: true })).status).toBe(400);
+		}
+		await files.writeFile(join(checkout, ".gitignore"), "ignored.txt\n");
+		await files.writeFile(join(checkout, "ignored.txt"), "keep me\n");
+		await files.writeFile(join(checkout, "new.txt"), "indexed\n");
+		await run("add", "new.txt");
+		await files.writeFile(join(checkout, "new.txt"), "after staging\n");
+		await files.writeFile(join(checkout, "untracked.txt"), "new file\n");
+		const dirty = await post(land);
+		expect(dirty.status).toBe(409);
+		expect(await dirty.json()).toEqual({ error: "ticket-worktree-dirty" });
+		const gitDir = (await run("rev-parse", "--absolute-git-dir")).trim();
+		await files.writeFile(join(gitDir, "CHERRY_PICK_HEAD"), workspace.head!);
+		for (const action of [checkpoint, land]) {
+			const inProgress = await post(action);
+			expect(inProgress.status).toBe(409);
+			expect(await inProgress.json()).toEqual({ error: "ticket-git-in-progress" });
+		}
+		await files.rm(join(gitDir, "CHERRY_PICK_HEAD"));
+		const first = ticketCheckpointSchema.parse(await (await post(checkpoint)).json());
+		expect(first.outcome).toBe("committed");
+		expect(await run("show", "HEAD:new.txt")).toBe("after staging\n");
+		expect(await run("show", "HEAD:untracked.txt")).toBe("new file\n");
+		expect(await run("ls-files", "ignored.txt")).toBe("");
+		expect((await run("log", "-1", "--format=%an <%ae>%n%s")).trim()).toBe(
+			`Recovery Owner <owner@example.com>\nCheckpoint ${manual.id}`,
+		);
+		expect((await run("rev-parse", "main")).trim()).toBe(workspace.head);
+		expect((await jobs.get(manual.id))?.state).toBe("uncertain");
+		await files.rm(join(checkout, "new.txt"));
+		const final = ticketCheckpointSchema.parse(await (await post(checkpoint)).json());
+		expect(final.outcome).toBe("committed");
+		expect(await run("diff", "--name-status", first.sha, final.sha)).toBe("D\tnew.txt\n");
+		expect(ticketCheckpointSchema.parse(await (await post(checkpoint)).json())).toEqual({
+			outcome: "unchanged",
+			sha: final.sha,
+		});
+		const merged = ticketManualMergeSchema.parse(await (await post(land)).json());
+		expect(merged).toMatchObject({ sha: final.sha, workflow: { state: "idle", cleanupPending: true } });
+		expect((await run("rev-parse", "main")).trim()).toBe(final.sha);
+		expect((await tickets.get(owner, manual.id)).status).toBe("done");
+		expect((await post(land)).status).toBe(409);
+		const history = (await historyStore.read(manual.id, 0)).events;
+		expect(history.filter(({ type }) => type === "merged")).toHaveLength(1);
+		expect(history.some(({ type }) => type === "implemented")).toBe(false);
+		expect(runtimeUnavailable).not.toHaveBeenCalled();
+		await files.writeFile(join(checkout, "after-merge.txt"), "preserve this\n");
+		await workflow.tick(owner);
+		await vi.waitFor(async () => expect((await jobs.get(manual.id))?.cleanupFailed).toBe(true));
+		expect(await files.readFile(join(checkout, "after-merge.txt"))).toBe("preserve this\n");
+		expect(await files.readFile(join(checkout, "ignored.txt"))).toBe("keep me\n");
+
+		const interrupted = await tickets.create(owner, {
+			repositoryIds: [project.id],
+			title: "Interrupted merge",
+			description: "",
+		});
+		const interruptedWorkspace = await workspaces.create(owner, project.id, { name: interrupted.id });
+		const { path: interruptedPath } = await workspaces.resolve(owner, interruptedWorkspace.id);
+		await jobs.save(
+			{
+				ticketId: interrupted.id,
+				phase: "implementation",
+				state: "failed",
+				mergeAttempts: 0,
+				workspaceId: interruptedWorkspace.id,
+			},
+			{ status: "in-progress" },
+		);
+		await expect(workflow.mergeIntoMain(owner, interrupted.id)).rejects.toThrow("ticket-no-commits");
+		await files.writeFile(join(interruptedPath, "recovered.txt"), "recover the exact candidate\n");
+		const { sha } = await workflow.commitCheckpoint(owner, interrupted.id);
+		const save = jobs.save.bind(jobs);
+		const saveSpy = vi.spyOn(jobs, "save").mockImplementation(async (record, move) => {
+			if (record.ticketId === interrupted.id && move?.status === "done")
+				throw new Error("Stopped after the ref update");
+			await save(record, move);
+		});
+		try {
+			await expect(workflow.mergeIntoMain(owner, interrupted.id)).rejects.toThrow("ticket-unavailable");
+		} finally {
+			saveSpy.mockRestore();
+		}
+		expect((await jobs.get(interrupted.id))?.manualMergeSha).toBe(sha);
+		expect((await ticketStore.get(interrupted.id))?.status).toBe("in-progress");
+		expect((await git.run(["-C", repository, "rev-parse", "main"])).trim()).toBe(sha);
+		const reopened = workflowService();
+		await reopened.recover(owner, interrupted.id);
+		await reopened.recover(owner, interrupted.id);
+		await vi.waitFor(async () => expect((await jobs.get(interrupted.id))?.workspaceCleaned).toBe(true));
+		expect((await ticketStore.get(interrupted.id))?.status).toBe("done");
+		expect((await jobs.get(interrupted.id))?.manualMergeSha).toBeUndefined();
+		expect(
+			(await historyStore.read(interrupted.id, 0)).events.filter(({ type }) => type === "merged"),
+		).toHaveLength(1);
+	} finally {
+		await git.close();
+		await db.close();
+		await files.rm(root, { recursive: true, force: true });
+	}
+}, 15_000);

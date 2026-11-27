@@ -8,6 +8,9 @@ export interface WorkspaceLocation {
 	/** Internal only: never include this path in browser responses. */
 	path: string;
 }
+export interface TicketMergeLocation extends WorkspaceLocation {
+	assertGitIdle(): Promise<void>;
+}
 export interface IWorkspaceFiles {
 	mkdir(path: string, options?: { recursive?: boolean; mode?: number }): Promise<void>;
 	lstat(path: string): Promise<FileMetadata & { size: number; mode: number; mtimeMs: number }>;

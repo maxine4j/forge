@@ -11,6 +11,9 @@ import {
 	ticketWorkflowSchema,
 	ticketHistoryQuerySchema,
 	ticketHistorySchema,
+	ticketCheckpointSchema,
+	ticketManualMergeSchema,
+	ticketUtilityRequestSchema,
 } from "@forge/contracts/tickets";
 import { ticketNotificationsSchema } from "@forge/contracts/tickets";
 import Router from "@koa/router";
@@ -89,6 +92,20 @@ export class TicketRouter implements IHttpRouter {
 		router.post("/api/tickets/:id/merge", async (ctx) => {
 			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);
 			ctx.body = ticketWorkflowSchema.parse(await this.workflow.queueMerge(ctx.state.actor, ticket));
+		});
+		router.post("/api/tickets/:id/commit-checkpoint", async (ctx) => {
+			if (!ticketUtilityRequestSchema.safeParse(ctx.request.body).success)
+				throw new TicketError("invalid-request");
+			ctx.body = ticketCheckpointSchema.parse(
+				await this.workflow.commitCheckpoint(ctx.state.actor, ctx.params["id"]!),
+			);
+		});
+		router.post("/api/tickets/:id/merge-into-main", async (ctx) => {
+			if (!ticketUtilityRequestSchema.safeParse(ctx.request.body).success)
+				throw new TicketError("invalid-request");
+			ctx.body = ticketManualMergeSchema.parse(
+				await this.workflow.mergeIntoMain(ctx.state.actor, ctx.params["id"]!),
+			);
 		});
 		router.post("/api/tickets/:id/reconcile", async (ctx) => {
 			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);

@@ -62,6 +62,16 @@ export class WorkspaceApi implements IWorkspaceApi {
 				"ticket-conflict":
 					"This transition is not available. Wait for the current work or plan before retrying.",
 				"ticket-unavailable": "Tickets are unavailable. Retry or check the server logs.",
+				"ticket-workspace-invalid":
+					"Open the ticket workspace and verify that its assigned branch is checked out.",
+				"ticket-worktree-dirty": "Commit a checkpoint or resolve local changes before merging.",
+				"ticket-git-in-progress":
+					"Finish or abort the Git operation and resolve any index conflicts before retrying.",
+				"ticket-ref-changed": "The ticket branch or main changed. Review the current commits before retrying.",
+				"ticket-branch-diverged":
+					"The ticket branch has diverged from main. Update it to allow a fast-forward, then retry.",
+				"ticket-no-commits":
+					"The ticket branch needs commits beyond its workspace base before it can be merged.",
 				"epic-not-found": "Epic no longer exists. Refresh the backlog.",
 				"epic-unavailable": "Epics are unavailable. Refresh and retry. Your edits are preserved.",
 				"invalid-request": "Check the supplied values.",

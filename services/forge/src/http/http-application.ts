@@ -73,9 +73,9 @@ export class HttpApplication implements IHttpApplication {
 							? 400
 							: err.code === "ticket-not-found"
 								? 404
-								: err.code === "ticket-conflict"
-									? 409
-									: 503;
+								: err.code === "ticket-unavailable"
+									? 503
+									: 409;
 					ctx.body = { error: err.code };
 				} else if (err instanceof WorkspaceError) {
 					ctx.status =

@@ -8,7 +8,14 @@ import {
 	type TicketAgentPhase,
 	type TicketExecutionSettings,
 } from "@forge/contracts/tickets";
-import type { BoardSettings, Ticket, CreateTicket, MoveTicket, TicketWorkflow } from "@forge/contracts/tickets";
+import type {
+	BoardSettings,
+	Ticket,
+	CreateTicket,
+	MoveTicket,
+	TicketCheckpoint,
+	TicketWorkflow,
+} from "@forge/contracts/tickets";
 
 import type { ITicketAgents } from "../agents/agent-service.ts";
 import { AgentCatalogError, AgentError } from "../agents/errors.ts";
@@ -18,7 +25,11 @@ import { ModelProviderError } from "../model-providers/errors.ts";
 import { type IModelProviderService } from "../model-providers/model-provider-service.ts";
 import type { ITaskAgents } from "../task-agents/task-agent-service.ts";
 import type { ITicketMergeClient } from "../workspaces/workspace-merge-client.ts";
-import type { IMergedWorkspaceCleanup, IAbandonedWorkspaceCleanup } from "../workspaces/workspace-service.ts";
+import type {
+	IMergedWorkspaceCleanup,
+	IAbandonedWorkspaceCleanup,
+	ITicketRecoveryWorkspace,
+} from "../workspaces/workspace-service.ts";
 import { capHandoffText, completionReportRequirements, parseCompletionReport } from "./completion-report.ts";
 import { TicketError } from "./errors.ts";
 import { parseTicketPlan } from "./ticket-plan-format.ts";
@@ -47,6 +58,8 @@ export interface ITicketWorkflowService {
 	boardSummary(actor: Actor): Promise<Map<string, Pick<Ticket, "agentStatus" | "needsAttention">>>;
 	approve(actor: Actor, ticket: Ticket, revision: number): Promise<TicketWorkflow>;
 	queueMerge(actor: Actor, ticket: Ticket): Promise<TicketWorkflow>;
+	commitCheckpoint(actor: Actor, id: string): Promise<TicketCheckpoint>;
+	mergeIntoMain(actor: Actor, id: string): Promise<{ workflow: TicketWorkflow; sha: string }>;
 	message(
 		actor: Actor,
 		ticket: Ticket,
@@ -62,6 +75,8 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	private tail: Promise<unknown> = Promise.resolve();
 	private readonly settingUp = new Set<string>();
 	private readonly resetting = new Map<string, Promise<void>>();
+	private readonly cleaning = new Set<string>();
+	private readonly manualMerges = new Set<string>();
 	private readonly log = createLogger(TicketWorkflowService.name);
 	async options(actor: Actor, ticketId?: string, requestedPhase?: TicketAgentPhase): Promise<AgentOptions> {
 		this.access.assertOwner(actor);
@@ -173,6 +188,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		private readonly providers?: IModelProviderService,
 		private readonly taskAgents?: ITaskAgents,
 		private readonly openAIQuotaExhausted: () => Promise<boolean> = async () => false,
+		private readonly recoveryWorkspaces?: ITicketRecoveryWorkspace,
 	) {}
 	async update(actor: Actor, id: string, input: CreateTicket): Promise<void> {
 		this.access.assertOwner(actor);
@@ -186,7 +202,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	async archive(actor: Actor, ticket: Ticket, archivedAt: string): Promise<void> {
 		this.access.assertOwner(actor);
 		await this.serialize(async () => {
-			const job = await this.record(ticket.id);
+			const job = await this.mutableRecord(actor, ticket.id);
 			if (["running", "dispatching", "uncertain", "merge-queued", "resetting"].includes(job.state))
 				throw new TicketError("ticket-conflict");
 			await this.tickets.archive(ticket.id, archivedAt);
@@ -196,6 +212,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	async move(actor: Actor, ticket: Ticket, input: MoveTicket): Promise<void> {
 		this.access.assertOwner(actor);
 		await this.serialize(async () => {
+			const job = await this.mutableRecord(actor, ticket.id);
 			const current = await this.tickets.get(ticket.id);
 			if (!current || current.archivedAt) throw new TicketError("ticket-conflict");
 			if (input.beforeId) {
@@ -203,7 +220,6 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				if (before?.id === ticket.id || before?.archivedAt || before?.status !== input.status)
 					throw new TicketError("ticket-conflict");
 			}
-			const job = await this.record(ticket.id);
 			if (job.state === "resetting") {
 				if (input.status !== current.status) throw new TicketError("ticket-conflict");
 				await this.store.save(job, input);
@@ -369,7 +385,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	async approve(actor: Actor, ticket: Ticket, revision: number): Promise<TicketWorkflow> {
 		this.access.assertOwner(actor);
 		return this.serialize(async () => {
-			const job = await this.inProgress(ticket.id);
+			const job = await this.inProgress(actor, ticket.id);
 			if (
 				job.phase !== "planning"
 				|| !["idle", "failed"].includes(job.state)
@@ -393,7 +409,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	async queueMerge(actor: Actor, ticket: Ticket): Promise<TicketWorkflow> {
 		this.access.assertOwner(actor);
 		return this.serialize(async () => {
-			const job = await this.inProgress(ticket.id);
+			const job = await this.inProgress(actor, ticket.id);
 			if (
 				job.contextFailure
 				|| job.completionFailure
@@ -419,7 +435,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	): Promise<TicketWorkflow> {
 		this.access.assertOwner(actor);
 		return this.serialize(async () => {
-			const job = await this.inProgress(ticket.id);
+			const job = await this.inProgress(actor, ticket.id);
 			if (
 				revision !== undefined
 				&& (job.phase !== "planning" || job.plan?.revision !== revision || job.approvedRevision)
@@ -486,10 +502,17 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	async tick(actor: Actor): Promise<void> {
 		this.access.assertOwner(actor);
 		await this.processResets(actor);
+		for (const job of await this.store.pendingCleanup(true)) this.scheduleManualCleanup(actor, job);
 		return this.serialize(async () => {
 			let quota: Promise<boolean> | undefined;
 			const quotaExhausted = () => (quota ??= this.openAIQuotaExhausted());
 			for (const job of await this.store.list()) {
+				if (job.manualMergeSha) {
+					await this.reconcileManualMerge(actor, job).catch((err: unknown) => {
+						this.log.error({ err, ticketId: job.ticketId }, "Manual merge recovery is pending");
+					});
+					continue;
+				}
 				let ticket = await this.tickets.get(job.ticketId);
 				if (!ticket || ticket.archivedAt || ticket.status === "backlog" || ticket.status === "done") continue;
 				if (job.state === "queued") {
@@ -533,10 +556,24 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				if (ticket.archivedAt) throw new TicketError("ticket-conflict");
 			}
 			if (!ticketId) {
-				for (const job of await this.store.pendingCleanup()) await this.cleanup(actor, job);
+				for (const job of await this.store.pendingCleanup()) {
+					if (job.manualCleanupThreads) this.scheduleManualCleanup(actor, job);
+					else await this.cleanup(actor, job);
+				}
 			}
 			const selected = ticketId ? [await this.record(ticketId)] : await this.store.list();
 			for (const job of selected) {
+				if (job.manualMergeSha) {
+					await this.reconcileManualMerge(actor, job).catch((err: unknown) => {
+						if (ticketId) throw err;
+						this.log.error({ err, ticketId: job.ticketId }, "Manual merge recovery is pending");
+					});
+					continue;
+				}
+				if (job.manualCleanupThreads) {
+					this.scheduleManualCleanup(actor, job);
+					continue;
+				}
 				if (ticketId && job.cleanupFailed && (await this.tickets.get(job.ticketId))?.status === "done") {
 					await this.cleanup(actor, job);
 					continue;
@@ -569,12 +606,121 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	private async record(id: string): Promise<TicketWorkflowRecord> {
 		return (await this.store.get(id)) ?? { ticketId: id, phase: "planning", state: "idle", mergeAttempts: 0 };
 	}
-	private async inProgress(id: string): Promise<TicketWorkflowRecord> {
-		const ticket = await this.tickets.get(id);
-		if (ticket?.archivedAt || ticket?.status !== "in-progress") throw new TicketError("ticket-conflict");
+	private async mutableRecord(actor: Actor, id: string): Promise<TicketWorkflowRecord> {
 		const job = await this.record(id);
+		if (!job.manualMergeSha) return job;
+		const current = await this.reconcileManualMerge(actor, job);
+		if (current.manualCleanupThreads) throw new TicketError("ticket-conflict");
+		return current;
+	}
+	private async inProgress(actor: Actor, id: string): Promise<TicketWorkflowRecord> {
+		const ticket = await this.tickets.get(id);
+		if (!ticket) throw new TicketError("ticket-not-found");
+		if (ticket.archivedAt || ticket.status !== "in-progress") throw new TicketError("ticket-conflict");
+		const job = await this.mutableRecord(actor, id);
 		if (job.state === "resetting") throw new TicketError("ticket-conflict");
 		return job;
+	}
+	async commitCheckpoint(actor: Actor, id: string): Promise<TicketCheckpoint> {
+		this.access.assertOwner(actor);
+		return this.serialize(async () => {
+			const job = await this.inProgress(actor, id);
+			if (!job.workspaceId || !this.recoveryWorkspaces) throw new TicketError("ticket-workspace-invalid");
+			return this.recoveryWorkspaces.withTicketWrite(actor, job.workspaceId, (_, checkpoint) =>
+				checkpoint(`Checkpoint ${job.ticketId}`),
+			);
+		});
+	}
+	async mergeIntoMain(actor: Actor, id: string): Promise<{ workflow: TicketWorkflow; sha: string }> {
+		this.access.assertOwner(actor);
+		if (this.manualMerges.has(id)) throw new TicketError("ticket-conflict");
+		this.manualMerges.add(id);
+		try {
+			return await this.serialize(async () => {
+				const job = await this.inProgress(actor, id);
+				const { workspaceId } = job;
+				if (!workspaceId || !this.recoveryWorkspaces) throw new TicketError("ticket-workspace-invalid");
+				return this.recoveryWorkspaces.withTicketWrite(actor, workspaceId, async (location) => {
+					const sha = await this.merges.candidate(actor, workspaceId, location);
+					const intent = { ...job, manualMergeSha: sha };
+					await this.store.save(intent);
+					try {
+						if ((await this.merges.merge(actor, workspaceId, sha, location)) === "rebase")
+							throw new TicketError("ticket-branch-diverged");
+					} catch (cause) {
+						if (cause instanceof TicketError && cause.code !== "ticket-unavailable")
+							await this.clearManualMerge(intent);
+						throw cause;
+					}
+					return { workflow: this.summary(await this.completeManualMerge(intent, sha)), sha };
+				});
+			});
+		} finally {
+			this.manualMerges.delete(id);
+		}
+	}
+	private async reconcileManualMerge(actor: Actor, job: TicketWorkflowRecord): Promise<TicketWorkflowRecord> {
+		if (!job.workspaceId || !job.manualMergeSha || !this.recoveryWorkspaces)
+			throw new TicketError("ticket-unavailable");
+		const repository = await this.recoveryWorkspaces
+			.ticketRepository(actor, job.workspaceId)
+			.catch((cause: unknown) => {
+				throw new TicketError("ticket-unavailable", { cause });
+			});
+		if (await this.merges.isMerged(actor, job.workspaceId, job.manualMergeSha, repository))
+			return this.completeManualMerge(job, job.manualMergeSha);
+		return this.clearManualMerge(job);
+	}
+	private async clearManualMerge(job: TicketWorkflowRecord): Promise<TicketWorkflowRecord> {
+		const next: TicketWorkflowRecord = {
+			...job,
+			manualMergeSha: undefined,
+			...(job.state === "merge-queued" ? { state: "failed", mergeRetryEligible: true } : {}),
+		};
+		await this.store.save(next);
+		return next;
+	}
+	private async completeManualMerge(job: TicketWorkflowRecord, sha: string): Promise<TicketWorkflowRecord> {
+		const mayBeLive = !!job.reservation || ["running", "dispatching", "uncertain", "failed"].includes(job.state);
+		const done: TicketWorkflowRecord = {
+			...job,
+			state: "idle",
+			message: undefined,
+			mergeRetryEligible: undefined,
+			manualMergeSha: undefined,
+			resultSha: sha,
+			manualCleanupThreads: mayBeLive
+				? [job.plannerId, job.implementerId, ...(job.previousImplementerIds ?? [])].filter(
+						(id) => id !== undefined,
+					)
+				: [],
+		};
+		await this.store.save(done, { status: "done" });
+		this.wake();
+		return done;
+	}
+	private scheduleManualCleanup(actor: Actor, job: TicketWorkflowRecord): void {
+		const { ticketId } = job;
+		if (!job.manualCleanupThreads || job.workspaceCleaned || this.cleaning.has(ticketId)) return;
+		this.cleaning.add(ticketId);
+		void (async () => {
+			const { manualCleanupThreads, workspaceCleaned } = await this.record(ticketId);
+			if (!manualCleanupThreads || workspaceCleaned) return;
+			if (manualCleanupThreads.length && !(await this.agents.stopTicket(actor, manualCleanupThreads))) return;
+			const settled = await this.serialize(async () => {
+				const current = await this.record(ticketId);
+				const settled = { ...current, reservation: undefined, manualCleanupThreads: [] };
+				if (current.reservation || current.manualCleanupThreads?.length) await this.store.save(settled);
+				return settled;
+			});
+			await this.cleanup(actor, settled, (changes) =>
+				this.serialize(async () => {
+					await this.store.save({ ...(await this.record(ticketId)), ...changes });
+				}),
+			);
+		})()
+			.catch((err: unknown) => this.log.error({ err, ticketId }, "Manual merge cleanup is pending"))
+			.finally(() => this.cleaning.delete(ticketId));
 	}
 	private async processResets(actor: Actor, ticketId?: string): Promise<void> {
 		const jobs = ticketId ? [await this.record(ticketId)] : await this.store.list();
@@ -1083,18 +1229,24 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			if (!exhausted) this.wake();
 		}
 	}
-	private async cleanup(actor: Actor, job: TicketWorkflowRecord): Promise<void> {
+	private async cleanup(
+		actor: Actor,
+		job: TicketWorkflowRecord,
+		saveProgress: (changes: Pick<TicketWorkflowRecord, "cleanupFailed" | "workspaceCleaned">) => Promise<void> = (
+			changes,
+		) => this.store.save({ ...job, ...changes }),
+	): Promise<void> {
 		if (!job.workspaceId || !job.resultSha || job.workspaceCleaned) return;
 		const { workspaceId, resultSha } = job;
 		try {
-			if (job.cleanupFailed) {
-				job = { ...job, cleanupFailed: undefined };
-				await this.store.save(job);
-			}
-			await this.workspaceCleanup.cleanupMerged(actor, workspaceId, resultSha);
-			await this.store.save({ ...job, workspaceCleaned: true });
+			if (job.cleanupFailed && !job.manualCleanupThreads) await saveProgress({ cleanupFailed: undefined });
+			if (job.manualCleanupThreads)
+				await this.workspaceCleanup.cleanupMerged(actor, workspaceId, resultSha, true);
+			else await this.workspaceCleanup.cleanupMerged(actor, workspaceId, resultSha);
+			await saveProgress({ cleanupFailed: undefined, workspaceCleaned: true });
 		} catch (err) {
-			await this.store.save({ ...job, cleanupFailed: true });
+			if (job.cleanupFailed && job.manualCleanupThreads) return;
+			await saveProgress({ cleanupFailed: true });
 			this.log.error({ err, ticketId: job.ticketId }, "Merged ticket workspace cleanup is pending");
 		}
 	}

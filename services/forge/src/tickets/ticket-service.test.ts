@@ -68,6 +68,8 @@ const fixture = () => {
 			boardSummary: vi.fn(async () => summary),
 			approve: vi.fn(),
 			queueMerge: vi.fn(),
+			commitCheckpoint: vi.fn(),
+			mergeIntoMain: vi.fn(),
 			message: vi.fn(),
 			tick: vi.fn(),
 			recover: vi.fn(),

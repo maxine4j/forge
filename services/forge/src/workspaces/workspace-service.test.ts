@@ -21,6 +21,9 @@ test("owner authorization precedes every workspace lookup", async () => {
 		saveFile: vi.fn(),
 		stage: vi.fn(),
 		commit: vi.fn(),
+		checkpoint: vi.fn(),
+		assertGitIdle: vi.fn(),
+		repositoryLocation: vi.fn(),
 	};
 	const projects: IProjectService = {
 		create: vi.fn(),

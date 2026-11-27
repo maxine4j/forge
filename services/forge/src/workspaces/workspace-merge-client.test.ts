@@ -1,5 +1,10 @@
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { mkdtemp, rm } from "@forge/backend-infrastructure/file";
 import { expect, test, vi } from "vitest";
 
+import { GitTransport } from "../repositories/git-transport.ts";
 import { WorkspaceMergeClient } from "./workspace-merge-client.ts";
 
 test("fast-forward checks ancestry and clean files, then atomically updates main with its expected SHA", async () => {
@@ -67,6 +72,55 @@ test("fast-forward checks ancestry and clean files, then atomically updates main
 		["-C", "/data/worktrees/test", "update-ref", "--stdin"],
 		expect.stringContaining(`update refs/heads/main ${head} ${advanced}`),
 	);
+});
+
+test.each(["ticket", "main"])("a real Git ref race on %s rejects the exact manual candidate", async (racingRef) => {
+	const path = await mkdtemp(join(tmpdir(), "forge-manual-merge-"));
+	const git = new GitTransport(undefined, { identity: () => ({ name: "Owner", email: "owner@example.com" }) });
+	try {
+		const run = (...args: string[]) => git.run(["-C", path, ...args]);
+		await run("init", "--initial-branch=main");
+		await run("commit", "--allow-empty", "-m", "Base");
+		const main = (await run("rev-parse", "main")).trim();
+		await run("switch", "-c", "ticket");
+		await run("commit", "--allow-empty", "-m", "Candidate");
+		const candidate = (await run("rev-parse", "HEAD")).trim();
+		const tree = (await run("rev-parse", "HEAD^{tree}")).trim();
+		const raced = (
+			await run("commit-tree", tree, "-p", racingRef === "main" ? main : candidate, "-m", "Concurrent")
+		).trim();
+		const location = {
+			path,
+			workspace: {
+				id: "work",
+				projectId: "project",
+				branch: "ticket",
+				name: "Task",
+				status: "ready" as const,
+				createdAt: "2026-11-03T00:00:00.000Z",
+				baseSha: main,
+			},
+			assertGitIdle: async () => {},
+		};
+		const resolve = vi.fn(async () => location);
+		const client = new WorkspaceMergeClient(
+			{ retry: vi.fn(), get: vi.fn(), tree: vi.fn(), create: vi.fn(), resolve },
+			{
+				async run(args, input) {
+					if (args.includes("update-ref")) await run("update-ref", `refs/heads/${racingRef}`, raced);
+					return git.run(args, input);
+				},
+			},
+		);
+		await expect(client.merge({ username: "owner" }, "work", candidate, location)).rejects.toThrow(
+			"ticket-ref-changed",
+		);
+		expect((await run("rev-parse", "main")).trim()).toBe(racingRef === "main" ? raced : main);
+		expect(resolve).not.toHaveBeenCalled();
+	} finally {
+		await git.close();
+		await rm(path, { recursive: true, force: true });
+	}
 });
 
 test("rejects a branch changed after owner approval and verifies committed completion", async () => {

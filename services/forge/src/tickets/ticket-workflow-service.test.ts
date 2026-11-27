@@ -838,6 +838,34 @@ const fixture = (
 		head: vi.fn(async () => "a".repeat(40)),
 	};
 	const wake = vi.fn();
+	const checkpoint = vi.fn(async (_message: string) => ({ outcome: "committed" as const, sha: "b".repeat(40) }));
+	const recoveryWorkspaces = {
+		async withTicketWrite<T>(
+			_actor: typeof actor,
+			_id: string,
+			action: (
+				location: import("../workspaces/types.ts").TicketMergeLocation,
+				commit: typeof checkpoint,
+			) => Promise<T>,
+		): Promise<T> {
+			return action(
+				{
+					path: "/work",
+					workspace: {
+						id: _id,
+						projectId,
+						name: "Task",
+						branch: "ticket",
+						status: "ready",
+						createdAt: "2026-11-03T00:00:00.000Z",
+					},
+					assertGitIdle: async () => {},
+				},
+				checkpoint,
+			);
+		},
+		ticketRepository: vi.fn(async () => "/repo"),
+	};
 	const cleanup = vi.fn(async (_actor: typeof actor, _workspaceId: string, _candidate: string) => {});
 	const cleanupAbandoned = vi.fn(async (_actor: typeof actor, _workspaceId: string) => {});
 	const makeService = () =>
@@ -855,6 +883,7 @@ const fixture = (
 			providers,
 			taskAgents,
 			quotaExhausted,
+			recoveryWorkspaces,
 		);
 	const service = makeService();
 	const create = (id = "TASK-1") => {
@@ -894,8 +923,103 @@ const fixture = (
 		wake,
 		cleanup,
 		cleanupAbandoned,
+		checkpoint,
+		store,
 	};
 };
+
+test.each(["running", "uncertain"] as const)("manual utilities run without runtime calls while %s", async (state) => {
+	const f = fixture(() => "stopped");
+	const ticket = f.create();
+	ticket.status = "in-progress";
+	const implementerId = "93cff870-33b7-4e99-aa02-04cd72dafeb0";
+	f.jobs.set(ticket.id, {
+		ticketId: ticket.id,
+		phase: "implementation",
+		state,
+		mergeAttempts: 0,
+		workspaceId: "work",
+		implementerId,
+		reservation: "provider",
+	});
+	f.agents.get.mockRejectedValue(new Error("Runtime unavailable"));
+	f.agents.stopTicket.mockRejectedValue(new Error("Runtime unavailable"));
+	await expect(f.service.commitCheckpoint(actor, ticket.id)).resolves.toEqual({
+		outcome: "committed",
+		sha: "b".repeat(40),
+	});
+	expect(f.checkpoint).toHaveBeenCalledWith("Checkpoint TASK-1");
+	expect(f.jobs.get(ticket.id)?.state).toBe(state);
+	await expect(f.service.mergeIntoMain(actor, ticket.id)).resolves.toMatchObject({
+		sha: "b".repeat(40),
+		workflow: { state: "idle", cleanupPending: true },
+	});
+	for (const call of Object.values(f.agents)) expect(call).not.toHaveBeenCalled();
+	expect(ticket.status).toBe("done");
+	expect(f.jobs.get(ticket.id)?.reservation).toBe("provider");
+	await f.service.tick(actor);
+	expect(f.cleanup).not.toHaveBeenCalled();
+	expect(f.jobs.get(ticket.id)?.reservation).toBe("provider");
+	f.agents.stopTicket.mockResolvedValue(true);
+	await f.service.tick(actor);
+	await vi.waitFor(() =>
+		expect(f.jobs.get(ticket.id)).toMatchObject({ workspaceCleaned: true, reservation: undefined }),
+	);
+	expect(f.agents.stopTicket).toHaveBeenCalledWith(actor, [implementerId]);
+	expect(f.cleanup).toHaveBeenCalledOnce();
+});
+
+test("manual divergence clears intent, and a pending merge serializes against reset and repeat merge", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	ticket.status = "in-progress";
+	f.jobs.set(ticket.id, {
+		ticketId: ticket.id,
+		phase: "implementation",
+		state: "failed",
+		mergeAttempts: 0,
+		workspaceId: "work",
+	});
+	f.merges.merge.mockResolvedValueOnce("rebase");
+	await expect(f.service.mergeIntoMain(actor, ticket.id)).rejects.toThrow("ticket-branch-diverged");
+	expect(f.jobs.get(ticket.id)?.manualMergeSha).toBeUndefined();
+	expect(ticket.status).toBe("in-progress");
+	const { promise, resolve } = Promise.withResolvers<"merged">();
+	f.merges.merge.mockReturnValueOnce(promise);
+	const merge = f.service.mergeIntoMain(actor, ticket.id);
+	await vi.waitFor(() => expect(f.jobs.get(ticket.id)?.manualMergeSha).toBe("b".repeat(40)));
+	const reset = expect(f.service.move(actor, ticket, { status: "backlog" })).rejects.toThrow("ticket-conflict");
+	const repeat = expect(f.service.mergeIntoMain(actor, ticket.id)).rejects.toThrow("ticket-conflict");
+	resolve("merged");
+	await Promise.all([merge, reset, repeat]);
+	expect(f.merges.merge).toHaveBeenCalledTimes(2);
+	expect(f.store.save.mock.calls.filter(([, move]) => move?.status === "done")).toHaveLength(1);
+});
+
+test.each([false, true])("restart reconciles a manual merge intent with landed=%s", async (landed) => {
+	const f = fixture();
+	const ticket = f.create();
+	ticket.status = "in-progress";
+	f.jobs.set(ticket.id, {
+		ticketId: ticket.id,
+		phase: "implementation",
+		state: "failed",
+		mergeAttempts: 0,
+		workspaceId: "work",
+	});
+	f.merges.merge.mockRejectedValueOnce(new Error("Git response lost"));
+	await expect(f.service.mergeIntoMain(actor, ticket.id)).rejects.toThrow("Git response lost");
+	f.merges.isMerged.mockRejectedValueOnce(new Error("Git unavailable")).mockResolvedValue(landed);
+	const restarted = f.makeService();
+	await restarted.recover(actor);
+	expect(f.jobs.get(ticket.id)?.manualMergeSha).toBe("b".repeat(40));
+	await restarted.recover(actor);
+	await restarted.recover(actor);
+	expect(f.jobs.get(ticket.id)?.manualMergeSha).toBeUndefined();
+	expect(ticket.status).toBe(landed ? "done" : "in-progress");
+	expect(f.merges.merge).toHaveBeenCalledOnce();
+	expect(f.store.save.mock.calls.filter(([, move]) => move?.status === "done")).toHaveLength(landed ? 1 : 0);
+});
 
 test("Ready requires a first ready repository and dispatch revalidates it", async () => {
 	const f = fixture();

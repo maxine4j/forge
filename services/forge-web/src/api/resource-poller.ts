@@ -26,14 +26,14 @@ export class ResourcePoller<T> {
 			}
 		});
 	}
-	mutate(operation: (signal: AbortSignal) => Promise<T>): Promise<void> {
+	mutate(operation: (signal: AbortSignal) => Promise<T | void>): Promise<void> {
 		clearTimeout(this.timer);
 		this.queue = this.queue.then(async () => {
 			clearTimeout(this.timer);
 			if (this.controller.signal.aborted) return;
 			try {
 				const value = await operation(this.controller.signal);
-				if (!this.controller.signal.aborted) this.changed(value);
+				if (!this.controller.signal.aborted && value !== undefined) this.changed(value);
 			} catch (error) {
 				if (!this.controller.signal.aborted)
 					this.failed(error instanceof Error ? error.message : "Request failed. Try again.");

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { agentSettingsSchema, agentRequestSchema } from "../agents/index.ts";
 import { ticketAssigneeSchema } from "../task-agents/index.ts";
+import { gitShaSchema } from "../workspace.ts";
 import { structuredTicketPlanSchema } from "./plan.ts";
 export * from "./plan.ts";
 
@@ -162,6 +163,7 @@ export const ticketWorkflowSchema = z.strictObject({
 	contextFailure: z.enum(["telemetry", "headroom", "checkpoint", "report", "no-progress"]).optional(),
 	completionFailure: z.enum(["incomplete", "invalid-report"]).optional(),
 	mergeRetryEligible: z.literal(true).optional(),
+	cleanupPending: z.literal(true).optional(),
 	ticketId: ticketIdSchema,
 	executionRepositoryId: z.uuid().optional(),
 	workspaceId: z.uuid().optional(),
@@ -202,6 +204,13 @@ export const ticketWorkflowSchema = z.strictObject({
 		.optional(),
 });
 export type TicketWorkflow = z.infer<typeof ticketWorkflowSchema>;
+export const ticketUtilityRequestSchema = z.strictObject({});
+export const ticketCheckpointSchema = z.strictObject({
+	outcome: z.enum(["committed", "unchanged"]),
+	sha: gitShaSchema,
+});
+export const ticketManualMergeSchema = z.strictObject({ workflow: ticketWorkflowSchema, sha: gitShaSchema });
+export type TicketCheckpoint = z.infer<typeof ticketCheckpointSchema>;
 export const ticketNotificationSchema = z.strictObject({
 	id: z.string().min(1),
 	at: z.iso.datetime(),

@@ -26,6 +26,8 @@ export const ticketWorkflowRecordSchema = ticketWorkflowSchema.extend({
 		.optional(),
 	workspaceCleaned: z.literal(true).optional(),
 	cleanupFailed: z.literal(true).optional(),
+	manualMergeSha: ticketWorkflowSchema.shape.resultSha,
+	manualCleanupThreads: z.array(z.uuid()).optional(),
 	abandonment: z
 		.object({
 			workspaceId: z.string().optional(),
@@ -46,6 +48,8 @@ export function ticketWorkflowSummary({
 	context: _context,
 	workspaceCleaned: _cleaned,
 	cleanupFailed: _cleanupFailed,
+	manualMergeSha: _manualMergeSha,
+	manualCleanupThreads,
 	abandonment: _abandonment,
 	planningProviderSnapshot,
 	implementationProviderSnapshot,
@@ -60,6 +64,7 @@ export function ticketWorkflowSummary({
 		};
 	return {
 		...workflow,
+		...(manualCleanupThreads && !_cleaned && { cleanupPending: true as const }),
 		plan: workflow.plan && {
 			revision: workflow.plan.revision,
 			text: workflow.plan.text,

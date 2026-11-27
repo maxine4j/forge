@@ -13,7 +13,7 @@ are exhausted, Back follows normal browser history. Native dialog cancellation
 is prevented and routed through this same controller; native pickers and popovers
 retain their dismissal priority. Hidden retained views have no active dialogs.
 
-Every page accepts `ticket=TASK-n` with `tab=details|chat|history|cost`. Direct
+Every page accepts `ticket=TASK-n` with `tab=details|chat|history|cost|utils`. Direct
 links establish a dismissible parent preserving the pathname, unrelated query
 parameters and hash. Costs opens tickets over its own `/costs` URL. The shared
 application ticket host stays outside retained page containers and uses one

@@ -16,12 +16,14 @@ import {
 	type WorkspaceCommit,
 	type WorkspaceDiff,
 } from "@forge/contracts";
+import type { TicketCheckpoint } from "@forge/contracts/tickets";
 
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
 import type { IProjectService } from "../projects/project-service.ts";
+import { TicketError } from "../tickets/errors.ts";
 import { WorkspaceError } from "./errors.ts";
-import type { WorkspaceLocation, WorkspaceRecord } from "./types.ts";
+import type { TicketMergeLocation, WorkspaceLocation, WorkspaceRecord } from "./types.ts";
 import type { IWorkspaceClient } from "./workspace-client.ts";
 import type { IWorkspaceDiffClient } from "./workspace-diff-client.ts";
 import type { IWorkspaceStore } from "./workspace-store.ts";
@@ -54,11 +56,22 @@ export interface IWorkspaceService {
 }
 export interface IMergedWorkspaceCleanup {
 	/** Removes a verified merged worktree and branch, retaining archived workspace metadata. Safe to retry. */
-	cleanupMerged(actor: Actor, id: string, candidate: string): Promise<void>;
+	cleanupMerged(actor: Actor, id: string, candidate: string, preserveLocalFiles?: boolean): Promise<void>;
 }
 export interface IAbandonedWorkspaceCleanup {
 	/** Closes terminals and discards owned unmerged work, preserving archived metadata. */
 	cleanupAbandoned(actor: Actor, id: string): Promise<void>;
+}
+export interface ITicketRecoveryWorkspace {
+	withTicketWrite<T>(
+		actor: Actor,
+		id: string,
+		action: (
+			location: TicketMergeLocation,
+			checkpoint: (message: string) => Promise<TicketCheckpoint>,
+		) => Promise<T>,
+	): Promise<T>;
+	ticketRepository(actor: Actor, id: string): Promise<string>;
 }
 export class WorkspaceService implements IWorkspaceService, IMergedWorkspaceCleanup, IAbandonedWorkspaceCleanup {
 	private readonly log = createLogger(WorkspaceService.name);
@@ -128,11 +141,11 @@ export class WorkspaceService implements IWorkspaceService, IMergedWorkspaceClea
 			return record;
 		});
 	}
-	async cleanupMerged(actor: Actor, id: string, candidate: string): Promise<void> {
+	async cleanupMerged(actor: Actor, id: string, candidate: string, preserveLocalFiles = false): Promise<void> {
 		this.access.assertOwner(actor);
 		await this.serialize(async () => {
 			const record = await this.require(id);
-			await this.client.removeMerged(record, candidate);
+			await this.client.removeMerged(record, candidate, preserveLocalFiles);
 			if (record.status !== "archived") await this.store.update({ ...record, status: "archived" });
 		});
 	}
@@ -164,6 +177,38 @@ export class WorkspaceService implements IWorkspaceService, IMergedWorkspaceClea
 			const record = await this.ready(id);
 			return { workspace: await this.publicWorkspace(record), path: await this.client.location(record) };
 		});
+	}
+	async withTicketWrite<T>(
+		actor: Actor,
+		id: string,
+		action: (
+			location: TicketMergeLocation,
+			checkpoint: (message: string) => Promise<TicketCheckpoint>,
+		) => Promise<T>,
+	): Promise<T> {
+		this.access.assertOwner(actor);
+		return this.serialize(async () => {
+			const record = await this.ready(id).catch((cause: unknown) => {
+				throw new TicketError("ticket-workspace-invalid", { cause });
+			});
+			try {
+				const path = await this.client.location(record, true);
+				return await action(
+					{ path, workspace: record, assertGitIdle: () => this.client.assertGitIdle(path) },
+					(message) => this.client.checkpoint(record, message),
+				);
+			} catch (cause) {
+				if (cause instanceof TicketError) throw cause;
+				throw new TicketError(
+					cause instanceof WorkspaceError ? "ticket-workspace-invalid" : "ticket-unavailable",
+					{ cause },
+				);
+			}
+		});
+	}
+	async ticketRepository(actor: Actor, id: string): Promise<string> {
+		this.access.assertOwner(actor);
+		return this.client.repositoryLocation(await this.require(id));
 	}
 	async tree(actor: Actor, id: string, path: string): Promise<WorkspaceTree> {
 		this.access.assertOwner(actor);

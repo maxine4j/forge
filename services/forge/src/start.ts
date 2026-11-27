@@ -394,6 +394,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		providers,
 		taskAgents,
 		() => usage.quotaExhausted(),
+		workspaces,
 	);
 	const tickets = new TicketService(ticketStore, store, access, () => new Date(), workflow, epicStore);
 	const epics = new EpicService(epicStore, ticketStore, access, () => new Date());
