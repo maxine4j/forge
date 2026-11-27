@@ -1,6 +1,7 @@
 import type { Ticket, TicketWorkflow } from "@forge/contracts/tickets";
 import { expect, test } from "vitest";
 
+import { completionReportRequirements } from "./completion-report.ts";
 import {
 	ticketPlanGuidance as subtaskGuidance,
 	ticketSinglePlanGuidance as ticketPlanGuidance,
@@ -26,6 +27,7 @@ test("initial phase prompts include only the scope needed for that phase and fol
 	);
 	const plan = { revision: 2, text: "# Plan\nFilter by extension." };
 	const structured = {
+		title: "Plan title marker",
 		goals: "Goals body",
 		scope: "Scope body",
 		decisions: "Decisions body",
@@ -36,19 +38,19 @@ test("initial phase prompts include only the scope needed for that phase and fol
 				number: 1,
 				title: "First",
 				files: "a.ts",
-				dependencies: "None",
-				expectedChanges: "Change",
-				exclusions: "None",
-				completionCriteria: "Done",
+				dependencies: "First dependency marker",
+				expectedChanges: "First change marker",
+				exclusions: "First exclusion marker",
+				completionCriteria: "First completion marker",
 			},
 			{
 				number: 2,
 				title: "Second",
 				files: "b.ts",
-				dependencies: "1",
-				expectedChanges: "More",
-				exclusions: "None",
-				completionCriteria: "Done",
+				dependencies: "Second dependency marker",
+				expectedChanges: "Second change marker",
+				exclusions: "Second exclusion marker",
+				completionCriteria: "Second completion marker",
 			},
 		],
 	};
@@ -71,6 +73,15 @@ test("initial phase prompts include only the scope needed for that phase and fol
 		planningInstructions: "List the risks.\nConsider migrations.",
 		implementationInstructions: "Run focused tests.",
 	}));
+	for (const [subtaskIndex, task] of structured.subtasks.entries()) {
+		const scoped = configured.build(
+			{ ...ticket, executionSettings: { workflowPreset: "planner-subtasks" } },
+			{ ...job, phase: "implementation", plan: { ...plan, structured }, subtaskIndex },
+		);
+		expect(scoped).toBe(
+			`Implement only subtask ${task.number}: ${task.title}. Commit your changes on this branch.\n\nRun focused tests.\n\n- Files: ${task.files}\n- Dependencies: ${task.dependencies}\n- Expected changes: ${task.expectedChanges}\n- Exclusions: ${task.exclusions}\n- Completion criteria: ${task.completionCriteria}\n\n${ticketCompletionInstructions(completionReportRequirements(false, subtaskIndex === 0))}`,
+		);
+	}
 	expect(configured.build(ticket, job)).toBe(
 		`Propose an implementation plan for TASK-1 Search files. Filter by extension.\n\nList the risks.\nConsider migrations.\n\n${ticketPlanGuidance}`,
 	);

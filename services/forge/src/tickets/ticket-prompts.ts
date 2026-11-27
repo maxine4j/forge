@@ -1,11 +1,17 @@
 import type { ForgeSettings } from "@forge/contracts/settings";
-import { renderTicketPlan, resolveTicketWorkflowPreset, type Ticket } from "@forge/contracts/tickets";
+import { renderTicketPlan, resolveTicketWorkflowPreset, ticketPlanLabels, type Ticket } from "@forge/contracts/tickets";
 
 import { completionReportRequirements, handoffRequestTokens, reportTextLimit } from "./completion-report.ts";
 import { ticketPlanGuidance, ticketSinglePlanGuidance } from "./ticket-plan-format.ts";
 import type { TicketWorkflowRecord } from "./types.ts";
 
 type TicketInstructions = Pick<ForgeSettings, "planningInstructions" | "implementationInstructions">;
+
+export function assignedSubtask(ticket: Ticket, job: TicketWorkflowRecord) {
+	if (job.phase === "implementation" && resolveTicketWorkflowPreset(ticket.executionSettings) === "planner-subtasks")
+		return job.plan?.structured?.subtasks[job.subtaskIndex ?? 0];
+	return undefined;
+}
 
 export function hasNextSubtask(ticket: Ticket | undefined, job: TicketWorkflowRecord): boolean {
 	return (
@@ -73,14 +79,16 @@ export class TicketPrompts implements ITicketPrompts {
 		const instructions = this.instructions?.();
 		if (job.phase === "planning")
 			return `Propose an implementation plan for ${ticket.id} ${ticket.title}${ticket.description ? `. ${ticket.description}` : "."}${this.extra(instructions?.planningInstructions)}`;
-		if (
-			job.plan
-			&& resolveTicketWorkflowPreset(ticket.executionSettings) === "planner-subtasks"
-			&& job.plan.structured?.subtasks.length
-		) {
-			const task = job.plan.structured.subtasks[job.subtaskIndex ?? 0];
-			if (task)
-				return `Implement only subtask ${task.number}: ${task.title} from the approved plan below. Commit your changes on this branch. Earlier subtasks may already be complete; leave later subtasks for subsequent implementers.${this.extra(instructions?.implementationInstructions)}\n\n${renderTicketPlan(job.plan.structured)}`;
+		const task = assignedSubtask(ticket, job);
+		if (task) {
+			const fields = [
+				task.files,
+				task.dependencies,
+				task.expectedChanges,
+				task.exclusions,
+				task.completionCriteria,
+			];
+			return `Implement only subtask ${task.number}: ${task.title}. Commit your changes on this branch.${this.extra(instructions?.implementationInstructions)}\n\n${fields.map((value, i) => `- ${ticketPlanLabels[i]}: ${value}`).join("\n")}`;
 		}
 		if (job.plan)
 			return `Implement the approved plan below and commit the changes on this branch.${this.extra(instructions?.implementationInstructions)}\n\n${job.plan.structured ? renderTicketPlan(job.plan.structured) : job.plan.text}`;

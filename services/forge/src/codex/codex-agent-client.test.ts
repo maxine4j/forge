@@ -443,6 +443,7 @@ test("steering uses the pinned active-turn protocol without starting or reviving
 		expectedTurnId: "turn-1",
 		input: [{ type: "text", text: "Focus on tests", text_elements: [] }],
 	});
+	expect(rpc.mock.calls.filter(([method]) => method === "turn/steer")).toHaveLength(1);
 	expect(client.read(id)).toEqual(before);
 	expect(track).toHaveBeenCalledTimes(1);
 	rpc.mockImplementationOnce(async () => {
@@ -482,6 +483,7 @@ test("ticket steering resolves structured skills without replacing active settin
 			{ type: "skill", name: "review", path: "/skills/review/SKILL.md" },
 		],
 	});
+	expect(rpc.mock.calls.filter(([method]) => method === "turn/steer")).toHaveLength(1);
 	expect(rpc.mock.calls.filter(([method]) => method === "turn/start")).toHaveLength(1);
 });
 

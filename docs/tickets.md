@@ -4,9 +4,16 @@
 
 Managed Implementers use Codex's default automatic compaction; see [agent execution](agents.md#codex-harness-and-lifecycle). For implementation work, Forge observes samples for the current turn. At 75% of the reported window it waits for pending requests, checks for 4,096 free tokens, persists one steering attempt, and requests a committed checkpoint and end to the turn. Forge never replays an ambiguous steer.
 
-After a recorded Forge checkpoint steer settles, Forge verifies a clean worktree on the expected branch and checks for 4,096 free tokens before asking the same thread whether the assignment is complete or needs a handoff. A threshold crossing first observed after an unsteered work turn settles follows normal outcome validation. Forge verifies that the checkpoint remains clean and unchanged before accepting the report. A valid handoff requires a new commit and starts a fresh Implementer on the same worktree and branch with the original assignment and latest handover. A valid complete report follows the normal [progression and merge rules](#implementer-completion-and-handover).
+After a recorded Forge checkpoint steer settles, Forge verifies a clean worktree on the expected branch and checks for 4,096 free tokens before asking the same thread whether the assignment is complete or needs a handoff. A threshold crossing first observed after an unsteered work turn settles follows normal outcome validation. Forge verifies that the checkpoint remains clean and unchanged before accepting the report. A valid handoff requires a new commit and starts a fresh Implementer on the same worktree and branch with the current assignment and latest bounded handover. Forge rebuilds ordered assignments from the saved structured subtask at dispatch time, even when an older record caches the full plan. A valid complete report follows the normal [progression and merge rules](#implementer-completion-and-handover).
 
 Automatic checkpoint steering applies during active implementation work. Forge checks available headroom before finalization dispatch and never requests compaction, steers, or starts a recovery handoff during a checkpoint report or verdict retry. Insufficient headroom and context exhaustion during finalization fail the workflow without an automatic retry. Ticket Chat shows context telemetry, headroom, checkpoint, report and no-progress failures. The owner can adjust configuration and explicitly retry after settlement. Forge preserves the worktree, commits and provider pin.
+
+An explicit retry after a context failure opens a fresh thread. For ordered work,
+Forge sends the saved subtask assignment and the owner's recovery instruction.
+For whole-ticket work, the owner's retry text is the recovery assignment and the
+original plan remains available in ticket history. Fresh recovery includes
+available bounded handover or previous-subtask summary and the completion
+requirements for the current phase and subtask.
 
 ## Chat inference speed
 
@@ -106,6 +113,8 @@ precede them. Ordered subtasks have consecutive `### 1. Title` headings and nonb
 Files, Dependencies, Expected changes, Exclusions, and Completion criteria entries.
 Continuation lines are indented. The Planner supplies repository paths, symbols,
 dependencies, and test commands; Forge validates structure, not their accuracy.
+Each subtask includes its applicable decisions and verification commands so the
+Implementer can execute it independently.
 Plans are limited to 32,000 characters.
 
 Each accepted revision stores original Markdown and parsed sections and subtasks
@@ -117,6 +126,11 @@ Invalid or missing output fails planning without replacing the prior
 revision or releasing the Planner reservation; the owner can send feedback to the
 same pinned thread or approve the prior valid revision. Planner + subtasks runs each
 structured subtask in order in a fresh Implementer conversation on the same branch.
+That assignment includes the subtask number, title and all five fields, configured
+implementation instructions, and the commit and completion report requirements.
+Fresh threads receive any applicable bounded previous-subtask summary or
+checkpoint handover. Plan-wide sections, ticket prose and sibling assignments stay
+out of the prompt. Review still renders the complete saved plan.
 Other presets send the entire plan to one Implementer; text-only records use their original text.
 See [agent lifecycle](agents.md#codex-harness-and-lifecycle).
 
@@ -432,7 +446,10 @@ text across approval and modal reopening within the board's browser memory.
 
 Messages during running implementation and rebase turns steer the known active
 turn immediately through `turn/steer` with `expectedTurnId`; they retain the same
-execution tracking and turn identity. Steering is serialized with ticket completion
+execution tracking and turn identity. The text item is the trimmed owner message.
+A follow-up on a settled implementation or rebase thread sends that message and
+the required completion report instructions on the same thread, including after
+scheduler restart. Steering is serialized with ticket completion
 and merge transitions. Stale turns, completed tickets and merge-queued submissions
 are rejected. Failed or ambiguous steering is never replayed automatically; the
 browser retains its draft and refreshes status. Planning messages remain limited

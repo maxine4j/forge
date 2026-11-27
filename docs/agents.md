@@ -412,6 +412,9 @@ authoritative conversation storage. Approval uses the workflow's saved revision.
 Managed ticket implementation and rebase turns support owner steering. Forge
 verifies workspace ownership, serializes per-thread operations, and submits
 `turn/steer` with `{threadId,expectedTurnId,input:[{type:"text",text,text_elements:[]}]}`.
+The text item contains exactly the trimmed owner message. Skill references
+continue to produce structured inputs. Keep cached assignments, plan text,
+transcripts, report boilerplate and owner-guidance wrappers out of steering.
 The response is `{turnId}` and must match the expected active turn. These shapes
 were verified with `codex app-server generate-ts` from Codex `0.164.0`
 against the [official steering documentation](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn).
@@ -421,6 +424,12 @@ are rejected; transport failures never trigger replay. Ticket workflow
 serialization also prevents steering after completion/merge queuing. Waiting
 structured requests use existing replies; planner feedback requires an idle or
 failed workflow.
+
+A follow-up on a settled implementation or rebase thread starts a turn on the
+same thread with the owner's message and the required [completion report
+instructions](#managed-implementer-completion-reports). Forge sends those two
+parts after scheduler restart as well. The assignment and earlier summaries
+remain in the conversation. See [fresh-thread recovery](tickets.md#implementation-context-handover).
 
 Controlled Chromium tests cover independent threads, activity, interruptions,
 reopening, failed sends/replies, approval/input, reconnects, automatic recovery and

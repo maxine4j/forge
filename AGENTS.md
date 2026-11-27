@@ -13,6 +13,7 @@ The documents below define Forge requirements. Update the relevant document when
 - Keep backend side effects behind injected interfaces. Use the workspace infrastructure package for filesystem operations, YAML, timers, and logging.
 - Keep credentials out of API responses and preserve persistent data and credentials during resource removal.
 - Follow the [development checks](docs/development.md#development-checks). Keep process and startup wiring in `main.ts` and `start.ts`, and keep business logic in separately tested modules.
+- Send active ticket steering as the trimmed owner text, with existing structured skill inputs. Never add a cached assignment, full plan, transcript, report boilerplate, or `Owner guidance` wrapper to steering. For a settled implementation or rebase thread, send the owner follow-up and the required completion-report instructions. Never replay the assignment to append a same-thread follow-up. See [ticket steering and follow-ups](docs/agents.md#interactive-agents).
 
 ## Read for the task
 
