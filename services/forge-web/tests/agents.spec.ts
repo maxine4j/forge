@@ -83,7 +83,13 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 					json: [
 						{ id: openai, name: "OpenAI", kind: "openai", retired: false },
 						{ id: ollama, name: "Local", kind: "ollama", retired: false, endpoint: "http://ollama/v1" },
-						{ id: unused, name: "Unused", kind: "ollama", retired: false, endpoint: "http://unused/v1" },
+						{
+							id: unused,
+							name: `Unused ${"long-provider-name-".repeat(5)}`,
+							kind: "ollama",
+							retired: false,
+							endpoint: `http://${"long-endpoint-".repeat(12)}example/v1`,
+						},
 						{ id: "123e4567-e89b-42d3-a456-426614174004", name: "Retired", kind: "openai", retired: true },
 					],
 				});
@@ -148,6 +154,18 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	await page.clock.fastForward(10_000);
 	await expect.poll(() => schedulerReads).toBeGreaterThan(schedulerBeforePoll);
 	expect(healthReads).toBe(healthBeforePoll);
+	await page.evaluate(() => {
+		Object.defineProperty(document, "hidden", { configurable: true, value: true });
+		document.dispatchEvent(new Event("visibilitychange"));
+	});
+	const schedulerWhileHidden = schedulerReads;
+	await page.clock.fastForward(10_000);
+	expect(schedulerReads).toBe(schedulerWhileHidden);
+	await page.evaluate(() => {
+		Object.defineProperty(document, "hidden", { configurable: true, value: false });
+		document.dispatchEvent(new Event("visibilitychange"));
+	});
+	await expect.poll(() => schedulerReads).toBeGreaterThan(schedulerWhileHidden);
 	for (const [width, columns] of [
 		[1280, 3],
 		[820, 2],
