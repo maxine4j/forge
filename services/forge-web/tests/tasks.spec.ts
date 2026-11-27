@@ -2803,6 +2803,24 @@ test("Ticket Chat shows context recovery guidance and accepts retry", async ({ p
 	await expect.poll(fixture.messages).toBe(1);
 });
 
+test("Ticket Chat shows completion failure and hides the stale merge action", async ({ page }) => {
+	const fixture = await setup(page, false, true);
+	fixture.setAgentStatus(undefined, true);
+	fixture.setWorkflow({
+		phase: "rebase",
+		state: "failed",
+		implementerId: "123e4567-e89b-42d3-a456-426614174010",
+		resultSha: "a".repeat(40),
+		mergeRetryEligible: true,
+		completionFailure: "invalid-report",
+	});
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const panel = page.getByRole("dialog");
+	await panel.getByRole("tab", { name: "Chat", exact: true }).click();
+	await expect(panel.getByRole("alert")).toContainText("did not provide a valid completion report");
+	await expect(panel.getByRole("button", { name: /merge/i })).toHaveCount(0);
+});
+
 for (const size of [
 	{ width: 1280, height: 900 },
 	{ width: 820, height: 820 },

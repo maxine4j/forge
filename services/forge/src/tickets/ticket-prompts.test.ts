@@ -5,7 +5,7 @@ import {
 	ticketPlanGuidance as subtaskGuidance,
 	ticketSinglePlanGuidance as ticketPlanGuidance,
 } from "./ticket-plan-format.ts";
-import { TicketPrompts } from "./ticket-prompts.ts";
+import { TicketPrompts, ticketCompletionInstructions } from "./ticket-prompts.ts";
 
 test("initial phase prompts include only the scope needed for that phase and followups are verbatim", () => {
 	const prompts = new TicketPrompts();
@@ -58,14 +58,14 @@ test("initial phase prompts include only the scope needed for that phase and fol
 		/## Goals[\s\S]*## Scope[\s\S]*## Decisions[\s\S]*## Acceptance criteria[\s\S]*## Tests[\s\S]*### 1\. First[\s\S]*### 2\. Second/,
 	);
 	expect(prompts.build(ticket, { ...job, phase: "implementation", plan })).toBe(
-		"Implement the approved plan below and commit the changes on this branch.\n\n# Plan\nFilter by extension.",
+		`Implement the approved plan below and commit the changes on this branch.\n\n# Plan\nFilter by extension.\n\n${ticketCompletionInstructions}`,
 	);
 	expect(prompts.build(ticket, { ...job, phase: "rebase", plan })).toBe(
-		"Rebase this branch onto the latest local main and resolve any conflicts.",
+		`Rebase this branch onto the latest local main and resolve any conflicts.\n\n${ticketCompletionInstructions}`,
 	);
 	for (const phase of ["implementation", "rebase"] as const)
 		expect(prompts.build(ticket, { ...job, phase, plan, message: "Include hidden files" })).toBe(
-			"Include hidden files",
+			`Include hidden files\n\n${ticketCompletionInstructions}`,
 		);
 	const configured = new TicketPrompts(() => ({
 		planningInstructions: "List the risks.\nConsider migrations.",
@@ -75,7 +75,7 @@ test("initial phase prompts include only the scope needed for that phase and fol
 		`Propose an implementation plan for TASK-1 Search files. Filter by extension.\n\nList the risks.\nConsider migrations.\n\n${ticketPlanGuidance}`,
 	);
 	expect(configured.build(ticket, { ...job, phase: "implementation", plan })).toBe(
-		"Implement the approved plan below and commit the changes on this branch.\n\nRun focused tests.\n\n# Plan\nFilter by extension.",
+		`Implement the approved plan below and commit the changes on this branch.\n\nRun focused tests.\n\n# Plan\nFilter by extension.\n\n${ticketCompletionInstructions}`,
 	);
 	expect(configured.build(ticket, { ...job, message: "Include hidden files" })).toBe(
 		`Include hidden files\n\nProvide a complete replacement native plan incorporating this feedback.\n\n${ticketPlanGuidance}`,

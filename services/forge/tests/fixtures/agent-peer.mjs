@@ -1,4 +1,6 @@
 import { execFileSync } from "node:child_process";
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 const threads = new Map();
@@ -127,12 +129,30 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		});
 		result = { turn };
 		if (highContext) thread.checkpointScenario = true;
+		if (prompt.includes("TASK84_CONTROLLED")) thread.completionScenario = true;
+		if (thread.completionScenario && prompt.startsWith("Assess the assignment")) {
+			const item = {
+				id: `answer-${sequence}`,
+				type: "agentMessage",
+				phase: "final_answer",
+				text: JSON.stringify({ status: "incomplete", remaining: "Finish integration" }),
+			};
+			turn.items.push(item);
+			turn.status = "completed";
+			thread.status = { type: "idle" };
+			notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
+			notify("turn/completed", { threadId: thread.id, turn });
+		}
 		if (prompt.startsWith("Using the conversation") && thread.checkpointScenario) {
 			const item = {
 				id: `answer-${sequence}`,
 				type: "agentMessage",
 				phase: "final_answer",
-				text: JSON.stringify({ status: "handoff", handover: "Finish controlled work" }),
+				text: JSON.stringify({
+					status: "incomplete",
+					remaining: "Finish controlled work",
+					handover: "Finish controlled work",
+				}),
 			};
 			turn.items.push(item);
 			turn.status = "completed";
@@ -146,7 +166,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			planning
 			|| rebase
 			|| (!highContext
-				&& (prompt.startsWith("Implement the approved plan") || prompt.includes("TASK67_CONTROLLED")))
+				&& (prompt.startsWith("Implement the approved plan")
+					|| prompt.includes("TASK67_CONTROLLED")
+					|| prompt.includes("TASK84_CONTROLLED")))
 		) {
 			if (planning) {
 				if (thread.turns.length > 1 && !prompt.startsWith("Include filtering\n\n"))
@@ -174,7 +196,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 						{ encoding: "utf8" },
 					).trim();
 				if (rebase) git("rebase", "--keep-empty", "main");
-				else git("commit", "--allow-empty", "-m", `Controlled implementation ${sequence}`);
+				else {
+					if (thread.completionScenario && thread.turns.length === 1) {
+						writeFileSync(join(thread.cwd, "partial.txt"), "Partial implementation\n");
+						git("add", "partial.txt");
+					}
+					git("commit", "--allow-empty", "-m", `Controlled implementation ${sequence}`);
+				}
 			}
 			if (rebase)
 				turn.items.push({
@@ -187,7 +215,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			turn.items.push({
 				id: `answer-${sequence}`,
 				type: "agentMessage",
-				text: planning ? "Plan ready." : "Changes committed.",
+				phase: "final_answer",
+				text: planning
+					? "Plan ready."
+					: thread.completionScenario && thread.turns.length === 1
+						? "TASK-78 is **not complete**"
+						: JSON.stringify({ status: "complete" }),
 			});
 			turn.status = "completed";
 			thread.status = { type: "idle" };

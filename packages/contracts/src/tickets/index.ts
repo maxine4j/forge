@@ -160,6 +160,8 @@ export const ticketWorkflowSchema = z.strictObject({
 		.optional(),
 	providerSelectionError: z.boolean().optional(),
 	contextFailure: z.enum(["telemetry", "headroom", "checkpoint", "report", "no-progress"]).optional(),
+	completionFailure: z.enum(["incomplete", "invalid-report"]).optional(),
+	mergeRetryEligible: z.literal(true).optional(),
 	ticketId: ticketIdSchema,
 	executionRepositoryId: z.uuid().optional(),
 	workspaceId: z.uuid().optional(),

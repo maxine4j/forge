@@ -362,8 +362,9 @@ export const TicketDetails = ({
 	const canQueueMerge =
 		ticket.status === "in-progress"
 		&& !job?.contextFailure
+		&& !job?.completionFailure
 		&& job?.resultSha
-		&& ((job.phase === "review" && job.state === "idle") || job.state === "failed");
+		&& ((job.phase === "review" && job.state === "idle") || (job.state === "failed" && job.mergeRetryEligible));
 	const act = (path: string, body: unknown, onSuccess?: () => void) => {
 		if (archived || actionPending.current || !poller.current) return;
 		actionPending.current = true;
@@ -765,6 +766,14 @@ export const TicketDetails = ({
 				{ticket.status !== "backlog" && <p>Scope is fixed after execution starts. Discuss changes in chat.</p>}
 			</div>
 			<div className='ticket-chat' {...panel("chat")}>
+				{job?.completionFailure && (
+					<p role='alert'>
+						{job.completionFailure === "incomplete"
+							? "The implementer reported that the assignment is incomplete."
+							: "The implementer did not provide a valid completion report."}{" "}
+						Review the conversation and send guidance to continue.
+					</p>
+				)}
 				{job?.contextFailure && (
 					<p role='alert'>
 						{

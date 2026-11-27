@@ -731,3 +731,9 @@ tickets remain readable. Private attempt identities and runtime data are exclude
 The tab loads on selection, refreshes once per second without overlapping requests,
 retains loaded pages and reading position, and offers Load more, loading, empty
 and retryable error states.
+
+## Implementer completion and handover
+
+Managed Implementers must return exactly one JSON object without surrounding prose or Markdown. A complete report has `status: "complete"` and may have a nonblank `summary`; an incomplete report has `status: "incomplete"`, a nonblank `remaining`, and an optional nonblank `summary`. Text fields are trimmed and limited to 2,000 characters. Unknown fields are rejected. Complete means the assigned scope is finished and required changes have been committed. See also the [managed turn contract](agents.md#managed-implementer-completion-reports).
+
+Forge asks once for a report-only clarification when a final answer is invalid or absent. An incomplete or second invalid report stops progression and asks for owner guidance. Checkpoint reports may also include a nonblank `handover` of at most 12,000 characters on an incomplete report. A successor starts only after the checkpoint remains unchanged and demonstrates new progress. A complete report still must pass the existing Git candidate checks; Done requires a successful merge. Merge retries require a verified candidate and explicit retry eligibility after a merge failure or exhausted divergence retries. Unresolved completion failures block merging.

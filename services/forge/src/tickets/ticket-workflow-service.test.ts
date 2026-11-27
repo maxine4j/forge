@@ -363,7 +363,7 @@ test("recommendations use current settings on the next feedback and rebase turns
 	await f.service.tick(actor);
 	await f.service.message(actor, ticket, "Try again");
 	await f.service.tick(actor);
-	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Try again\n\nChoose the recommended option");
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Choose the recommended option");
 	f.merges.merge.mockResolvedValue("rebase");
 	f.complete(job.implementerId!);
 	await f.service.tick(actor);
@@ -418,13 +418,15 @@ test("a checkpoint report hands work to a fresh thread on the same workspace", a
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "queued", context: { stage: "report" } });
 	await f.service.tick(actor);
-	f.agents.finalAnswer.mockResolvedValue('{"status":"handoff","handover":"Finish tests"}');
+	f.agents.finalAnswer.mockResolvedValue(
+		'{"status":"incomplete","remaining":"Finish tests","handover":"Finish tests"}',
+	);
 	f.complete(id);
 	await f.service.tick(actor);
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)!.implementerId).not.toBe(id);
 	expect(f.jobs.get(ticket.id)!.workspaceId).toBe(first.workspaceId);
-	expect(f.agents.dispatch.mock.lastCall![2]).toContain(prompt);
+	expect(f.agents.dispatch.mock.lastCall![2]).toContain(prompt.split("\n\nEnd your final answer")[0]);
 	expect(f.agents.dispatch.mock.lastCall![2]).toContain("Finish tests");
 });
 
@@ -448,31 +450,106 @@ test("a complete report permits the existing merge path", async () => {
 	await f.service.tick(actor);
 	expect(ticket.status).toBe("done");
 });
-test.each([
-	["{bad", "report"],
-	[JSON.stringify({ status: "handoff", handover: "x".repeat(12001) }), "report"],
-])("rejects invalid checkpoint reports", async (answer, reason) => {
+test("prose queues one same-thread verdict and incomplete blocks merge until owner guidance", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.settings(actor, ticket, { skipPlanning: true });
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	const job = f.jobs.get(ticket.id)!;
+	const id = job.implementerId!;
+	f.agents.finalAnswer.mockResolvedValueOnce("TASK-78 is **not complete**");
+	f.complete(id);
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "queued", reportRetrySourceTurnId: job.turnId });
+	expect(ticket.status).toBe("in-progress");
+	expect(f.merges.candidate).not.toHaveBeenCalled();
+	await f.makeService().tick(actor);
+	expect(f.agents.dispatch.mock.lastCall?.[1]).toBe(id);
+	expect(f.agents.dispatch.mock.lastCall?.[2]).toContain("Do not edit files or commit");
+	await f.makeService().tick(actor);
+	expect(f.agents.dispatch).toHaveBeenCalledTimes(2);
+	f.agents.finalAnswer.mockResolvedValueOnce('{"status":"incomplete","remaining":"Finish tests"}');
+	f.complete(id);
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", completionFailure: "incomplete" });
+	await expect(f.service.queueMerge(actor, ticket)).rejects.toThrow("ticket-conflict");
+	await f.service.message(actor, ticket, "Finish the tests");
+	await f.service.tick(actor);
+	expect(f.agents.dispatch.mock.lastCall?.[1]).toBe(id);
+	expect(f.agents.dispatch.mock.lastCall?.[2]).toContain("Finish the tests");
+	f.complete(id);
+	await f.service.tick(actor);
+	await f.service.tick(actor);
+	expect(ticket.status).toBe("done");
+});
+test("an incomplete rebase cannot merge an earlier verified candidate", async () => {
 	const f = fixture();
 	const ticket = f.create();
 	await f.service.settings(actor, ticket, { skipPlanning: true });
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
 	const id = f.jobs.get(ticket.id)!.implementerId!;
-	f.agents.contextSample.mockResolvedValue({ used: 96000, max: 128000, crossed: true });
-	await f.service.tick(actor);
 	f.complete(id);
 	await f.service.tick(actor);
+	f.merges.merge.mockResolvedValueOnce("rebase");
 	await f.service.tick(actor);
-	f.agents.finalAnswer.mockResolvedValue(answer);
+	await f.service.tick(actor);
+	f.agents.finalAnswer.mockResolvedValueOnce('{"status":"incomplete","remaining":"Resolve conflicts"}');
 	f.complete(id);
 	await f.service.tick(actor);
-	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", contextFailure: reason });
-	expect(f.merges.merge).not.toHaveBeenCalled();
-	await f.service.message(actor, ticket, "Please continue");
-	await f.service.tick(actor);
-	expect(f.jobs.get(ticket.id)!.implementerId).not.toBe(id);
-	expect(f.agents.dispatch.mock.lastCall![2]).toContain("Please continue");
+	expect(f.jobs.get(ticket.id)).toMatchObject({ phase: "rebase", state: "failed", completionFailure: "incomplete" });
+	await expect(f.service.queueMerge(actor, ticket)).rejects.toThrow("ticket-conflict");
+	expect(f.merges.merge).toHaveBeenCalledTimes(1);
 });
+test("a clarification cannot accept an earlier turn's final answer", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.settings(actor, ticket, { skipPlanning: true });
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	const job = f.jobs.get(ticket.id)!;
+	const id = job.implementerId!;
+	f.agents.finalAnswer.mockResolvedValueOnce("not complete");
+	f.complete(id);
+	await f.service.tick(actor);
+	await f.service.tick(actor);
+	f.views.get(id)!.thread.turnId = job.turnId;
+	f.complete(id);
+	await f.makeService().tick(actor);
+	expect(f.jobs.get(ticket.id)?.state).toBe("uncertain");
+	expect(f.agents.finalAnswer).toHaveBeenCalledTimes(1);
+	expect(f.merges.merge).not.toHaveBeenCalled();
+});
+test.each(["{bad", JSON.stringify({ status: "incomplete", remaining: "tests", handover: "x".repeat(12001) })])(
+	"rejects invalid checkpoint reports",
+	async (answer) => {
+		const f = fixture();
+		const ticket = f.create();
+		await f.service.settings(actor, ticket, { skipPlanning: true });
+		await f.service.move(actor, ticket, { status: "todo" });
+		await f.service.tick(actor);
+		const id = f.jobs.get(ticket.id)!.implementerId!;
+		f.agents.contextSample.mockResolvedValue({ used: 96000, max: 128000, crossed: true });
+		await f.service.tick(actor);
+		f.complete(id);
+		await f.service.tick(actor);
+		await f.service.tick(actor);
+		f.agents.finalAnswer.mockResolvedValue(answer);
+		f.complete(id);
+		await f.service.tick(actor);
+		expect(f.jobs.get(ticket.id)).toMatchObject({ state: "queued" });
+		await f.makeService().tick(actor);
+		f.complete(id);
+		await f.service.tick(actor);
+		expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", completionFailure: "invalid-report" });
+		expect(f.merges.merge).not.toHaveBeenCalled();
+		await f.service.message(actor, ticket, "Please continue");
+		await f.service.tick(actor);
+		expect(f.jobs.get(ticket.id)!.implementerId).toBe(id);
+		expect(f.agents.dispatch.mock.lastCall![2]).toContain("Please continue");
+	},
+);
 test("insufficient context waits for settlement before allowing a retry", async () => {
 	const f = fixture();
 	const ticket = f.create();
@@ -539,7 +616,9 @@ test.each(["dirty", "unchanged"] as const)("%s checkpoint prevents handoff", asy
 	await f.service.tick(actor);
 	if (condition === "unchanged") {
 		await f.service.tick(actor);
-		f.agents.finalAnswer.mockResolvedValue('{"status":"handoff","handover":"Work remains"}');
+		f.agents.finalAnswer.mockResolvedValue(
+			'{"status":"incomplete","remaining":"Work remains","handover":"Work remains"}',
+		);
 		f.complete(id);
 		await f.service.tick(actor);
 	}
@@ -608,7 +687,7 @@ const fixture = (
 			max: 128000,
 			crossed: false,
 		})),
-		finalAnswer: vi.fn(async () => undefined as string | undefined),
+		finalAnswer: vi.fn(async () => '{"status":"complete"}' as string | undefined),
 		get: vi.fn<ITicketAgents["get"]>(async (_actor, id) => structuredClone(views.get(id)!)),
 		resume: vi.fn<ITicketAgents["resume"]>(async (_actor, id) => structuredClone(views.get(id)!)),
 	};
@@ -1772,7 +1851,8 @@ test("uncommitted implementation stays In progress and can receive a plain follo
 	expect(f.merges.merge).not.toHaveBeenCalled();
 	await f.service.message(actor, ticket, "Commit the changes");
 	await f.service.tick(actor);
-	expect(f.agents.dispatch.mock.calls.at(-1)?.slice(1, 3)).toEqual([id, "Commit the changes"]);
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[1]).toBe(id);
+	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("Commit the changes");
 });
 
 test("workflow mutations reject nonowners before touching the board", async () => {

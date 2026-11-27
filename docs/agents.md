@@ -548,3 +548,7 @@ Both time charts use Recharts and expose values on hover and keyboard focus.
 This is budget capacity, not a guarantee of completing work in the remaining time:
 other account activity and changing ticket complexity affect it.
 It imposes no spending cap or scheduler enforcement.
+
+## Managed implementer completion reports
+
+Every managed Implementer turn, including rebase and owner-guided turns, must finish with a single JSON completion report. A completed agent turn is not itself evidence that the assignment is complete. Forge validates the final answer of the current turn and may request one report-only clarification on the same thread. See [ticket completion and handover](tickets.md#implementer-completion-and-handover) for the progression and merge rules. Standalone chats and planning turns do not use this contract.

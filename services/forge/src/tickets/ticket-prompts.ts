@@ -6,8 +6,10 @@ import type { TicketWorkflowRecord } from "./types.ts";
 
 type TicketInstructions = Pick<ForgeSettings, "planningInstructions" | "implementationInstructions">;
 
-export const ticketContextReportPrompt =
-	'Using the conversation, leave the worktree unchanged and return exactly one JSON object: {"status":"complete"} or {"status":"handoff","handover":"..."}. Limit the handover to 2,000 tokens covering completed work, outstanding requirements, relevant files, and verification status.';
+export const ticketCompletionInstructions =
+	'End your final answer with exactly one JSON object, without Markdown fences or surrounding prose: {"status":"complete","summary":"Implemented and verified the assignment"} or {"status":"incomplete","remaining":"Still need to finish the integration tests"}. Summary is optional; remaining is required only for incomplete. Text must be nonblank and at most 2,000 characters. Report complete only after finishing your assigned scope and committing the required changes.';
+export const ticketReportRetryPrompt = `Assess the assignment against the work already done. Do not edit files or commit. Return only the explicit verdict. ${ticketCompletionInstructions}`;
+export const ticketContextReportPrompt = `Using the conversation, leave the worktree unchanged. ${ticketCompletionInstructions} An incomplete checkpoint report may also include a nonblank handover field of at most 12,000 characters covering completed work, outstanding requirements, relevant files, and verification status.`;
 
 export interface ITicketPrompts {
 	build(ticket: Ticket, job: TicketWorkflowRecord): string;
@@ -20,7 +22,9 @@ export class TicketPrompts implements ITicketPrompts {
 			resolveTicketWorkflowPreset(ticket.executionSettings) === "planner-subtasks"
 				? ticketPlanGuidance
 				: ticketSinglePlanGuidance;
-		const prompt = this.scope(ticket, job) + (job.phase === "planning" ? `\n\n${guidance}` : "");
+		const prompt =
+			this.scope(ticket, job)
+			+ (job.phase === "planning" ? `\n\n${guidance}` : `\n\n${ticketCompletionInstructions}`);
 		return ticket.executionSettings?.acceptRecommendations
 			? `${prompt}\n\nChoose the recommended option, make reasonable assumptions, and proceed without asking the owner preference or clarification questions or asking them to select or confirm an approach. Retain manual plan approval and the selected tool permission mode.`
 			: prompt;

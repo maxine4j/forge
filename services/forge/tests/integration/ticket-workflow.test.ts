@@ -467,6 +467,46 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect((await jobs.get(returning.id))?.plan).toBeUndefined();
 		expect((await cost.read(owner)).tickets.find(({ id }) => id === returning.id)).toEqual(usageBeforeClear);
 		const prepare = workspaceClient.prepare.bind(workspaceClient);
+		const partial = await tickets.create(owner, {
+			repositoryIds: [project.id],
+			title: "Partial work",
+			description: "TASK84_CONTROLLED",
+			executionSettings: { ...executionSettings, skipPlanning: true },
+		});
+		const beforePartial = (await git.run(["-C", repository, "rev-parse", "main"])).trim();
+		await tickets.move(owner, partial.id, { status: "todo" });
+		await workflow.tick(owner);
+		const partialJob = (await jobs.get(partial.id))!;
+		await expect
+			.poll(
+				async () => {
+					await workflow.tick(owner);
+					return (await jobs.get(partial.id))?.completionFailure;
+				},
+				{ timeout: 10000 },
+			)
+			.toBe("incomplete");
+		expect((await ticketStore.get(partial.id))?.status).toBe("in-progress");
+		expect((await git.run(["-C", repository, "rev-parse", "main"])).trim()).toBe(beforePartial);
+		const verdict = rpc.mock.calls.find(
+			([method, params]) => method === "turn/start" && JSON.stringify(params).includes("Assess the assignment"),
+		);
+		const initialPartial = rpc.mock.calls.find(
+			([method, params]) => method === "turn/start" && JSON.stringify(params).includes("TASK84_CONTROLLED"),
+		);
+		expect(initialPartial).toBeDefined();
+		expect(verdict?.[1]).toMatchObject({ threadId: (initialPartial![1] as { threadId: string }).threadId });
+		expect((await jobs.get(partial.id))?.implementerId).toBe(partialJob.implementerId);
+		await workflow.message(owner, (await ticketStore.get(partial.id))!, "Finish the integration");
+		await expect
+			.poll(
+				async () => {
+					await workflow.tick(owner);
+					return (await ticketStore.get(partial.id))?.status;
+				},
+				{ timeout: 10000 },
+			)
+			.toBe("done");
 		const contextTicket = await tickets.create(owner, {
 			repositoryIds: [project.id],
 			title: "Context handoff",
