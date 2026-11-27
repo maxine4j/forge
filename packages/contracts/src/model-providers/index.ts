@@ -50,6 +50,8 @@ export const modelProviderSchema = z.object({
 	retired: z.boolean(),
 	maxConcurrentAgents: concurrentAgents.default(1),
 	compactionThresholdTokens: compactionThresholdTokens.optional(),
+	contextWindow: z.int().positive().optional(),
+	supportedConcurrency: z.int().positive().optional(),
 });
 export const modelProvidersSchema = z.array(modelProviderSchema);
 export const modelProviderHealthSchema = z.object({

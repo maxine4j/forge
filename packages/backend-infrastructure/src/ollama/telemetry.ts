@@ -4,6 +4,7 @@ export interface TelemetryFrame {
 	type: "telemetry";
 	ready: boolean;
 	contextWindow: number;
+	concurrency?: number;
 	hostMemory: { total: number; free: number } | null;
 	loadedModels: { count: number; size: number; sizeVram: number } | null;
 	gpus: { utilization: number | null; memoryUsed: number | null; memoryTotal: number | null }[];
@@ -25,6 +26,7 @@ export const readTelemetry = (data: Buffer): TelemetryFrame => {
 		|| typeof value["ready"] !== "boolean"
 		|| !bytes(value["contextWindow"])
 		|| value["contextWindow"] === 0
+		|| (value["concurrency"] !== undefined && (!bytes(value["concurrency"]) || value["concurrency"] === 0))
 		|| !(
 			value["hostMemory"] === null
 			|| (record(value["hostMemory"])
@@ -58,6 +60,7 @@ export const readTelemetry = (data: Buffer): TelemetryFrame => {
 		type: "telemetry",
 		ready: value["ready"],
 		contextWindow: value["contextWindow"],
+		...(value["concurrency"] === undefined ? {} : { concurrency: value["concurrency"] as number }),
 		hostMemory:
 			value["hostMemory"] === null
 				? null

@@ -20,6 +20,8 @@ resources:
               value: https://${SERVICE_DOMAIN}
             - name: FORGE_IMPORT_HOSTS
               value: github.com
+            - name: FORGE_OLLAMA_RELAY_ORIGIN
+              value: http://ollama-relay:8081
         volumes:
             - mountPath: /data
         termination:

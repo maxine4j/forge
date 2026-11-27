@@ -83,7 +83,7 @@ export class ModelProviderService implements IModelProviderService {
 	}
 	async create(actor: Actor, input: unknown): Promise<ModelProvider> {
 		this.access.assertOwner(actor);
-		return this.save(this.id(), input);
+		return this.serialize(() => this.save(this.id(), input));
 	}
 	async update(actor: Actor, id: string, input: unknown): Promise<ModelProvider> {
 		return this.serialize(async () => {
@@ -94,8 +94,8 @@ export class ModelProviderService implements IModelProviderService {
 			if (merged.comparisonModel === null) merged.comparisonModel = undefined;
 			if (merged.compactionThresholdTokens === null) merged.compactionThresholdTokens = undefined;
 			if (merged.kind !== previous.kind) throw new ModelProviderError("invalid-provider");
-			const { id: _id, retired: _retired, ...configuration } = merged;
-			const value = await this.save(id, configuration);
+			const { id: _id, retired: _retired, contextWindow, supportedConcurrency, ...configuration } = merged;
+			const value = await this.save(id, configuration, { contextWindow, supportedConcurrency });
 			this.wake();
 			return value;
 		});
@@ -107,10 +107,55 @@ export class ModelProviderService implements IModelProviderService {
 			this.wake();
 		});
 	}
-	private async save(id: string, input: unknown): Promise<ModelProvider> {
+	async reconcileRelay(
+		origin: string,
+		inventory: { workerId: string; contextWindow: number | null; concurrency: number | null }[],
+		conflict: (workerId: string) => void,
+	): Promise<void> {
+		await this.serialize(async () => {
+			const active = await this.store.list();
+			for (const worker of inventory) {
+				const endpoint = `${origin}/${worker.workerId}/openai/v1`;
+				const existing = active.find(
+					(provider) => provider.name.toLowerCase() === worker.workerId.toLowerCase(),
+				);
+				if (
+					existing
+					&& (existing.kind !== "ollama"
+						|| !existing.endpoint
+						|| URL.parse(existing.endpoint)?.href !== new URL(endpoint).href)
+				) {
+					conflict(worker.workerId);
+					continue;
+				}
+				const value: ModelProvider = existing
+					? { ...existing }
+					: {
+							id: this.id(),
+							name: worker.workerId,
+							kind: "ollama",
+							endpoint,
+							retired: false,
+							maxConcurrentAgents: 1,
+						};
+				if (worker.contextWindow !== null) value.contextWindow = worker.contextWindow;
+				if (worker.concurrency !== null) value.supportedConcurrency = worker.concurrency;
+				if (!existing || JSON.stringify(existing) !== JSON.stringify(value)) {
+					await this.store.save(value);
+					if (!existing) active.push(value);
+					this.wake();
+				}
+			}
+		});
+	}
+	private async save(
+		id: string,
+		input: unknown,
+		capabilities: Pick<ModelProvider, "contextWindow" | "supportedConcurrency"> = {},
+	): Promise<ModelProvider> {
 		const parsed = modelProviderInputSchema.safeParse(input);
 		if (!parsed.success) throw new ModelProviderError("invalid-provider");
-		const value = { ...parsed.data, id, retired: false };
+		const value = { ...parsed.data, ...capabilities, id, retired: false };
 		if (value.kind === "ollama" && value.comparisonModel && !modelRates(value.comparisonModel))
 			throw new ModelProviderError("invalid-provider");
 		try {

@@ -4,4 +4,5 @@ export interface ForgeConfiguration {
 	dataDirectory: string;
 	port: number;
 	importHosts: string[];
+	ollamaRelayOrigin?: string | undefined;
 }

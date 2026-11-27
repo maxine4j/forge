@@ -57,6 +57,28 @@ test("provider HTTP routes require owner/origin, expose safe records and return 
 		expect((await request("/health", "GET", undefined, "other")).status).toBe(403);
 		expect(await (await request("/health")).json()).toEqual([]);
 		expect((await request("", "POST", { name: "Secret", kind: "openai", loginId: "private" })).status).toBe(400);
+		expect(
+			(
+				await request("", "POST", {
+					name: "Bad",
+					kind: "ollama",
+					endpoint: "http://relay/bad/openai/v1",
+					contextWindow: 100,
+				})
+			).status,
+		).toBe(400);
+		await service.reconcileRelay(
+			"http://relay",
+			[{ workerId: "gpu", contextWindow: 32768, concurrency: 1 }],
+			() => {},
+		);
+		const discovered = (await (await request()).json()) as ModelProvider[];
+		expect(discovered[0]).toMatchObject({ name: "gpu", contextWindow: 32768, supportedConcurrency: 1 });
+		expect((await request(`/${discovered[0]!.id}`, "PATCH", { contextWindow: 10 })).status).toBe(400);
+		expect(
+			await (await request(`/${discovered[0]!.id}`, "PATCH", { maxConcurrentAgents: 2 })).json(),
+		).toMatchObject({ contextWindow: 32768, supportedConcurrency: 1 });
+		await request(`/${discovered[0]!.id}`, "DELETE");
 		const created = await request("", "POST", {
 			name: " Local ",
 			kind: "ollama",

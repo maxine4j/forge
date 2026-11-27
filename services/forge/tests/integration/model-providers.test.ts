@@ -24,6 +24,59 @@ const actor = { username: "owner" };
 const access = new AccessService({ owner: "owner", origin: "https://forge.test" });
 const ollama = { name: "Local", kind: "ollama", endpoint: "http://ollama/v1" };
 
+test("relay reconciliation preserves owner settings, retirement history, and last known capabilities", async () => {
+	const f = await fixture();
+	try {
+		const origin = "http://relay:8081";
+		const manual = await f.service.create(actor, {
+			name: "GPU-1",
+			kind: "ollama",
+			endpoint: `${origin}/gpu-1/openai/v1`,
+			maxConcurrentAgents: 3,
+			compactionThresholdTokens: 5000,
+			comparisonModel: "gpt-5.4",
+		});
+		await f.service.create(actor, { name: "collision", kind: "openai" });
+		const conflict = vi.fn();
+		const writes = vi.spyOn(f.store, "save");
+		const inventory = [
+			{ workerId: "gpu-1", contextWindow: 32000, concurrency: 1 },
+			{ workerId: "collision", contextWindow: 2000, concurrency: 2 },
+			{ workerId: "gpu-2", contextWindow: null, concurrency: null },
+		];
+		await f.service.reconcileRelay(origin, inventory, conflict);
+		expect(writes).toHaveBeenCalledTimes(2);
+		await f.service.reconcileRelay(origin, inventory, conflict);
+		expect(writes).toHaveBeenCalledTimes(2);
+		expect(conflict).toHaveBeenCalledTimes(2);
+		expect(await f.store.get(manual.id)).toMatchObject({
+			id: manual.id,
+			maxConcurrentAgents: 3,
+			compactionThresholdTokens: 5000,
+			comparisonModel: "gpt-5.4",
+			contextWindow: 32000,
+			supportedConcurrency: 1,
+		});
+		expect((await f.store.list()).find((p) => p.name === "gpu-2")).toMatchObject({ maxConcurrentAgents: 1 });
+		await expect(f.service.create(actor, { ...ollama, contextWindow: 1 })).rejects.toThrow();
+		await expect(f.service.update(actor, manual.id, { supportedConcurrency: 1 })).rejects.toThrow();
+		await f.service.update(actor, manual.id, { maxConcurrentAgents: 4 });
+		await f.service.reconcileRelay(origin, [{ ...inventory[0]!, contextWindow: null, concurrency: 2 }], conflict);
+		expect(await f.store.get(manual.id)).toMatchObject({
+			contextWindow: 32000,
+			supportedConcurrency: 2,
+			maxConcurrentAgents: 4,
+		});
+		await f.service.remove(actor, manual.id);
+		await f.service.reconcileRelay(origin, [inventory[0]!], conflict);
+		const replacement = (await f.store.list()).find((p) => p.name === "gpu-1")!;
+		expect(replacement.id).not.toBe(manual.id);
+		expect(await f.store.get(manual.id)).toMatchObject({ retired: true, contextWindow: 32000 });
+	} finally {
+		await f.close();
+	}
+});
+
 test("provider compaction thresholds persist, validate, and clear", async () => {
 	const f = await fixture();
 	try {

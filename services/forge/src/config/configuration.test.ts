@@ -24,8 +24,19 @@ test("configuration requires explicit owner and HTTPS origin, and validates impo
 		{ FORGE_IMPORT_HOSTS: "127.0.0.1" },
 		{ FORGE_IMPORT_HOSTS: "*.github.com" },
 		{ FORGE_DATA_DIRECTORY: "relative" },
+		...[
+			"ftp://relay",
+			"http://user@relay",
+			"http://relay/",
+			"http://relay/path",
+			"http://relay?",
+			"http://relay#",
+		].map((FORGE_OLLAMA_RELAY_ORIGIN) => ({ FORGE_OLLAMA_RELAY_ORIGIN })),
 	]) {
 		expect(() => new Configuration({ ...env, ...change }).load()).toThrow("Invalid Forge configuration");
 	}
 	expect(new Configuration({ ...env, FORGE_IMPORT_HOSTS: undefined }).load().importHosts).toEqual([]);
+	expect(new Configuration({ ...env, FORGE_OLLAMA_RELAY_ORIGIN: "http://relay:8081" }).load().ollamaRelayOrigin).toBe(
+		"http://relay:8081",
+	);
 });

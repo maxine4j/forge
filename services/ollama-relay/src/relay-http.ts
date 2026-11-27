@@ -160,6 +160,8 @@ export class RelayHttp {
 	}
 
 	private async respond(request: IncomingMessage, response: ServerResponse): Promise<void> {
+		if (request.method === "GET" && request.url === "/providers")
+			return json(response, 200, { providers: this.workers.inventory() });
 		const output = new HttpInferenceResponse(response);
 		const named = /^\/([^/]+)\/(openai\/v1\/(?:models|responses)|health|metrics)$/u.exec(request.url ?? "");
 		const id = named?.[1];

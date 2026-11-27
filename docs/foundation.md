@@ -184,9 +184,11 @@ contains inference routing, singleton Ollama configuration or OpenAI defaults.
 
 ### Model providers
 
+When relay discovery is configured, connected named Ollama workers are saved as providers named for their worker IDs. The owner-only provider API returns optional read-only `contextWindow` and `supportedConcurrency` values from fresh worker telemetry. These values do not change Codex context settings or the owner-controlled `maxConcurrentAgents` scheduling limit. Owner create and patch inputs cannot set them. Last known capabilities and providers remain saved when workers disconnect or the relay is unavailable. See [relay discovery and upgrades](development.md#ollama-relay-discovery).
+
 Providers may specify an automatic compaction threshold in tokens. Leave it blank to use Codex defaults; clearing an existing value removes the override. For Ollama, choose a threshold below the deployed context size with headroom for instructions, tool output, and generation. See [Codex lifecycle](agents.md#codex-harness-and-lifecycle) and [ticket execution settings](tickets.md#ticket-execution-settings).
 
-Fresh installations have no providers. Named cards show the name, type, OpenAI
+Fresh installations have no providers before relay discovery. Named cards show the name, type, OpenAI
 account status or Ollama endpoint, the ticket concurrency limit, and Edit/Remove actions. Add and edit use
 routed dialogs at `/config?provider=new|<id>`; removal adds `remove=true` and
 requires confirmation. Dialogs use shared history, dismissal, draft guards,

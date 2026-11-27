@@ -48,6 +48,7 @@ import { migrateModelProviders } from "./model-providers/model-provider-migratio
 import { ModelProviderRouter } from "./model-providers/model-provider-router.ts";
 import { ModelProviderService } from "./model-providers/model-provider-service.ts";
 import { ModelProviderStore } from "./model-providers/model-provider-store.ts";
+import { pollOllamaRelay } from "./model-providers/ollama-relay-poller.ts";
 import { ActProcess } from "./pipelines/act-process.ts";
 import { GitSnapshotClient } from "./pipelines/git-snapshot-client.ts";
 import { PipelineRouter } from "./pipelines/pipeline-router.ts";
@@ -400,10 +401,13 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	await notifications.initialize();
 	const actor = { username: config.owner };
 	await agents.seed(actor);
-	const workflowAbort = new AbortController();
-	const workflowLoop = (async () => {
+	const startupRecovery = (async () => {
 		await agents.recover(actor);
 		await workflow.recover(actor);
+	})();
+	const workflowAbort = new AbortController();
+	const workflowLoop = (async () => {
+		await startupRecovery;
 		while (!workflowAbort.signal.aborted) {
 			wakeRequested = false;
 			try {
@@ -425,6 +429,24 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 	lifecycle.register(async () => {
 		workflowAbort.abort();
 		await workflowLoop;
+	});
+	const relayAbort = new AbortController();
+	const relayLoop = startupRecovery.then(() =>
+		pollOllamaRelay(
+			config.ollamaRelayOrigin,
+			fetch,
+			sleep,
+			(inventory) =>
+				providers.reconcileRelay(config.ollamaRelayOrigin!, inventory, (workerId) =>
+					log.warn({ workerId }, "Relay provider name conflict"),
+				),
+			(err) => log.warn({ err }, "Relay provider discovery failed"),
+			relayAbort.signal,
+		),
+	);
+	lifecycle.register(async () => {
+		relayAbort.abort();
+		await relayLoop;
 	});
 	const agentRouter = new AgentRouter(agents, sleep);
 	lifecycle.register(() => agentRouter.close());

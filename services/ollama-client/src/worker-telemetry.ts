@@ -55,6 +55,7 @@ export const collectTelemetry = async (
 		gpus(signal: AbortSignal): Promise<TelemetryFrame["gpus"]>;
 	},
 	lifetime: AbortSignal,
+	concurrency = 1,
 ): Promise<TelemetryFrame> => {
 	const signal = AbortSignal.any([lifetime, AbortSignal.timeout(2_000)]);
 	const [ready, loadedModels, gpus] = await Promise.all([
@@ -62,5 +63,13 @@ export const collectTelemetry = async (
 		sources.loadedModels(signal).catch(() => null),
 		sources.gpus(signal).catch(() => []),
 	]);
-	return { type: "telemetry", ready, contextWindow, hostMemory: sources.hostMemory(), loadedModels, gpus };
+	return {
+		type: "telemetry",
+		ready,
+		contextWindow,
+		concurrency,
+		hostMemory: sources.hostMemory(),
+		loadedModels,
+		gpus,
+	};
 };

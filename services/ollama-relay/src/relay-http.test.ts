@@ -205,9 +205,18 @@ test("routes named workers independently and resets telemetry on reconnect", asy
 		gpus: [],
 	};
 	try {
+		expect(await (await get("/providers")).json()).toEqual({ providers: [] });
+		expect((await fetch(`http://127.0.0.1:${pairing}/providers`)).status).toBe(404);
+		await bind();
 		await expect(bind("Invalid")).rejects.toThrow("400");
 		const first = await bind("first");
 		const second = await bind("second");
+		expect(await (await get("/providers")).json()).toEqual({
+			providers: [
+				{ workerId: "first", contextWindow: null, concurrency: null },
+				{ workerId: "second", contextWindow: null, concurrency: null },
+			],
+		});
 		await expect(bind("first")).rejects.toThrow("409");
 		for (const [id, socket] of [
 			["first", first],
@@ -230,7 +239,7 @@ test("routes named workers independently and resets telemetry on reconnect", asy
 		expect((await get("/first/metrics")).status).toBe(503);
 		expect((await fetch(`http://127.0.0.1:${pairing}/first/health`)).status).toBe(404);
 		first.send(JSON.stringify(report));
-		second.send(JSON.stringify({ ...report, ready: false }));
+		second.send(JSON.stringify({ ...report, ready: false, concurrency: 2 }));
 		await vi.waitFor(async () => expect((await get("/first/health")).status).toBe(200));
 		await vi.waitFor(async () =>
 			expect(await (await get("/second/health")).json()).toMatchObject({ status: "unhealthy" }),
@@ -241,7 +250,19 @@ test("routes named workers independently and resets telemetry on reconnect", asy
 			freshness: "fresh",
 			contextWindow: 32000,
 		});
+		expect(await (await get("/providers")).json()).toEqual({
+			providers: [
+				{ workerId: "first", contextWindow: 32000, concurrency: 1 },
+				{ workerId: "second", contextWindow: 32000, concurrency: 2 },
+			],
+		});
 		now += 45_000;
+		expect(await (await get("/providers")).json()).toEqual({
+			providers: [
+				{ workerId: "first", contextWindow: null, concurrency: null },
+				{ workerId: "second", contextWindow: null, concurrency: null },
+			],
+		});
 		expect(await (await get("/first/metrics")).json()).toMatchObject({ freshness: "stale" });
 		const closed = new Promise<void>((resolve) => first.once("close", resolve));
 		first.terminate();
@@ -249,12 +270,20 @@ test("routes named workers independently and resets telemetry on reconnect", asy
 		await vi.waitFor(async () =>
 			expect(await (await get("/first/metrics")).json()).toMatchObject({ freshness: "offline" }),
 		);
+		expect(await (await get("/providers")).json()).toEqual({
+			providers: [{ workerId: "second", contextWindow: null, concurrency: null }],
+		});
 		await bind("first");
 		expect((await get("/first/metrics")).status).toBe(503);
+		expect(await (await get("/providers")).json()).toEqual({
+			providers: [
+				{ workerId: "first", contextWindow: null, concurrency: null },
+				{ workerId: "second", contextWindow: null, concurrency: null },
+			],
+		});
 		expect((await get("/second/openai/v1/models")).status).toBe(200);
 		for (let index = 0; index < 14; index++) await bind(`worker-${index}`);
 		await expect(bind("over-capacity")).rejects.toThrow("503");
-		await bind();
 	} finally {
 		await relay.close();
 	}

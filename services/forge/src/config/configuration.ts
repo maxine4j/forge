@@ -18,6 +18,13 @@ const schema = z.object({
 		}),
 	dataDirectory: z.string().refine(isAbsolute),
 	port: z.coerce.number().int().min(1).max(65535),
+	ollamaRelayOrigin: z
+		.string()
+		.refine((value) => {
+			const url = URL.parse(value);
+			return !!url && (url.protocol === "http:" || url.protocol === "https:") && value === url.origin;
+		})
+		.optional(),
 	importHosts: z.array(
 		z
 			.string()
@@ -36,6 +43,9 @@ export class Configuration implements IConfiguration {
 			origin: this.environment["FORGE_ORIGIN"],
 			dataDirectory: this.environment["FORGE_DATA_DIRECTORY"] ?? "/data",
 			port: this.environment["FORGE_PORT"] ?? "8080",
+			...(this.environment["FORGE_OLLAMA_RELAY_ORIGIN"] === undefined
+				? {}
+				: { ollamaRelayOrigin: this.environment["FORGE_OLLAMA_RELAY_ORIGIN"] }),
 			importHosts:
 				this.environment["FORGE_IMPORT_HOSTS"]?.split(",").map((host) => host.trim().toLowerCase()) ?? [],
 		});

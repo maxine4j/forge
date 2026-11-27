@@ -58,6 +58,23 @@ export class WorkerRegistry {
 		slot.report = { receivedAt: this.now(), sample };
 	}
 
+	inventory(): { workerId: string; contextWindow: number | null; concurrency: number | null }[] {
+		return [...this.live.entries()]
+			.flatMap(([workerId, slot]) => {
+				if (workerId === undefined) return [];
+				const sample =
+					slot.report && this.now() - slot.report.receivedAt < freshnessMs ? slot.report.sample : undefined;
+				return [
+					{
+						workerId,
+						contextWindow: sample?.contextWindow ?? null,
+						concurrency: sample ? (sample.concurrency ?? 1) : null,
+					},
+				];
+			})
+			.sort((a, b) => a.workerId.localeCompare(b.workerId));
+	}
+
 	status(slot: WorkerSlot): "offline" | "starting" | "stale" | "ready" | "unhealthy" {
 		if (slot.disconnectedAt !== undefined) return "offline";
 		if (!slot.report) return "starting";

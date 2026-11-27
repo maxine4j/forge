@@ -1,5 +1,14 @@
 # Forge development and deployment
 
+## Ollama relay discovery
+
+Set `FORGE_OLLAMA_RELAY_ORIGIN` to the bare HTTP or HTTPS origin of the private relay listener, without credentials, path, query or fragment. The bundled deployment sets `http://ollama-relay:8081`; leaving the setting unset disables discovery. Forge polls immediately after startup recovery and every 30 seconds after an attempt, with a five-second deadline. The private `GET /providers` endpoint returns connected named workers as `{ providers: [{ workerId, contextWindow, concurrency }] }`, sorted by ID. Capabilities are null until telemetry arrives or when it becomes stale; fresh legacy telemetry defaults concurrency to 1. The public listener does not expose this endpoint.
+
+Discovery creates an Ollama provider at `<origin>/<workerId>/openai/v1` or updates capabilities on an existing active provider with the same case-insensitive name and normalized endpoint. Matching manual providers retain their IDs and owner settings; conflicts are logged and skipped. Retired records remain in history and a connected worker can receive a new provider ID. Missing workers, invalid responses and older relays returning 404 leave existing providers and last known capabilities intact. See [provider API and fields](foundation.md#model-providers).
+
+With the local Forge and relay images built, `node services/forge/tests/relay-discovery-image-smoke.mjs` starts both on an isolated Docker network and checks discovery through the owner API using a named telemetry fixture with a custom context window.
+After `pnpm build`, `node services/forge/tests/relay-discovery-local-smoke.mjs` exercises the same discovery path with the built services and a temporary SQLite database on the host.
+
 ## Development checks
 
 ### Phone installation
@@ -434,9 +443,8 @@ The worker retains its existing reconnect behavior.
    [worker installation guide](../services/ollama-client/README.md) to download
    the single-file bundle from `main` and configure its launcher with the relay
    HTTPS origin, a unique worker ID, the pairing token and the context window.
-3. Create one named [Ollama provider](agents.md#codex-harness-and-lifecycle) per
-   worker with base URL `http://ollama-relay:8081/{workerId}/openai/v1` and use
-   the installed model tag. Verify a streamed
+3. Confirm Forge has discovered the named [Ollama provider](foundation.md#model-providers)
+   for each worker and use the installed model tag. Verify a streamed
    tool-call round trip with a new test agent before routing regular work to the
    relay. The worker starts local-only Ollama on `127.0.0.1:11434` with
    single-request parallelism. Use `--context-window <tokens>` to override the

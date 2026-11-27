@@ -16,6 +16,7 @@ import { WorkerSession, type IOllamaClient } from "./worker-session.ts";
 import { collectTelemetry, parseNvidiaMetrics } from "./worker-telemetry.ts";
 
 const logger = createLogger("ollama-relay-worker");
+const parallelism = 1;
 
 export const startWorker = async (signal: AbortSignal): Promise<void> => {
 	const config = workerConfig(process.env, process.argv.slice(2));
@@ -34,7 +35,7 @@ export const startWorker = async (signal: AbortSignal): Promise<void> => {
 			OLLAMA_HOST: config.ollamaAddress,
 			OLLAMA_KV_CACHE_TYPE: "q8_0",
 			OLLAMA_FLASH_ATTENTION: "1",
-			OLLAMA_NUM_PARALLEL: "1",
+			OLLAMA_NUM_PARALLEL: String(parallelism),
 			OLLAMA_CONTEXT_LENGTH: config.context,
 			OLLAMA_NO_CLOUD: "1",
 		},
@@ -80,6 +81,7 @@ export const startWorker = async (signal: AbortSignal): Promise<void> => {
 						},
 					},
 					signal,
+					parallelism,
 				),
 			lifetime.signal,
 		);

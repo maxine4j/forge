@@ -58,6 +58,22 @@ try {
 		});
 		assert.equal((await request(8080)).status, 404);
 		assert.equal((await request(8081)).status, 503);
+		assert.equal((await fetch('http://127.0.0.1:8080/providers')).status, 404);
+		assert.deepEqual(await (await fetch('http://127.0.0.1:8081/providers')).json(), { providers: [] });
+		const named = new WebSocket("ws://127.0.0.1:8080/pair", { headers: { Authorization: "Bearer " + process.env.OLLAMA_RELAY_TOKEN, "X-Forge-Worker-Id": "smoke-gpu" } });
+		await once(named, "open");
+		named.send(JSON.stringify({ type: "telemetry", ready: true, contextWindow: 32768, concurrency: 1, hostMemory: null, loadedModels: null, gpus: [] }));
+		const deadline = Date.now() + 5000;
+		while (true) {
+			const inventory = await (await fetch('http://127.0.0.1:8081/providers')).json();
+			if (inventory.providers[0]?.contextWindow === 32768) {
+				assert.deepEqual(inventory.providers, [{ workerId: "smoke-gpu", contextWindow: 32768, concurrency: 1 }]);
+				break;
+			}
+			if (Date.now() >= deadline) throw new Error("Named telemetry did not arrive");
+			await new Promise((resolve) => setTimeout(resolve, 25));
+		}
+		named.terminate();
 		const rejected = (headers) => new Promise((resolve, reject) => {
 			const socket = new WebSocket("ws://127.0.0.1:8080/pair", { headers });
 			socket.once("unexpected-response", (_request, response) => { response.resume(); resolve(response); });

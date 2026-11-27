@@ -16,10 +16,108 @@ import { PairingLimiter } from "../../../ollama-relay/src/pairing-limiter.ts";
 import { RelayHttp } from "../../../ollama-relay/src/relay-http.ts";
 import { AccountProcess } from "../../src/accounts/account-process.ts";
 import { CodexConnection } from "../../src/accounts/codex-connection.ts";
+import { AccessService } from "../../src/auth/access-service.ts";
 import { CodexAgentClient } from "../../src/codex/codex-agent-client.ts";
 import { CodexUsageClient } from "../../src/codex/codex-usage-client.ts";
 import { CostStore } from "../../src/cost/cost-store.ts";
 import { SqliteDatabase } from "../../src/database/sqlite-database.ts";
+import { ModelProviderService } from "../../src/model-providers/model-provider-service.ts";
+import { ModelProviderStore } from "../../src/model-providers/model-provider-store.ts";
+import { pollOllamaRelay } from "../../src/model-providers/ollama-relay-poller.ts";
+
+test("discovers a connected named worker and persists refreshed capabilities through restart", async () => {
+	const root = await files.mkdtemp(join(tmpdir(), "forge-discovery-"));
+	let database = new SqliteDatabase(join(root, "forge.sqlite"));
+	const relay = new RelayHttp(
+		Buffer.from("Bearer secret"),
+		sleep,
+		new PairingLimiter(Date.now),
+		{ warn: () => {} },
+		Date.now,
+	);
+	let socket: WebSocket | undefined;
+	try {
+		await database.initialize();
+		let store = new ModelProviderStore(database);
+		await store.initialize();
+		await relay.listen("127.0.0.1", 0, 0);
+		const origin = `http://127.0.0.1:${relay.ports.inference}`;
+		socket = new WebSocket(`ws://127.0.0.1:${relay.ports.pairing}/pair`, {
+			headers: { Authorization: "Bearer secret", "X-Forge-Worker-Id": "gpu-1" },
+		});
+		await new Promise<void>((resolve, reject) => {
+			socket!.once("open", resolve);
+			socket!.once("error", reject);
+		});
+		const report = {
+			type: "telemetry",
+			ready: true,
+			contextWindow: 48000,
+			concurrency: 1,
+			hostMemory: null,
+			loadedModels: null,
+			gpus: [],
+		};
+		socket.send(JSON.stringify(report));
+		await vi.waitFor(async () =>
+			expect(await (await fetch(`${origin}/providers`)).json()).toEqual({
+				providers: [{ workerId: "gpu-1", contextWindow: 48000, concurrency: 1 }],
+			}),
+		);
+		const access = new AccessService({ owner: "owner", origin: "https://forge.test" });
+		const service = () =>
+			new ModelProviderService(store, access, randomUUID, async () => {
+				throw new Error("unused");
+			});
+		const poll = async (current: ModelProviderService) => {
+			const abort = new AbortController();
+			await pollOllamaRelay(
+				origin,
+				fetch,
+				sleep,
+				async (workers) => {
+					await current.reconcileRelay(origin, workers, () => {
+						throw new Error("conflict");
+					});
+					abort.abort();
+				},
+				(error) => {
+					throw error;
+				},
+				abort.signal,
+			);
+		};
+		await poll(service());
+		const initial = (await store.list())[0]!;
+		expect(initial).toMatchObject({ name: "gpu-1", contextWindow: 48000, supportedConcurrency: 1 });
+		await database.close();
+		database = new SqliteDatabase(join(root, "forge.sqlite"));
+		await database.initialize();
+		store = new ModelProviderStore(database);
+		await store.initialize();
+		await poll(service());
+		expect((await store.list())[0]?.id).toBe(initial.id);
+		socket.send(JSON.stringify({ ...report, contextWindow: 96000 }));
+		await vi.waitFor(async () =>
+			expect(await (await fetch(`${origin}/providers`)).json()).toMatchObject({
+				providers: [{ contextWindow: 96000 }],
+			}),
+		);
+		await poll(service());
+		expect((await store.get(initial.id))?.contextWindow).toBe(96000);
+		socket.terminate();
+		await vi.waitFor(async () =>
+			expect(await (await fetch(`${origin}/providers`)).json()).toEqual({ providers: [] }),
+		);
+		await poll(service());
+		expect((await store.list())[0]?.id).toBe(initial.id);
+	} finally {
+		socket?.terminate();
+		await relay.close();
+		await database.close();
+		await files.rm(root, { recursive: true, force: true });
+	}
+});
 
 test("pinned Codex streams through the relay and resumes after restart without sending OpenAI auth", async () => {
 	const root = await files.mkdtemp(join(tmpdir(), "forge-provider-test-"));

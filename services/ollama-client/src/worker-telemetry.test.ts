@@ -61,8 +61,22 @@ test("aggregates model memory and tolerates incomplete device probes", async () 
 		type: "telemetry",
 		ready: true,
 		contextWindow: 32000,
+		concurrency: 1,
 		hostMemory: { total: 1024, free: 512 },
 		loadedModels: null,
 		gpus: [],
 	});
+	const configured = workerConfig(env, [...options, "--context-window", "48000"]);
+	const telemetry = await collectTelemetry(
+		Number(configured.context),
+		{
+			hasLocalModel: async () => true,
+			hostMemory: () => null,
+			loadedModels: async () => null,
+			gpus: async () => [],
+		},
+		new AbortController().signal,
+		3,
+	);
+	expect(telemetry).toMatchObject({ contextWindow: 48000, concurrency: 3 });
 });
