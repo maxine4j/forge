@@ -1,0 +1,15 @@
+{
+	"name": "@forge/ollama-client",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"start": "node dist/worker-main.js",
+		"build": "tsc -p tsconfig.build.json",
+		"typecheck": "tsc --noEmit"
+	},
+	"dependencies": {
+		"@forge/backend-infrastructure": "workspace:*",
+		"ws": "8.22.1"
+	}
+}

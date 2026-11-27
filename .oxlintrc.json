@@ -7,7 +7,7 @@
 	"ignorePatterns": ["**/dist/**"],
 	"overrides": [
 		{
-			"files": ["src/**/*.ts", "packages/backend-infrastructure/src/**/*.ts"],
+			"files": ["services/forge/src/**/*.ts", "packages/backend-infrastructure/src/**/*.ts"],
 			"excludeFiles": [
 				"packages/backend-infrastructure/src/file.test.ts",
 				"packages/backend-infrastructure/src/file.ts",

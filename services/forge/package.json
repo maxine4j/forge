@@ -1,0 +1,34 @@
+{
+	"name": "@forge/forge",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"dev": "node --watch src/main.ts",
+		"start": "node dist/main.js",
+		"build": "tsc -p tsconfig.build.json",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:integration": "vitest run --config tests/vitest.integration.config.ts",
+		"test:image": "node tests/image-smoke.mjs"
+	},
+	"dependencies": {
+		"@forge/backend-infrastructure": "workspace:*",
+		"@forge/contracts": "workspace:*",
+		"@koa/bodyparser": "6.1.0",
+		"@koa/router": "15.7.0",
+		"@modelcontextprotocol/sdk": "1.32.2",
+		"@openai/codex": "0.171.0",
+		"koa": "3.2.1",
+		"node-pty": "1.1.0",
+		"pino": "10.4.0",
+		"typescript-language-server": "6.1.0",
+		"vscode-jsonrpc": "10.0.0",
+		"vscode-languageserver-protocol": "3.18.5",
+		"ws": "8.22.1",
+		"zod": "4.6.7"
+	},
+	"devDependencies": {
+		"typescript-legacy": "npm:typescript@6.0.3"
+	}
+}

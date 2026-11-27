@@ -23,6 +23,5 @@
 		"rewriteRelativeImportExtensions": true,
 		"skipLibCheck": true,
 		"types": ["node"]
-	},
-	"include": ["src", "tests"]
+	}
 }

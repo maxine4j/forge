@@ -1,0 +1,19 @@
+{
+	"name": "@forge/ollama-relay",
+	"version": "0.1.0",
+	"private": true,
+	"files": [
+		"dist"
+	],
+	"type": "module",
+	"scripts": {
+		"build": "tsc -p tsconfig.build.json",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:image": "node tests/image-smoke.mjs"
+	},
+	"dependencies": {
+		"@forge/backend-infrastructure": "workspace:*",
+		"ws": "8.22.1"
+	}
+}

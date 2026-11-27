@@ -63,7 +63,7 @@ HTTP / WebSocket / Git protocol adapters / background tasks
 
 ### Worktree TypeScript intelligence
 
-Forge owns a read-only stdio MCP bridge under `src/typescript-lsp`, with separate
+Forge owns a read-only stdio MCP bridge under `services/forge/src/typescript-lsp`, with separate
 MCP, language-client, runtime-resolution and process adapters. `main.ts`/`start.ts`
 own construction and lifecycle; filesystem, timers and process boundaries are
 injected. No shared language-server state or new persistence/API is introduced.
@@ -207,75 +207,26 @@ each module. Do not introduce empty abstractions solely to fill this tree.
 
 ```text
 forge/
-├── AGENTS.md
+├── forge.sd.yaml                  # Compose Forge and the Ollama relay
+├── package.json                   # Workspace commands and shared tools
+├── pnpm-workspace.yaml
+├── pnpm-lock.yaml
+├── tsconfig.json                  # Shared compiler options
 ├── docs/
-├── package.json
-├── Dockerfile
-├── forge.sd.yaml
-├── tsconfig.json
-├── tsconfig.build.json
 ├── packages/
-│   ├── backend-infrastructure/   # Backend side effect boundaries
-│   ├── contracts/
-│   │   ├── package.json
-│   │   └── src/                    # Browser-safe schemas and DTOs
-│   └── frontend/
-│       ├── package.json
-│       ├── vite.config.ts
-│       └── src/
-│           ├── app.tsx
-│           ├── main.tsx
-│           ├── api/
-│           ├── components/
-│           └── features/
-│               ├── setup/          # ChatGPT and GitHub login
-│               ├── projects/
-│               ├── board/
-│               ├── repository/     # Files, branches, commits
-│               ├── workspace/      # Integrated development screen
-│               ├── agents/
-│               ├── editor/
-│               ├── terminal/
-│               ├── diff/
-│               └── pull-requests/
-├── src/
-│   ├── main.ts
-│   ├── start.ts
-│   ├── config/
-│   ├── http/                       # Server, errors, assets, health
-│   ├── auth/                       # Forge access/session policy
-│   ├── projects/
-│   ├── repositories/               # Git hosting, browsing, ref policy
-│   ├── tickets/                    # Board and transition rules
-│   ├── plans/                      # Plan revisions and approval
-│   ├── pull-requests/              # Work review, comments, merge
-│   ├── workspaces/                 # Worktrees and file access
-│   ├── terminal/                   # PTY lifecycle and socket adapter
-│   ├── agents/
-│   │   ├── agent-router.ts
-│   │   ├── agent-service.ts        # Ticket-to-Codex orchestration
-│   │   ├── agent-run-store.ts
-│   │   └── types.ts
-│   ├── codex/
-│   │   ├── codex-process.ts
-│   │   ├── codex-connection.ts
-│   │   ├── codex-client.ts
-│   │   ├── codex-login-service.ts
-│   │   ├── codex-event-mapper.ts
-│   │   └── types.ts
-│   ├── github/                     # gh login and pushes
-│   ├── pipelines/                  # Manual act execution, snapshots, state and recovery
-│   ├── jobs/                       # Scheduling and restart recovery
-│   ├── events/                     # Durable events and live delivery
-│   ├── database/                   # SQLite and initial schema
-│   └── artifacts/
-└── tests/
-    ├── integration/
-    └── e2e/
+│   ├── backend-infrastructure/    # Shared Node.js adapters
+│   └── contracts/                 # Browser-safe schemas and DTOs
+└── services/
+    ├── forge/                     # Backend, integration tests, and Dockerfile
+    ├── forge-web/                 # React web GUI, built into the Forge image
+    ├── ollama-relay/              # Pairing and inference proxy, with Dockerfile
+    └── ollama-client/             # CLI for the machine running Ollama
 ```
 
-The pnpm workspace includes `packages/*`. Frontend code imports only browser-safe
-contracts, never backend implementation modules.
+The pnpm workspace includes `services/*` and `packages/*` and uses a single
+lockfile. Forge serves the built web GUI. The Ollama relay and client share
+pairing transport code through `@forge/backend-infrastructure`. See
+[build and deployment commands](development.md#commands).
 
 Colocate unit tests with components. Use injected fakes for service tests, real
 local Git/SQLite for adapter integration tests, and controlled protocol peers for
@@ -295,7 +246,7 @@ automatic merge queue. The [Git and CI contract](git-and-ci.md) describes the
 manual local pipeline workflow.
 
 Local pipelines use a service, SQLite store, Git snapshot client and streaming
-act adapter under `src/pipelines`. Startup initializes storage, interrupts unfinished
+act adapter under `services/forge/src/pipelines`. Startup initializes storage, interrupts unfinished
 runs and reconciles disposable resources; shutdown stops owned process groups.
 Run metadata/jobs/steps live in `pipeline_runs`; disposable source and bounded
 diagnostics live under `artifacts/<runId>`. See [the pipeline contract](git-and-ci.md#manual-local-pipelines).

@@ -1,5 +1,5 @@
 packages:
+    - services/*
     - packages/*
-    - ollama-relay
 onlyBuiltDependencies:
     - node-pty

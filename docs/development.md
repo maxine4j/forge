@@ -44,7 +44,7 @@ See [tool contract](agents.md#worktree-typescript-tools),
 
 ### Request telemetry verification
 
-`src/codex/request-performance.test.ts` covers deterministic request aggregation,
+`services/forge/src/codex/request-performance.test.ts` covers deterministic request aggregation,
 duplicate/reordered exports, delayed token counts, missing timing, retries,
 warmups, isolation, contract validation and real SQLite restart recovery.
 `telemetry-receiver.test.ts` verifies authentication, paths, size limits and drain.
@@ -61,7 +61,9 @@ and [private persistence boundary](architecture.md#private-request-telemetry).
 
 ### Commands
 
-Run `nvm use` from the repository root before the following commands:
+Run `nvm use` from the repository root before the following commands. The root
+scripts use pnpm workspace filters to run tools in each
+[service and shared package](architecture.md#expected-source-and-package-structure).
 
 ```sh
 pnpm install --frozen-lockfile
@@ -77,7 +79,7 @@ pnpm test:image
 Browser tests use controlled API responses in Chromium, including mobile layout,
 account setup states and project recovery controls. They do not claim production
 ingress authentication or live login. Install the repository's pinned Chromium
-with `pnpm --filter @forge/frontend exec playwright install chromium` if
+with `pnpm --filter @forge/forge-web exec playwright install chromium` if
 needed. Screenshots/diagnostics live under ignored `artifacts/forge*/`.
 Epic coverage includes grouped unfinished rows, empty/completed sections, dialog
 editing and child navigation, membership selectors, polling, keyboard disclosure,
@@ -96,7 +98,7 @@ signed-out check reaches GitHub's credential-free `/user` endpoint; it needs
 network connectivity. It never performs a real login. Real credential persistence
 and successful live ChatGPT/GitHub login remain manual checks.
 
-`pnpm dev` builds the workspace and watches the backend;
+`pnpm dev` builds Forge and its web GUI, then watches the backend;
 set `FORGE_OWNER`, `FORGE_ORIGIN` and an absolute writable `FORGE_DATA_DIRECTORY`
 first. This is a private proxy workload: browse through authenticated HTTPS PaaS
 ingress. The standalone Vite server is used for controlled browser tests; it does
@@ -359,7 +361,9 @@ can supply an environment value only when its descriptor entry uses `secret: tru
 undeclared secret-file entries are not injected. Keep credentials out of literal
 descriptor values. Private-repository imports remain unsupported, including after
 GitHub account sign-in.
-Build locally with `pnpm image`. GitHub Actions publishes
+Build locally with `pnpm image`. Both image builds use the repository root as
+their build context and select the Dockerfile in the corresponding service.
+GitHub Actions publishes
 `ghcr.io/maxine4j/forge` alongside the independent checks and image validation
 jobs. Publishing can succeed even when validation fails. A push to `main` publishes
 the full commit SHA and `latest`. A `vX.X.X` tag publishes the full SHA and
@@ -406,10 +410,10 @@ The worker retains its existing reconnect behavior.
     ```sh
     nvm use
     pnpm install --frozen-lockfile
-    pnpm --filter @forge/ollama-relay... build
+    pnpm --filter @forge/ollama-client... build
     export OLLAMA_RELAY_URL='wss://ollama-relay.forge.<base-domain>/pair'
     # Supply OLLAMA_RELAY_TOKEN through your secret manager or shell environment.
-    node ollama-relay/dist/worker-main.js
+    pnpm --filter @forge/ollama-client start
     ```
 
 3. Set the [Ollama provider](agents.md#codex-harness-and-lifecycle) base URL to
@@ -431,9 +435,8 @@ To build and smoke-test the image locally:
 
 ```sh
 nvm use
-pnpm --filter @forge/backend-infrastructure build
-docker buildx build --platform linux/amd64 -f ollama-relay/Dockerfile -t forge-ollama-relay:dev --load .
-node ollama-relay/tests/image-smoke.mjs
+docker buildx build --platform linux/amd64 -f services/ollama-relay/Dockerfile -t forge-ollama-relay:dev --load .
+pnpm test:relay-image
 ```
 
 ## Named-provider upgrades
