@@ -6,12 +6,15 @@
 	"scripts": {
 		"start": "node dist/worker-main.js",
 		"build": "tsc -p tsconfig.build.json",
+		"bundle": "node scripts/bundle.mjs",
 		"typecheck": "tsc --noEmit",
-		"test": "vitest run",
-		"stage": "node scripts/stage-package.mjs"
+		"test": "vitest run"
 	},
 	"dependencies": {
 		"@forge/backend-infrastructure": "workspace:*",
 		"ws": "8.22.1"
+	},
+	"devDependencies": {
+		"esbuild": "0.25.12"
 	}
 }

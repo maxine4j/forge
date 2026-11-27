@@ -13,4 +13,3 @@ jobs:
             packages: write
         with:
             publish-image: true
-            publish-client: true

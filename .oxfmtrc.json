@@ -5,6 +5,7 @@
 	"bracketSpacing": true,
 	"endOfLine": "lf",
 	"experimentalOperatorPosition": "start",
+	"ignorePatterns": ["/services/ollama-client/dist/forge-ollama-client.cjs"],
 	"insertFinalNewline": true,
 	"jsxSingleQuote": true,
 	"objectWrap": "preserve",
