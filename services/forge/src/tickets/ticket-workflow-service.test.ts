@@ -63,6 +63,68 @@ test("agent metrics count queued phases and held reservations independently", as
 	expect((await f.service.agentMetrics(actor)).agents).toEqual([]);
 });
 
+test("agent metrics select saved-plan and pinned agents and exclude inactive lifecycle states", async () => {
+	const f = namedFixture(() => "paused");
+	const planner = await f.addAgent("Planner");
+	const implementer = await f.addAgent("Implementer");
+	const pinned = await f.addAgent("Pinned");
+	const saved = f.create("TASK-1");
+	saved.status = "todo";
+	saved.executionSettings = { plannerAgentId: planner.id, implementerAgentId: implementer.id };
+	f.jobs.set(saved.id, {
+		ticketId: saved.id,
+		phase: "planning",
+		state: "queued",
+		mergeAttempts: 0,
+		plan: { revision: 1, text: "Saved plan" },
+	});
+	const reserved = f.create("TASK-2");
+	reserved.status = "in-progress";
+	reserved.executionSettings = { implementerAgentId: implementer.id };
+	f.jobs.set(reserved.id, {
+		ticketId: reserved.id,
+		phase: "implementation",
+		state: "queued",
+		mergeAttempts: 0,
+		reservation: f.planner.id,
+		implementationProviderSnapshot: await f.taskAgents.resolve(actor, pinned.id),
+	});
+	for (const [index, state] of (["failed", "setup-failed", "resetting", "merge-queued", "idle"] as const).entries()) {
+		const ticket = f.create(`TASK-${index + 3}`);
+		ticket.status = "in-progress";
+		ticket.executionSettings = { implementerAgentId: implementer.id };
+		f.jobs.set(ticket.id, { ticketId: ticket.id, phase: "implementation", state, mergeAttempts: 0 });
+	}
+	expect((await f.service.agentMetrics(actor)).agents).toEqual([
+		{ agentId: implementer.id, queued: 1 },
+		{ agentId: pinned.id, queued: 1 },
+	]);
+});
+
+test("agent metrics exclude a phase while its setup is in progress", async () => {
+	const f = namedFixture();
+	const agent = await f.addAgent("Agent");
+	const ticket = f.create();
+	await f.ready(ticket, agent);
+	const original = f.agents.createTicketThread.getMockImplementation()!;
+	let release!: () => void;
+	const gate = new Promise<void>((resolve) => {
+		release = resolve;
+	});
+	f.agents.createTicketThread.mockImplementationOnce(async (...args) => {
+		await gate;
+		return original(...args);
+	});
+	const tick = f.service.tick(actor);
+	try {
+		await vi.waitFor(() => expect(f.agents.createTicketThread).toHaveBeenCalled());
+		expect((await f.service.agentMetrics(actor)).agents).toEqual([]);
+	} finally {
+		release();
+		await tick;
+	}
+});
+
 function namedFixture(dispatchMode?: Parameters<typeof fixture>[0], quotaExhausted?: () => Promise<boolean>) {
 	const planner: ModelProvider = {
 		id: "123e4567-e89b-42d3-a456-426614174001",

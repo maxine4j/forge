@@ -14,6 +14,10 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	const writes: TaskAgentInput[] = [];
 	const modelReads: string[] = [];
 	let healthReads = 0;
+	let schedulerReads = 0;
+	let usageFails = false;
+	let schedulerFails = false;
+	let sparse = false;
 	const costs = new MockApi().read(new URL("http://localhost/api/costs?range=-7d")) as {
 		providers: Array<{ id: string; incompleteTokens: number }>;
 	};
@@ -25,14 +29,19 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 		async (route) => {
 			const path = new URL(route.request().url()).pathname;
 			const method = route.request().method();
-			if (path === "/api/costs") return route.fulfill({ json: costs });
-			if (path === "/api/tickets/agent-metrics")
-				return route.fulfill({
-					json: {
-						providers: [{ providerId: openai, running: 2, reserved: 3 }],
-						agents: [{ agentId: id, queued: 4 }],
-					},
-				});
+			if (path === "/api/costs")
+				return usageFails ? route.fulfill({ status: 503 }) : route.fulfill({ json: costs });
+			if (path === "/api/tickets/agent-metrics") {
+				schedulerReads++;
+				return schedulerFails
+					? route.fulfill({ status: 503 })
+					: route.fulfill({
+							json: {
+								providers: sparse ? [] : [{ providerId: openai, running: 2, reserved: 3 }],
+								agents: [{ agentId: id, queued: 4 }],
+							},
+						});
+			}
 			if (path === "/api/board/settings") return route.fulfill({ json: defaultBoardSettings });
 			if (path === "/api/accounts") return route.fulfill({ status: 503, json: { error: "internal-error" } });
 			if (path === "/api/tickets" && agent) {
@@ -75,6 +84,7 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 						{ id: openai, name: "OpenAI", kind: "openai", retired: false },
 						{ id: ollama, name: "Local", kind: "ollama", retired: false, endpoint: "http://ollama/v1" },
 						{ id: unused, name: "Unused", kind: "ollama", retired: false, endpoint: "http://unused/v1" },
+						{ id: "123e4567-e89b-42d3-a456-426614174004", name: "Retired", kind: "openai", retired: true },
 					],
 				});
 			if (path.endsWith("/model-options")) {
@@ -117,6 +127,7 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 			return route.fulfill({ json: [] });
 		},
 	);
+	await page.clock.install();
 	await page.goto("/tasks");
 	const tabs = page.getByRole("tablist", { name: "Task views" }).getByRole("tab");
 	await expect(tabs).toHaveText(["Board", "Backlog", /Notifications/, "Agents"]);
@@ -127,10 +138,16 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	await expect(health).toContainText("Unhealthy");
 	await expect(health).toContainText("Usage limits reached");
 	await expect(health).toContainText("Unused");
+	await expect(health).not.toContainText("Retired");
 	await expect(health).toContainText("Running 2 / 1");
 	await expect(health).toContainText("3 slots reserved");
 	await expect(health).toContainText("Token usage is incomplete");
 	await expect(health).toContainText("No recorded usage");
+	const healthBeforePoll = healthReads;
+	const schedulerBeforePoll = schedulerReads;
+	await page.clock.fastForward(10_000);
+	await expect.poll(() => schedulerReads).toBeGreaterThan(schedulerBeforePoll);
+	expect(healthReads).toBe(healthBeforePoll);
 	for (const [width, columns] of [
 		[1280, 3],
 		[820, 2],
@@ -153,6 +170,17 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	).toBeEnabled();
 	await health.getByRole("button", { name: "Refresh metrics" }).click();
 	await expect(health).toContainText("Healthy");
+	usageFails = true;
+	schedulerFails = true;
+	await health.getByRole("button", { name: "Refresh metrics" }).click();
+	await expect(health.getByText("Running 2 / 1 (Stale)")).toBeVisible();
+	await expect(health.getByText("Last 7 days (Stale)").first()).toBeVisible();
+	usageFails = false;
+	schedulerFails = false;
+	sparse = true;
+	await health.getByRole("button", { name: "Refresh metrics" }).click();
+	await expect(health.getByText("Running 0 / 1").first()).toBeVisible();
+	sparse = false;
 	await page.reload();
 	await expect(tabs.last()).toHaveAttribute("aria-selected", "true");
 	await page.getByRole("group", { name: "Agent actions" }).getByRole("button", { name: "Create agent" }).click();
@@ -297,6 +325,11 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	expect([...new Set(modelReads)]).toEqual([`/api/model-providers/${openai}/model-options`]);
 
 	await page.getByRole("tab", { name: "Board", exact: true }).click();
+	await expect(page.locator(".provider-metrics-grid")).toHaveCount(0);
+	await page.waitForTimeout(100);
+	const schedulerAfterLeave = schedulerReads;
+	await page.clock.fastForward(10_000);
+	expect(schedulerReads).toBe(schedulerAfterLeave);
 	const assigned = page.getByRole("button", { name: "TASK-1 Assigned" });
 	await expect(assigned.getByRole("img", { name: "Reviewer updated" })).toHaveAttribute("data-colour", "Mint");
 	await expect(assigned.getByRole("img", { name: "Reviewer updated" })).toHaveAttribute("data-symbol", "Apple");
