@@ -20,6 +20,7 @@ import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
 import type { ICodexAgentClient } from "../codex/codex-agent-client.ts";
 import type { IAgentPerformance } from "../codex/performance-telemetry.ts";
+import type { TurnContextSample } from "../codex/types.ts";
 import type { TicketUsageScope } from "../cost/types.ts";
 import { ModelProviderError } from "../model-providers/errors.ts";
 import type { ModelProviderSnapshot } from "../model-providers/types.ts";
@@ -81,11 +82,7 @@ export interface ITicketAgents {
 	): Promise<AgentView>;
 	plan(actor: Actor, id: string, turnId: string): Promise<string | undefined>;
 	finalAnswer?(actor: Actor, id: string, turnId: string): Promise<string | undefined>;
-	contextSample?(
-		actor: Actor,
-		id: string,
-		turnId: string,
-	): Promise<{ used: number; max: number; crossed: boolean } | undefined>;
+	contextSample?(actor: Actor, id: string, turnId: string): Promise<TurnContextSample | undefined>;
 	get(actor: Actor, id: string): Promise<AgentView>;
 	resume(actor: Actor, id: string): Promise<AgentView>;
 }
@@ -119,17 +116,20 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 		private readonly history?: ITicketAgentHistory,
 		private readonly performance?: IAgentPerformance,
 		private readonly ticketOnly = false,
+		private readonly wakeScheduler: () => void = () => {},
 	) {
 		this.unsubscribePerformance = performance?.subscribe((codexId) => {
 			const id = this.identities.get(codexId);
 			if (id && !this.closed) for (const listener of this.listeners.get(id) ?? []) listener();
 		});
-		this.unsubscribe = client.subscribe((codexId) => {
+		this.unsubscribe = client.subscribe((codexId, schedulingUpdate) => {
 			const id = this.identities.get(codexId);
 			if (!id || this.closed) return;
 			const observedAt = this.now().toISOString();
 			void this.serialize(id, async () => {
-				await this.sync(await this.require(id), observedAt);
+				const record = await this.require(id);
+				await this.sync(record, observedAt);
+				if (schedulingUpdate && record.managed && !record.abandoned) this.wakeScheduler();
 				for (const listener of this.listeners.get(id) ?? []) listener();
 			}).catch((err: unknown) => this.log.error({ err }, "Could not persist agent activity"));
 		});
@@ -646,10 +646,9 @@ export class AgentService implements IAgentService, ITicketAgents, IAgentStop {
 			requests: runtime?.requests ?? record.requests,
 			truncated: runtime?.truncated ?? false,
 			...(contextWindow && { contextWindow }),
-			...(record.managedRole !== "implementation"
-				&& record.provider?.compactionThresholdTokens !== undefined && {
-					compactionThresholdTokens: record.provider.compactionThresholdTokens,
-				}),
+			...(record.provider?.compactionThresholdTokens !== undefined && {
+				compactionThresholdTokens: record.provider.compactionThresholdTokens,
+			}),
 			...(performance && { performance }),
 			...(thread.status === "failed" && runtime?.turnFailure && { turnFailure: runtime.turnFailure }),
 		};

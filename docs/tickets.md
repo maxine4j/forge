@@ -19,11 +19,11 @@ and [workspace safeguards](workspaces.md#ticket-recovery-workspaces).
 
 ## Implementation context handover
 
-Managed Implementers use Codex's default automatic compaction; see [agent execution](agents.md#codex-harness-and-lifecycle). For implementation work, Forge observes samples for the current turn. At 75% of the reported window it waits for pending requests, checks for 4,096 free tokens, persists one steering attempt, and requests a committed checkpoint and end to the turn. Forge never replays an ambiguous steer.
+Managed Implementers use Codex's default automatic compaction. Forge uses the [pinned provider threshold](foundation.md#model-providers) to steer active implementation and managed rebase work when the turn's peak usage reaches that value. With no configured threshold, Forge uses 75% of the reported window. A crossing remains latched for that turn after usage falls. Forge waits for pending requests to resolve and records one steering attempt against the active turn before asking the Implementer to finish its current operation and return a committed handoff if work remains. A finished assignment can return complete. Forge sends the steer regardless of reported headroom and reconciles ambiguous results without replay. See [agent execution](agents.md#codex-harness-and-lifecycle).
 
-After a recorded Forge checkpoint steer settles, Forge verifies a clean worktree on the expected branch and checks for 4,096 free tokens before asking the same thread whether the assignment is complete or needs a handoff. A threshold crossing first observed after an unsteered work turn settles follows normal outcome validation. Forge verifies that the checkpoint remains clean and unchanged before accepting the report. A valid handoff requires a new commit and starts a fresh Implementer on the same worktree and branch with the current assignment and latest bounded handover. Forge rebuilds ordered assignments from the saved structured subtask at dispatch time, even when an older record caches the full plan. A valid complete report follows the normal [progression and merge rules](#implementer-completion-and-handover).
+Forge processes valid reports directly from settled work turns. A handoff requires a clean worktree on the expected branch and a commit SHA that differs from the recorded work-turn baseline. The successor keeps the phase, worktree, branch, provider pin, assignment and merge-attempt count, and receives the latest bounded handover. Forge rebuilds ordered assignments from the saved structured subtask at dispatch time. A valid complete report follows the normal [progression and merge rules](#implementer-completion-and-handover).
 
-Automatic checkpoint steering applies during active implementation work. Forge checks available headroom before finalization dispatch and never requests compaction, steers, or starts a recovery handoff during a checkpoint report or verdict retry. Insufficient headroom and context exhaustion during finalization fail the workflow without an automatic retry. Ticket Chat shows context telemetry, headroom, checkpoint, report and no-progress failures. The owner can adjust configuration and explicitly retry after settlement. Forge preserves the worktree, commits and provider pin.
+Missing or invalid work reports get one same-thread report-only turn when headroom permits. Ordinary report recovery can proceed with unknown headroom. After a recorded checkpoint steer, recovery requires a verified checkpoint and at least 4,096 tokens of known headroom. Forge verifies the checkpoint SHA again before accepting the reply. Report-only turns are exempt from automatic steering. A second invalid report, context exhaustion during recovery, an unsafe checkpoint or a handoff without progress leaves the worktree, commits and provider pin available for explicit owner recovery.
 
 An explicit retry after a context failure opens a fresh thread. For ordered work,
 Forge sends the saved subtask assignment and the owner's recovery instruction.
@@ -464,9 +464,9 @@ text across approval and modal reopening within the board's browser memory.
 Messages during running implementation and rebase turns steer the known active
 turn immediately through `turn/steer` with `expectedTurnId`; they retain the same
 execution tracking and turn identity. The text item is the trimmed owner message.
-A follow-up on a settled implementation or rebase thread sends that message and
-the required completion report instructions on the same thread, including after
-scheduler restart. Steering is serialized with ticket completion
+A follow-up on a settled implementation or rebase thread sends only the trimmed
+owner text on the same thread, including after scheduler restart. Forge requests
+a missing or invalid report separately after settlement. Steering is serialized with ticket completion
 and merge transitions. Stale turns, completed tickets and merge-queued submissions
 are rejected. Failed or ambiguous steering is never replayed automatically; the
 browser retains its draft and refreshes status. Planning messages remain limited
@@ -770,7 +770,7 @@ and retryable error states.
 
 ## Implementer completion and handover
 
-Managed Implementers must return exactly one JSON object without surrounding prose or Markdown. Normal work and its report-only retry accept `status: "complete"` with an optional `summary` on the final assignment, or `status: "incomplete"` with required `remaining` and optional `summary`. These text fields are nonblank, trimmed and limited to 2,000 characters. A [checkpoint report](#implementation-context-handover) accepts `complete` or `status: "handoff"` with required nonblank `handover`. Forge rejects unknown fields and wrong types. Complete means the assigned scope is finished and required changes have been committed. See the [managed turn contract](agents.md#managed-implementer-completion-reports).
+Managed Implementers must return exactly one JSON object without surrounding prose or Markdown. Normal work and its report-only retry accept `status: "complete"` with an optional `summary` on the final assignment, `status: "incomplete"` with required `remaining` and optional `summary`, or `{"status":"handoff","handover":"…"}` with required nonblank handover. Ordinary summary and remaining text are nonblank, trimmed and limited to 2,000 characters. Forge bounds handover text and rejects unknown fields and wrong types. A [checkpoint report](#implementation-context-handover) accepts complete or handoff. Complete means the assigned scope is finished and required changes have been committed. See the [managed turn contract](agents.md#managed-implementer-completion-reports).
 
 A complete report requires a nonblank `summary` whenever another ordered subtask remains. Forge saves it with the subtask advance and supplies it to the next Implementer after restart or explicit retry. Prompts request at most 1,500 tokens for handover and next-subtask summaries, covering progress, next actions, decisions, blockers and verification results as applicable, and omitting code dumps, long logs and repeated plan text. Before saving or dispatching either field, Forge trims and truncates to 8,000 UTF-16 code units without splitting a surrogate pair. This estimates a 2,000-token cap at four code units per token.
 

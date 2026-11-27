@@ -19,6 +19,7 @@ export const ticketWorkflowRecordSchema = ticketWorkflowSchema.extend({
 			baseline: z.string().optional(),
 			workTurn: z.string().optional(),
 			attempted: z.string().optional(),
+			crossedTurnId: z.string().optional(),
 			insufficient: z.boolean().optional(),
 			checkpoint: z.string().optional(),
 			stage: z.enum(["work", "report"]),

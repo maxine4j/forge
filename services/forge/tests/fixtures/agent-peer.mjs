@@ -115,12 +115,17 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			turnId: turn.id,
 			tokenUsage: {
 				total: breakdown(thread.turns.length),
-				last: { ...breakdown(1), totalTokens: highContext ? 96000 : 1100 },
-				modelContextWindow: 128000,
+				last: { ...breakdown(1), totalTokens: highContext ? 8000 : 1100 },
+				modelContextWindow: highContext ? 12000 : 128000,
 			},
 		};
 		notify("thread/tokenUsage/updated", usage);
 		notify("thread/tokenUsage/updated", usage);
+		if (highContext)
+			notify("thread/tokenUsage/updated", {
+				...usage,
+				tokenUsage: { ...usage.tokenUsage, last: breakdown(1) },
+			});
 		notify("item/agentMessage/delta", {
 			threadId: thread.id,
 			turnId: turn.id,
@@ -143,22 +148,6 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
 			notify("turn/completed", { threadId: thread.id, turn });
 		}
-		if (prompt.startsWith("Using the conversation") && thread.checkpointScenario) {
-			const item = {
-				id: `answer-${sequence}`,
-				type: "agentMessage",
-				phase: "final_answer",
-				text: JSON.stringify({
-					status: "handoff",
-					handover: "Finish controlled work",
-				}),
-			};
-			turn.items.push(item);
-			turn.status = "completed";
-			thread.status = { type: "idle" };
-			notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
-			notify("turn/completed", { threadId: thread.id, turn });
-		}
 		const planning = params.collaborationMode?.mode === "plan";
 		const rebase = prompt.startsWith("Rebase this branch");
 		if (
@@ -167,7 +156,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			|| (!highContext
 				&& (prompt.startsWith("Implement the approved plan")
 					|| prompt.includes("TASK67_CONTROLLED")
-					|| (thread.completionScenario && prompt.startsWith("Finish the integration\n\n"))
+					|| (thread.completionScenario && prompt === "Finish the integration")
 					|| prompt.includes("TASK84_CONTROLLED")))
 		) {
 			if (planning) {
@@ -251,6 +240,14 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 				"-m",
 				"Controlled checkpoint",
 			]);
+			const answer = {
+				id: `handoff-${sequence}`,
+				type: "agentMessage",
+				phase: "final_answer",
+				text: JSON.stringify({ status: "handoff", handover: "Finish controlled work" }),
+			};
+			turn.items.push(answer);
+			notify("item/completed", { threadId: thread.id, turnId: turn.id, item: answer });
 			turn.status = "completed";
 			thread.status = { type: "idle" };
 			notify("turn/completed", { threadId: thread.id, turn });

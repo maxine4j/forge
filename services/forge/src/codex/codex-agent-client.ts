@@ -16,7 +16,8 @@ import { CodexRpcError } from "../accounts/codex-connection.ts";
 import { AgentError } from "../agents/errors.ts";
 import type { UsageScope } from "../cost/types.ts";
 import type { ICodexUsageTracker } from "./codex-usage-client.ts";
-import type { AgentRuntimeView, ExecutionReconciliation } from "./types.ts";
+import type { AgentRuntimeView, ExecutionReconciliation, TurnContextSample } from "./types.ts";
+
 export interface ICodexAgentClient {
 	reconcile(id?: string, path?: string, provider?: InferenceProvider): Promise<ExecutionReconciliation>;
 	/** Uses persistent Codex history. Failures throw AgentError; requests are never replayed. */
@@ -25,23 +26,23 @@ export interface ICodexAgentClient {
 	/** Loads stored history without starting or subscribing to a runtime thread. Throws AgentError. */
 	loadHistory(id: string): Promise<AgentRuntimeView>;
 	read(id: string): AgentRuntimeView;
-	contextSample?(id: string, turnId: string): { used: number; max: number; crossed: boolean } | undefined;
+	contextSample?(id: string, turnId: string): TurnContextSample | undefined;
 	send(id: string, path: string, text: string, settings?: AgentSettings, usage?: UsageScope): Promise<void>;
 	options(path?: string, provider?: InferenceProvider): Promise<AgentOptions>;
 	files(path: string, query: string): Promise<string[]>;
 	interrupt(id: string, turnId: string): Promise<void>;
 	steer(id: string, turnId: string, text: string, path?: string): Promise<void>;
 	reply(id: string, input: AgentReply): void;
-	subscribe(listener: (id: string) => void): () => void;
+	subscribe(listener: (id: string, schedulingUpdate?: boolean) => void): () => void;
 }
 const ollamaProviderId = "forge_ollama";
 
 export class CodexAgentClient implements ICodexAgentClient {
-	private readonly contextSamples = new Map<string, Map<string, { used: number; max: number; crossed: boolean }>>();
+	private readonly contextSamples = new Map<string, Map<string, TurnContextSample>>();
 	private readonly log = createLogger(CodexAgentClient.name);
 	private readonly views = new Map<string, AgentRuntimeView>();
 	private readonly pending = new Map<string, { threadId: string; turnId: string; rpcId: string | number }>();
-	private readonly listeners = new Set<(id: string) => void>();
+	private readonly listeners = new Set<(id: string, schedulingUpdate?: boolean) => void>();
 	private readonly revisions = new Map<string, number>();
 	private readonly resuming = new Set<string>();
 	private readonly models = new Map<string, string>();
@@ -230,7 +231,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 		if (!view) throw new AgentError("agent-unavailable");
 		return structuredClone(view);
 	}
-	contextSample(id: string, turnId: string): { used: number; max: number; crossed: boolean } | undefined {
+	contextSample(id: string, turnId: string): TurnContextSample | undefined {
 		const sample = this.contextSamples.get(id)?.get(turnId);
 		return sample && { ...sample };
 	}
@@ -444,9 +445,9 @@ export class CodexAgentClient implements ICodexAgentClient {
 		this.pending.delete(input.requestId);
 		view.requests = view.requests.filter((value) => value.id !== input.requestId);
 		view.status = view.requests.length ? "waiting" : "running";
-		this.emit(id);
+		this.emit(id, true);
 	}
-	subscribe(listener: (id: string) => void): () => void {
+	subscribe(listener: (id: string, schedulingUpdate?: boolean) => void): () => void {
 		this.listeners.add(listener);
 		return () => {
 			this.listeners.delete(listener);
@@ -775,17 +776,18 @@ export class CodexAgentClient implements ICodexAgentClient {
 				const { last, modelContextWindow } = sample.data.tokenUsage;
 				const samples = this.contextSamples.get(id) ?? new Map();
 				const previous = samples.get(sample.data.turnId);
+				const peak = Math.max(last.totalTokens, previous?.peak ?? 0);
+				const max = modelContextWindow ?? undefined;
 				samples.set(sample.data.turnId, {
 					used: last.totalTokens,
-					max: modelContextWindow,
-					crossed: !!previous?.crossed || last.totalTokens >= Math.ceil(modelContextWindow * 0.75),
+					peak,
+					max,
+					crossed: !!previous?.crossed || (max !== undefined && peak >= Math.ceil(max * 0.75)),
 				});
 				if (samples.size > 100) samples.delete(samples.keys().next().value!);
 				this.contextSamples.set(id, samples);
 				if (view.turnId && view.turnId !== sample.data.turnId) return;
-				if (view.contextWindow?.used === last.totalTokens && view.contextWindow.max === modelContextWindow)
-					return;
-				view.contextWindow = { used: last.totalTokens, max: modelContextWindow };
+				if (max !== undefined) view.contextWindow = { used: last.totalTokens, max };
 			} else if (method === "thread/status/changed") {
 				const { status } = z.object({ status: threadStatusSchema }).parse(params);
 				if (!["systemError", "notLoaded"].includes(status.type)) return;
@@ -847,7 +849,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 					text: (existing?.text ?? "") + delta.delta,
 				});
 			} else return;
-			this.emit(id);
+			this.emit(id, method === "thread/tokenUsage/updated" || method === "serverRequest/resolved");
 		} catch (err) {
 			this.log.warn({ err }, "Invalid Codex activity");
 			view.status = "uncertain";
@@ -941,9 +943,9 @@ export class CodexAgentClient implements ICodexAgentClient {
 			return false;
 		}
 	}
-	private emit(id: string): void {
+	private emit(id: string, schedulingUpdate?: boolean): void {
 		this.revisions.set(id, (this.revisions.get(id) ?? 0) + 1);
-		for (const listener of this.listeners) listener(id);
+		for (const listener of this.listeners) listener(id, schedulingUpdate);
 	}
 	private async guard<T>(operation: () => Promise<T>): Promise<T> {
 		try {
@@ -967,7 +969,7 @@ const contextUpdate = z.object({
 	turnId: z.string(),
 	tokenUsage: z.object({
 		last: z.object({ totalTokens: z.int().nonnegative() }),
-		modelContextWindow: z.int().positive(),
+		modelContextWindow: z.int().positive().nullish().catch(undefined),
 	}),
 });
 const threadStatusSchema = z.object({ type: z.enum(["notLoaded", "idle", "active", "systemError"]) });

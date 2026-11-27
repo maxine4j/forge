@@ -33,10 +33,10 @@ describe("parseCompletionReport", () => {
 		])
 			expect(parseCompletionReport(answer)).toBeUndefined();
 	});
-	it("accepts handoff only during checkpoint reporting", () => {
+	it("accepts handoff during work and checkpoint reporting", () => {
 		const checkpoint = completionReportRequirements(true);
 		const answer = '{"status":"handoff","handover":" notes "}';
-		expect(parseCompletionReport(answer)).toBeUndefined();
+		expect(parseCompletionReport(answer)).toEqual({ status: "handoff", handover: "notes" });
 		expect(parseCompletionReport(answer, checkpoint)).toEqual({
 			status: "handoff",
 			handover: "notes",

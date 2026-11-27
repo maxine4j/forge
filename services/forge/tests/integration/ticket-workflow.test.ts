@@ -513,6 +513,8 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				{ timeout: 10000 },
 			)
 			.toBe("done");
+		await providers.update(owner, provider.id, { compactionThresholdTokens: 8000 });
+		const contextRpcStart = rpc.mock.calls.length;
 		const contextTicket = await tickets.create(owner, {
 			repositoryIds: [project.id],
 			title: "Context handoff",
@@ -534,6 +536,12 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		const successor = (await jobs.get(contextTicket.id))!;
 		expect(successor.workspaceId).toBe(initialContextJob.workspaceId);
 		expect(successor.implementerId).not.toBe(initialContextJob.implementerId);
+		expect(successor.implementationProviderSnapshot).toEqual(initialContextJob.implementationProviderSnapshot);
+		const contextCalls = rpc.mock.calls.slice(contextRpcStart);
+		const steers = contextCalls.filter(([method]) => method === "turn/steer");
+		expect(steers).toHaveLength(1);
+		expect(steers[0]?.[1]).toMatchObject({ expectedTurnId: initialContextJob.turnId });
+		expect(contextCalls.filter(([method]) => method === "turn/start")).toHaveLength(2);
 		const handoverCall = rpc.mock.calls.find(
 			([method, params]) => method === "turn/start" && JSON.stringify(params).includes("Finish controlled work"),
 		);

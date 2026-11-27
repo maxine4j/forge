@@ -356,6 +356,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 		ticketHistory,
 		performance,
 		true,
+		wakeScheduler,
 	);
 	lifecycle.register(() => agents.shutdown());
 	const boardStore = new BoardSettingsStore(database);

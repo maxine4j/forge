@@ -24,7 +24,7 @@ export function completionReportRequirements(checkpoint = false, hasNextSubtask 
 		{ name: "summary", required: false },
 	];
 	const handoff: ReportField[] = [{ name: "handover", required: true, bounded: true }];
-	return { complete, incomplete: checkpoint ? undefined : incomplete, handoff: checkpoint ? handoff : undefined };
+	return { complete, incomplete: checkpoint ? undefined : incomplete, handoff };
 }
 
 /** Parse a final answer without accepting extra text or fields. */

@@ -1,12 +1,20 @@
 import type { Ticket, TicketWorkflow } from "@forge/contracts/tickets";
 import { expect, test } from "vitest";
 
-import { completionReportRequirements } from "./completion-report.ts";
+import { completionReportRequirements, parseCompletionReport } from "./completion-report.ts";
 import {
 	ticketPlanGuidance as subtaskGuidance,
 	ticketSinglePlanGuidance as ticketPlanGuidance,
 } from "./ticket-plan-format.ts";
 import { TicketPrompts, ticketCompletionInstructions } from "./ticket-prompts.ts";
+
+test.each([false, true])("advertised report examples pass validation (checkpoint=%s)", (checkpoint) => {
+	const requirements = completionReportRequirements(checkpoint);
+	const examples = ticketCompletionInstructions(requirements).match(/\{"status":[^}]+\}/g);
+	expect(examples).toContain('{"status":"handoff","handover":"…"}');
+	expect(examples).toHaveLength(checkpoint ? 2 : 3);
+	for (const example of examples!) expect(parseCompletionReport(example, requirements)).toBeDefined();
+});
 
 test("initial phase prompts include only the scope needed for that phase and followups are verbatim", () => {
 	const prompts = new TicketPrompts();

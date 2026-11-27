@@ -22,7 +22,8 @@ const setup = (
 	let sequence = 0;
 	const records = new Map<string, AgentThreadRecord>();
 	const views = new Map<string, AgentRuntimeView>();
-	let changed: (id: string) => void = () => {};
+	let changed: (id: string, schedulingUpdate?: boolean) => void = () => {};
+	const wakeScheduler = vi.fn();
 	const id = () => `123e4567-e89b-42d3-a456-${String(++sequence).padStart(12, "0")}`;
 	const createdAt = "2026-11-03T00:00:00.000Z";
 	const projects: IProjectService = {
@@ -141,7 +142,7 @@ const setup = (
 		}),
 		interrupt: vi.fn(async (_id: string, _turnId: string) => {}),
 		reply: vi.fn(),
-		subscribe: (listener: (key: string) => void) => {
+		subscribe: (listener: (key: string, schedulingUpdate?: boolean) => void) => {
 			changed = listener;
 			return () => {};
 		},
@@ -174,6 +175,8 @@ const setup = (
 		provider,
 		history,
 		performance,
+		false,
+		wakeScheduler,
 	);
 	return {
 		service,
@@ -184,7 +187,8 @@ const setup = (
 		views,
 		pool,
 		history,
-		changed: (key: string) => changed(key),
+		wakeScheduler,
+		changed: (key: string, schedulingUpdate?: boolean) => changed(key, schedulingUpdate),
 	};
 };
 
@@ -746,7 +750,43 @@ test("implementer threads omit the saved compaction override", async () => {
 	f.records.get(thread.id)!.status = "uncertain";
 	await f.service.recover(owner);
 	expect(f.client.reconcile).toHaveBeenCalledWith(expect.any(String), expect.any(String), { kind: "openai" });
-	expect((await f.service.get(owner, thread.id)).compactionThresholdTokens).toBeUndefined();
+	expect((await f.service.get(owner, thread.id)).compactionThresholdTokens).toBe(8000);
+	await f.service.shutdown();
+});
+
+test("wakes scheduling for managed context and request updates", async () => {
+	const f = setup();
+	const { thread } = await f.service.createTicketThread(owner, projectId, "Implementer");
+	await f.service.dispatch(owner, thread.id, "Work");
+	const codexId = f.records.get(thread.id)!.codexId!;
+	f.changed(codexId);
+	await f.service.get(owner, thread.id);
+	expect(f.wakeScheduler).not.toHaveBeenCalled();
+	f.changed(codexId, true);
+	f.changed(codexId, true);
+	await f.service.get(owner, thread.id);
+	expect(f.wakeScheduler).toHaveBeenCalledTimes(2);
+	await f.service.shutdown();
+});
+
+test("planner and standalone threads pass the configured override through", async () => {
+	const configuration = { kind: "openai", compactionThresholdTokens: 8000 } as const;
+	const f = setup(undefined, () => configuration);
+	const planner = await f.service.createTicketThread(
+		owner,
+		projectId,
+		"Planner",
+		undefined,
+		undefined,
+		undefined,
+		"planning",
+	);
+	const chat = await f.service.create(owner, projectId, "Chat");
+	await f.service.dispatch(owner, planner.thread.id, "Plan");
+	await f.service.send(owner, chat.thread.id, "Chat");
+	expect(f.client.start.mock.calls).toHaveLength(2);
+	expect(f.client.start).toHaveBeenNthCalledWith(1, expect.any(String), configuration);
+	expect(f.client.start).toHaveBeenNthCalledWith(2, expect.any(String), configuration);
 	await f.service.shutdown();
 });
 

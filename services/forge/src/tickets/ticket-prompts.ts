@@ -37,13 +37,14 @@ export function ticketCompletionInstructions(requirements = completionReportRequ
 		requirements.handoff || requirements.complete.some(({ bounded }) => bounded)
 			? " In handover or the next-subtask summary, retain concise progress, next actions, decisions, blockers, and verification results as applicable. Omit code dumps, long logs, and repeated plan text."
 			: "";
-	return `End your final answer with exactly one JSON object, without Markdown fences or surrounding prose. Use only the fields shown for your outcome. ${outcomes.join(" ")} Report complete only after finishing your assigned scope and committing the required changes.${guidance}`;
+	const checkpoint = requirements.handoff ? " Report handoff only after committing a safe checkpoint." : "";
+	return `End your final answer with exactly one JSON object, without Markdown fences or surrounding prose. Use only the fields shown for your outcome. ${outcomes.join(" ")} Report complete only after finishing your assigned scope and committing the required changes.${checkpoint}${guidance}`;
 }
 
 export function ticketFinalizationPrompt(requirements: ReturnType<typeof completionReportRequirements>): string {
-	const question = requirements.handoff
-		? "Using the conversation, assess whether this assignment is complete or needs a handoff."
-		: "Assess the assignment against the work already done.";
+	const question = requirements.incomplete
+		? "Assess the assignment against the work already done."
+		: "Using the conversation, assess whether this assignment is complete or needs a handoff.";
 	return `${question} Do not edit files or commit. Return only the explicit verdict. ${ticketCompletionInstructions(requirements)}`;
 }
 

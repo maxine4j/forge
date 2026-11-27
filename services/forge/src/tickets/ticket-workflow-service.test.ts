@@ -472,7 +472,7 @@ test("recommendation guidance applies to assignments and automatic rebase", asyn
 	await f.service.tick(actor);
 	await f.service.message(actor, ticket, "Try again");
 	await f.service.tick(actor);
-	expect(f.agents.dispatch.mock.lastCall?.[2]).toBe(`Try again\n\n${ticketCompletionInstructions()}`);
+	expect(f.agents.dispatch.mock.lastCall?.[2]).toBe("Try again");
 	f.merges.merge.mockResolvedValue("rebase");
 	f.complete(job.implementerId!);
 	await f.service.tick(actor);
@@ -494,10 +494,77 @@ test("steers an implementation once at the context threshold", async () => {
 	await f.service.settings(actor, ticket, { skipPlanning: true });
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
-	f.agents.contextSample.mockResolvedValue({ used: 96000, max: 128000, crossed: true });
+	f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
 	await f.service.tick(actor);
 	await f.makeService().tick(actor);
 	expect(f.agents.steer).toHaveBeenCalledOnce();
+});
+
+test.each([8000, 8001])("uses the pinned threshold at a turn peak of %i", async (peak) => {
+	const f = namedFixture();
+	const ticket = f.create();
+	const implementer = await f.addAgent("Implementer", [{ providerId: f.implementer.id, model: "local" }]);
+	await f.ready(ticket, implementer, implementer, true);
+	await f.service.tick(actor);
+	const job = f.jobs.get(ticket.id)!;
+	await f.providers.update(actor, f.implementer.id, { compactionThresholdTokens: 16000 });
+	f.agents.contextSample.mockResolvedValue({ used: 7999, peak: 7999, max: 9500, crossed: true });
+	await f.service.tick(actor);
+	expect(f.agents.steer).not.toHaveBeenCalled();
+	f.agents.contextSample.mockResolvedValue({ used: 7700, peak, max: 11000, crossed: false });
+	await f.service.tick(actor);
+	expect(f.agents.steer).toHaveBeenCalledWith(
+		actor,
+		job.implementerId,
+		job.turnId,
+		expect.stringContaining('{"status":"handoff","handover":"…"}'),
+	);
+	f.agents.contextSample.mockResolvedValue({ used: 2000, peak, crossed: false });
+	await f.makeService().tick(actor);
+	expect(f.agents.steer).toHaveBeenCalledOnce();
+});
+
+test("rebase handoff preserves the merge attempt, assignment and worktree", async () => {
+	const f = namedFixture();
+	const ticket = f.create();
+	const implementer = await f.addAgent("Implementer", [{ providerId: f.implementer.id, model: "local" }]);
+	await f.ready(ticket, implementer, implementer, true);
+	await f.service.tick(actor);
+	const id = f.jobs.get(ticket.id)!.implementerId!;
+	f.complete(id);
+	await f.service.tick(actor);
+	f.merges.merge.mockResolvedValueOnce("rebase");
+	await f.service.tick(actor);
+	f.merges.head.mockResolvedValue("b".repeat(40));
+	await f.service.tick(actor);
+	const rebase = f.jobs.get(ticket.id)!;
+	const prompt = f.agents.dispatch.mock.lastCall![2];
+	expect(prompt).toContain('{"status":"handoff","handover":"…"}');
+	await f.service.message(actor, ticket, "  Keep the new API  ", rebase.turnId);
+	expect(f.agents.steer).toHaveBeenLastCalledWith(actor, id, rebase.turnId, "Keep the new API");
+	f.agents.contextSample.mockResolvedValue({ used: 8000, peak: 8000, crossed: false });
+	await f.service.tick(actor);
+	expect(f.agents.steer).toHaveBeenCalledTimes(2);
+	f.merges.candidate.mockResolvedValue("c".repeat(40));
+	f.agents.finalAnswer.mockResolvedValueOnce('{"status":"handoff","handover":"Verify the rebase"}');
+	f.complete(id);
+	await f.service.tick(actor);
+	await f.makeService().tick(actor);
+	const successor = f.jobs.get(ticket.id)!;
+	expect(successor.implementerId).not.toBe(id);
+	expect(successor).toMatchObject({
+		phase: "rebase",
+		workspaceId: rebase.workspaceId,
+		resultSha: rebase.resultSha,
+		mergeAttempts: rebase.mergeAttempts,
+		implementationProviderSnapshot: rebase.implementationProviderSnapshot,
+	});
+	expect(f.agents.dispatch.mock.lastCall![2]).toContain(
+		"Rebase this branch onto the latest local main and resolve any conflicts.\n\nHandover:\nVerify the rebase",
+	);
+	f.complete(successor.implementerId!);
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)?.state).toBe("merge-queued");
 });
 test("an ambiguous checkpoint steer is reconciled without replay", async () => {
 	const f = fixture();
@@ -505,14 +572,14 @@ test("an ambiguous checkpoint steer is reconciled without replay", async () => {
 	await f.service.settings(actor, ticket, { skipPlanning: true });
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
-	f.agents.contextSample.mockResolvedValue({ used: 96000, max: 128000, crossed: true });
+	f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
 	f.agents.steer.mockRejectedValueOnce(new Error("lost response"));
 	await f.service.tick(actor);
 	await f.makeService().tick(actor);
 	expect(f.agents.steer).toHaveBeenCalledOnce();
 	expect(f.agents.resume).toHaveBeenCalledOnce();
 });
-test.each(["one-shot", "planner-subtasks"] as const)(
+test.each(["one-shot", "planner-implementer", "planner-subtasks"] as const)(
 	"%s checkpoint hands work to a fresh thread",
 	async (workflowPreset) => {
 		const f = fixture();
@@ -520,8 +587,12 @@ test.each(["one-shot", "planner-subtasks"] as const)(
 		await f.service.settings(actor, ticket, { workflowPreset });
 		await f.service.move(actor, ticket, { status: "todo" });
 		await f.service.tick(actor);
-		if (workflowPreset === "planner-subtasks") {
+		if (workflowPreset !== "one-shot") {
 			f.complete(f.jobs.get(ticket.id)!.plannerId!, "Plan wide title");
+			if (workflowPreset === "planner-implementer")
+				f.agents.plan.mockResolvedValueOnce(
+					"# Approved plan\n\n## Goals\nGoal\n## Scope\nScope\n## Decisions\nDecision\n## Acceptance criteria\nCriteria\n## Tests\nTests",
+				);
 			await f.service.tick(actor);
 			await f.service.approve(actor, ticket, 1);
 			await f.service.tick(actor);
@@ -529,16 +600,9 @@ test.each(["one-shot", "planner-subtasks"] as const)(
 		const first = f.jobs.get(ticket.id)!;
 		const id = first.implementerId!;
 		const prompt = f.agents.dispatch.mock.lastCall![2];
-		f.agents.contextSample.mockResolvedValue({ used: 96000, max: 128000, crossed: true });
+		expect(prompt).toContain('{"status":"handoff","handover":"…"}');
+		f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
 		await f.service.tick(actor);
-		f.complete(id);
-		await f.service.tick(actor);
-		expect(f.jobs.get(ticket.id)).toMatchObject({ state: "queued", context: { stage: "report" } });
-		await f.service.tick(actor);
-		expect(f.agents.dispatch.mock.lastCall?.[1]).toBe(id);
-		expect(f.agents.dispatch.mock.lastCall?.[2]).toContain("complete or needs a handoff");
-		expect(f.agents.dispatch.mock.lastCall?.[2]).toContain("at most 1,500 tokens");
-		expect(f.agents.dispatch.mock.lastCall?.[2]).toContain("Omit code dumps, long logs, and repeated plan text");
 		const notes = "Finish tests ".repeat(700);
 		f.agents.finalAnswer.mockResolvedValue(JSON.stringify({ status: "handoff", handover: notes }));
 		f.complete(id);
@@ -563,11 +627,7 @@ test("a complete report permits the existing merge path", async () => {
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
 	const id = f.jobs.get(ticket.id)!.implementerId!;
-	f.agents.contextSample.mockResolvedValue({ used: 96000, max: 128000, crossed: true });
-	await f.service.tick(actor);
-	f.complete(id);
-	await f.service.tick(actor);
-	expect(f.jobs.get(ticket.id)?.state).toBe("queued");
+	f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
 	await f.service.tick(actor);
 	f.agents.finalAnswer.mockResolvedValue('{"status":"complete"}');
 	f.complete(id);
@@ -584,6 +644,7 @@ test("prose queues one same-thread verdict and incomplete blocks merge until own
 	await f.service.tick(actor);
 	const job = f.jobs.get(ticket.id)!;
 	const id = job.implementerId!;
+	f.agents.contextSample.mockResolvedValue(undefined);
 	f.agents.finalAnswer.mockResolvedValueOnce("TASK-78 is **not complete**");
 	f.complete(id);
 	await f.service.tick(actor);
@@ -600,10 +661,10 @@ test("prose queues one same-thread verdict and incomplete blocks merge until own
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", completionFailure: "incomplete" });
 	await expect(f.service.queueMerge(actor, ticket)).rejects.toThrow("ticket-conflict");
-	await f.service.message(actor, ticket, "Finish the tests");
+	await f.service.message(actor, ticket, "  Finish the tests  ");
 	await f.service.tick(actor);
 	expect(f.agents.dispatch.mock.lastCall?.[1]).toBe(id);
-	expect(f.agents.dispatch.mock.lastCall?.[2]).toContain("Finish the tests");
+	expect(f.agents.dispatch.mock.lastCall?.[2]).toBe("Finish the tests");
 	f.complete(id);
 	await f.service.tick(actor);
 	await f.service.tick(actor);
@@ -629,11 +690,7 @@ test("an incomplete rebase cannot merge an earlier verified candidate", async ()
 	expect(f.merges.merge).toHaveBeenCalledTimes(1);
 	await f.service.message(actor, ticket, "  Resolve conflicts and verify  ");
 	await f.makeService().tick(actor);
-	expect(f.agents.dispatch.mock.lastCall?.slice(0, 3)).toEqual([
-		actor,
-		id,
-		`Resolve conflicts and verify\n\n${ticketCompletionInstructions()}`,
-	]);
+	expect(f.agents.dispatch.mock.lastCall?.slice(0, 3)).toEqual([actor, id, "Resolve conflicts and verify"]);
 	f.merges.candidate.mockResolvedValue("c".repeat(40));
 	f.complete(id);
 	await f.service.tick(actor);
@@ -667,21 +724,20 @@ test.each(["{bad", JSON.stringify({ status: "incomplete", remaining: "tests", ha
 		await f.service.move(actor, ticket, { status: "todo" });
 		await f.service.tick(actor);
 		const id = f.jobs.get(ticket.id)!.implementerId!;
-		f.agents.contextSample.mockResolvedValue({ used: 96000, max: 128000, crossed: true });
+		f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
 		await f.service.tick(actor);
+		f.agents.finalAnswer.mockResolvedValueOnce(undefined);
 		f.complete(id);
 		await f.service.tick(actor);
+		// Legacy checkpoint reports were queued without the retry source field.
+		delete f.jobs.get(ticket.id)!.reportRetrySourceTurnId;
 		await f.service.tick(actor);
 		f.agents.finalAnswer.mockResolvedValue(answer);
 		f.complete(id);
 		await f.service.tick(actor);
-		expect(f.jobs.get(ticket.id)).toMatchObject({ state: "queued" });
-		await f.makeService().tick(actor);
-		f.complete(id);
-		await f.service.tick(actor);
 		expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", completionFailure: "invalid-report" });
-		await f.service.tick(actor);
-		expect(f.agents.dispatch).toHaveBeenCalledTimes(3);
+		await f.makeService().tick(actor);
+		expect(f.agents.dispatch).toHaveBeenCalledTimes(2);
 		expect(f.merges.merge).not.toHaveBeenCalled();
 		await f.service.message(actor, ticket, "Please continue");
 		await f.service.tick(actor);
@@ -696,12 +752,14 @@ test("insufficient context waits for settlement before allowing a retry", async 
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
 	const id = f.jobs.get(ticket.id)!.implementerId!;
-	f.agents.contextSample.mockResolvedValue({ used: 127000, max: 128000, crossed: true });
+	f.agents.contextSample.mockResolvedValue({ used: 127000, peak: 127000, max: 128000, crossed: true });
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)?.state).toBe("running");
-	expect(f.agents.steer).not.toHaveBeenCalled();
+	expect(f.agents.steer).toHaveBeenCalledOnce();
 	await expect(f.service.message(actor, ticket, "Retry")).rejects.toThrow("ticket-conflict");
+	f.agents.finalAnswer.mockResolvedValueOnce(undefined);
 	f.complete(id);
+	await f.service.tick(actor);
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", contextFailure: "headroom" });
 	await f.service.message(actor, ticket, "  Recover by verifying the committed changes  ");
@@ -718,7 +776,7 @@ test("a threshold first observed after work settles uses the normal completion v
 	await f.service.settings(actor, ticket, { skipPlanning: true });
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
-	f.agents.contextSample.mockResolvedValue({ used: 127000, max: 128000, crossed: true });
+	f.agents.contextSample.mockResolvedValue({ used: 127000, peak: 127000, max: 128000, crossed: true });
 	f.complete(f.jobs.get(ticket.id)!.implementerId!);
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)?.state).toBe("merge-queued");
@@ -742,9 +800,9 @@ test.each([
 		const job = f.jobs.get(ticket.id)!;
 		const id = job.implementerId!;
 		expect(job.implementationProviderSnapshot).toBeDefined();
-		f.agents.contextSample.mockResolvedValue({ used: 96000, max: 128000, crossed: true });
+		f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
 		if (checkpoint) await f.service.tick(actor);
-		else f.agents.finalAnswer.mockResolvedValueOnce(undefined);
+		f.agents.finalAnswer.mockResolvedValueOnce(undefined);
 		f.complete(id);
 		await f.service.tick(actor);
 		expect(f.jobs.get(ticket.id)?.state).toBe("queued");
@@ -754,7 +812,7 @@ test.each([
 			f.views.get(id)!.thread.status = "failed";
 			f.views.get(id)!.turnFailure = "context-window";
 		} else {
-			f.agents.contextSample.mockResolvedValue({ used: 127000, max: 128000, crossed: true });
+			f.agents.contextSample.mockResolvedValue({ used: 127000, peak: 127000, max: 128000, crossed: true });
 		}
 		await f.makeService().tick(actor);
 		await f.service.tick(actor);
@@ -775,7 +833,7 @@ test.each([
 	},
 );
 
-test("missing live telemetry fails only after work settles", async () => {
+test("missing live telemetry allows a valid work verdict", async () => {
 	const f = fixture();
 	const ticket = f.create();
 	await f.service.settings(actor, ticket, { skipPlanning: true });
@@ -787,7 +845,7 @@ test("missing live telemetry fails only after work settles", async () => {
 	expect(f.jobs.get(ticket.id)?.state).toBe("running");
 	f.complete(id);
 	await f.service.tick(actor);
-	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", contextFailure: "telemetry" });
+	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "merge-queued" });
 	expect(f.merges.merge).not.toHaveBeenCalled();
 });
 
@@ -800,43 +858,66 @@ test("pending requests defer steering until they resolve", async () => {
 	const id = f.jobs.get(ticket.id)!.implementerId!;
 	f.views.get(id)!.requests = [{ id: "request" } as never];
 	f.views.get(id)!.thread.status = "waiting";
-	f.agents.contextSample.mockResolvedValue({ used: 96000, max: 128000, crossed: true });
+	f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
 	await f.service.tick(actor);
 	expect(f.agents.steer).not.toHaveBeenCalled();
+	expect(f.jobs.get(ticket.id)?.context?.crossedTurnId).toBe(f.views.get(id)!.thread.turnId);
+	f.agents.contextSample.mockResolvedValue(undefined);
 	f.views.get(id)!.requests = [];
 	f.views.get(id)!.thread.status = "running";
-	await f.service.tick(actor);
+	await f.makeService().tick(actor);
 	expect(f.agents.steer).toHaveBeenCalledOnce();
 });
 
-test.each(["dirty", "changed", "unchanged"] as const)("%s checkpoint prevents handoff", async (condition) => {
+test("rejects a checkpoint report if the recorded commit changes", async () => {
 	const f = fixture();
 	const ticket = f.create();
 	await f.service.settings(actor, ticket, { skipPlanning: true });
 	await f.service.move(actor, ticket, { status: "todo" });
 	await f.service.tick(actor);
-	const id = f.jobs.get(ticket.id)!.implementerId!;
-	f.agents.contextSample.mockResolvedValue({ used: 96000, max: 128000, crossed: true });
+	const job = f.jobs.get(ticket.id)!;
+	const id = job.implementerId!;
+	f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
 	await f.service.tick(actor);
-	if (condition === "dirty") f.merges.candidate.mockRejectedValueOnce(new Error("dirty"));
-	if (condition === "unchanged") f.merges.candidate.mockResolvedValue("a".repeat(40));
+	f.agents.finalAnswer.mockResolvedValueOnce(undefined);
 	f.complete(id);
 	await f.service.tick(actor);
-	if (condition !== "dirty") {
+	await f.service.tick(actor);
+	expect(f.merges.verify).toHaveBeenCalledWith(actor, job.workspaceId, "b".repeat(40));
+	f.merges.candidate.mockResolvedValue("c".repeat(40));
+	f.agents.finalAnswer.mockResolvedValueOnce('{"status":"handoff","handover":"Continue work"}');
+	f.complete(id);
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", contextFailure: "checkpoint", implementerId: id });
+});
+
+test.each(["dirty", "wrong branch", "unchanged", "missing baseline"] as const)(
+	"%s checkpoint prevents handoff",
+	async (condition) => {
+		const f = fixture();
+		const ticket = f.create();
+		await f.service.settings(actor, ticket, { skipPlanning: true });
+		await f.service.move(actor, ticket, { status: "todo" });
 		await f.service.tick(actor);
-		if (condition === "changed") f.merges.candidate.mockResolvedValue("c".repeat(40));
+		const id = f.jobs.get(ticket.id)!.implementerId!;
+		f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
+		await f.service.tick(actor);
+		if (condition === "dirty" || condition === "wrong branch")
+			f.merges.candidate.mockRejectedValueOnce(new Error(condition));
+		if (condition === "unchanged") f.merges.candidate.mockResolvedValue("a".repeat(40));
+		if (condition === "missing baseline") delete f.jobs.get(ticket.id)!.context!.baseline;
 		f.agents.finalAnswer.mockResolvedValue('{"status":"handoff","handover":"Work remains"}');
 		f.complete(id);
 		await f.service.tick(actor);
-	}
-	expect(f.jobs.get(ticket.id)).toMatchObject({
-		state: "failed",
-		contextFailure: condition === "unchanged" ? "no-progress" : "checkpoint",
-	});
-	await f.service.tick(actor);
-	expect(f.agents.createTicketThread).toHaveBeenCalledOnce();
-	expect(f.merges.merge).not.toHaveBeenCalled();
-});
+		expect(f.jobs.get(ticket.id)).toMatchObject({
+			state: "failed",
+			contextFailure: ["unchanged", "missing baseline"].includes(condition) ? "no-progress" : "checkpoint",
+		});
+		await f.service.tick(actor);
+		expect(f.agents.createTicketThread).toHaveBeenCalledOnce();
+		expect(f.merges.merge).not.toHaveBeenCalled();
+	},
+);
 const fixture = (
 	dispatchMode: () => "running" | "paused" | "stopped" = () => "running",
 	providers?: IModelProviderService,
@@ -893,6 +974,7 @@ const fixture = (
 		plan: vi.fn(async (_actor, id: string) => plans.get(id)),
 		contextSample: vi.fn<NonNullable<ITicketAgents["contextSample"]>>(async () => ({
 			used: 1000,
+			peak: 1000,
 			max: 128000,
 			crossed: false,
 		})),
@@ -1834,18 +1916,14 @@ test("ordered subtasks recover a bounded checkpoint completion summary and retai
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("only subtask 1: First");
 	expect(f.agents.dispatch.mock.lastCall?.[2]).not.toMatch(/## Goals|Second/);
 	expect(f.agents.dispatch.mock.lastCall?.[2]).toContain("summary is required");
-	f.agents.contextSample.mockResolvedValue({ used: 96000, max: 128000, crossed: true });
+	f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
 	await f.service.tick(actor);
 	f.complete(first);
 	await f.service.tick(actor);
 	await f.service.tick(actor);
 	expect(f.agents.dispatch.mock.lastCall?.[1]).toBe(first);
 	expect(f.agents.dispatch.mock.lastCall?.[2]).toContain("summary is required");
-	f.complete(first);
-	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)?.reportRetrySourceTurnId).toBeDefined();
-	await f.makeService().tick(actor);
-	expect(f.agents.dispatch.mock.lastCall?.[2]).toContain("summary is required");
 	const summary = "x".repeat(8000);
 	f.agents.finalAnswer.mockResolvedValueOnce(JSON.stringify({ status: "complete", summary: ` ${summary}extra ` }));
 	f.complete(first);
@@ -1867,9 +1945,11 @@ test("ordered subtasks recover a bounded checkpoint completion summary and retai
 	expect(f.agents.dispatch.mock.calls.at(-1)?.[2]).toContain("only subtask 2: Second");
 	expect(f.agents.dispatch.mock.lastCall?.[2]).not.toMatch(/## Goals|First/);
 	expect(f.agents.dispatch.mock.lastCall?.[2]).toContain(`Previous subtask summary:\n${summary}\n\n`);
-	f.agents.contextSample.mockResolvedValue({ used: 127000, max: 128000, crossed: true });
+	f.agents.contextSample.mockResolvedValue({ used: 127000, peak: 127000, max: 128000, crossed: true });
 	await f.service.tick(actor);
+	f.agents.finalAnswer.mockResolvedValueOnce(undefined);
 	f.complete(initialSecond);
+	await f.service.tick(actor);
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", contextFailure: "headroom" });
 	f.jobs.get(ticket.id)!.context!.prompt = text;
@@ -1880,18 +1960,14 @@ test("ordered subtasks recover a bounded checkpoint completion summary and retai
 	expect(f.agents.dispatch.mock.lastCall?.[2]).toBe(
 		`Implement only subtask 2: Second. Commit your changes on this branch.\n\n- Files: b\n- Dependencies: 1\n- Expected changes: Second\n- Exclusions: None\n- Completion criteria: Done\n\nRecovery instruction:\nRecover the second subtask\n\nPrevious subtask summary:\n${summary}\n\n${ticketCompletionInstructions()}`,
 	);
-	f.agents.contextSample.mockResolvedValue({ used: 1000, max: 128000, crossed: false });
+	f.agents.contextSample.mockResolvedValue({ used: 1000, peak: 1000, max: 128000, crossed: false });
 	f.agents.finalAnswer.mockResolvedValueOnce('{"status":"incomplete","remaining":"Finish verification"}');
 	f.complete(second);
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", subtaskIndex: 1 });
 	await f.service.message(actor, ticket, "Finish verification");
 	await f.makeService().tick(actor);
-	expect(f.agents.dispatch.mock.lastCall?.slice(0, 3)).toEqual([
-		actor,
-		second,
-		`Finish verification\n\n${ticketCompletionInstructions()}`,
-	]);
+	expect(f.agents.dispatch.mock.lastCall?.slice(0, 3)).toEqual([actor, second, "Finish verification"]);
 	f.complete(second);
 	await f.service.tick(actor);
 	expect(f.jobs.get(ticket.id)?.state).toBe("merge-queued");

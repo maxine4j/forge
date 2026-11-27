@@ -426,10 +426,10 @@ structured requests use existing replies; planner feedback requires an idle or
 failed workflow.
 
 A follow-up on a settled implementation or rebase thread starts a turn on the
-same thread with the owner's message and the required [completion report
-instructions](#managed-implementer-completion-reports). Forge sends those two
-parts after scheduler restart as well. The assignment and earlier summaries
-remain in the conversation. See [fresh-thread recovery](tickets.md#implementation-context-handover).
+same thread with only the trimmed owner text, including after scheduler restart.
+The assignment and earlier summaries remain in the conversation. If the turn
+settles without a valid report, Forge can request the [completion report](#managed-implementer-completion-reports)
+in a separate turn. See [fresh-thread recovery](tickets.md#implementation-context-handover).
 
 Controlled Chromium tests cover independent threads, activity, interruptions,
 reopening, failed sends/replies, approval/input, reconnects, automatic recovery and
@@ -560,7 +560,7 @@ It imposes no spending cap or scheduler enforcement.
 
 ## Managed implementer completion reports
 
-Managed Implementer work, including rebase and owner-guided turns, requires a single JSON completion report. Forge validates the outcome for the current turn's purpose and requires an explicit complete verdict before advancing a subtask or queuing a merge. After a Forge checkpoint steer settles, a same-thread report can instead request a handoff. Forge can request one report-only clarification when headroom permits. See [ticket completion and handover](tickets.md#implementer-completion-and-handover) for report shapes and progression rules, and [implementation context handover](tickets.md#implementation-context-handover) for checkpoint and finalization failure handling. Standalone chats and planning turns do not use this contract.
+Managed Implementer work, including rebase and owner-guided turns, requires a single JSON completion report. Fresh assignments advertise complete, incomplete and handoff. Forge validates the outcome and requires an explicit complete verdict before advancing a subtask or queuing a merge. A valid handoff on the work turn can start a successor after checkpoint verification. Forge can request one report-only clarification when headroom permits. See [ticket completion and handover](tickets.md#implementer-completion-and-handover) for report shapes and progression rules, and [implementation context handover](tickets.md#implementation-context-handover) for threshold steering and recovery.
 
 # Agent usage overview
 

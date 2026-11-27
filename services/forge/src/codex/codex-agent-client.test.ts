@@ -341,7 +341,7 @@ test("context usage follows the latest window sample and can decrease after comp
 		});
 	update(32000);
 	expect(client.read(id).contextWindow).toEqual({ used: 32000, max: 128000 });
-	expect(listener).toHaveBeenLastCalledWith(id);
+	expect(listener).toHaveBeenLastCalledWith(id, true);
 	update(64000, "older-turn");
 	expect(client.read(id).contextWindow?.used).toBe(32000);
 	update(4000);
@@ -360,7 +360,7 @@ test("turn context retains a threshold crossing after compaction", async () => {
 			turnId: "turn-1",
 			tokenUsage: { last: { totalTokens: used }, modelContextWindow: 128000 },
 		});
-	expect(client.contextSample(id, "turn-1")).toEqual({ used: 4000, max: 128000, crossed: true });
+	expect(client.contextSample(id, "turn-1")).toEqual({ used: 4000, peak: 96000, max: 128000, crossed: true });
 	expect(client.contextSample(id, "other")).toBeUndefined();
 });
 
@@ -373,8 +373,22 @@ test("equal samples retain their turn identity even before a start reply", async
 			turnId,
 			tokenUsage: { last: { totalTokens: 96000 }, modelContextWindow: 128000 },
 		});
-	expect(client.contextSample(id, "new")).toEqual({ used: 96000, max: 128000, crossed: true });
-	expect(client.contextSample(id, "old")).toEqual({ used: 96000, max: 128000, crossed: true });
+	expect(client.contextSample(id, "new")).toEqual({ used: 96000, peak: 96000, max: 128000, crossed: true });
+	expect(client.contextSample(id, "old")).toEqual({ used: 96000, peak: 96000, max: 128000, crossed: true });
+});
+
+test("retains current-turn usage without a model window and isolates delayed samples", async () => {
+	const { client, notify } = setup();
+	const id = await client.start("/data/worktrees/one");
+	await client.send(id, "/data/worktrees/one", "Work");
+	const update = (turnId: string, totalTokens: number) =>
+		notify("thread/tokenUsage/updated", { threadId: id, turnId, tokenUsage: { last: { totalTokens } } });
+	update("turn-1", 8000);
+	update("older-turn", 32000);
+	update("turn-1", 2000);
+	expect(client.contextSample(id, "turn-1")).toEqual({ used: 2000, peak: 8000, crossed: false });
+	expect(client.contextSample(id, "older-turn")?.peak).toBe(32000);
+	expect(client.read(id).contextWindow).toBeUndefined();
 });
 
 test("captures only the completed turn's final answer", async () => {
@@ -1027,8 +1041,11 @@ test("externally resolved approval requests disappear and cannot be answered", a
 	await client.send(id, "/data/worktrees/one", "Work");
 	request(10, "item/fileChange/requestApproval", { threadId: id, turnId: "turn-1", reason: "Patch" });
 	const requestId = client.read(id).requests[0]!.id;
+	const listener = vi.fn();
+	client.subscribe(listener);
 	notify("serverRequest/resolved", { threadId: id, requestId: 10 });
 	expect(client.read(id).requests).toEqual([]);
+	expect(listener).toHaveBeenCalledWith(id, true);
 	expect(() => client.reply(id, { requestId, decision: "accept" })).toThrow("agent-conflict");
 });
 
