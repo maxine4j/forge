@@ -9,8 +9,22 @@ import {
 	ticketStatuses,
 	ticketExecutionSettingsSchema,
 	ticketPhaseSettings,
+	ticketAgentMetricsSchema,
 	resolveTicketWorkflowPreset,
 } from "./index.ts";
+
+test("scheduler metrics accept only aggregate UUID rows with nonnegative integer counts", () => {
+	const id = "550e8400-e29b-41d4-a716-446655440000";
+	const value = { providers: [{ providerId: id, running: 2, reserved: 3 }], agents: [{ agentId: id, queued: 0 }] };
+	expect(ticketAgentMetricsSchema.parse(value)).toEqual(value);
+	expect(ticketAgentMetricsSchema.safeParse({ providers: [], agents: [] }).success).toBe(true);
+	for (const invalid of [
+		{ ...value, providers: [{ providerId: id, running: -1, reserved: 3 }] },
+		{ ...value, agents: [{ agentId: id, queued: 0.5 }] },
+		{ ...value, agents: [{ agentId: "invalid", queued: 0 }] },
+		{ ...value, providers: [{ ...value.providers[0], credential: "secret" }] },
+	]) expect(ticketAgentMetricsSchema.safeParse(invalid).success).toBe(false);
+});
 
 test("workflow presets validate and resolve legacy settings", () => {
 	for (const workflowPreset of ["planner-subtasks", "planner-implementer", "one-shot"])

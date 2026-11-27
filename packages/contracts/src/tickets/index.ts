@@ -6,6 +6,15 @@ import { gitShaSchema } from "../workspace.ts";
 import { structuredTicketPlanSchema } from "./plan.ts";
 export * from "./plan.ts";
 
+/** Aggregate scheduler activity; never includes ticket details or provider credentials. */
+export const ticketAgentMetricsSchema = z.strictObject({
+	providers: z.array(
+		z.strictObject({ providerId: z.uuid(), running: z.int().nonnegative(), reserved: z.int().nonnegative() }),
+	),
+	agents: z.array(z.strictObject({ agentId: z.uuid(), queued: z.int().nonnegative() })),
+});
+export type TicketAgentMetrics = z.infer<typeof ticketAgentMetricsSchema>;
+
 export const ticketWorkflowPresetSchema = z.enum(["planner-subtasks", "planner-implementer", "one-shot"]);
 export const ticketExecutionSettingsSchema = agentSettingsSchema.extend({
 	workflowPreset: ticketWorkflowPresetSchema.optional(),
