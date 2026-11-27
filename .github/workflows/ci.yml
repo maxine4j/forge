@@ -6,9 +6,6 @@ on:
             publish-image:
                 type: boolean
                 default: false
-            publish-client:
-                type: boolean
-                default: false
 permissions:
     contents: read
 jobs:
@@ -19,15 +16,17 @@ jobs:
             - uses: ./.github/actions/setup
             - run: pnpm check
             - run: pnpm build
-            - name: Verify standalone worker package
+            - name: Verify standalone worker bundle
               shell: bash
               run: |
-                  pnpm --filter @maxine4j/forge-ollama-client stage
-                  package="$PWD/services/ollama-client/dist/package"
+                  bundle=services/ollama-client/dist/forge-ollama-client.cjs
+                  git ls-files --error-unmatch -- "$bundle" >/dev/null
+                  pnpm --filter @maxine4j/forge-ollama-client bundle
+                  git diff --exit-code -- "$bundle"
                   smoke="$(mktemp -d)"
-                  tarball="$(cd "$package" && npm pack --pack-destination "$smoke" --silent)"
-                  npm install --prefix "$smoke" "$smoke/$tarball"
-                  if "$smoke/node_modules/.bin/forge-ollama-client" > "$smoke/output" 2>&1; then
+                  trap 'rm -rf -- "$smoke"' EXIT
+                  cp "$bundle" "$smoke/"
+                  if node "$smoke/forge-ollama-client.cjs" > "$smoke/output" 2>&1; then
                       exit 1
                   fi
                   grep -F -- "--worker-id must be a lowercase worker ID" "$smoke/output"
@@ -131,29 +130,3 @@ jobs:
                   docker buildx build --platform linux/amd64 -f services/ollama-relay/Dockerfile "${tags[@]}" \
                       --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
                       --push .
-    publish-client:
-        if: inputs.publish-client && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')
-        runs-on: ubuntu-24.04
-        permissions:
-            contents: read
-            packages: write
-        steps:
-            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-            - uses: ./.github/actions/setup
-            - run: pnpm --filter @maxine4j/forge-ollama-client... build
-            - name: Stage worker package
-              shell: bash
-              run: |
-                  if [[ "$GITHUB_REF_TYPE" == tag ]]; then
-                      version="${GITHUB_REF_NAME#v}"
-                  else
-                      version="0.0.0-commit${GITHUB_SHA:0:7}"
-                  fi
-                  pnpm --filter @maxine4j/forge-ollama-client stage "$version"
-            - name: Publish worker to GitHub Packages
-              working-directory: services/ollama-client/dist/package
-              env:
-                  NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-              run: |
-                  printf '%s\n' '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > .npmrc
-                  npm publish --tag latest

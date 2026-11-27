@@ -430,22 +430,10 @@ The worker retains its existing reconnect behavior.
    full SHA and release tag.
 2. Confirm the public `/health` returns 200 and a public
    `POST /worker-a/openai/v1/responses` returns 404. On each worker host,
-   install Node.js 24, Ollama and the local model you intend to use. Stop any
-   existing Ollama instance on port 11434. Main pushes publish version
-   `0.0.0-commit<short-sha>` (the first seven commit SHA characters), and release
-   tags `vX.Y.Z` publish version `X.Y.Z` to GitHub Packages independently of CI
-   checks. Both publish with npm's `latest` tag. Configure npm for the
-   `@maxine4j` scope using an account with read access to the package and its
-   token in `NODE_AUTH_TOKEN`.
-
-    ```sh
-    npm config set @maxine4j:registry https://npm.pkg.github.com
-    npm config set '//npm.pkg.github.com/:_authToken' '${NODE_AUTH_TOKEN}'
-    npm install --global @maxine4j/forge-ollama-client
-    # Supply OLLAMA_RELAY_TOKEN through your secret manager or shell environment.
-    forge-ollama-client --worker-id worker-a --relay-base-url 'https://ollama-relay.forge.<base-domain>'
-    ```
-
+   install Node.js 24, Ollama and a local model. Follow the
+   [worker installation guide](../services/ollama-client/README.md) to download
+   the single-file bundle from `main` and configure its launcher with the relay
+   HTTPS origin, a unique worker ID, the pairing token and the context window.
 3. Create one named [Ollama provider](agents.md#codex-harness-and-lifecycle) per
    worker with base URL `http://ollama-relay:8081/{workerId}/openai/v1` and use
    the installed model tag. Verify a streamed
