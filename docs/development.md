@@ -431,8 +431,10 @@ The worker retains its existing reconnect behavior.
 2. Confirm the public `/health` returns 200 and a public
    `POST /worker-a/openai/v1/responses` returns 404. On each worker host,
    install Node.js 24, Ollama and the local model you intend to use. Stop any
-   existing Ollama instance on port 11434. Release tags `vX.Y.Z` publish version
-   `X.Y.Z` to GitHub Packages independently of CI checks. Configure npm for the
+   existing Ollama instance on port 11434. Main pushes publish version
+   `0.0.0-commit<short-sha>` (the first seven commit SHA characters), and release
+   tags `vX.Y.Z` publish version `X.Y.Z` to GitHub Packages independently of CI
+   checks. Both publish with npm's `latest` tag. Configure npm for the
    `@maxine4j` scope using an account with read access to the package and its
    token in `NODE_AUTH_TOKEN`.
 

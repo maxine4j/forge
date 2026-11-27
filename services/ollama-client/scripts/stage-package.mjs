@@ -10,8 +10,8 @@ const { dependencies: infrastructureDependencies } = JSON.parse(
 );
 
 const release = process.argv[2] ?? version;
-if (!/^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u.test(release))
-	throw new Error("Package version must use X.Y.Z with no leading zeroes");
+if (!/^(?:(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)|0\.0\.0-commit[0-9a-f]{7})$/u.test(release))
+	throw new Error("Package version must use X.Y.Z or 0.0.0-commit followed by seven lowercase hex digits");
 
 await mkdir(new URL("ollama/", internal), { recursive: true });
 for (const name of [

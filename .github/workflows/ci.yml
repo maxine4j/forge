@@ -132,7 +132,7 @@ jobs:
                       --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
                       --push .
     publish-client:
-        if: inputs.publish-client && github.ref_type == 'tag'
+        if: inputs.publish-client && github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref_type == 'tag')
         runs-on: ubuntu-24.04
         permissions:
             contents: read
@@ -141,7 +141,15 @@ jobs:
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
             - uses: ./.github/actions/setup
             - run: pnpm --filter @maxine4j/forge-ollama-client... build
-            - run: pnpm --filter @maxine4j/forge-ollama-client stage "${GITHUB_REF_NAME#v}"
+            - name: Stage worker package
+              shell: bash
+              run: |
+                  if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+                      version="${GITHUB_REF_NAME#v}"
+                  else
+                      version="0.0.0-commit${GITHUB_SHA:0:7}"
+                  fi
+                  pnpm --filter @maxine4j/forge-ollama-client stage "$version"
             - name: Publish worker to GitHub Packages
               working-directory: services/ollama-client/dist/package
               env:
