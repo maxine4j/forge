@@ -70,7 +70,7 @@ jobs:
             - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
             - run: docker buildx build --platform linux/amd64 -f services/ollama-relay/Dockerfile -t forge-ollama-relay:dev --load .
             - run: pnpm test:relay-image
-    publish:
+    publish-forge:
         if: inputs.publish-image && github.event_name == 'push'
         runs-on: ubuntu-24.04
         permissions:
@@ -133,7 +133,6 @@ jobs:
                       --push .
     publish-client:
         if: inputs.publish-client && github.ref_type == 'tag'
-        needs: checks
         runs-on: ubuntu-24.04
         permissions:
             contents: read
