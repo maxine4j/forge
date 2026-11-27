@@ -48,43 +48,45 @@ export function TicketAgentSettings({
 		) ?? [];
 	return (
 		<>
-			{(
-				[
-					["Planner", "plannerAgentId", job?.planningProvider, job?.plannerId],
-					["Implementer", "implementerAgentId", job?.implementationProvider, job?.implementerId],
-				] as const
-			)
-				.filter(
-					([label]) =>
-						label !== "Planner" || (resolveTicketWorkflowPreset(settings) !== "one-shot" && !job?.plan),
+			<div className='ticket-agent-roles'>
+				{(
+					[
+						["Implementer", "implementerAgentId", job?.implementationProvider, job?.implementerId],
+						["Planner", "plannerAgentId", job?.planningProvider, job?.plannerId],
+					] as const
 				)
-				.map(([label, key, pin, thread]) => {
-					const value = settings[key] ?? "";
-					const saved = catalog?.agents.find((agent) => agent.id === value);
-					return (
-						<label key={key}>
-							{label}
-							<select
-								value={value}
-								disabled={disabled || !catalog || !!pin || !!thread}
-								onChange={(event) => change({ [key]: event.target.value || undefined })}
-							>
-								<option value=''>{pin?.providerName ?? "Select an agent"}</option>
-								{value && !choices.some((agent) => agent.id === value) && (
-									<option value={value} disabled>
-										{saved?.name ?? pin?.providerName ?? "Unavailable agent"}
-										{saved?.retired ? " (retired)" : ""}
-									</option>
-								)}
-								{choices.map((agent) => (
-									<option key={agent.id} value={agent.id}>
-										{agent.name}
-									</option>
-								))}
-							</select>
-						</label>
-					);
-				})}
+					.filter(
+						([label]) =>
+							label !== "Planner" || (resolveTicketWorkflowPreset(settings) !== "one-shot" && !job?.plan),
+					)
+					.map(([label, key, pin, thread]) => {
+						const value = settings[key] ?? "";
+						const saved = catalog?.agents.find((agent) => agent.id === value);
+						return (
+							<label key={key}>
+								{label}
+								<select
+									value={value}
+									disabled={disabled || !catalog || !!pin || !!thread}
+									onChange={(event) => change({ [key]: event.target.value || undefined })}
+								>
+									<option value=''>{pin?.providerName ?? "Select an agent"}</option>
+									{value && !choices.some((agent) => agent.id === value) && (
+										<option value={value} disabled>
+											{saved?.name ?? pin?.providerName ?? "Unavailable agent"}
+											{saved?.retired ? " (retired)" : ""}
+										</option>
+									)}
+									{choices.map((agent) => (
+										<option key={agent.id} value={agent.id}>
+											{agent.name}
+										</option>
+									))}
+								</select>
+							</label>
+						);
+					})}
+			</div>
 			<label>
 				Permissions
 				<select

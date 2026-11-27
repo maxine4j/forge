@@ -717,19 +717,6 @@ export const TicketDetails = ({
 				)}
 				<fieldset className='ticket-detail-section ticket-agent-settings'>
 					<legend>Agent Settings</legend>
-					<TicketAgentSettings
-						api={api}
-						settings={settings}
-						job={job}
-						change={changeSettings}
-						disabled={settingsDisabled}
-					/>
-					<RepositorySelection
-						api={api}
-						value={pendingRepositories ?? ticket.repositoryIds}
-						change={(ids) => void changeRepositories(ids)}
-						disabled={!editable || busy}
-					/>
 					<label>
 						Workflow
 						<select
@@ -748,6 +735,19 @@ export const TicketDetails = ({
 							<option value='one-shot'>One shot, no planner</option>
 						</select>
 					</label>
+					<TicketAgentSettings
+						api={api}
+						settings={settings}
+						job={job}
+						change={changeSettings}
+						disabled={settingsDisabled}
+					/>
+					<RepositorySelection
+						api={api}
+						value={pendingRepositories ?? ticket.repositoryIds}
+						change={(ids) => void changeRepositories(ids)}
+						disabled={!editable || busy}
+					/>
 					<label>
 						Agent input
 						<select

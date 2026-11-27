@@ -1712,6 +1712,11 @@
 .ticket-agent-selection {
 	min-width: 0;
 }
+.ticket-agent-roles {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+	gap: 8px;
+}
 .ticket-chat > .ticket-agent-selection {
 	flex-shrink: 0;
 }
@@ -3369,6 +3374,11 @@ summary {
 }
 .repository-code .code-editor {
 	margin-top: 12px;
+}
+@media (min-width: 741px) {
+	.repository-code .cm-editor {
+		height: max(400px, calc(100dvh - 250px));
+	}
 }
 .repository-readme {
 	margin-top: 24px;
