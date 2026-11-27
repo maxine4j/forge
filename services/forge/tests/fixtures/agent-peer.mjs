@@ -149,8 +149,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 				type: "agentMessage",
 				phase: "final_answer",
 				text: JSON.stringify({
-					status: "incomplete",
-					remaining: "Finish controlled work",
+					status: "handoff",
 					handover: "Finish controlled work",
 				}),
 			};

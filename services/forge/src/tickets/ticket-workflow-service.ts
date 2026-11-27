@@ -19,13 +19,13 @@ import { type IModelProviderService } from "../model-providers/model-provider-se
 import type { ITaskAgents } from "../task-agents/task-agent-service.ts";
 import type { ITicketMergeClient } from "../workspaces/workspace-merge-client.ts";
 import type { IMergedWorkspaceCleanup, IAbandonedWorkspaceCleanup } from "../workspaces/workspace-service.ts";
-import { parseCompletionReport } from "./completion-report.ts";
+import { capHandoffText, completionReportRequirements, parseCompletionReport } from "./completion-report.ts";
 import { TicketError } from "./errors.ts";
 import { parseTicketPlan } from "./ticket-plan-format.ts";
 import {
+	hasNextSubtask,
 	ticketCompletionInstructions,
-	ticketContextReportPrompt,
-	ticketReportRetryPrompt,
+	ticketFinalizationPrompt,
 	type ITicketPrompts,
 } from "./ticket-prompts.ts";
 import type { ITicketStore } from "./ticket-store.ts";
@@ -452,11 +452,12 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 							context: {
 								prompt: job.context.prompt,
 								handover: job.context.handover,
+								previousSubtaskSummary: job.context.previousSubtaskSummary,
 								stage: "work" as const,
 							},
 						}
 					: {}),
-				...(job.contextFailure && job.context
+				...(job.contextFailure
 					? {
 							implementerId: undefined,
 							previousImplementerIds: [
@@ -466,9 +467,10 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 							turnId: undefined,
 							previousTurnId: undefined,
 							contextFailure: undefined,
-							context: {
+							context: job.context && {
 								prompt: job.context.prompt,
 								handover: job.context.handover,
+								previousSubtaskSummary: job.context.previousSubtaskSummary,
 								stage: "work" as const,
 							},
 						}
@@ -707,6 +709,9 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		if (!resolveAgentSettings(await this.options(actor, current.id, phase), settings).supported)
 			throw new TicketError("unsupported-settings");
 		const planning = job.phase === "planning";
+		const checkpoint = job.context?.stage === "report";
+		const finalizing = checkpoint || !!job.reportRetrySourceTurnId;
+		const requirements = completionReportRequirements(checkpoint, hasNextSubtask(current, job));
 		let id = planning ? job.plannerId : job.implementerId;
 		this.settingUp.add(current.id);
 		try {
@@ -733,24 +738,23 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				}
 			}
 			if (!job.baseSha && job.workspaceId) job.baseSha = await this.merges.base(actor, job.workspaceId);
-			if (
-				job.phase === "implementation"
-				&& job.workspaceId
-				&& job.context?.stage !== "report"
-				&& !job.reportRetrySourceTurnId
-			) {
+			if (job.phase === "implementation" && job.workspaceId && !finalizing) {
 				job.context = {
-					prompt: job.context?.prompt ?? this.prompts.build(current, job),
-					handover: job.context?.handover,
+					prompt: job.context?.prompt ?? this.prompts.build(current, job, false),
+					handover: job.context?.handover && capHandoffText(job.context.handover),
+					previousSubtaskSummary:
+						job.context?.previousSubtaskSummary && capHandoffText(job.context.previousSubtaskSummary),
 					baseline: await this.merges.head(actor, job.workspaceId),
 					stage: "work",
 				};
 			}
-			if (job.context?.stage === "report") {
+			if (checkpoint) {
 				try {
 					if (
 						!job.workspaceId
-						|| !job.context.checkpoint
+						|| !job.context?.checkpoint
+						|| !job.context.workTurn
+						|| job.context.attempted !== job.context.workTurn
 						|| (await this.merges.candidate(actor, job.workspaceId)) !== job.context.checkpoint
 					)
 						throw new Error("Checkpoint changed");
@@ -758,9 +762,11 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 					await this.store.save({ ...job, state: "failed", contextFailure: "checkpoint" });
 					return;
 				}
-				const sample =
-					job.context.workTurn && (await this.agents.contextSample?.(actor, id, job.context.workTurn));
-				if (!sample || sample.max - sample.used < 4096) {
+			}
+			if (finalizing) {
+				const sourceTurn = job.reportRetrySourceTurnId ?? job.context?.workTurn;
+				const sample = sourceTurn && (await this.agents.contextSample?.(actor, id, sourceTurn));
+				if ((!sample && checkpoint) || (sample && sample.max - sample.used < 4096)) {
 					await this.store.save({
 						...job,
 						state: "failed",
@@ -777,18 +783,18 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			const view = await this.agents.dispatch(
 				actor,
 				id,
-				job.reportRetrySourceTurnId
-					? ticketReportRetryPrompt
-							+ (job.context?.stage === "report" ? `\n\n${ticketContextReportPrompt}` : "")
+				finalizing
+					? ticketFinalizationPrompt(requirements)
 					: job.phase === "implementation" && job.context
-						? job.context.stage === "report"
-							? ticketContextReportPrompt
-							: job.context.prompt
-								+ (job.context.handover ? `\n\nHandover:\n${job.context.handover}` : "")
-								+ (job.message && job.message !== job.context.prompt
-									? `\n\nOwner guidance: ${job.message}`
-									: "")
-								+ `\n\n${ticketCompletionInstructions}`
+						? (job.context.prompt ?? this.prompts.build(current, job, false))
+							+ (job.context.handover ? `\n\nHandover:\n${job.context.handover}` : "")
+							+ (job.context.previousSubtaskSummary
+								? `\n\nPrevious subtask summary:\n${job.context.previousSubtaskSummary}`
+								: "")
+							+ (job.message && job.message !== job.context.prompt
+								? `\n\nOwner guidance: ${job.message}`
+								: "")
+							+ `\n\n${ticketCompletionInstructions(requirements)}`
 						: this.prompts.build(current, job),
 				{ ticketId: current.id, phase: job.phase },
 				() => this.canDispatch(current),
@@ -815,36 +821,40 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		if (job.phase === "implementation" && !job.context) {
 			const ticket = await this.tickets.get(job.ticketId);
 			if (!ticket) throw new TicketError("ticket-not-found");
-			job.context = { prompt: this.prompts.build(ticket, job), stage: "work" };
+			job.context = { prompt: this.prompts.build(ticket, job, false), stage: "work" };
 			await this.store.save(job);
 		}
-		const { thread, requests } = await this.agents.get(actor, id);
+		const { thread, requests, turnFailure } = await this.agents.get(actor, id);
+		const checkpoint = job.context?.stage === "report";
+		const finalizing = checkpoint || !!job.reportRetrySourceTurnId;
 		if (thread.status === "uncertain") {
 			await this.store.save({ ...job, state: "uncertain" });
 			return;
 		}
 		if (["interrupted", "failed"].includes(thread.status)) {
 			const sample =
-				job.context?.stage === "work" && thread.turnId
+				!finalizing && job.context?.stage === "work" && thread.turnId
 					? await this.agents.contextSample?.(actor, id, thread.turnId)
 					: undefined;
 			const contextFailure =
-				job.context?.stage === "report"
-					? ("report" as const)
-					: job.context?.insufficient
-						? ("headroom" as const)
-						: job.context && !sample
-							? ("telemetry" as const)
-							: job.context?.attempted || sample?.crossed
-								? ("report" as const)
-								: undefined;
+				finalizing && turnFailure === "context-window"
+					? ("headroom" as const)
+					: checkpoint
+						? ("report" as const)
+						: job.context?.insufficient
+							? ("headroom" as const)
+							: !finalizing && job.context && !sample
+								? ("telemetry" as const)
+								: job.context?.attempted || sample?.crossed
+									? ("report" as const)
+									: undefined;
 			await this.store.save({
 				...job,
 				state: "failed",
-				...(job.reportRetrySourceTurnId
+				...(job.reportRetrySourceTurnId && !contextFailure
 					? { completionFailure: "invalid-report" as const, reportRetrySourceTurnId: undefined }
 					: {}),
-				...(contextFailure ? { contextFailure } : { context: undefined }),
+				contextFailure,
 			});
 			return;
 		}
@@ -857,7 +867,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			return;
 		}
 		if (thread.status === "running" || thread.status === "waiting") {
-			if (job.phase === "implementation" && job.context?.stage === "work") {
+			if (!finalizing && job.phase === "implementation" && job.context?.stage === "work") {
 				const sample = await this.agents.contextSample?.(actor, id, thread.turnId);
 				if (sample?.crossed && !job.context.attempted && !job.context.insufficient && !requests.length) {
 					if (sample.max - sample.used < 4096) {
@@ -898,7 +908,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			return;
 		}
 		if (job.phase === "implementation" && job.context) {
-			if (job.context.stage === "work" && !job.reportRetrySourceTurnId) {
+			if (job.context.stage === "work" && !finalizing) {
 				const sample = await this.agents.contextSample?.(actor, id, thread.turnId);
 				if (!sample || job.context.insufficient) {
 					await this.store.save({
@@ -908,7 +918,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 					});
 					return;
 				}
-				if (sample.crossed || job.context.attempted) {
+				if (job.context.attempted === thread.turnId) {
 					if (sample.max - sample.used < 4096) {
 						await this.store.save({ ...job, state: "failed", contextFailure: "headroom" });
 						return;
@@ -929,11 +939,12 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				}
 			}
 		}
+		const nextSubtask = job.phase === "implementation" && hasNextSubtask(await this.tickets.get(job.ticketId), job);
+		let summary: string | undefined;
 		if (job.phase === "implementation" || job.phase === "rebase") {
-			const checkpoint = job.context?.stage === "report";
 			const report = parseCompletionReport(
 				(await this.agents.finalAnswer?.(actor, id, thread.turnId)) ?? "",
-				checkpoint,
+				completionReportRequirements(checkpoint, nextSubtask),
 			);
 			if (!report) {
 				if (job.reportRetrySourceTurnId) {
@@ -950,7 +961,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				return;
 			}
 			job.reportRetrySourceTurnId = undefined;
-			if (report.status === "incomplete" && !(checkpoint && report.handover)) {
+			if (report.status === "incomplete") {
 				await this.store.save({ ...job, state: "failed", completionFailure: "incomplete" });
 				return;
 			}
@@ -966,7 +977,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 					await this.store.save({ ...job, state: "failed", contextFailure: "checkpoint" });
 					return;
 				}
-				if (report.status === "incomplete" && report.handover) {
+				if (report.status === "handoff") {
 					if (!job.context.baseline || job.context.baseline === job.context.checkpoint) {
 						await this.store.save({ ...job, state: "failed", contextFailure: "no-progress" });
 						return;
@@ -979,13 +990,19 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 						previousTurnId: undefined,
 						message: undefined,
 						state: "queued",
-						context: { prompt: job.context.prompt, handover: report.handover, stage: "work" },
+						context: {
+							prompt: job.context.prompt,
+							handover: report.handover,
+							previousSubtaskSummary: job.context.previousSubtaskSummary,
+							stage: "work",
+						},
 					});
 					this.wake();
 					return;
 				}
 			}
-			job.context = undefined;
+			if (report.status !== "complete") throw new TicketError("ticket-conflict");
+			summary = report.summary;
 		}
 		if (job.phase === "planning") {
 			const text = await this.agents.plan(actor, id, thread.turnId);
@@ -1005,17 +1022,11 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			await this.store.save({ ...job, plan, state: "idle", message: undefined });
 		} else {
 			if (!job.workspaceId) throw new TicketError("ticket-conflict");
-			const ticket = await this.tickets.get(job.ticketId);
-			const subtasks = job.plan?.structured?.subtasks;
-			if (
-				job.phase === "implementation"
-				&& resolveTicketWorkflowPreset(ticket?.executionSettings) === "planner-subtasks"
-				&& subtasks
-				&& (job.subtaskIndex ?? 0) + 1 < subtasks.length
-			) {
+			if (nextSubtask) {
 				await this.store.save({
 					...job,
 					subtaskIndex: (job.subtaskIndex ?? 0) + 1,
+					context: { stage: "work", previousSubtaskSummary: summary },
 					implementerId: undefined,
 					previousImplementerIds: [...(job.previousImplementerIds ?? []), id],
 					state: "queued",
@@ -1032,6 +1043,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			await this.store.save({
 				...job,
 				resultSha,
+				context: undefined,
 				state: job.phase === "review" ? "idle" : "merge-queued",
 				message: undefined,
 			});

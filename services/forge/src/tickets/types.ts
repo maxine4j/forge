@@ -13,8 +13,9 @@ export const ticketWorkflowRecordSchema = ticketWorkflowSchema.extend({
 	turnId: z.string().min(1).max(256).optional(),
 	context: z
 		.object({
-			prompt: z.string(),
+			prompt: z.string().optional(),
 			handover: z.string().optional(),
+			previousSubtaskSummary: z.string().optional(),
 			baseline: z.string().optional(),
 			workTurn: z.string().optional(),
 			attempted: z.string().optional(),
