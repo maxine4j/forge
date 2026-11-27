@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { fileURLToPath } from "node:url";
 
 import { sleep } from "@forge/backend-infrastructure/sleep";
 
@@ -41,6 +42,9 @@ try {
 			await sleep(100);
 		}
 	}
+	const workerSession = fileURLToPath(new URL("../../ollama-client/dist/worker-session.js", import.meta.url));
+	docker("cp", workerSession, `${name}:/app/dist/worker-session.js`);
+	docker("exec", "--user", "root", name, "chmod", "0644", "/app/dist/worker-session.js");
 	evaluate(`
 		import assert from "node:assert/strict";
 		import { once } from "node:events";

@@ -3,9 +3,10 @@ import { validateHeaderValue } from "node:http";
 
 import type { RawData, WebSocket } from "ws";
 
+import type { TelemetryFrame } from "./telemetry.ts";
 import { maxChunkBytes, type RelayFrame } from "./types.ts";
 
-export const sendFrame = (socket: WebSocket, frame: RelayFrame | Buffer): Promise<void> =>
+export const sendFrame = (socket: WebSocket, frame: RelayFrame | TelemetryFrame | Buffer): Promise<void> =>
 	new Promise((resolve, reject) => {
 		socket.send(Buffer.isBuffer(frame) ? frame : JSON.stringify(frame), (error) => {
 			if (error) reject(error);

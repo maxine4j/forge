@@ -1,7 +1,11 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { connect } from "node:net";
+import { freemem, totalmem } from "node:os";
+import { promisify } from "node:util";
 
 import { createLogger } from "@forge/backend-infrastructure/logger";
+import { sendFrame } from "@forge/backend-infrastructure/ollama/pairing-socket";
+import type { TelemetryFrame } from "@forge/backend-infrastructure/ollama/telemetry";
 import { maxRequestBytes } from "@forge/backend-infrastructure/ollama/types";
 import { sleep } from "@forge/backend-infrastructure/sleep";
 import { WebSocket } from "ws";
@@ -9,11 +13,12 @@ import { WebSocket } from "ws";
 import { workerConfig } from "./config.ts";
 import { OllamaClient } from "./ollama-client.ts";
 import { WorkerSession, type IOllamaClient } from "./worker-session.ts";
+import { collectTelemetry, parseNvidiaMetrics } from "./worker-telemetry.ts";
 
 const logger = createLogger("ollama-relay-worker");
 
 export const startWorker = async (signal: AbortSignal): Promise<void> => {
-	const config = workerConfig(process.env);
+	const config = workerConfig(process.env, process.argv.slice(2));
 	await requireFreePort();
 	signal.throwIfAborted();
 	const lifetime = new AbortController();
@@ -52,7 +57,32 @@ export const startWorker = async (signal: AbortSignal): Promise<void> => {
 	const local = new OllamaClient(`http://${config.ollamaAddress}`, fetch);
 	try {
 		await waitForModel(local, lifetime.signal);
-		await pair(config.url, config.token, local, lifetime.signal);
+		await pair(
+			config,
+			local,
+			(signal) =>
+				collectTelemetry(
+					Number(config.context),
+					{
+						hasLocalModel: (signal) => local.hasLocalModel(signal),
+						loadedModels: (signal) => local.loadedModels(signal),
+						hostMemory: () => ({ total: totalmem(), free: freemem() }),
+						gpus: async (signal) => {
+							const { stdout } = await promisify(execFile)(
+								"nvidia-smi",
+								[
+									"--query-gpu=utilization.gpu,memory.used,memory.total",
+									"--format=csv,noheader,nounits",
+								],
+								{ env, signal, maxBuffer: 8192, killSignal: "SIGKILL", windowsHide: true },
+							);
+							return parseNvidiaMetrics(stdout);
+						},
+					},
+					signal,
+				),
+			lifetime.signal,
+		);
 		if (childStopped && !signal.aborted) throw new Error(await stopped);
 	} catch (error) {
 		if (childStopped && !signal.aborted) throw new Error(await stopped);
@@ -98,12 +128,17 @@ const waitForModel = async (client: OllamaClient, signal: AbortSignal): Promise<
 	throw new Error("Ollama did not become ready within 30 seconds");
 };
 
-const pair = async (url: URL, token: string, ollama: IOllamaClient, signal: AbortSignal): Promise<void> => {
+const pair = async (
+	{ url, token, workerId }: ReturnType<typeof workerConfig>,
+	ollama: IOllamaClient,
+	sample: (signal: AbortSignal) => Promise<TelemetryFrame>,
+	signal: AbortSignal,
+): Promise<void> => {
 	let delay = 500;
 	while (!signal.aborted) {
 		let opened = false;
 		const socket = new WebSocket(url, {
-			headers: { Authorization: `Bearer ${token}` },
+			headers: { Authorization: `Bearer ${token}`, "X-Forge-Worker-Id": workerId },
 			handshakeTimeout: 10_000,
 			maxPayload: maxRequestBytes,
 			perMessageDeflate: false,
@@ -116,6 +151,7 @@ const pair = async (url: URL, token: string, ollama: IOllamaClient, signal: Abor
 			result = await new Promise<number | undefined>((resolve) => {
 				let status: number | undefined;
 				let heartbeat = new AbortController();
+				const telemetry = new AbortController();
 				const resetHeartbeat = () => {
 					heartbeat.abort();
 					heartbeat = new AbortController();
@@ -124,8 +160,18 @@ const pair = async (url: URL, token: string, ollama: IOllamaClient, signal: Abor
 				const worker = new WorkerSession(socket, ollama);
 				socket.once("open", () => {
 					opened = true;
-					logger.info("Paired with Ollama relay");
+					logger.info({ workerId }, "Paired with Ollama relay");
 					resetHeartbeat();
+					void (async () => {
+						while (!telemetry.signal.aborted) {
+							const report = await sample(telemetry.signal);
+							if (telemetry.signal.aborted) return;
+							await sendFrame(socket, report);
+							await sleep(15_000, telemetry.signal);
+						}
+					})().catch(() => {
+						if (!telemetry.signal.aborted) stop();
+					});
 				});
 				socket.on("ping", resetHeartbeat);
 				socket.once("unexpected-response", (_request, response) => {
@@ -135,6 +181,7 @@ const pair = async (url: URL, token: string, ollama: IOllamaClient, signal: Abor
 				});
 				socket.once("close", () => {
 					heartbeat.abort();
+					telemetry.abort();
 					void worker.settle().then(() => resolve(status));
 				});
 			});

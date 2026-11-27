@@ -13,7 +13,7 @@
 		"dev:mock": "pnpm --filter @forge/contracts build && pnpm --filter @forge/forge-web dev --mode mock",
 		"test:browser": "pnpm --filter @forge/backend-infrastructure --filter @forge/contracts build && pnpm --filter @forge/forge-web test:browser",
 		"test:image": "pnpm --filter @forge/backend-infrastructure build && pnpm --filter @forge/forge test:image",
-		"test:relay-image": "pnpm --filter @forge/backend-infrastructure build && pnpm --filter @forge/ollama-relay test:image",
+		"test:relay-image": "pnpm --filter @maxine4j/forge-ollama-client... build && pnpm --filter @forge/ollama-relay test:image",
 		"image": "docker build -f services/forge/Dockerfile -t forge:dev .",
 		"lint": "pnpm --filter @forge/backend-infrastructure --filter @forge/contracts build && oxlint --deny-warnings .",
 		"format": "oxfmt .",

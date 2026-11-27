@@ -6,6 +6,9 @@ on:
             publish-image:
                 type: boolean
                 default: false
+            publish-client:
+                type: boolean
+                default: false
 permissions:
     contents: read
 jobs:
@@ -16,6 +19,18 @@ jobs:
             - uses: ./.github/actions/setup
             - run: pnpm check
             - run: pnpm build
+            - name: Verify standalone worker package
+              shell: bash
+              run: |
+                  pnpm --filter @maxine4j/forge-ollama-client stage
+                  package="$PWD/services/ollama-client/dist/package"
+                  smoke="$(mktemp -d)"
+                  tarball="$(cd "$package" && npm pack --pack-destination "$smoke" --silent)"
+                  npm install --prefix "$smoke" "$smoke/$tarball"
+                  if "$smoke/node_modules/.bin/forge-ollama-client" > "$smoke/output" 2>&1; then
+                      exit 1
+                  fi
+                  grep -F -- "--worker-id must be a lowercase worker ID" "$smoke/output"
             - run: pnpm test
             - run: pnpm test:integration
             - run: pnpm --filter @forge/forge-web exec playwright install --with-deps chromium
@@ -116,3 +131,22 @@ jobs:
                   docker buildx build --platform linux/amd64 -f services/ollama-relay/Dockerfile "${tags[@]}" \
                       --label "org.opencontainers.image.source=https://github.com/$GITHUB_REPOSITORY" \
                       --push .
+    publish-client:
+        if: inputs.publish-client && github.ref_type == 'tag'
+        needs: checks
+        runs-on: ubuntu-24.04
+        permissions:
+            contents: read
+            packages: write
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+            - uses: ./.github/actions/setup
+            - run: pnpm --filter @maxine4j/forge-ollama-client... build
+            - run: pnpm --filter @maxine4j/forge-ollama-client stage "${GITHUB_REF_NAME#v}"
+            - name: Publish worker to GitHub Packages
+              working-directory: services/ollama-client/dist/package
+              env:
+                  NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+              run: |
+                  printf '%s\n' '//npm.pkg.github.com/:_authToken=${NODE_AUTH_TOKEN}' > .npmrc
+                  npm publish

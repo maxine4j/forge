@@ -1,17 +1,33 @@
-import { readToken } from "@forge/backend-infrastructure/ollama/pairing-token";
+import { parseArgs } from "node:util";
 
-export const workerConfig = (env: NodeJS.ProcessEnv) => {
-	const token = readToken(env);
+import { readToken } from "@forge/backend-infrastructure/ollama/pairing-token";
+import { isWorkerId } from "@forge/backend-infrastructure/ollama/types";
+
+export const workerConfig = (env: NodeJS.ProcessEnv, args: string[]) => {
+	const { values } = parseArgs({
+		args,
+		options: {
+			"worker-id": { type: "string" },
+			"relay-base-url": { type: "string" },
+			"context-window": { type: "string", default: "164000" },
+		},
+	});
+	const workerId = values["worker-id"];
+	if (!workerId || !isWorkerId(workerId))
+		throw new Error("--worker-id must be a lowercase worker ID (1–63 characters)");
+	const origin = values["relay-base-url"] ?? "";
+	const urlError = "--relay-base-url must be an HTTPS origin without credentials, query, or fragment";
 	let url: URL;
 	try {
-		url = new URL(env["OLLAMA_RELAY_URL"] ?? "");
+		url = new URL(origin);
 	} catch {
-		throw new Error("OLLAMA_RELAY_URL must be a wss:// URL ending in /pair");
+		throw new Error(urlError);
 	}
-	if (url.protocol !== "wss:" || url.username || url.password || url.search || url.hash || url.pathname !== "/pair")
-		throw new Error("OLLAMA_RELAY_URL must be a wss:// URL ending in /pair");
-	const context = env["OLLAMA_CONTEXT_LENGTH"] ?? "164000";
-	if (!/^[1-9][0-9]*$/u.test(context) || !Number.isSafeInteger(Number(context)))
-		throw new Error("OLLAMA_CONTEXT_LENGTH must be a positive integer");
-	return { url, token, context, ollamaAddress: "127.0.0.1:11434" };
+	if (!/^https:\/\/[^/\\@?#\s]+\/?$/iu.test(origin) || /\s/u.test(origin)) throw new Error(urlError);
+	url.protocol = "wss:";
+	url.pathname = "/pair";
+	const context = values["context-window"];
+	if (!/^[1-9][0-9]*$/u.test(context) || /\D/u.test(context) || !Number.isSafeInteger(Number(context)))
+		throw new Error("--context-window must be a positive integer");
+	return { url, workerId, token: readToken(env), context, ollamaAddress: "127.0.0.1:11434" };
 };

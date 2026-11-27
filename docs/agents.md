@@ -276,9 +276,10 @@ restrictions remain in force. Ollama turns record usage for [API-equivalent and
 weekly allowance estimates](#cost-and-usage). OpenAI quota sampling and attribution
 remain scoped to OpenAI. Provider errors follow existing recovery paths. Named providers
 share the ticket board’s existing scheduler and execution tracker.
-Forge can also reach a local Ollama worker through the [Ollama relay](development.md#ollama-relay).
-The relay forwards Ollama's stateless Responses and SSE stream, and the worker
-connects from the approved inference host over TLS.
+Forge can reach local workers through the [Ollama relay](development.md#ollama-relay).
+Each worker pairs over TLS and has a private provider URL ending in
+`/{workerId}/openai/v1`. The relay forwards Ollama's stateless Responses and
+SSE stream. Provider health checks the worker's `/models` endpoint.
 
 Ollama accepts **Ask** and **Full access**. Codex 0.164.0 requests a separate
 `codex-auto-review` model for **Approve for me**, outside Forge's single-model

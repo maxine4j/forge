@@ -1,6 +1,7 @@
 import type { Buffer } from "node:buffer";
 
 import type { IOllamaClient } from "./worker-session.ts";
+import { loadedModelMemory } from "./worker-telemetry.ts";
 
 export class OllamaClient implements IOllamaClient {
 	constructor(
@@ -44,5 +45,14 @@ export class OllamaClient implements IOllamaClient {
 					&& !("remote_host" in model && model.remote_host),
 			)
 		);
+	}
+
+	async loadedModels(signal: AbortSignal) {
+		const response = await this.request(`${this.origin}/api/ps`, { redirect: "error", signal });
+		if (!response.ok) {
+			await response.body?.cancel();
+			return null;
+		}
+		return loadedModelMemory(await response.json());
 	}
 }

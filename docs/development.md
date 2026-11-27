@@ -376,10 +376,35 @@ the [Forge ingress trust boundary](foundation.md#slice-1-foundation-contract).
 The descriptor adds a separate `ollama-relay` resource. Its public HTTPS host is
 `ollama-relay.forge.<base-domain>`. Port 8080 serves `GET /health` and the
 authenticated `/pair` WebSocket upgrade. The health check reports listener
-availability even when the worker is offline. The Forge container reaches
-`POST /v1/responses` and `GET /v1/models` on port 8081 through the shared service Docker network.
-The [Agents health check](tickets.md#named-agents) requires both an updated relay and worker.
+availability even when workers are offline. Private port 8081 serves
+`POST /{workerId}/openai/v1/responses` and `GET /{workerId}/openai/v1/models`
+through the shared service Docker network. There are 16 named pairing slots and
+one reserved slot for existing clients without an `X-Forge-Worker-Id` header.
+Their inference paths remain `/v1/responses` and `/v1/models`.
+Worker IDs contain 1–63 lowercase ASCII letters, digits, or hyphens and begin
+and end with a letter or digit. A duplicate live ID receives HTTP 409 and
+a new ID at capacity receives HTTP 503.
+The [Agents health check](tickets.md#named-agents) uses the model list at the
+configured provider URL.
 Treat that network as trusted for inference requests.
+
+Private `GET /{workerId}/health` returns `workerId`, `status`, and the relay's
+ISO timestamp `receivedAt` (null before the first sample). A fresh ready worker
+returns 200. Starting, unhealthy, stale, and offline workers return 503.
+`GET /{workerId}/metrics` returns 503 before the first report and 200 for an
+available snapshot, with `freshness` set to `fresh`, `stale`, or `offline`.
+The client samples immediately on pairing and waits 15 seconds between reports.
+Reports become stale after 45 seconds. The relay retains the latest sample for
+each live worker and up to 16 recently disconnected workers for five minutes.
+Both routes return 404 for unknown or expired IDs. A reconnect starts with a
+fresh queue and no report.
+
+Readiness checks for an installed local model. Metrics include the configured
+context in tokens, host total and free memory, and the count, total memory
+and VRAM of running models reported by [Ollama's running-model API](https://docs.ollama.com/api/ps).
+Where `nvidia-smi` is available, GPU metrics include utilization percent and used
+and total device memory. All memory values are in bytes. Unavailable readings
+are null or, when there are no GPU readings, an empty GPU list.
 
 Pairing limits each client IP to five failed bearer checks before a cooldown;
 the fifth failure returns 401 and subsequent attempts return 429 with a
@@ -404,32 +429,36 @@ The worker retains its existing reconnect behavior.
    publishes the full commit SHA and `latest`; a `vX.X.X` tag publishes the
    full SHA and release tag.
 2. Confirm the public `/health` returns 200 and a public
-   `POST /v1/responses` returns 404. On the approved Mac, install Ollama and
-   the local model you intend to use. Stop any existing Ollama instance on port 11434. From the matching Forge checkout, run:
+   `POST /worker-a/openai/v1/responses` returns 404. On each worker host,
+   install Node.js 24, Ollama and the local model you intend to use. Stop any
+   existing Ollama instance on port 11434. Release tags `vX.Y.Z` publish version
+   `X.Y.Z` to GitHub Packages after CI checks. Configure npm for the
+   `@maxine4j` scope using an account with read access to the package and its
+   token in `NODE_AUTH_TOKEN`.
 
     ```sh
-    nvm use
-    pnpm install --frozen-lockfile
-    pnpm --filter @forge/ollama-client... build
-    export OLLAMA_RELAY_URL='wss://ollama-relay.forge.<base-domain>/pair'
+    npm config set @maxine4j:registry https://npm.pkg.github.com
+    npm config set '//npm.pkg.github.com/:_authToken' '${NODE_AUTH_TOKEN}'
+    npm install --global @maxine4j/forge-ollama-client
     # Supply OLLAMA_RELAY_TOKEN through your secret manager or shell environment.
-    pnpm --filter @forge/ollama-client start
+    forge-ollama-client --worker-id worker-a --relay-base-url 'https://ollama-relay.forge.<base-domain>'
     ```
 
-3. Set the [Ollama provider](agents.md#codex-harness-and-lifecycle) base URL to
-   `http://ollama-relay:8081/v1` and use the installed model tag. Verify a streamed
+3. Create one named [Ollama provider](agents.md#codex-harness-and-lifecycle) per
+   worker with base URL `http://ollama-relay:8081/{workerId}/openai/v1` and use
+   the installed model tag. Verify a streamed
    tool-call round trip with a new test agent before routing regular work to the
-   relay. The worker starts local-only Ollama on `127.0.0.1:11434`. Set
-   `OLLAMA_CONTEXT_LENGTH` if the model or Mac needs a different context size
-   from the 164000-token default.
+   relay. The worker starts local-only Ollama on `127.0.0.1:11434` with
+   single-request parallelism. Use `--context-window <tokens>` to override the
+   164000-token default passed to Ollama as `OLLAMA_CONTEXT_LENGTH`.
 
 The Alpine relay runs as a nonroot user with limits of 0.5 CPU and 192 MiB.
-It runs one inference at a time and holds up to four requests for 30 seconds,
+Each worker runs one inference at a time and holds up to four requests for 30 seconds,
 with a 16 MiB per-request limit and a 32 MiB combined request budget. The active
 request has a 10-minute deadline. A disconnected worker fails active and queued
 requests. To rotate the token, update the PaaS secret atomically and wait for the
-relay to be recreated, then restart the Mac CLI with the new token. Recreating
-the relay closes the previous pairing and interrupts in-flight inference.
+relay to be recreated, then restart each worker CLI with the new token. Recreating
+the relay closes all pairings and interrupts in-flight inference.
 
 To build and smoke-test the image locally:
 

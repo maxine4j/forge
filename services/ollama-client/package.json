@@ -1,12 +1,14 @@
 {
-	"name": "@forge/ollama-client",
+	"name": "@maxine4j/forge-ollama-client",
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
 	"scripts": {
 		"start": "node dist/worker-main.js",
 		"build": "tsc -p tsconfig.build.json",
-		"typecheck": "tsc --noEmit"
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"stage": "node scripts/stage-package.mjs"
 	},
 	"dependencies": {
 		"@forge/backend-infrastructure": "workspace:*",

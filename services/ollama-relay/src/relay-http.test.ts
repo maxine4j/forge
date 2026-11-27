@@ -9,17 +9,16 @@ import { WebSocket } from "ws";
 import { WorkerSession } from "../../ollama-client/src/worker-session.ts";
 import { PairingLimiter } from "./pairing-limiter.ts";
 import { RelayHttp } from "./relay-http.ts";
-import { RelayService } from "./relay-service.ts";
 
 test("limits real pairing upgrades by forwarded IP and resets after expiry", async () => {
 	let now = 0;
 	const warn = vi.fn();
 	const relay = new RelayHttp(
-		new RelayService(sleep),
 		Buffer.from("Bearer secret"),
 		sleep,
 		new PairingLimiter(() => now),
 		{ warn },
+		() => now,
 	);
 	await relay.listen("127.0.0.1", 0, 0);
 	const url = `ws://127.0.0.1:${relay.ports.pairing}/pair`;
@@ -54,9 +53,15 @@ test("limits real pairing upgrades by forwarded IP and resets after expiry", asy
 
 test("isolates public ingress and preserves inference responses through an authenticated worker", async () => {
 	const bearer = "Bearer fixture-token";
-	const relay = new RelayHttp(new RelayService(sleep), Buffer.from(bearer), sleep, new PairingLimiter(Date.now), {
-		warn: () => {},
-	});
+	const relay = new RelayHttp(
+		Buffer.from(bearer),
+		sleep,
+		new PairingLimiter(Date.now),
+		{
+			warn: () => {},
+		},
+		Date.now,
+	);
 	await relay.listen("127.0.0.1", 0, 0);
 	const { pairing, inference } = relay.ports;
 	const pairingUrl = `ws://127.0.0.1:${pairing}/pair`;
@@ -172,3 +177,85 @@ const connect = (url: string, headers?: Record<string, string>): Promise<WebSock
 		socket.once("open", () => resolve(socket));
 		socket.once("error", reject);
 	});
+
+test("routes named workers independently and resets telemetry on reconnect", async () => {
+	let now = 1000;
+	const bearer = "Bearer fixture";
+	const relay = new RelayHttp(
+		Buffer.from(bearer),
+		sleep,
+		new PairingLimiter(() => now),
+		{ warn: () => {} },
+		() => now,
+	);
+	await relay.listen("127.0.0.1", 0, 0);
+	const { pairing, inference } = relay.ports;
+	const bind = (id?: string) =>
+		connect(`ws://127.0.0.1:${pairing}/pair`, {
+			Authorization: bearer,
+			...(id !== undefined ? { "X-Forge-Worker-Id": id } : {}),
+		});
+	const get = (path: string) => fetch(`http://127.0.0.1:${inference}${path}`);
+	const report = {
+		type: "telemetry",
+		ready: true,
+		contextWindow: 32000,
+		hostMemory: null,
+		loadedModels: null,
+		gpus: [],
+	};
+	try {
+		await expect(bind("Invalid")).rejects.toThrow("400");
+		const first = await bind("first");
+		const second = await bind("second");
+		await expect(bind("first")).rejects.toThrow("409");
+		for (const [id, socket] of [
+			["first", first],
+			["second", second],
+		] as const) {
+			new WorkerSession(socket, {
+				infer: async () => new Response(id),
+				listModels: async () => Response.json({ data: [{ id }] }),
+			});
+			const base = `/${id}/openai/v1`;
+			expect(await (await get(`${base}/models`)).json()).toEqual({ data: [{ id }] });
+			const response = await fetch(`http://127.0.0.1:${inference}${base}/responses`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: "{}",
+			});
+			expect(await response.text()).toBe(id);
+		}
+		expect((await get("/unknown/metrics")).status).toBe(404);
+		expect((await get("/first/metrics")).status).toBe(503);
+		expect((await fetch(`http://127.0.0.1:${pairing}/first/health`)).status).toBe(404);
+		first.send(JSON.stringify(report));
+		second.send(JSON.stringify({ ...report, ready: false }));
+		await vi.waitFor(async () => expect((await get("/first/health")).status).toBe(200));
+		await vi.waitFor(async () =>
+			expect(await (await get("/second/health")).json()).toMatchObject({ status: "unhealthy" }),
+		);
+		expect(await (await get("/first/metrics")).json()).toMatchObject({
+			workerId: "first",
+			receivedAt: new Date(now).toISOString(),
+			freshness: "fresh",
+			contextWindow: 32000,
+		});
+		now += 45_000;
+		expect(await (await get("/first/metrics")).json()).toMatchObject({ freshness: "stale" });
+		const closed = new Promise<void>((resolve) => first.once("close", resolve));
+		first.terminate();
+		await closed;
+		await vi.waitFor(async () =>
+			expect(await (await get("/first/metrics")).json()).toMatchObject({ freshness: "offline" }),
+		);
+		await bind("first");
+		expect((await get("/first/metrics")).status).toBe(503);
+		expect((await get("/second/openai/v1/models")).status).toBe(200);
+		for (let index = 0; index < 14; index++) await bind(`worker-${index}`);
+		await expect(bind("over-capacity")).rejects.toThrow("503");
+		await bind();
+	} finally {
+		await relay.close();
+	}
+});

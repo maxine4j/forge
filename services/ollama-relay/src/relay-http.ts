@@ -4,12 +4,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { Duplex } from "node:stream";
 
 import { messageBytes, readChunk, readFrame, sendFrame } from "@forge/backend-infrastructure/ollama/pairing-socket";
-import { maxChunkBytes, maxRequestBytes } from "@forge/backend-infrastructure/ollama/types";
+import { readTelemetry } from "@forge/backend-infrastructure/ollama/telemetry";
+import { isWorkerId, maxChunkBytes, maxRequestBytes } from "@forge/backend-infrastructure/ollama/types";
 import type { ISleep } from "@forge/backend-infrastructure/sleep";
 import { WebSocketServer } from "ws";
 
 import { canonicalIp, type PairingLimiter } from "./pairing-limiter.ts";
-import type { IInferenceResponse, IRelayService, IWorkerConnection } from "./relay-service.ts";
+import type { IInferenceResponse, IWorkerConnection } from "./relay-service.ts";
+import { WorkerRegistry } from "./worker-registry.ts";
 
 const maxBufferedRequestBytes = 2 * maxRequestBytes;
 
@@ -25,18 +27,18 @@ export class RelayHttp {
 	});
 	private readonly sockets = new WebSocketServer({ noServer: true, maxPayload: maxChunkBytes });
 	private readonly lifetime = new AbortController();
-	private reading = 0;
 	private bufferedBytes = 0;
-	private paired = false;
 	private warnedFallback = false;
+	private readonly workers: WorkerRegistry;
 
 	constructor(
-		private readonly service: IRelayService,
 		private readonly bearer: Buffer,
 		private readonly sleep: ISleep,
 		private readonly limiter: PairingLimiter,
 		private readonly logger: { warn(message: string): void },
+		now: () => number,
 	) {
+		this.workers = new WorkerRegistry(sleep, now);
 		this.pairing.on("upgrade", (request, socket, head) => this.upgrade(request, socket, head));
 	}
 
@@ -102,15 +104,20 @@ export class RelayHttp {
 			return rejectUpgrade(socket, 401, "Unauthorized");
 		}
 		this.limiter.success(ip);
-		if (this.paired) return rejectUpgrade(socket, 409, "Conflict");
+		const id = request.headers["x-forge-worker-id"];
+		if (id !== undefined && (typeof id !== "string" || !isWorkerId(id)))
+			return rejectUpgrade(socket, 400, "Bad Request");
+		const rejection = this.workers.admission(id);
+		if (rejection) return rejectUpgrade(socket, rejection, rejection === 409 ? "Conflict" : "Service Unavailable");
 
 		this.sockets.handleUpgrade(request, socket, head, (webSocket) => {
+			const slot = this.workers.connect(id);
+			const { service } = slot;
 			const worker: IWorkerConnection = {
 				send: (frame) => sendFrame(webSocket, frame),
 				terminate: () => webSocket.terminate(),
 			};
-			if (!this.service.pair(worker)) return webSocket.terminate();
-			this.paired = true;
+			service.pair(worker);
 			const lifetime = new AbortController();
 			let alive = true;
 			webSocket.on("pong", () => {
@@ -118,14 +125,25 @@ export class RelayHttp {
 			});
 			webSocket.on("close", () => {
 				lifetime.abort();
-				this.service.disconnect(worker);
-				this.paired = false;
+				this.workers.disconnect(id, slot);
+				service.disconnect(worker);
 			});
 			webSocket.on("error", () => webSocket.terminate());
 			webSocket.on("message", (raw, binary) => {
 				try {
 					const bytes = messageBytes(raw);
-					this.service.receive(worker, binary ? readChunk(bytes) : readFrame(bytes));
+					if (binary) service.receive(worker, readChunk(bytes));
+					else {
+						let frame;
+						try {
+							frame = readFrame(bytes);
+						} catch (error) {
+							if (id === undefined) throw error;
+							this.workers.report(slot, readTelemetry(bytes));
+							return;
+						}
+						service.receive(worker, frame);
+					}
 				} catch {
 					webSocket.terminate();
 				}
@@ -143,14 +161,40 @@ export class RelayHttp {
 
 	private async respond(request: IncomingMessage, response: ServerResponse): Promise<void> {
 		const output = new HttpInferenceResponse(response);
-		if (request.method === "GET" && request.url === "/v1/models") {
-			const lifetime = new AbortController();
-			response.once("close", () => lifetime.abort());
-			this.service.listModels(output, lifetime.signal);
+		const named = /^\/([^/]+)\/(openai\/v1\/(?:models|responses)|health|metrics)$/u.exec(request.url ?? "");
+		const id = named?.[1];
+		const route = named?.[2] ?? request.url;
+		const models = request.method === "GET" && (route === "openai/v1/models" || route === "/v1/models");
+		const infer = request.method === "POST" && (route === "openai/v1/responses" || route === "/v1/responses");
+		const statusRoute = request.method === "GET" && (route === "health" || route === "metrics");
+		if ((!models && !infer && !statusRoute) || (id !== undefined && !isWorkerId(id))) {
+			output.fail(404, "not_found", "Route not found");
 			return;
 		}
-		if (request.method !== "POST" || request.url !== "/v1/responses") {
-			output.fail(404, "not_found", "Route not found");
+		const slot = this.workers.get(id);
+		if (id !== undefined && !slot) {
+			output.fail(404, "not_found", "Unknown worker");
+			return;
+		}
+		if (id !== undefined && slot && statusRoute) {
+			const status = this.workers.status(slot);
+			const report = slot.report;
+			const receivedAt = report ? new Date(report.receivedAt).toISOString() : null;
+			const health = { workerId: id, status, receivedAt };
+			if (route === "health") return json(response, status === "ready" ? 200 : 503, health);
+			if (!report) return json(response, 503, health);
+			const { ready, contextWindow, hostMemory, loadedModels, gpus } = report.sample;
+			const freshness = status === "offline" || status === "stale" ? status : "fresh";
+			return json(response, 200, { ...health, freshness, ready, contextWindow, hostMemory, loadedModels, gpus });
+		}
+		if (!slot || slot.disconnectedAt !== undefined) {
+			output.fail(503, "worker_offline", "Inference worker is unavailable");
+			return;
+		}
+		if (models) {
+			const lifetime = new AbortController();
+			response.once("close", () => lifetime.abort());
+			slot.service.listModels(output, lifetime.signal);
 			return;
 		}
 		if (request.headers["content-type"]?.split(";").at(0)?.trim().toLowerCase() !== "application/json") {
@@ -161,7 +205,7 @@ export class RelayHttp {
 			output.fail(413, "request_too_large", "Inference request exceeds 16 MiB");
 			return;
 		}
-		if (this.reading >= 5) {
+		if (slot.reading >= 5) {
 			output.fail(429, "queue_full", "Inference request capacity exceeded");
 			return;
 		}
@@ -174,7 +218,9 @@ export class RelayHttp {
 		});
 		const chunks: Buffer[] = [];
 		let size = 0;
-		this.reading++;
+		const onDisconnect = () => output.fail(503, "worker_offline", "Inference worker disconnected");
+		slot.reading++;
+		slot.lifetime.signal.addEventListener("abort", onDisconnect, { once: true });
 		try {
 			for await (const chunk of request.iterator({ destroyOnReturn: false }) as AsyncIterable<Buffer>) {
 				if (lifetime.signal.aborted) return;
@@ -192,11 +238,17 @@ export class RelayHttp {
 				chunks.push(chunk);
 			}
 		} finally {
-			this.reading--;
+			slot.reading--;
+			slot.lifetime.signal.removeEventListener("abort", onDisconnect);
 		}
-		this.service.infer(Buffer.concat(chunks, size), output, lifetime.signal);
+		slot.service.infer(Buffer.concat(chunks, size), output, lifetime.signal);
 	}
 }
+
+const json = (response: ServerResponse, status: number, value: object): void => {
+	response.writeHead(status, { "Content-Type": "application/json", "Cache-Control": "no-store" });
+	response.end(JSON.stringify(value));
+};
 
 class HttpInferenceResponse implements IInferenceResponse {
 	constructor(private readonly response: ServerResponse) {}

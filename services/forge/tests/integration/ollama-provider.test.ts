@@ -14,7 +14,6 @@ import { OllamaClient } from "../../../ollama-client/src/ollama-client.ts";
 import { WorkerSession } from "../../../ollama-client/src/worker-session.ts";
 import { PairingLimiter } from "../../../ollama-relay/src/pairing-limiter.ts";
 import { RelayHttp } from "../../../ollama-relay/src/relay-http.ts";
-import { RelayService } from "../../../ollama-relay/src/relay-service.ts";
 import { AccountProcess } from "../../src/accounts/account-process.ts";
 import { CodexConnection } from "../../src/accounts/codex-connection.ts";
 import { CodexAgentClient } from "../../src/codex/codex-agent-client.ts";
@@ -133,9 +132,15 @@ test("pinned Codex streams through the relay and resumes after restart without s
 		async (providerId) => (providerId === "local" ? benchmark : undefined),
 	);
 	const bearer = "Bearer synthetic-ollama-pairing-token";
-	const relay = new RelayHttp(new RelayService(sleep), Buffer.from(bearer), sleep, new PairingLimiter(Date.now), {
-		warn: () => {},
-	});
+	const relay = new RelayHttp(
+		Buffer.from(bearer),
+		sleep,
+		new PairingLimiter(Date.now),
+		{
+			warn: () => {},
+		},
+		Date.now,
+	);
 	let socket: WebSocket | undefined;
 	try {
 		await db.initialize();
@@ -168,7 +173,7 @@ test("pinned Codex streams through the relay and resumes after restart without s
 		const address = z.object({ port: z.number() }).parse(server.address());
 		await relay.listen("127.0.0.1", 0, 0);
 		const worker = new WebSocket(`ws://127.0.0.1:${relay.ports.pairing}/pair`, {
-			headers: { Authorization: bearer },
+			headers: { Authorization: bearer, "X-Forge-Worker-Id": "fixture-worker" },
 			maxPayload: maxRequestBytes,
 		});
 		socket = worker;
@@ -197,7 +202,7 @@ test("pinned Codex streams through the relay and resumes after restart without s
 		);
 		const provider = {
 			kind: "ollama",
-			endpoint: `http://127.0.0.1:${relay.ports.inference}/v1`,
+			endpoint: `http://127.0.0.1:${relay.ports.inference}/fixture-worker/openai/v1`,
 			model: "fixture:latest",
 		} as const;
 		const client = new CodexAgentClient(connection, files.realpath, randomUUID, usage);
