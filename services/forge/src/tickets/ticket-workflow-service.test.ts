@@ -16,6 +16,53 @@ import { ticketWorkflowRecordSchema, type TicketWorkflowRecord } from "./types.t
 
 const actor = { username: "owner" };
 
+test("agent metrics count queued phases and held reservations independently", async () => {
+	const f = namedFixture();
+	const planner = await f.addAgent("Planner");
+	const implementer = await f.addAgent("Implementer");
+	const providerId = "123e4567-e89b-42d3-a456-426614174001";
+	const first = f.create("TASK-1");
+	first.status = "todo";
+	first.executionSettings = { plannerAgentId: planner.id, implementerAgentId: implementer.id };
+	const second = f.create("TASK-2");
+	second.status = "in-progress";
+	second.executionSettings = { implementerAgentId: implementer.id, workflowPreset: "one-shot" };
+	f.jobs.set(second.id, {
+		ticketId: second.id,
+		phase: "implementation",
+		state: "queued",
+		mergeAttempts: 0,
+		reservation: providerId,
+	});
+	const third = f.create("TASK-3");
+	third.status = "in-progress";
+	f.jobs.set(third.id, {
+		ticketId: third.id,
+		phase: "implementation",
+		state: "running",
+		mergeAttempts: 0,
+		reservation: providerId,
+	});
+	expect(await f.service.agentMetrics(actor)).toEqual({
+		providers: [{ providerId, running: 1, reserved: 2 }],
+		agents: [
+			{ agentId: planner.id, queued: 1 },
+			{ agentId: implementer.id, queued: 1 },
+		],
+	});
+	await expect(f.service.agentMetrics({ username: "other" })).rejects.toThrow();
+	first.executionSettings = {
+		plannerAgentId: planner.id,
+		implementerAgentId: implementer.id,
+		workflowPreset: "one-shot",
+	};
+	f.jobs.set(first.id, { ticketId: first.id, phase: "planning", state: "queued", mergeAttempts: 0 });
+	f.jobs.set(second.id, { ...f.jobs.get(second.id)!, state: "setup-failed" });
+	expect((await f.service.agentMetrics(actor)).agents).toEqual([{ agentId: implementer.id, queued: 1 }]);
+	f.jobs.set(first.id, { ...f.jobs.get(first.id)!, phase: "review" });
+	expect((await f.service.agentMetrics(actor)).agents).toEqual([]);
+});
+
 function namedFixture(dispatchMode?: Parameters<typeof fixture>[0], quotaExhausted?: () => Promise<boolean>) {
 	const planner: ModelProvider = {
 		id: "123e4567-e89b-42d3-a456-426614174001",
@@ -792,6 +839,15 @@ const fixture = (
 		resume: vi.fn<ITicketAgents["resume"]>(async (_actor, id) => structuredClone(views.get(id)!)),
 	};
 	const store = {
+		metricsRows: async () =>
+			[...tickets.values()]
+				.filter((ticket) => !ticket.archivedAt)
+				.map((ticket) => ({
+					id: ticket.id,
+					status: ticket.status,
+					settings: ticket.executionSettings,
+					job: jobs.get(ticket.id),
+				})),
 		boardSummary: async () => [...jobs.values()],
 		countReservations: async (id: string) =>
 			[...jobs.values()].filter((job) => job.reservation === id && !tickets.get(job.ticketId)?.archivedAt).length,

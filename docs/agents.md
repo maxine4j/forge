@@ -561,3 +561,7 @@ It imposes no spending cap or scheduler enforcement.
 ## Managed implementer completion reports
 
 Managed Implementer work, including rebase and owner-guided turns, requires a single JSON completion report. Forge validates the outcome for the current turn's purpose and requires an explicit complete verdict before advancing a subtask or queuing a merge. After a Forge checkpoint steer settles, a same-thread report can instead request a handoff. Forge can request one report-only clarification when headroom permits. See [ticket completion and handover](tickets.md#implementer-completion-and-handover) for report shapes and progression rules, and [implementation context handover](tickets.md#implementation-context-handover) for checkpoint and finalization failure handling. Standalone chats and planning turns do not use this contract.
+
+# Agent usage overview
+
+The Agents overview joins provider usage from the existing Costs API for the last seven days. Cached input tokens are included in input tokens; incomplete token records are flagged. See [provider overview](foundation.md#provider-overview) and [ticket scheduler metrics](tickets.md#agent-scheduler-metrics).

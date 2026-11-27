@@ -1,4 +1,4 @@
-import type { MoveTicket } from "@forge/contracts/tickets";
+import { ticketExecutionSettingsSchema, type MoveTicket, type TicketExecutionSettings } from "@forge/contracts/tickets";
 import { z } from "zod";
 
 import type { IDatabase } from "../database/sqlite-database.ts";
@@ -10,6 +10,9 @@ import { boardMoveStatements, ticketCompletionsTable } from "./ticket-store.ts";
 import { normalizeTicketWorkflow, ticketWorkflowRecordSchema, type TicketWorkflowRecord } from "./types.ts";
 
 export interface ITicketWorkflowStore {
+	metricsRows(): Promise<
+		Array<{ id: string; status: string; settings?: TicketExecutionSettings; job?: TicketWorkflowRecord }>
+	>;
 	get(id: string): Promise<TicketWorkflowRecord | undefined>;
 	/** Active jobs in board position order, globally paginated across the board. Idle/failed jobs are read by ID. */
 	list(): Promise<TicketWorkflowRecord[]>;
@@ -43,6 +46,34 @@ export class TicketWorkflowStore implements ITicketWorkflowStore {
 	async get(id: string): Promise<TicketWorkflowRecord | undefined> {
 		const records = await this.read("SELECT record FROM ticket_workflows WHERE ticketId=?", [id]);
 		return records.at(0);
+	}
+	async metricsRows() {
+		try {
+			const rows = await this.database.all(
+				"SELECT t.id,t.status,t.executionSettings,w.record FROM tickets t LEFT JOIN ticket_workflows w ON w.ticketId=t.id WHERE t.archivedAt IS NULL AND (t.status IN ('todo','in-progress') OR json_extract(w.record,'$.reservation') IS NOT NULL)",
+				[],
+			);
+			return rows.map((value) => {
+				const row = z
+					.object({
+						id: z.string(),
+						status: z.string(),
+						executionSettings: z.string().nullable(),
+						record: z.string().nullable(),
+					})
+					.parse(value);
+				return {
+					id: row.id,
+					status: row.status,
+					settings: row.executionSettings
+						? ticketExecutionSettingsSchema.parse(JSON.parse(row.executionSettings))
+						: undefined,
+					job: row.record ? normalizeTicketWorkflow(JSON.parse(row.record)) : undefined,
+				};
+			});
+		} catch (cause) {
+			throw new TicketError("ticket-unavailable", { cause });
+		}
 	}
 	async list(): Promise<TicketWorkflowRecord[]> {
 		const jobs: TicketWorkflowRecord[] = [];

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { mkdtemp, rm } from "@forge/backend-infrastructure/file";
-import { ticketHistorySchema } from "@forge/contracts/tickets";
+import { ticketAgentMetricsSchema, ticketHistorySchema } from "@forge/contracts/tickets";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { AccessService } from "../../src/auth/access-service.ts";
@@ -135,6 +135,16 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 			...(body === undefined ? {} : { body: JSON.stringify(body) }),
 		});
 	const listPath = "tickets";
+	const metrics = await request("tickets/agent-metrics");
+	expect(metrics.headers.get("cache-control")).toBe("no-store");
+	expect(ticketAgentMetricsSchema.parse(await metrics.json())).toEqual({ providers: [], agents: [] });
+	expect(
+		(
+			await fetch(`http://127.0.0.1:${address.port}/api/tickets/agent-metrics`, {
+				headers: { "x-webauth-user": "stranger" },
+			})
+		).status,
+	).toBe(403);
 	expect((await request("tickets/notifications")).status).toBe(200);
 	expect(await (await request("tickets/notifications")).json()).toEqual([]);
 	expect(

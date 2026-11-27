@@ -23,7 +23,8 @@ test("scheduler metrics accept only aggregate UUID rows with nonnegative integer
 		{ ...value, agents: [{ agentId: id, queued: 0.5 }] },
 		{ ...value, agents: [{ agentId: "invalid", queued: 0 }] },
 		{ ...value, providers: [{ ...value.providers[0], credential: "secret" }] },
-	]) expect(ticketAgentMetricsSchema.safeParse(invalid).success).toBe(false);
+	])
+		expect(ticketAgentMetricsSchema.safeParse(invalid).success).toBe(false);
 });
 
 test("workflow presets validate and resolve legacy settings", () => {

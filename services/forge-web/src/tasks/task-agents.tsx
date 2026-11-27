@@ -1,10 +1,5 @@
 import { agentOptionsSchema, type AgentOptions } from "@forge/contracts/agents";
-import {
-	modelProviderHealthListSchema,
-	modelProvidersSchema,
-	type ModelProvider,
-	type ModelProviderHealth,
-} from "@forge/contracts/model-providers";
+import { modelProvidersSchema, type ModelProvider } from "@forge/contracts/model-providers";
 import {
 	agentAvatarColours,
 	agentAvatarSymbols,
@@ -18,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { useDialogDismissal, useModalDialog, useModalDraft, useModalNavigation } from "../navigation/controller.tsx";
 import { AgentAvatar } from "./agent-avatar.tsx";
+import { ProviderMetrics, useProviderMetrics } from "./provider-metrics.tsx";
 
 export function TaskAgents({
 	api,
@@ -35,28 +31,7 @@ export function TaskAgents({
 	const [attempt, retry] = useState(0);
 	const [error, setError] = useState("");
 	const [busy, setBusy] = useState(false);
-	const [health, setHealth] = useState<ModelProviderHealth[]>([]);
-	const [checking, setChecking] = useState(true);
-	const [healthAttempt, refreshHealth] = useState(0);
-	useEffect(() => {
-		let active = true;
-		void api
-			.read("model-providers/health", modelProviderHealthListSchema)
-			.then(
-				(value) => {
-					if (active) setHealth(value);
-				},
-				() => {
-					if (active) setHealth([]);
-				},
-			)
-			.finally(() => {
-				if (active) setChecking(false);
-			});
-		return () => {
-			active = false;
-		};
-	}, [api, healthAttempt]);
+	const metrics = useProviderMetrics(api);
 	useEffect(() => {
 		let active = true;
 		void Promise.all([
@@ -118,44 +93,7 @@ export function TaskAgents({
 		);
 	return (
 		<section className='forge-settings task-agent-catalog' aria-label='Agents'>
-			{catalog.providers.length > 0 && (
-				<section className='provider-health' aria-label='Model provider health'>
-					<h3>Model provider health</h3>
-					<button
-						disabled={checking}
-						onClick={() => {
-							setChecking(true);
-							refreshHealth((value) => value + 1);
-						}}
-					>
-						Refresh health
-					</button>
-					{catalog.providers
-						.filter((provider) => !provider.retired)
-						.map((provider) => {
-							const status = checking
-								? undefined
-								: health.find((item) => item.providerId === provider.id)?.status;
-							const label = checking
-								? "Checking…"
-								: status === "healthy"
-									? "Healthy"
-									: status === "unhealthy"
-										? "Unhealthy"
-										: status === "usage-limits-reached"
-											? "Usage limits reached"
-											: "Status unavailable";
-							return (
-								<p key={provider.id}>
-									{provider.name}:{" "}
-									<span className={`provider-health-dot ${status ?? "neutral"}`} aria-hidden='true' />{" "}
-									{label}
-								</p>
-							);
-						})}
-				</section>
-			)}
-			{!catalog.providers.length && <p>Add a model provider in Config to configure agents.</p>}
+			<ProviderMetrics providers={catalog.providers} metrics={metrics} />
 			{!catalog.agents.length && <p>No agents configured.</p>}
 			{creating && (
 				<AgentEditor
@@ -175,6 +113,13 @@ export function TaskAgents({
 							<AgentAvatar colour={agent.avatarColour} symbol={agent.avatarSymbol} />
 							{agent.name}
 						</h3>
+						<p>
+							{metrics.scheduler.value
+								? `${metrics.scheduler.value.agents.find((row) => row.agentId === agent.id)?.queued ?? 0} in queue${metrics.scheduler.failed ? " (Stale)" : ""}`
+								: metrics.scheduler.failed
+									? "Queue unavailable"
+									: "Loading queue…"}
+						</p>
 						<ol aria-label={`${agent.name} model priority`}>
 							{agent.models.map((model, index) => (
 								<li key={index}>

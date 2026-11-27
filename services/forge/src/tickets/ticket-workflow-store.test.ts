@@ -90,6 +90,15 @@ test("workflow intent and board movement are atomic, durable, and scheduled in b
 		expect((await jobs.boardSummary()).map((record) => record.ticketId)).toEqual([two.id, other.id, one.id]);
 		await tickets.archive(one.id, createdAt);
 		expect((await jobs.boardSummary()).map((record) => record.ticketId)).toEqual([two.id, other.id]);
+		const providerId = "123e4567-e89b-42d3-a456-426614174009";
+		await jobs.save({ ...job, ticketId: two.id, reservation: providerId, state: "running" });
+		await jobs.save({ ...job, ticketId: other.id, reservation: providerId });
+		await jobs.save({ ...job, ticketId: one.id, reservation: providerId });
+		const rows = await jobs.metricsRows();
+		expect(rows.filter((row) => row.job?.reservation === providerId)).toHaveLength(
+			await jobs.countReservations(providerId),
+		);
+		expect(rows.filter((row) => row.job?.state === "running")).toHaveLength(1);
 		await db.run("DROP TRIGGER reject_done");
 		const done = {
 			...(await jobs.get(two.id))!,

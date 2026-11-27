@@ -2,6 +2,8 @@ import type { TaskAgent, TaskAgentInput } from "@forge/contracts/task-agents";
 import { defaultBoardSettings } from "@forge/contracts/tickets";
 import { expect, test } from "@playwright/test";
 
+import { MockApi } from "../dev/mock-api.ts";
+
 const openai = "123e4567-e89b-42d3-a456-426614174000";
 const ollama = "123e4567-e89b-42d3-a456-426614174001";
 const id = "123e4567-e89b-42d3-a456-426614174002";
@@ -12,11 +14,25 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	const writes: TaskAgentInput[] = [];
 	const modelReads: string[] = [];
 	let healthReads = 0;
+	const costs = new MockApi().read(new URL("http://localhost/api/costs?range=-7d")) as {
+		providers: Array<{ id: string; incompleteTokens: number }>;
+	};
+	costs.providers[0]!.id = openai;
+	costs.providers[0]!.incompleteTokens = 1;
+	costs.providers[1]!.id = ollama;
 	await page.route(
 		(url) => url.pathname.startsWith("/api/"),
 		async (route) => {
 			const path = new URL(route.request().url()).pathname;
 			const method = route.request().method();
+			if (path === "/api/costs") return route.fulfill({ json: costs });
+			if (path === "/api/tickets/agent-metrics")
+				return route.fulfill({
+					json: {
+						providers: [{ providerId: openai, running: 2, reserved: 3 }],
+						agents: [{ agentId: id, queued: 4 }],
+					},
+				});
 			if (path === "/api/board/settings") return route.fulfill({ json: defaultBoardSettings });
 			if (path === "/api/accounts") return route.fulfill({ status: 503, json: { error: "internal-error" } });
 			if (path === "/api/tickets" && agent) {
@@ -44,7 +60,7 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 			if (path === "/api/task-agents" && method === "GET") return route.fulfill({ json: agent ? [agent] : [] });
 			if (path === "/api/model-providers/health") {
 				healthReads++;
-				if (healthReads === 2) return route.fulfill({ status: 503 });
+				if (healthReads === 3) return route.fulfill({ status: 503 });
 				return route.fulfill({
 					json: [
 						{ providerId: openai, status: "healthy" },
@@ -106,17 +122,36 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	await expect(tabs).toHaveText(["Board", "Backlog", /Notifications/, "Agents"]);
 	await tabs.first().press("End");
 	await expect(page).toHaveURL("/tasks?view=agents");
-	const health = page.getByRole("region", { name: "Model provider health" });
+	const health = page.getByRole("region", { name: "Model providers" });
 	await expect(health).toContainText("Healthy");
 	await expect(health).toContainText("Unhealthy");
 	await expect(health).toContainText("Usage limits reached");
 	await expect(health).toContainText("Unused");
-	await health.getByRole("button", { name: "Refresh health" }).click();
-	await expect(health).toContainText("Status unavailable");
+	await expect(health).toContainText("Running 2 / 1");
+	await expect(health).toContainText("3 slots reserved");
+	await expect(health).toContainText("Token usage is incomplete");
+	await expect(health).toContainText("No recorded usage");
+	for (const [width, columns] of [
+		[1280, 3],
+		[820, 2],
+		[390, 1],
+	] as const) {
+		await page.setViewportSize({ width, height: 900 });
+		const grid = page.locator(".provider-metrics-grid");
+		expect(await grid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(
+			columns,
+		);
+		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		await health.getByRole("button", { name: "Refresh metrics" }).focus();
+		await expect(health.getByRole("button", { name: "Refresh metrics" })).toBeFocused();
+	}
+	await page.setViewportSize({ width: 1280, height: 900 });
+	await health.getByRole("button", { name: "Refresh metrics" }).click();
+	await expect(health).toContainText("Stale");
 	await expect(
 		page.getByRole("group", { name: "Agent actions" }).getByRole("button", { name: "Create agent" }),
 	).toBeEnabled();
-	await health.getByRole("button", { name: "Refresh health" }).click();
+	await health.getByRole("button", { name: "Refresh metrics" }).click();
 	await expect(health).toContainText("Healthy");
 	await page.reload();
 	await expect(tabs.last()).toHaveAttribute("aria-selected", "true");
@@ -128,6 +163,7 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	await page.getByRole("combobox", { name: "Thinking level", exact: true }).selectOption("high");
 	await page.getByRole("button", { name: "Save agent" }).click();
 	await expect(page.getByRole("heading", { name: "Reviewer", exact: true })).toBeVisible();
+	await expect(page.getByText("4 in queue")).toBeVisible();
 	await expect(page.getByRole("heading", { name: "Reviewer", exact: true }).locator(".agent-avatar")).toHaveAttribute(
 		"data-colour",
 		"Sky",

@@ -14,6 +14,7 @@ import {
 	ticketCheckpointSchema,
 	ticketManualMergeSchema,
 	ticketUtilityRequestSchema,
+	ticketAgentMetricsSchema,
 } from "@forge/contracts/tickets";
 import { ticketNotificationsSchema } from "@forge/contracts/tickets";
 import Router from "@koa/router";
@@ -35,6 +36,10 @@ export class TicketRouter implements IHttpRouter {
 	) {}
 	create(): Router<{ actor: Actor }> {
 		const router = new Router<{ actor: Actor }>();
+		router.get("/api/tickets/agent-metrics", async (ctx) => {
+			ctx.set("Cache-Control", "no-store");
+			ctx.body = ticketAgentMetricsSchema.parse(await this.workflow.agentMetrics(ctx.state.actor));
+		});
 		router.get("/api/tickets/notifications", async (ctx) => {
 			if (!this.notifications) throw new TicketError("ticket-unavailable");
 			ctx.body = ticketNotificationsSchema.parse(await this.notifications.list(ctx.state.actor));

@@ -7,6 +7,7 @@ import {
 	resolveTicketWorkflowPreset,
 	type TicketAgentPhase,
 	type TicketExecutionSettings,
+	type TicketAgentMetrics,
 } from "@forge/contracts/tickets";
 import type {
 	BoardSettings,
@@ -45,6 +46,7 @@ import type { ITicketWorkflowStore } from "./ticket-workflow-store.ts";
 import { ticketWorkflowSummary, type TicketWorkflowRecord } from "./types.ts";
 
 export interface ITicketWorkflowService {
+	agentMetrics(actor: Actor): Promise<TicketAgentMetrics>;
 	update(actor: Actor, id: string, input: CreateTicket): Promise<void>;
 	options(actor: Actor, ticketId?: string, phase?: TicketAgentPhase): Promise<AgentOptions>;
 	validateSettings(actor: Actor, settings: TicketExecutionSettings): Promise<void>;
@@ -78,6 +80,42 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	private readonly cleaning = new Set<string>();
 	private readonly manualMerges = new Set<string>();
 	private readonly log = createLogger(TicketWorkflowService.name);
+	async agentMetrics(actor: Actor): Promise<TicketAgentMetrics> {
+		this.access.assertOwner(actor);
+		const providers = new Map<string, { providerId: string; running: number; reserved: number }>();
+		const agents = new Map<string, { agentId: string; queued: number }>();
+		for (const row of await this.store.metricsRows()) {
+			const job = row.job;
+			if (job?.reservation) {
+				const count = providers.get(job.reservation) ?? {
+					providerId: job.reservation,
+					running: 0,
+					reserved: 0,
+				};
+				count.reserved++;
+				if (job.state === "running") count.running++;
+				providers.set(job.reservation, count);
+			}
+			if (!["todo", "in-progress"].includes(row.status) || this.settingUp.has(row.id)) continue;
+			if (
+				job ? job.state !== "queued" || job.phase === "rebase" || job.phase === "review" : row.status !== "todo"
+			)
+				continue;
+			const phase =
+				!job || (!job.reservation && !job.plannerId && !job.implementerId)
+					? this.initialPhase({ executionSettings: row.settings }, job)
+					: job.phase === "planning"
+						? "planning"
+						: "implementation";
+			const id =
+				(job?.reservation && this.phaseSnapshot(job, phase)?.agentId) || ticketAgentId(row.settings, phase);
+			if (!id) continue;
+			const count = agents.get(id) ?? { agentId: id, queued: 0 };
+			count.queued++;
+			agents.set(id, count);
+		}
+		return { providers: [...providers.values()], agents: [...agents.values()] };
+	}
 	async options(actor: Actor, ticketId?: string, requestedPhase?: TicketAgentPhase): Promise<AgentOptions> {
 		this.access.assertOwner(actor);
 		try {
@@ -969,7 +1007,10 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 	private phaseSnapshot(job: TicketWorkflowRecord, phase: TicketAgentPhase) {
 		return phase === "planning" ? job.planningProviderSnapshot : job.implementationProviderSnapshot;
 	}
-	private initialPhase(ticket: Ticket, job?: TicketWorkflowRecord): "planning" | "implementation" {
+	private initialPhase(
+		ticket: Pick<Ticket, "executionSettings">,
+		job?: TicketWorkflowRecord,
+	): "planning" | "implementation" {
 		return job?.plan || resolveTicketWorkflowPreset(ticket.executionSettings) === "one-shot"
 			? "implementation"
 			: "planning";

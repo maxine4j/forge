@@ -378,3 +378,7 @@ and terminal, and blocks framing; device pages open separately. The explicit
 `style-src-elem 'self' 'unsafe-inline'` exception does not authorize inline scripts,
 eval or inline style attributes. Browser validation configures Zod's supported
 `jitless` mode before loading schemas, avoiding its eval capability probe.
+
+# Provider overview
+
+Tasks → Agents shows each active provider's health, configured ticket capacity, capabilities, and recent usage alongside Agent queues. Reserved capacity can exceed the configured limit after a limit reduction. See [ticket scheduler metrics](tickets.md#agent-scheduler-metrics) and [agent usage](agents.md#agent-usage-overview).

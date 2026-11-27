@@ -56,6 +56,7 @@ const fixture = () => {
 		new AccessService({ owner: "owner", origin: "https://forge.example.com" }),
 		() => now,
 		{
+			agentMetrics: vi.fn(),
 			options: vi.fn(),
 			clearPlan: vi.fn(),
 			capabilities: vi.fn(async () => ({})),
