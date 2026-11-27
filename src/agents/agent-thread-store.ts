@@ -41,8 +41,8 @@ export class AgentThreadStore implements IAgentThreadStore {
 		)
 			return undefined;
 		const rows = await this.database.all(
-			"SELECT CASE WHEN json_extract(record,'$.implementerId')=? THEN 'implementation' ELSE 'planning' END AS role FROM ticket_workflows WHERE json_extract(record,'$.implementerId')=? OR json_extract(record,'$.plannerId')=? LIMIT 1",
-			[id, id, id],
+			"SELECT CASE WHEN json_extract(record,'$.implementerId')=? OR EXISTS (SELECT 1 FROM json_each(record,'$.previousImplementerIds') WHERE value=?) THEN 'implementation' ELSE 'planning' END AS role FROM ticket_workflows WHERE json_extract(record,'$.implementerId')=? OR json_extract(record,'$.plannerId')=? OR EXISTS (SELECT 1 FROM json_each(record,'$.previousImplementerIds') WHERE value=?) LIMIT 1",
+			[id, id, id, id, id],
 		);
 		return rows.length ? z.object({ role: z.enum(["planning", "implementation"]) }).parse(rows[0]).role : undefined;
 	}

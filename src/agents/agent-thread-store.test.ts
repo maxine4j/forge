@@ -10,6 +10,27 @@ import { NotificationStore } from "../tickets/notification-store.ts";
 import { WorkspaceStore } from "../workspaces/workspace-store.ts";
 import { AgentThreadStore } from "./agent-thread-store.ts";
 
+test("resolves roles from current and previous workflow thread associations", async () => {
+	const root = await mkdtemp(join(tmpdir(), "forge-agent-roles-"));
+	const db = new SqliteDatabase(join(root, "db.sqlite"));
+	try {
+		await db.initialize();
+		const store = new AgentThreadStore(db);
+		expect(await store.role("old")).toBeUndefined();
+		await db.run("CREATE TABLE ticket_workflows (record TEXT NOT NULL)");
+		await db.run("INSERT INTO ticket_workflows VALUES (?)", [
+			JSON.stringify({ plannerId: "planner", implementerId: "current", previousImplementerIds: ["old"] }),
+		]);
+		expect(await store.role("planner")).toBe("planning");
+		expect(await store.role("current")).toBe("implementation");
+		expect(await store.role("old")).toBe("implementation");
+		expect(await store.role("missing")).toBeUndefined();
+	} finally {
+		await db.close();
+		await rm(root, { recursive: true, force: true });
+	}
+});
+
 test("persists thread identities and approvals; startup makes execution uncertain and invalidates requests", async () => {
 	const root = await mkdtemp(join(tmpdir(), "forge-agents-"));
 	const path = join(root, "db.sqlite");
