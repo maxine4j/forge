@@ -18,7 +18,8 @@ const ContextWindow = ({
 	compactionThresholdTokens,
 }: AgentContextWindow & { compactionThresholdTokens?: number }) => {
 	const tooltipId = useId();
-	const percent = 100 * (used / max);
+	const limit = Math.min(max, compactionThresholdTokens ?? max);
+	const percent = 100 * (used / limit);
 	return (
 		<div className='agent-context'>
 			<button
@@ -43,7 +44,7 @@ const ContextWindow = ({
 			<div id={tooltipId} role='tooltip' className='agent-context-tooltip'>
 				<strong>{number.format(Math.round(percent))}% used</strong>
 				<div>
-					{number.format(used)} of {number.format(max)} tokens
+					{number.format(used)} of {number.format(limit)} tokens
 				</div>
 				{compactionThresholdTokens !== undefined && (
 					<div>Configured compaction threshold · {number.format(compactionThresholdTokens)} tokens</div>

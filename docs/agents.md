@@ -136,7 +136,7 @@ Agent records, conversations and historical cost attribution survive abandonment
 
 ## Codex harness and lifecycle
 
-A phase pins the provider's optional [automatic compaction threshold](foundation.md#model-providers). Forge supplies it as `model_auto_compact_token_limit` on thread start and resume, including reconciliation, except for managed Implementer threads, which use Codex's default throughout their lifetime. Historical pins remain intact. Codex owns automatic compaction and may clamp configured values to the model window. Ticket Chat displays an applicable configured threshold separately from the latest context usage and model window reported by Codex. See [implementation checkpointing and recovery](tickets.md#implementation-context-handover).
+A phase pins the provider's optional [automatic compaction threshold](foundation.md#model-providers). Forge supplies it as `model_auto_compact_token_limit` on thread start and resume, including reconciliation, except for managed Implementer threads, which use Codex's default throughout their lifetime. Historical pins remain intact. Codex owns automatic compaction and may clamp configured values to the model window. Ticket Chat uses the smaller of the pinned threshold and Codex's reported model window as its context gauge limit, or the reported window when no threshold is pinned. It also displays the configured threshold separately. Managed Implementer handoffs use the pin while Codex manages automatic compaction; the 75% default applies to Forge handoff steering. See [implementation checkpointing and recovery](tickets.md#implementation-context-handover).
 
 Use Codex CLI's app-server as the built-in harness. Forge orchestrates tickets and
 reviews; Codex owns model interaction, tools, agent execution, and conversations.
@@ -486,7 +486,7 @@ duration. The endpoint returns normalized counts without conversation content,
 Codex identifiers, or account credentials.
 
 Ticket Chat uses the latest context sample and model context window from the
-same notification. Context can shrink after compaction. Completed ticket chats
+same notification. The gauge requires a sample, caps its ring at 100%, and shows actual usage in its tooltip, even above 100%. Context can shrink after compaction. Completed ticket chats
 load stored history without resuming Codex in a removed worktree.
 
 Account-wide quota windows come from `account/rateLimits/read` when available.

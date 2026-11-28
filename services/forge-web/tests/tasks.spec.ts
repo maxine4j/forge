@@ -541,6 +541,8 @@ const setup = async (
 ) => {
 	const threadId = "123e4567-e89b-42d3-a456-426614174010";
 	let messages = 0;
+	let contextWindow: { used: number; max: number } | undefined = { used: 32000, max: 128000 };
+	let compactionThresholdTokens: number | undefined = 64000;
 	const modelOptions = {
 		models: [
 			{
@@ -805,8 +807,8 @@ const setup = async (
 								]
 							: [],
 						truncated: review,
-						contextWindow: { used: 32000, max: 128000 },
-						compactionThresholdTokens: 64000,
+						contextWindow,
+						compactionThresholdTokens,
 						...(measured
 							? {
 									performance: {
@@ -950,6 +952,10 @@ const setup = async (
 			tickets[0]!.status = "in-progress";
 			tickets[0]!.agentStatus = agentStatus;
 			tickets[0]!.needsAttention = needsAttention;
+		},
+		setContext: (window: typeof contextWindow, threshold?: number) => {
+			contextWindow = window;
+			compactionThresholdTokens = threshold;
 		},
 		setTitle: (title: string) => {
 			tickets[0]!.title = title;
@@ -2789,16 +2795,51 @@ test("History exposes loading, retryable errors, empty data and cursor pages", a
 	await expect(panel.getByText("Plan adjusted · Revision 2")).toHaveCount(1);
 });
 
-test("ticket chat shows the current context window", async ({ page }) => {
-	await setup(page, false, true);
+for (const threshold of [64000, undefined, 128000, 256000]) {
+	test(`ticket chat context gauge uses threshold ${threshold ?? "absent"}`, async ({ page }) => {
+		const fixture = await setup(page, false, true);
+		fixture.setContext({ used: 32000, max: 128000 }, threshold);
+		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+		const modal = page.getByRole("dialog", { name: "TASK-1" });
+		const ring = modal.getByRole("button", { name: "Context window" });
+		await expect(ring).toBeVisible();
+		await ring.focus();
+		const limit = threshold === 64000 ? "64,000" : "128,000";
+		const percent = threshold === 64000 ? 50 : 25;
+		await expect(modal.getByRole("tooltip")).toContainText(`32,000 of ${limit} tokens`);
+		await expect(modal.getByRole("tooltip")).toContainText(`${percent}% used`);
+		await expect(ring.locator("circle").nth(1)).toHaveAttribute("stroke-dasharray", `${percent} 100`);
+		if (threshold !== undefined)
+			await expect(modal.getByRole("tooltip")).toContainText(
+				`Configured compaction threshold · ${threshold.toLocaleString("en-AU")} tokens`,
+			);
+	});
+}
+
+test("ticket chat context gauge refreshes after compaction", async ({ page }) => {
+	const fixture = await setup(page, false, true, true);
+	fixture.setContext({ used: 80000, max: 128000 }, 64000);
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const modal = page.getByRole("dialog", { name: "TASK-1" });
 	const ring = modal.getByRole("button", { name: "Context window" });
-	await expect(ring).toBeVisible();
 	await ring.focus();
-	await expect(modal.getByRole("tooltip")).toContainText("32,000 of 128,000 tokens");
+	await expect(modal.getByRole("tooltip")).toContainText("125% used");
+	await expect(modal.getByRole("tooltip")).toContainText("80,000 of 64,000 tokens");
+	await expect(ring.locator("circle").nth(1)).toHaveAttribute("stroke-dasharray", "100 100");
+	fixture.setContext({ used: 16000, max: 128000 }, 64000);
+	await modal.getByRole("tab", { name: "Cost" }).click();
+	await modal.getByRole("tab", { name: "Chat", exact: true }).click();
+	await ring.focus();
+	await expect(modal.getByRole("tooltip")).toContainText("16,000 of 64,000 tokens");
 	await expect(modal.getByRole("tooltip")).toContainText("25% used");
-	await expect(modal.getByRole("tooltip")).toContainText("Configured compaction threshold · 64,000 tokens");
+	await expect(ring.locator("circle").nth(1)).toHaveAttribute("stroke-dasharray", "25 100");
+});
+
+test("ticket chat context gauge requires a sample", async ({ page }) => {
+	const fixture = await setup(page, false, true);
+	fixture.setContext(undefined, 64000);
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	await expect(page.getByRole("button", { name: "Context window" })).toHaveCount(0);
 });
 
 for (const implementation of [false, true]) {
@@ -3805,6 +3846,11 @@ test("archived ticket chat retains history and disables input and execution", as
 	await expect(modal.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
 	await expect(modal.getByText("Planning message 0: implement search with tests.", { exact: true })).toBeAttached();
 	await expect(modal.getByLabel("Message", { exact: true })).toBeDisabled();
+	const ring = modal.getByRole("button", { name: "Context window" });
+	await ring.focus();
+	await expect(modal.getByRole("tooltip")).toContainText("32,000 of 64,000 tokens");
+	await expect(modal.getByRole("tooltip")).toContainText("50% used");
+	await expect(ring.locator("circle").nth(1)).toHaveAttribute("stroke-dasharray", "50 100");
 	const performance = modal.getByRole("button", { name: "Inference speed: 20.0 tokens/s", exact: true });
 	await expect(performance).toBeVisible();
 	await performance.focus();
