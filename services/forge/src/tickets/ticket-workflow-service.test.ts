@@ -766,7 +766,7 @@ test("insufficient context waits for settlement before allowing a retry", async 
 	await f.makeService().tick(actor);
 	expect(f.jobs.get(ticket.id)?.implementerId).not.toBe(id);
 	expect(f.agents.dispatch.mock.lastCall?.[2]).toBe(
-		`Recover by verifying the committed changes\n\n${ticketCompletionInstructions()}`,
+		`Recover by verifying the committed changes\n\nThe previous run may have left partial work in this worktree. Inspect the current changes and commits before continuing.\n\n${ticketCompletionInstructions()}`,
 	);
 });
 
@@ -1958,7 +1958,7 @@ test("ordered subtasks recover a bounded checkpoint completion summary and retai
 	const second = f.jobs.get(ticket.id)!.implementerId!;
 	expect(second).not.toBe(initialSecond);
 	expect(f.agents.dispatch.mock.lastCall?.[2]).toBe(
-		`Implement only subtask 2: Second. Commit your changes on this branch.\n\n- Files: b\n- Dependencies: 1\n- Expected changes: Second\n- Exclusions: None\n- Completion criteria: Done\n\nRecovery instruction:\nRecover the second subtask\n\nPrevious subtask summary:\n${summary}\n\n${ticketCompletionInstructions()}`,
+		`Implement only subtask 2: Second. Commit your changes on this branch.\n\n- Files: b\n- Dependencies: 1\n- Expected changes: Second\n- Exclusions: None\n- Completion criteria: Done\n\nThe previous run may have left partial work in this worktree. Inspect the current changes and commits before continuing.\n\nRecovery instruction:\nRecover the second subtask\n\nPrevious subtask summary:\n${summary}\n\n${ticketCompletionInstructions()}`,
 	);
 	f.agents.contextSample.mockResolvedValue({ used: 1000, peak: 1000, max: 128000, crossed: false });
 	f.agents.finalAnswer.mockResolvedValueOnce('{"status":"incomplete","remaining":"Finish verification"}');

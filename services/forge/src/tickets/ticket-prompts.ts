@@ -6,6 +6,7 @@ import { ticketPlanGuidance, ticketSinglePlanGuidance } from "./ticket-plan-form
 import type { TicketWorkflowRecord } from "./types.ts";
 
 type TicketInstructions = Pick<ForgeSettings, "planningInstructions" | "implementationInstructions">;
+const checkpointInstruction = " Report handoff only after committing a safe checkpoint.";
 
 export function assignedSubtask(ticket: Ticket, job: TicketWorkflowRecord) {
 	if (job.phase === "implementation" && resolveTicketWorkflowPreset(ticket.executionSettings) === "planner-subtasks")
@@ -21,7 +22,13 @@ export function hasNextSubtask(ticket: Ticket | undefined, job: TicketWorkflowRe
 	);
 }
 
-export function ticketCompletionInstructions(requirements = completionReportRequirements()): string {
+type CompletionRequirements = ReturnType<typeof completionReportRequirements>;
+
+export function ticketCompletionInstructions(
+	requirements: Omit<CompletionRequirements, "handoff"> & {
+		handoff?: CompletionRequirements["handoff"];
+	} = completionReportRequirements(),
+): string {
 	const outcomes = Object.entries(requirements).flatMap(([status, fields]) => {
 		if (!fields) return [];
 		const example = JSON.stringify({ status, ...Object.fromEntries(fields.map(({ name }) => [name, "…"])) });
@@ -37,7 +44,7 @@ export function ticketCompletionInstructions(requirements = completionReportRequ
 		requirements.handoff || requirements.complete.some(({ bounded }) => bounded)
 			? " In handover or the next-subtask summary, retain concise progress, next actions, decisions, blockers, and verification results as applicable. Omit code dumps, long logs, and repeated plan text."
 			: "";
-	const checkpoint = requirements.handoff ? " Report handoff only after committing a safe checkpoint." : "";
+	const checkpoint = requirements.handoff ? checkpointInstruction : "";
 	return `End your final answer with exactly one JSON object, without Markdown fences or surrounding prose. Use only the fields shown for your outcome. ${outcomes.join(" ")} Report complete only after finishing your assigned scope and committing the required changes.${checkpoint}${guidance}`;
 }
 
@@ -48,24 +55,70 @@ export function ticketFinalizationPrompt(requirements: ReturnType<typeof complet
 	return `${question} Do not edit files or commit. Return only the explicit verdict. ${ticketCompletionInstructions(requirements)}`;
 }
 
+// Older assignments could persist the rendered paragraph, including variants
+// that allowed handoff only for checkpoints.
+const completionBlocks = new Set([
+	'End your final answer with exactly one JSON object, without Markdown fences or surrounding prose: {"status":"complete","summary":"Implemented and verified the assignment"} or {"status":"incomplete","remaining":"Still need to finish the integration tests"}. Summary is optional; remaining is required only for incomplete. Text must be nonblank and at most 2,000 characters. Report complete only after finishing your assigned scope and committing the required changes.',
+	...[false, true].flatMap((hasNext) => {
+		const work = completionReportRequirements(false, hasNext);
+		const checkpoint = ticketCompletionInstructions(completionReportRequirements(true, hasNext));
+		const current = ticketCompletionInstructions(work);
+		return [
+			current,
+			checkpoint,
+			checkpoint.replace(checkpointInstruction, ""),
+			ticketCompletionInstructions({ ...work, handoff: undefined }),
+		];
+	}),
+]);
+
+export function cleanTicketAssignment(text: string | undefined): string | undefined {
+	if (!text) return undefined;
+	const retained = text.split(/(?<=\n)/).filter((line) => !completionBlocks.has(line.trim()));
+	return retained.join("").trim() || undefined;
+}
+
+export function ticketFreshWorkPrompt(
+	ticket: Ticket,
+	job: TicketWorkflowRecord,
+	assignment: string,
+	recovery?: string,
+	interrupted = false,
+): string {
+	return [
+		assignment,
+		interrupted
+			? "The previous run may have left partial work in this worktree. Inspect the current changes and commits before continuing."
+			: undefined,
+		recovery && `Recovery instruction:\n${recovery}`,
+		job.context?.handover && `Handover:\n${job.context.handover}`,
+		job.context?.previousSubtaskSummary && `Previous subtask summary:\n${job.context.previousSubtaskSummary}`,
+		ticketCompletionInstructions(completionReportRequirements(false, hasNextSubtask(ticket, job))),
+	]
+		.filter(Boolean)
+		.join("\n\n");
+}
+
 export interface ITicketPrompts {
-	build(ticket: Ticket, job: TicketWorkflowRecord, includeCompletion?: boolean): string;
+	planning(ticket: Ticket, job: TicketWorkflowRecord): string;
+	assignment(ticket: Ticket, job: TicketWorkflowRecord): string;
 }
 export class TicketPrompts implements ITicketPrompts {
 	constructor(private readonly instructions?: () => TicketInstructions) {}
 
-	build(ticket: Ticket, job: TicketWorkflowRecord, includeCompletion = true): string {
+	planning(ticket: Ticket, job: TicketWorkflowRecord): string {
 		const guidance =
 			resolveTicketWorkflowPreset(ticket.executionSettings) === "planner-subtasks"
 				? ticketPlanGuidance
 				: ticketSinglePlanGuidance;
-		const prompt =
-			this.scope(ticket, job)
-			+ (job.phase === "planning"
-				? `\n\n${guidance}`
-				: includeCompletion
-					? `\n\n${ticketCompletionInstructions(completionReportRequirements(false, hasNextSubtask(ticket, job)))}`
-					: "");
+		return this.withRecommendations(ticket, `${this.scope(ticket, job)}\n\n${guidance}`);
+	}
+
+	assignment(ticket: Ticket, job: TicketWorkflowRecord): string {
+		return this.withRecommendations(ticket, this.scope(ticket, job));
+	}
+
+	private withRecommendations(ticket: Ticket, prompt: string): string {
 		return ticket.executionSettings?.acceptRecommendations
 			? `${prompt}\n\nChoose the recommended option, make reasonable assumptions, and proceed without asking the owner preference or clarification questions or asking them to select or confirm an approach. Retain manual plan approval and the selected tool permission mode.`
 			: prompt;

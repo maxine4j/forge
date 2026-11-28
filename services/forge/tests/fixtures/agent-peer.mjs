@@ -5,14 +5,30 @@ import { createInterface } from "node:readline";
 
 const threads = new Map();
 let sequence = 0;
+const approvals = new Map();
 const write = (value) => process.stdout.write(JSON.stringify(value) + "\n");
 const notify = (method, params) => write({ method, params });
 createInterface({ input: process.stdin }).on("line", (line) => {
 	const message = JSON.parse(line);
-	if (!message.method) return;
+	if (!message.method) {
+		const threadId = approvals.get(message.id);
+		if (threadId) {
+			approvals.delete(message.id);
+			notify("serverRequest/resolved", { threadId, requestId: message.id });
+		}
+		return;
+	}
 	const { id, method, params } = message;
 	if (method === "initialized") return;
 	let result = {};
+	if (method === "skills/list")
+		result = {
+			data: params.cwds.map((cwd) => ({
+				cwd,
+				errors: [],
+				skills: [{ name: "review", description: "Review", path: "/skills/review/SKILL.md", enabled: true }],
+			})),
+		};
 	if (method === "model/list")
 		result = {
 			data: [
@@ -93,8 +109,16 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 	}
 	if (method === "turn/start") {
 		const thread = threads.get(params.threadId);
-		const prompt = params.input.map((part) => part.text ?? "").join("\n");
-		const highContext = prompt.includes("TASK67_CONTROLLED") && !prompt.includes("Handover:");
+		const prompt = params.input
+			.filter((part) => part.type === "text")
+			.map((part) => part.text)
+			.join("\n");
+		const lowHeadroom =
+			(prompt.includes("TASK94_LOW") || prompt.startsWith("Implement only subtask 2:"))
+			&& !prompt.includes("Recover ordered work");
+		const checkpointMode = prompt.match(/TASK94_CHECKPOINT_(REPORT|UNKNOWN|CHANGED|NO_PROGRESS|AMBIGUOUS)/)?.[1];
+		const highContext =
+			lowHeadroom || !!checkpointMode || (prompt.includes("TASK67_CONTROLLED") && !prompt.includes("Handover:"));
 		const turn = {
 			id: `turn-${++sequence}`,
 			status: "inProgress",
@@ -116,12 +140,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			tokenUsage: {
 				total: breakdown(thread.turns.length),
 				last: { ...breakdown(1), totalTokens: highContext ? 8000 : 1100 },
-				modelContextWindow: highContext ? 12000 : 128000,
+				modelContextWindow:
+					checkpointMode === "UNKNOWN" ? null : lowHeadroom ? 9000 : highContext ? 12000 : 128000,
 			},
 		};
 		notify("thread/tokenUsage/updated", usage);
 		notify("thread/tokenUsage/updated", usage);
-		if (highContext)
+		if (highContext && !lowHeadroom)
 			notify("thread/tokenUsage/updated", {
 				...usage,
 				tokenUsage: { ...usage.tokenUsage, last: breakdown(1) },
@@ -134,7 +159,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		});
 		result = { turn };
 		if (highContext) thread.checkpointScenario = true;
+		if (lowHeadroom) thread.lowHeadroom = true;
+		if (checkpointMode) thread.checkpointMode = checkpointMode;
 		if (prompt.includes("TASK84_CONTROLLED")) thread.completionScenario = true;
+		if (prompt.includes("TASK94_INVALID")) thread.invalidScenario = true;
+		const finishAfterInvalid = prompt === "$review Finish after invalid";
+		if (finishAfterInvalid) thread.invalidScenario = false;
 		if (thread.completionScenario && prompt.startsWith("Assess the assignment")) {
 			const item = {
 				id: `answer-${sequence}`,
@@ -150,12 +180,32 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		}
 		const planning = params.collaborationMode?.mode === "plan";
 		const rebase = prompt.startsWith("Rebase this branch");
+		const rebaseFollowUp = prompt === "Review the rebase" || prompt === "Verify the rebase";
+		const incomplete = rebase || prompt === "Review the rebase";
+		const invalid =
+			thread.invalidScenario
+			|| prompt === "Verify the rebase"
+			|| (thread.completionScenario && thread.turns.length === 1);
+		const firstSubtask = prompt.startsWith("Implement only subtask 1:");
+		const finalSubtask = prompt.startsWith("Implement only subtask 2:");
+		const planOnly =
+			"# Search plan\n\n## Goals\nSearch "
+			+ thread.turns.length
+			+ "\n\n## Scope\nFiltering\n\n## Decisions\nUse existing search\n\n## Acceptance criteria\nResults are filtered\n\n## Tests\nRun tests";
 		if (
 			planning
 			|| rebase
 			|| (!highContext
 				&& (prompt.startsWith("Implement the approved plan")
 					|| prompt.includes("TASK67_CONTROLLED")
+					|| firstSubtask
+					|| (finalSubtask && prompt.includes("Recover ordered work"))
+					|| rebaseFollowUp
+					|| thread.invalidScenario
+					|| finishAfterInvalid
+					|| (!thread.completionScenario && prompt.startsWith("Assess the assignment"))
+					|| prompt.startsWith("Using the conversation, assess whether")
+					|| prompt.includes("Recover legacy work")
 					|| (thread.completionScenario && prompt === "Finish the integration")
 					|| prompt.includes("TASK84_CONTROLLED")))
 		) {
@@ -165,7 +215,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 				const item = {
 					id: `plan-${sequence}`,
 					type: "plan",
-					text: `# Search plan\n\n## Goals\nSearch ${thread.turns.length}\n\n## Scope\nFiltering\n\n## Decisions\nUse existing search\n\n## Acceptance criteria\nResults are filtered\n\n## Tests\nRun tests\n\n## Ordered subtasks\n### 1. Search\n- Files: src/search.ts\n- Dependencies: None\n- Expected changes: Implement search revision ${thread.turns.length}\n- Exclusions: None\n- Completion criteria: Search works\n### 2. Filter\n- Files: src/filter.ts\n- Dependencies: 1\n- Expected changes: Add filtering\n- Exclusions: None\n- Completion criteria: Filtering works`,
+					text: prompt.includes("TASK94_SINGLE")
+						? planOnly
+						: `${planOnly}\n\n## Ordered subtasks\n### 1. Search\n- Files: src/search.ts\n- Dependencies: None\n- Expected changes: Implement search revision ${thread.turns.length}\n- Exclusions: None\n- Completion criteria: Search works\n### 2. Filter\n- Files: src/filter.ts\n- Dependencies: 1\n- Expected changes: Add filtering\n- Exclusions: None\n- Completion criteria: Filtering works`,
 				};
 				turn.items.push(item);
 				notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
@@ -185,7 +237,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 						{ encoding: "utf8" },
 					).trim();
 				if (rebase) git("rebase", "--keep-empty", "main");
-				else {
+				else if (
+					!prompt.includes("Do not edit files or commit.")
+					&& !rebaseFollowUp
+					&& !thread.invalidScenario
+				) {
 					if (thread.completionScenario && thread.turns.length === 1) {
 						writeFileSync(join(thread.cwd, "partial.txt"), "Partial implementation\n");
 						git("add", "partial.txt");
@@ -207,9 +263,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 				phase: "final_answer",
 				text: planning
 					? "Plan ready."
-					: thread.completionScenario && thread.turns.length === 1
-						? "TASK-78 is **not complete**"
-						: JSON.stringify({ status: "complete" }),
+					: firstSubtask
+						? '{"status":"complete","summary":"Search checkpoint verified"}'
+						: invalid
+							? "TASK-78 is **not complete**"
+							: incomplete
+								? '{"status":"incomplete","remaining":"Verify the rebased changes"}'
+								: JSON.stringify({ status: "complete" }),
 			});
 			turn.status = "completed";
 			thread.status = { type: "idle" };
@@ -227,27 +287,47 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		const item = { id: `steer-${++sequence}`, type: "userMessage", content: params.input };
 		turn.items.push(item);
 		notify("item/completed", { threadId: thread.id, turnId: turn.id, item });
-		if (thread.checkpointScenario) {
-			execFileSync("git", [
-				"-C",
-				thread.cwd,
-				"-c",
-				"user.name=Controlled Agent",
-				"-c",
-				"user.email=agent@example.com",
-				"commit",
-				"--allow-empty",
-				"-m",
-				"Controlled checkpoint",
-			]);
+		if (params.input[0].text === "$review the changes") {
+			const requestId = `approval-${sequence}`;
+			approvals.set(requestId, thread.id);
+			write({
+				id: requestId,
+				method: "item/commandExecution/requestApproval",
+				params: {
+					threadId: thread.id,
+					turnId: turn.id,
+					command: "git status",
+				},
+			});
+		}
+		if (thread.checkpointScenario && params.input[0].text.startsWith("Finish the current operation")) {
+			if (thread.checkpointMode === "AMBIGUOUS") {
+				write({ id, error: { code: -32603, message: "Controlled delivery failure" } });
+				return;
+			}
+			if (thread.checkpointMode !== "NO_PROGRESS")
+				execFileSync("git", [
+					"-C",
+					thread.cwd,
+					"-c",
+					"user.name=Controlled Agent",
+					"-c",
+					"user.email=agent@example.com",
+					"commit",
+					"--allow-empty",
+					"-m",
+					"Controlled checkpoint",
+				]);
 			const answer = {
 				id: `handoff-${sequence}`,
 				type: "agentMessage",
 				phase: "final_answer",
 				text: JSON.stringify({ status: "handoff", handover: "Finish controlled work" }),
 			};
-			turn.items.push(answer);
-			notify("item/completed", { threadId: thread.id, turnId: turn.id, item: answer });
+			if (!thread.lowHeadroom && (!thread.checkpointMode || thread.checkpointMode === "NO_PROGRESS")) {
+				turn.items.push(answer);
+				notify("item/completed", { threadId: thread.id, turnId: turn.id, item: answer });
+			}
 			turn.status = "completed";
 			thread.status = { type: "idle" };
 			notify("turn/completed", { threadId: thread.id, turn });

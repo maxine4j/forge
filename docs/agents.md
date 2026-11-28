@@ -560,7 +560,7 @@ It imposes no spending cap or scheduler enforcement.
 
 ## Managed implementer completion reports
 
-Managed Implementer work, including rebase and owner-guided turns, requires a single JSON completion report. Fresh assignments advertise complete, incomplete and handoff. Forge validates the outcome and requires an explicit complete verdict before advancing a subtask or queuing a merge. A valid handoff on the work turn can start a successor after checkpoint verification. Forge can request one report-only clarification when headroom permits. See [ticket completion and handover](tickets.md#implementer-completion-and-handover) for report shapes and progression rules, and [implementation context handover](tickets.md#implementation-context-handover) for threshold steering and recovery.
+Managed Implementer work, including rebase and owner-guided turns, requires a single JSON completion report. Forge appends one completion instruction to each fresh assignment and each report-only request. Fresh assignments advertise complete, incomplete and handoff. Forge validates the outcome and requires an explicit complete verdict before advancing a subtask or queuing a merge. A valid handoff on the work turn can start a successor after checkpoint verification. Forge can request one report-only clarification when headroom permits. See [ticket completion and handover](tickets.md#implementer-completion-and-handover) for report shapes and progression rules, and [implementation context handover](tickets.md#implementation-context-handover) for threshold steering, fresh retries and restart behavior.
 
 # Agent usage overview
 

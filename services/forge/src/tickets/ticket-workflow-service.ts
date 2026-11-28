@@ -37,7 +37,8 @@ import { parseTicketPlan } from "./ticket-plan-format.ts";
 import {
 	assignedSubtask,
 	hasNextSubtask,
-	ticketCompletionInstructions,
+	cleanTicketAssignment,
+	ticketFreshWorkPrompt,
 	ticketFinalizationPrompt,
 	type ITicketPrompts,
 } from "./ticket-prompts.ts";
@@ -958,13 +959,21 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				prompt = ticketFinalizationPrompt(requirements);
 			} else if (job.phase === "implementation" || job.phase === "rebase") {
 				const ordered = !!assignedSubtask(current, job);
-				const recovery = followUp ? undefined : job.message;
+				const recovery = followUp ? undefined : cleanTicketAssignment(job.message);
+				// A fresh retry retains an owner message and the retired Implementer.
+				// Handoffs and ordered advancement clear the message.
+				const interrupted = !followUp && !!job.message && !!job.previousImplementerIds?.length;
 				const assignment =
-					(!ordered && (recovery ?? job.context?.prompt))
-					|| this.prompts.build(current, { ...job, message: undefined }, false);
-				const handover = job.context?.handover && capHandoffText(job.context.handover);
-				const summary =
-					job.context?.previousSubtaskSummary && capHandoffText(job.context.previousSubtaskSummary);
+					(!ordered && recovery)
+					|| (!ordered && cleanTicketAssignment(job.context?.prompt))
+					|| cleanTicketAssignment(this.prompts.assignment(current, { ...job, message: undefined }))
+					|| "";
+				const boundedContext = (value: string | undefined) => {
+					const cleaned = cleanTicketAssignment(value);
+					return cleaned && capHandoffText(cleaned);
+				};
+				const handover = boundedContext(job.context?.handover);
+				const summary = boundedContext(job.context?.previousSubtaskSummary);
 				if (job.workspaceId) {
 					job.context = {
 						prompt: assignment,
@@ -974,14 +983,11 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 						stage: "work",
 					};
 				}
-				const freshPrompt =
-					assignment
-					+ (ordered && recovery ? `\n\nRecovery instruction:\n${recovery}` : "")
-					+ (handover ? `\n\nHandover:\n${handover}` : "")
-					+ (summary ? `\n\nPrevious subtask summary:\n${summary}` : "");
-				prompt = followUp ?? `${freshPrompt}\n\n${ticketCompletionInstructions(requirements)}`;
+				prompt =
+					followUp
+					?? ticketFreshWorkPrompt(current, job, assignment, ordered ? recovery : undefined, interrupted);
 			} else {
-				prompt = this.prompts.build(current, job);
+				prompt = this.prompts.planning(current, job);
 			}
 			job.previousTurnId = priorTurn;
 			if (job.phase === "rebase" && !job.reportRetrySourceTurnId) job.mergeRetryEligible = undefined;
@@ -1021,7 +1027,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		if (work && !job.context) {
 			const ticket = await this.tickets.get(job.ticketId);
 			if (!ticket) throw new TicketError("ticket-not-found");
-			job.context = { prompt: this.prompts.build(ticket, job, false), stage: "work" };
+			job.context = { prompt: this.prompts.assignment(ticket, job), stage: "work" };
 			await this.store.save(job);
 		}
 		const { thread, requests, turnFailure } = await this.agents.get(actor, id);

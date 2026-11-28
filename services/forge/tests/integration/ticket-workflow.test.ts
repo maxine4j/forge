@@ -47,6 +47,34 @@ import { WorkspaceMergeClient } from "../../src/workspaces/workspace-merge-clien
 import { WorkspaceService } from "../../src/workspaces/workspace-service.ts";
 import { WorkspaceStore } from "../../src/workspaces/workspace-store.ts";
 
+const reportIntro = "End your final answer with exactly one JSON object, without Markdown fences or surrounding prose.";
+const reportIncomplete =
+	'{"status":"incomplete","remaining":"…","summary":"…"} (remaining is required and must be nonblank text of at most 2,000 characters. summary is optional and must be nonblank text of at most 2,000 characters).';
+const reportHandoff =
+	'{"status":"handoff","handover":"…"} (handover is required and must be nonblank text of at most 1,500 tokens).';
+const reportFinish = "Report complete only after finishing your assigned scope and committing the required changes.";
+const reportGuidance =
+	"In handover or the next-subtask summary, retain concise progress, next actions, decisions, blockers, and verification results as applicable. Omit code dumps, long logs, and repeated plan text.";
+const reportBlock = (nonfinal = false, checkpoint = false) =>
+	[
+		reportIntro,
+		"Use only the fields shown for your outcome.",
+		nonfinal
+			? '{"status":"complete","summary":"…"} (summary is required and must be nonblank text of at most 1,500 tokens).'
+			: '{"status":"complete","summary":"…"} (summary is optional and must be nonblank text of at most 2,000 characters).',
+		...(checkpoint ? [] : [reportIncomplete]),
+		reportHandoff,
+		reportFinish,
+		"Report handoff only after committing a safe checkpoint.",
+		reportGuidance,
+	].join(" ");
+const legacyBlock =
+	'End your final answer with exactly one JSON object, without Markdown fences or surrounding prose: {"status":"complete","summary":"Implemented and verified the assignment"} or {"status":"incomplete","remaining":"Still need to finish the integration tests"}. Summary is optional; remaining is required only for incomplete. Text must be nonblank and at most 2,000 characters. Report complete only after finishing your assigned scope and committing the required changes.';
+const retryReminder =
+	"The previous run may have left partial work in this worktree. Inspect the current changes and commits before continuing.";
+const input = (text: string) => [{ type: "text", text, text_elements: [] }];
+const reportOnly = `Assess the assignment against the work already done. Do not edit files or commit. Return only the explicit verdict. ${reportBlock()}`;
+
 test("real Git, SQLite and controlled app-server execute the ticket lifecycle and recover a committed merge", async () => {
 	const root = await files.mkdtemp(join(tmpdir(), "forge-workflow-"));
 	const db = new SqliteDatabase(join(root, "forge.sqlite"));
@@ -106,6 +134,14 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			async () => {},
 		);
 		const rpc = vi.spyOn(connection, "request");
+		const turns = (offset = 0) =>
+			rpc.mock.calls.slice(offset).filter(([method]) => method === "turn/start" || method === "turn/steer");
+		const codexId = async (id: string) => (await agentStore.get(id))!.codexId;
+		const expectAssignment = (text: string, nonfinal = false) => {
+			expect(text.split(reportIntro)).toHaveLength(2);
+			expect(text.endsWith(`\n\n${reportBlock(nonfinal)}`)).toBe(true);
+		};
+		const turnText = (params: unknown) => (params as { input: { text: string }[] }).input[0]!.text;
 		let defaults: Pick<AgentOptions, "defaultModel" | "defaultReasoningEffort"> = {};
 		const makeClient = () => {
 			const client = new CodexAgentClient(connection, files.realpath, randomUUID, usage);
@@ -243,6 +279,16 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await workflow.tick(owner);
 		const planning = (await jobs.get(ticket.id))!;
 		expect(planning.plannerId).toBe(preparedPlanner);
+		const planningCall = turns().at(-1)!;
+		expect(planningCall).toEqual([
+			"turn/start",
+			expect.objectContaining({
+				threadId: await codexId(planning.plannerId!),
+				input: input(turnText(planningCall[1])),
+			}),
+		]);
+		expect(turnText(planningCall[1])).toContain("Return a complete native Markdown plan");
+		expect(turnText(planningCall[1])).not.toContain(reportIntro);
 		dispatch = "paused";
 		const idle = async () => {
 			await workflow.tick(owner);
@@ -292,6 +338,16 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await workflow.tick(owner);
 		await expect.poll(idle).toBe("idle");
 		expect((await jobs.get(ticket.id))?.plan?.revision).toBe(2);
+		const feedbackCall = turns().at(-1)!;
+		expect(feedbackCall[1]).toMatchObject({
+			threadId: await codexId(planning.plannerId!),
+			input: input(
+				turnText(planningCall[1]).replace(
+					/^.*?\n\n/,
+					"Include filtering\n\nProvide a complete replacement native plan incorporating this feedback.\n\n",
+				),
+			),
+		});
 		const revisedPlan = ticketWorkflowSchema.parse(await workflow.get(owner, ticket.id)).plan!;
 		expect(revisedPlan.structured?.subtasks.map((task) => task.number)).toEqual([1, 2]);
 		expect((await jobs.get(ticket.id))?.plan?.structured?.subtasks[0]?.expectedChanges).toBe(
@@ -344,6 +400,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				method === "turn/start" && JSON.stringify(params).includes("Implement the approved plan"),
 		);
 		expect(implementerStarts).toHaveLength(1);
+		expectAssignment(turnText(implementerStarts[0]![1]));
 		expect(JSON.stringify(implementerStarts[0])).toContain("Implement search revision 2");
 		expect(JSON.stringify(implementerStarts[0])).toContain("### 2. Filter");
 		expect((await tickets.list(owner)).at(0)?.agentStatus).toBeUndefined();
@@ -358,8 +415,43 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			.poll(async () => (await agents!.get(owner, implemented.implementerId!)).thread.status)
 			.toBe("completed");
 		await jobs.save({ ...(await jobs.get(ticket.id))!, state: "uncertain" });
+		const rebaseCall = turns().at(-1)!;
+		expect(rebaseCall).toEqual([
+			"turn/start",
+			expect.objectContaining({
+				threadId: await codexId(implemented.implementerId!),
+				input: input(
+					`Rebase this branch onto the latest local main and resolve any conflicts.\n\n${reportBlock()}`,
+				),
+			}),
+		]);
+		const beforeReconcile = turns().length;
 		await restart();
+		expect(turns()).toHaveLength(beforeReconcile);
 		expect((await agents!.get(owner, implemented.implementerId!)).truncated).toBe(true);
+		expect(await jobs.get(ticket.id)).toMatchObject({ state: "failed", completionFailure: "incomplete" });
+		const rebaseThreadId = await codexId(implemented.implementerId!);
+		const followUpOffset = rpc.mock.calls.length;
+		await workflow.message(owner, (await ticketStore.get(ticket.id))!, "  Review the rebase  ");
+		await expect.poll(idle).toBe("failed");
+		await workflow.message(owner, (await ticketStore.get(ticket.id))!, "  Verify the rebase  ");
+		await restart();
+		expect(turns(followUpOffset)).toEqual([
+			[
+				"turn/start",
+				expect.objectContaining({
+					threadId: rebaseThreadId,
+					input: input("Review the rebase"),
+				}),
+			],
+		]);
+		await expect.poll(idle).toBe("merge-queued");
+		expect(turns(followUpOffset)).toEqual(
+			["Review the rebase", "Verify the rebase", reportOnly].map((text) => [
+				"turn/start",
+				expect.objectContaining({ threadId: rebaseThreadId, input: input(text) }),
+			]),
+		);
 		const completed = (await jobs.get(ticket.id))!;
 		// Reconstruct services from persisted intent at the Git/SQLite crash boundary.
 		expect(completed.state).toBe("merge-queued");
@@ -410,21 +502,21 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect(history.contextWindow).toEqual({ used: 1100, max: 128000 });
 		expect(await agents!.list(owner, project.id)).toEqual([]);
 		const archived = await tickets.archive(owner, ticket.id);
-		await expect.poll(async () => (await cost.read(owner)).totals.input).toBe(8000);
+		await expect.poll(async () => (await cost.read(owner)).totals.input).toBe(11000);
 		const recorded = await cost.read(owner);
 		expect(recorded.phases.filter(({ turns }) => turns).map(({ phase, turns }) => [phase, turns])).toEqual([
 			["planning", 2],
 			["implementation", 1],
-			["rebase", 1],
+			["rebase", 4],
 			["chat", 4],
 		]);
 		expect(recorded.tickets.at(0)).toMatchObject({
 			id: ticket.id,
 			archivedAt: archived.archivedAt,
-			cached: 2000,
+			cached: 3500,
 			incomplete: { api: 0 },
 		});
-		expect(recorded.tickets.at(0)?.apiUsd).toBeCloseTo(0.0115);
+		expect(recorded.tickets.at(0)?.apiUsd).toBeCloseTo(0.020125);
 		expect(recorded.limits?.windows.at(0)).toMatchObject({ minutes: 300, usedPercent: 40 });
 		expect((await cost.read(owner)).phases.map(({ phase }) => phase)).toContain("chat");
 
@@ -473,6 +565,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect((await jobs.get(returning.id))?.plan).toBeUndefined();
 		expect((await cost.read(owner)).tickets.find(({ id }) => id === returning.id)).toEqual(usageBeforeClear);
 		const prepare = workspaceClient.prepare.bind(workspaceClient);
+		const partialOffset = rpc.mock.calls.length;
 		const partial = await tickets.create(owner, {
 			repositoryIds: [project.id],
 			title: "Partial work",
@@ -494,16 +587,21 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			.toBe("incomplete");
 		expect((await ticketStore.get(partial.id))?.status).toBe("in-progress");
 		expect((await git.run(["-C", repository, "rev-parse", "main"])).trim()).toBe(beforePartial);
-		const verdict = rpc.mock.calls.find(
+		const verdict = turns(partialOffset).find(
 			([method, params]) => method === "turn/start" && JSON.stringify(params).includes("Assess the assignment"),
 		);
-		const initialPartial = rpc.mock.calls.find(
+		const initialPartial = turns(partialOffset).find(
 			([method, params]) => method === "turn/start" && JSON.stringify(params).includes("TASK84_CONTROLLED"),
 		);
 		expect(initialPartial).toBeDefined();
 		expect(verdict?.[1]).toMatchObject({ threadId: (initialPartial![1] as { threadId: string }).threadId });
 		expect((await jobs.get(partial.id))?.implementerId).toBe(partialJob.implementerId);
-		await workflow.message(owner, (await ticketStore.get(partial.id))!, "Finish the integration");
+		expect(verdict?.[1]).toMatchObject({ input: input(reportOnly) });
+		expectAssignment(turnText(initialPartial![1]));
+		const beforeFollowUp = rpc.mock.calls.length;
+		await workflow.message(owner, (await ticketStore.get(partial.id))!, "  Finish the integration  ");
+		await restart();
+		expect(turns(beforeFollowUp)).toEqual([]);
 		await expect
 			.poll(
 				async () => {
@@ -513,6 +611,15 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				{ timeout: 10000 },
 			)
 			.toBe("done");
+		expect(turns(beforeFollowUp)).toEqual([
+			[
+				"turn/start",
+				expect.objectContaining({
+					threadId: await codexId(partialJob.implementerId!),
+					input: input("Finish the integration"),
+				}),
+			],
+		]);
 		await providers.update(owner, provider.id, { compactionThresholdTokens: 8000 });
 		const contextRpcStart = rpc.mock.calls.length;
 		const contextTicket = await tickets.create(owner, {
@@ -546,6 +653,310 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			([method, params]) => method === "turn/start" && JSON.stringify(params).includes("Finish controlled work"),
 		);
 		expect(JSON.stringify(handoverCall)).toContain("TASK67_CONTROLLED");
+		const contextText = turnText(turns(contextRpcStart)[0]![1]);
+		expectAssignment(contextText);
+		const contextThreadId = await codexId(initialContextJob.implementerId!);
+		expect(turns(contextRpcStart)).toEqual([
+			["turn/start", expect.objectContaining({ threadId: contextThreadId, input: input(contextText) })],
+			[
+				"turn/steer",
+				{
+					threadId: contextThreadId,
+					expectedTurnId: initialContextJob.turnId,
+					input: input(
+						'Finish the current operation and avoid starting another task. If work remains, commit a safe checkpoint and immediately return {"status":"handoff","handover":"…"} with concise handover notes. If the assignment is finished, return the complete report.',
+					),
+				},
+			],
+			[
+				"turn/start",
+				expect.objectContaining({
+					threadId: await codexId(successor.implementerId!),
+					input: input(
+						contextText.replace(reportBlock(), `Handover:\nFinish controlled work\n\n${reportBlock()}`),
+					),
+				}),
+			],
+		]);
+		const startTicket = async (
+			description: string,
+			workflowPreset: "planner-implementer" | "planner-subtasks" | "one-shot",
+		) => {
+			const item = await tickets.create(owner, {
+				repositoryIds: [project.id],
+				title: description,
+				description,
+				executionSettings: { ...executionSettings, workflowPreset },
+			});
+			await tickets.move(owner, item.id, { status: "todo" });
+			await workflow.tick(owner);
+			return item.id;
+		};
+		const pollJob = async (id: string) => {
+			await workflow.tick(owner);
+			return jobs.get(id);
+		};
+		const assertQuiet = async () => {
+			const count = turns().length;
+			await restart();
+			await workflow.tick(owner);
+			await workflow.recover(owner);
+			expect(turns()).toHaveLength(count);
+		};
+
+		const singleOffset = rpc.mock.calls.length;
+		const singleId = await startTicket("TASK94_SINGLE", "planner-implementer");
+		await expect.poll(() => pollJob(singleId)).toMatchObject({ phase: "planning", state: "idle" });
+		const single = (await jobs.get(singleId))!;
+		expect(single.plan?.structured?.subtasks).toEqual([]);
+		const singlePrompt = turnText(turns(singleOffset)[0]![1]);
+		expect(singlePrompt).toContain("Return a complete native Markdown plan");
+		expect(singlePrompt).not.toMatch(/Ordered subtasks|exactly one JSON object/);
+		await expect(workflow.approve(owner, (await ticketStore.get(singleId))!, 2)).rejects.toThrow("ticket-conflict");
+		expect(turns(singleOffset)).toEqual([
+			[
+				"turn/start",
+				expect.objectContaining({
+					threadId: await codexId(single.plannerId!),
+					input: input(singlePrompt),
+				}),
+			],
+		]);
+		await workflow.approve(owner, (await ticketStore.get(singleId))!, 1);
+		await expect
+			.poll(async () => {
+				await pollJob(singleId);
+				return (await ticketStore.get(singleId))!.status;
+			})
+			.toBe("done");
+		expectAssignment(turnText(turns(singleOffset)[1]![1]));
+		expect(turns(singleOffset)).toHaveLength(2);
+
+		const invalidOffset = rpc.mock.calls.length;
+		const invalidId = await startTicket("TASK94_INVALID", "one-shot");
+		await expect
+			.poll(() => pollJob(invalidId))
+			.toMatchObject({ state: "failed", completionFailure: "invalid-report" });
+		const invalid = (await jobs.get(invalidId))!;
+		const invalidThreadId = await codexId(invalid.implementerId!);
+		await assertQuiet();
+		expect(turns(invalidOffset)).toEqual([
+			["turn/start", expect.objectContaining({ threadId: invalidThreadId })],
+			["turn/start", expect.objectContaining({ threadId: invalidThreadId, input: input(reportOnly) })],
+		]);
+		await workflow.message(owner, (await ticketStore.get(invalidId))!, "  $review Finish after invalid  ");
+		await expect
+			.poll(async () => {
+				await pollJob(invalidId);
+				return (await ticketStore.get(invalidId))!.status;
+			})
+			.toBe("done");
+		expect(turns(invalidOffset)).toHaveLength(3);
+		expect(turns(invalidOffset)[2]).toEqual([
+			"turn/start",
+			expect.objectContaining({
+				threadId: invalidThreadId,
+				input: [
+					...input("$review Finish after invalid"),
+					{ type: "skill", name: "review", path: "/skills/review/SKILL.md" },
+				],
+			}),
+		]);
+
+		const legacyOffset = rpc.mock.calls.length;
+		const legacyId = await startTicket("TASK94_LOW", "one-shot");
+		await expect.poll(() => pollJob(legacyId)).toMatchObject({ state: "failed", contextFailure: "headroom" });
+		const legacy = (await jobs.get(legacyId))!;
+		await jobs.save({
+			...legacy,
+			context: {
+				...legacy.context!,
+				prompt: `Recover legacy work\n\n${legacyBlock}\n\n${reportBlock(true)}`,
+				handover: "Retain the checkpoint",
+			},
+		});
+		await assertQuiet();
+		await workflow.message(owner, (await ticketStore.get(legacyId))!, `  ${legacyBlock}  `);
+		await restart();
+		expect(turns(legacyOffset).map(([method]) => method)).toEqual(["turn/start", "turn/steer"]);
+		await workflow.tick(owner);
+		expect((await jobs.get(legacyId))?.context?.prompt).toBe("Recover legacy work");
+		await expect
+			.poll(async () => {
+				await pollJob(legacyId);
+				return (await ticketStore.get(legacyId))!.status;
+			})
+			.toBe("done");
+		const legacyRetry = (await jobs.get(legacyId))!;
+		expect(legacyRetry).toMatchObject({
+			workspaceId: legacy.workspaceId,
+			implementationProviderSnapshot: legacy.implementationProviderSnapshot,
+		});
+		expect(legacyRetry.implementerId).not.toBe(legacy.implementerId);
+		expect(turns(legacyOffset).at(-1)).toEqual([
+			"turn/start",
+			expect.objectContaining({
+				threadId: await codexId(legacyRetry.implementerId!),
+				input: input(
+					`Recover legacy work\n\n${retryReminder}\n\nHandover:\nRetain the checkpoint\n\n${reportBlock()}`,
+				),
+			}),
+		]);
+		await assertQuiet();
+
+		const orderedPlanningOffset = rpc.mock.calls.length;
+		const orderedId = await startTicket("Ordered recovery", "planner-subtasks");
+		await expect.poll(() => pollJob(orderedId)).toMatchObject({ phase: "planning", state: "idle" });
+		const orderedPlanning = turns(orderedPlanningOffset);
+		expect(orderedPlanning).toHaveLength(1);
+		expect(turnText(orderedPlanning[0]![1])).toMatch(
+			/Return a complete native Markdown plan.*Under Ordered subtasks/,
+		);
+		expect(turnText(orderedPlanning[0]![1])).not.toContain(reportIntro);
+		const orderedOffset = rpc.mock.calls.length;
+		await workflow.approve(owner, (await ticketStore.get(orderedId))!, 1);
+		await workflow.tick(owner);
+		await expect
+			.poll(async () => {
+				await workflow.tick(owner);
+				return (await jobs.get(orderedId))?.subtaskIndex;
+			})
+			.toBe(1);
+		await workflow.tick(owner);
+		const ordered = (await jobs.get(orderedId))!;
+		const orderedThread = await codexId(ordered.implementerId!);
+		const firstScope = turnText(turns(orderedOffset)[0]![1]);
+		expect(firstScope).toMatch(/^Implement only subtask 1: Search\./);
+		expect(firstScope).not.toContain("Add filtering");
+		expectAssignment(firstScope, true);
+		const secondScope = turnText(turns(orderedOffset)[1]![1]);
+		expect(secondScope).toMatch(/^Implement only subtask 2: Filter\./);
+		expect(secondScope).toContain("Previous subtask summary:\nSearch checkpoint verified");
+		expectAssignment(secondScope);
+		const steeringOffset = rpc.mock.calls.length;
+		const orderedTicket = (await ticketStore.get(orderedId))!;
+		await expect(workflow.message(owner, orderedTicket, "Stale", "old-turn")).rejects.toThrow("ticket-conflict");
+		await workflow.message(owner, orderedTicket, "  $review the changes  ", ordered.turnId);
+		await expect.poll(async () => (await agents!.get(owner, ordered.implementerId!)).thread.status).toBe("waiting");
+		await expect(workflow.message(owner, orderedTicket, "Waiting", ordered.turnId)).rejects.toThrow(
+			"agent-conflict",
+		);
+		await workflow.tick(owner);
+		await workflow.tick(owner);
+		expect(turns(steeringOffset)).toEqual([
+			[
+				"turn/steer",
+				{
+					threadId: orderedThread,
+					expectedTurnId: ordered.turnId,
+					input: [
+						...input("$review the changes"),
+						{ type: "skill", name: "review", path: "/skills/review/SKILL.md" },
+					],
+				},
+			],
+		]);
+		const pending = (await agents!.get(owner, ordered.implementerId!)).requests[0]!;
+		await agents!.reply(owner, ordered.implementerId!, { requestId: pending.id, decision: "accept" });
+		await expect.poll(() => pollJob(orderedId)).toMatchObject({ state: "failed", contextFailure: "headroom" });
+		expect(turns(steeringOffset).map(([method]) => method)).toEqual(["turn/steer", "turn/steer"]);
+		expect(turns(steeringOffset)[1]![1]).toMatchObject({ threadId: orderedThread, expectedTurnId: ordered.turnId });
+		await assertQuiet();
+		const orderedRetryOffset = rpc.mock.calls.length;
+		await workflow.message(owner, orderedTicket, `  Recover ordered work\n\n${reportBlock(true)}  `);
+		await restart();
+		expect(turns(orderedRetryOffset)).toEqual([]);
+		await workflow.tick(owner);
+		const orderedRetry = (await jobs.get(orderedId))!;
+		expect(orderedRetry).toMatchObject({
+			workspaceId: ordered.workspaceId,
+			subtaskIndex: 1,
+			implementationProviderSnapshot: ordered.implementationProviderSnapshot,
+		});
+		expect(orderedRetry.implementerId).not.toBe(ordered.implementerId);
+		expect(turns(orderedRetryOffset)).toEqual([
+			[
+				"turn/start",
+				expect.objectContaining({
+					threadId: await codexId(orderedRetry.implementerId!),
+					input: input(
+						secondScope.replace(
+							"Previous subtask summary:",
+							`${retryReminder}\n\nRecovery instruction:\nRecover ordered work\n\nPrevious subtask summary:`,
+						),
+					),
+				}),
+			],
+		]);
+		expect(orderedRetry.context?.prompt).not.toContain(reportIntro);
+		await expect
+			.poll(async () => {
+				await pollJob(orderedId);
+				return (await ticketStore.get(orderedId))!.status;
+			})
+			.toBe("done");
+		await assertQuiet();
+		for (const [mode, failure] of [
+			["REPORT", undefined],
+			["UNKNOWN", "telemetry"],
+			["CHANGED", "checkpoint"],
+			["NO_PROGRESS", "no-progress"],
+			["AMBIGUOUS", undefined],
+		] as const) {
+			const offset = rpc.mock.calls.length;
+			const id = await startTicket(`TASK94_CHECKPOINT_${mode}`, "one-shot");
+			const initial = (await jobs.get(id))!;
+			const threadId = await codexId(initial.implementerId!);
+			if (mode === "CHANGED") {
+				await expect.poll(() => pollJob(id)).toMatchObject({ state: "queued", context: { stage: "report" } });
+				const { path: checkpointPath } = await workspaces.resolve(owner, initial.workspaceId!);
+				await git.run([
+					"-C",
+					checkpointPath,
+					"-c",
+					"user.name=Owner",
+					"-c",
+					"user.email=owner@example.com",
+					"commit",
+					"--allow-empty",
+					"-m",
+					"Change recorded checkpoint",
+				]);
+			}
+			if (failure) {
+				await expect.poll(() => pollJob(id)).toMatchObject({ state: "failed", contextFailure: failure });
+			} else if (mode === "REPORT") {
+				await expect
+					.poll(async () => {
+						await pollJob(id);
+						return (await ticketStore.get(id))!.status;
+					})
+					.toBe("done");
+			} else {
+				await pollJob(id);
+			}
+			await assertQuiet();
+			const actual = turns(offset);
+			expect(actual.map(([method]) => method)).toEqual(
+				mode === "REPORT" ? ["turn/start", "turn/steer", "turn/start"] : ["turn/start", "turn/steer"],
+			);
+			expect(actual[1]![1]).toMatchObject({ threadId, expectedTurnId: initial.turnId });
+			if (mode === "REPORT")
+				expect(actual[2]![1]).toMatchObject({
+					threadId,
+					input: input(
+						`Using the conversation, assess whether this assignment is complete or needs a handoff. Do not edit files or commit. Return only the explicit verdict. ${reportBlock(false, true)}`,
+					),
+				});
+			if (mode === "AMBIGUOUS") {
+				await agents!.interrupt(owner, initial.implementerId!);
+				await pollJob(id);
+			}
+			if (mode !== "REPORT") {
+				await tickets.move(owner, id, { status: "backlog" });
+				await workflow.recover(owner, id);
+			}
+		}
 		for (const stage of ["before", "after"] as const) {
 			const failedTicket = await tickets.create(owner, {
 				repositoryIds: [project.id],

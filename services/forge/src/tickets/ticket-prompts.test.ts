@@ -6,7 +6,41 @@ import {
 	ticketPlanGuidance as subtaskGuidance,
 	ticketSinglePlanGuidance as ticketPlanGuidance,
 } from "./ticket-plan-format.ts";
-import { TicketPrompts, ticketCompletionInstructions } from "./ticket-prompts.ts";
+import { cleanTicketAssignment, TicketPrompts, ticketCompletionInstructions } from "./ticket-prompts.ts";
+
+test("strips repeated exact historical completion blocks and preserves surrounding prose and partial quotations", () => {
+	const original =
+		'End your final answer with exactly one JSON object, without Markdown fences or surrounding prose: {"status":"complete","summary":"Implemented and verified the assignment"} or {"status":"incomplete","remaining":"Still need to finish the integration tests"}. Summary is optional; remaining is required only for incomplete. Text must be nonblank and at most 2,000 characters. Report complete only after finishing your assigned scope and committing the required changes.';
+	const prefix =
+		"End your final answer with exactly one JSON object, without Markdown fences or surrounding prose. Use only the fields shown for your outcome.";
+	const complete =
+		'{"status":"complete","summary":"…"} (summary is optional and must be nonblank text of at most 2,000 characters).';
+	const bounded =
+		'{"status":"complete","summary":"…"} (summary is required and must be nonblank text of at most 1,500 tokens).';
+	const incomplete =
+		'{"status":"incomplete","remaining":"…","summary":"…"} (remaining is required and must be nonblank text of at most 2,000 characters. summary is optional and must be nonblank text of at most 2,000 characters).';
+	const handoff =
+		'{"status":"handoff","handover":"…"} (handover is required and must be nonblank text of at most 1,500 tokens).';
+	const finish = "Report complete only after finishing your assigned scope and committing the required changes.";
+	const guidance =
+		"In handover or the next-subtask summary, retain concise progress, next actions, decisions, blockers, and verification results as applicable. Omit code dumps, long logs, and repeated plan text.";
+	const blocks = [
+		original,
+		...[complete, bounded].flatMap((outcome) => [
+			`${prefix} ${outcome} ${incomplete} ${finish}${outcome === bounded ? ` ${guidance}` : ""}`,
+			`${prefix} ${outcome} ${handoff} ${finish} ${guidance}`,
+			`${prefix} ${outcome} ${incomplete} ${handoff} ${finish} Report handoff only after committing a safe checkpoint. ${guidance}`,
+			`${prefix} ${outcome} ${handoff} ${finish} Report handoff only after committing a safe checkpoint. ${guidance}`,
+		]),
+	];
+	const retained = ["Verify the branch.", prefix, `Quoted inline: ${original}`, "Then run tests."];
+	for (const block of blocks) {
+		expect(cleanTicketAssignment(block)).toBeUndefined();
+		expect(cleanTicketAssignment([retained[0], block, block, ...retained.slice(1)].join("\r\n"))).toBe(
+			retained.join("\r\n"),
+		);
+	}
+});
 
 test.each([false, true])("advertised report examples pass validation (checkpoint=%s)", (checkpoint) => {
 	const requirements = completionReportRequirements(checkpoint);
@@ -27,10 +61,10 @@ test("initial phase prompts include only the scope needed for that phase and fol
 		createdAt: "2026-11-03T00:00:00.000Z",
 	};
 	const job: TicketWorkflow = { ticketId: ticket.id, phase: "planning", state: "queued", mergeAttempts: 0 };
-	expect(prompts.build(ticket, job)).toBe(
+	expect(prompts.planning(ticket, job)).toBe(
 		`Propose an implementation plan for TASK-1 Search files. Filter by extension.\n\n${ticketPlanGuidance}`,
 	);
-	expect(prompts.build({ ...ticket, executionSettings: { workflowPreset: "planner-subtasks" } }, job)).toContain(
+	expect(prompts.planning({ ...ticket, executionSettings: { workflowPreset: "planner-subtasks" } }, job)).toContain(
 		subtaskGuidance,
 	);
 	const plan = { revision: 2, text: "# Plan\nFilter by extension." };
@@ -62,47 +96,47 @@ test("initial phase prompts include only the scope needed for that phase and fol
 			},
 		],
 	};
-	const rebuilt = prompts.build(ticket, { ...job, phase: "implementation", plan: { ...plan, structured } });
+	const rebuilt = prompts.assignment(ticket, { ...job, phase: "implementation", plan: { ...plan, structured } });
 	expect(rebuilt).not.toContain("Filter by extension.");
 	expect(rebuilt).toMatch(
 		/## Goals[\s\S]*## Scope[\s\S]*## Decisions[\s\S]*## Acceptance criteria[\s\S]*## Tests[\s\S]*### 1\. First[\s\S]*### 2\. Second/,
 	);
-	expect(prompts.build(ticket, { ...job, phase: "implementation", plan })).toBe(
-		`Implement the approved plan below and commit the changes on this branch.\n\n# Plan\nFilter by extension.\n\n${ticketCompletionInstructions()}`,
+	expect(prompts.assignment(ticket, { ...job, phase: "implementation", plan })).toBe(
+		`Implement the approved plan below and commit the changes on this branch.\n\n# Plan\nFilter by extension.`,
 	);
-	expect(prompts.build(ticket, { ...job, phase: "rebase", plan })).toBe(
-		`Rebase this branch onto the latest local main and resolve any conflicts.\n\n${ticketCompletionInstructions()}`,
+	expect(prompts.assignment(ticket, { ...job, phase: "rebase", plan })).toBe(
+		`Rebase this branch onto the latest local main and resolve any conflicts.`,
 	);
 	for (const phase of ["implementation", "rebase"] as const)
-		expect(prompts.build(ticket, { ...job, phase, plan, message: "Include hidden files" })).toBe(
-			`Include hidden files\n\n${ticketCompletionInstructions()}`,
+		expect(prompts.assignment(ticket, { ...job, phase, plan, message: "Include hidden files" })).toBe(
+			`Include hidden files`,
 		);
 	const configured = new TicketPrompts(() => ({
 		planningInstructions: "List the risks.\nConsider migrations.",
 		implementationInstructions: "Run focused tests.",
 	}));
 	for (const [subtaskIndex, task] of structured.subtasks.entries()) {
-		const scoped = configured.build(
+		const scoped = configured.assignment(
 			{ ...ticket, executionSettings: { workflowPreset: "planner-subtasks" } },
 			{ ...job, phase: "implementation", plan: { ...plan, structured }, subtaskIndex },
 		);
 		expect(scoped).toBe(
-			`Implement only subtask ${task.number}: ${task.title}. Commit your changes on this branch.\n\nRun focused tests.\n\n- Files: ${task.files}\n- Dependencies: ${task.dependencies}\n- Expected changes: ${task.expectedChanges}\n- Exclusions: ${task.exclusions}\n- Completion criteria: ${task.completionCriteria}\n\n${ticketCompletionInstructions(completionReportRequirements(false, subtaskIndex === 0))}`,
+			`Implement only subtask ${task.number}: ${task.title}. Commit your changes on this branch.\n\nRun focused tests.\n\n- Files: ${task.files}\n- Dependencies: ${task.dependencies}\n- Expected changes: ${task.expectedChanges}\n- Exclusions: ${task.exclusions}\n- Completion criteria: ${task.completionCriteria}`,
 		);
 	}
-	expect(configured.build(ticket, job)).toBe(
+	expect(configured.planning(ticket, job)).toBe(
 		`Propose an implementation plan for TASK-1 Search files. Filter by extension.\n\nList the risks.\nConsider migrations.\n\n${ticketPlanGuidance}`,
 	);
-	expect(configured.build(ticket, { ...job, phase: "implementation", plan })).toBe(
-		`Implement the approved plan below and commit the changes on this branch.\n\nRun focused tests.\n\n# Plan\nFilter by extension.\n\n${ticketCompletionInstructions()}`,
+	expect(configured.assignment(ticket, { ...job, phase: "implementation", plan })).toBe(
+		`Implement the approved plan below and commit the changes on this branch.\n\nRun focused tests.\n\n# Plan\nFilter by extension.`,
 	);
-	expect(configured.build(ticket, { ...job, message: "Include hidden files" })).toBe(
+	expect(configured.planning(ticket, { ...job, message: "Include hidden files" })).toBe(
 		`Include hidden files\n\nProvide a complete replacement native plan incorporating this feedback.\n\n${ticketPlanGuidance}`,
 	);
-	expect(configured.build(ticket, { ...job, phase: "rebase" })).toBe(
-		prompts.build(ticket, { ...job, phase: "rebase" }),
+	expect(configured.assignment(ticket, { ...job, phase: "rebase" })).toBe(
+		prompts.assignment(ticket, { ...job, phase: "rebase" }),
 	);
-	const direct = configured.build(ticket, { ...job, phase: "implementation" });
+	const direct = configured.assignment(ticket, { ...job, phase: "implementation" });
 	expect(direct).toContain("TASK-1 Search files");
 	expect(direct).toContain("Filter by extension.");
 	expect(direct).toContain("Run focused tests.");
@@ -110,7 +144,7 @@ test("initial phase prompts include only the scope needed for that phase and fol
 	expect(direct).not.toContain("approved plan");
 	for (const phase of ["planning", "implementation", "rebase"] as const) {
 		for (const message of [undefined, "Owner feedback"]) {
-			const recommended = configured.build(
+			const recommended = configured[phase === "planning" ? "planning" : "assignment"](
 				{ ...ticket, executionSettings: { acceptRecommendations: true } },
 				{ ...job, phase, message },
 			);
