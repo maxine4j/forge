@@ -208,6 +208,12 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 		expect(await grid.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length)).toBe(
 			columns,
 		);
+		const usageRows = await grid
+			.getByRole("heading", { name: "Last 7 days", exact: true })
+			.evaluateAll((headings) => headings.map((heading) => heading.getBoundingClientRect().top));
+		for (const [index, top] of usageRows.entries()) {
+			expect(top).toBeCloseTo(usageRows.at(index - (index % columns))!, 0);
+		}
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 		const button = (await createAgent.boundingBox())!;
 		const heading = (await agentsHeading.boundingBox())!;

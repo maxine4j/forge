@@ -101,72 +101,81 @@ export function ProviderMetrics({
 					const reserved = scheduler?.reserved ?? 0;
 					return (
 						<article className='account-card provider-metrics-card' key={provider.id}>
-							<div className='provider-metrics-heading'>
-								<div className='provider-metrics-name'>
-									{provider.kind === "ollama" ? (
-										<img src={ollamaIcon} alt='Ollama' width='16' height='16' />
-									) : (
-										<span role='img' aria-label='OpenAI'>
-											<InterfaceIcon name='cloud' />
-										</span>
-									)}
-									<h3>{provider.name}</h3>
-								</div>
-								<span className='provider-metrics-health'>
-									<span
-										className={`provider-health-dot ${health?.status ?? "neutral"}`}
-										aria-hidden='true'
-									/>{" "}
-									{healthLabel ?? (stateLabel(metrics.health) || "Unavailable")}
-									{healthLabel && metrics.health.failed && " (Stale)"}
-								</span>
-							</div>
-							{metrics.scheduler.value ? (
-								<>
-									<div className='provider-metrics-capacity'>
-										<progress
-											aria-label={`${provider.name} reserved capacity`}
-											aria-describedby={`provider-capacity-${provider.id}`}
-											value={Math.min(reserved, provider.maxConcurrentAgents)}
-											max={provider.maxConcurrentAgents}
-										/>
-										<span id={`provider-capacity-${provider.id}`}>
-											Running {running} / {provider.maxConcurrentAgents}
-											{metrics.scheduler.failed && " (Stale)"}
-										</span>
+							<div>
+								<div className='provider-metrics-heading'>
+									<div className='provider-metrics-name'>
+										{provider.kind === "ollama" ? (
+											<img src={ollamaIcon} alt='Ollama' width='16' height='16' />
+										) : (
+											<span role='img' aria-label='OpenAI'>
+												<InterfaceIcon name='cloud' />
+											</span>
+										)}
+										<h3>{provider.name}</h3>
 									</div>
-									{reserved !== running && <p>{reserved} slots reserved</p>}
-								</>
-							) : (
-								<p>Running: {stateLabel(metrics.scheduler)}</p>
-							)}
-							{provider.contextWindow && <p>Context window: {formatTokens(provider.contextWindow)}</p>}
-							{provider.supportedConcurrency && (
-								<p>Worker concurrency: {provider.supportedConcurrency.toLocaleString()}</p>
-							)}
-							{provider.compactionThresholdTokens && (
-								<p>Compaction threshold: {formatTokens(provider.compactionThresholdTokens)} tokens</p>
-							)}
-							<h4 className='provider-metrics-period'>
-								Last 7 days {metrics.usage.value && metrics.usage.failed && "(Stale)"}
-							</h4>
-							{!metrics.usage.value ? (
-								<p>{stateLabel(metrics.usage)}</p>
-							) : !usage ? (
-								<p>Unavailable</p>
-							) : usage.turns === 0 ? (
-								<p>No recorded usage</p>
-							) : (
-								<>
-									<p>Turns: {usage.turns.toLocaleString()}</p>
+									<span className='provider-metrics-health'>
+										<span
+											className={`provider-health-dot ${health?.status ?? "neutral"}`}
+											aria-hidden='true'
+										/>{" "}
+										{healthLabel ?? (stateLabel(metrics.health) || "Unavailable")}
+										{healthLabel && metrics.health.failed && " (Stale)"}
+									</span>
+								</div>
+								{metrics.scheduler.value ? (
+									<>
+										<div className='provider-metrics-capacity'>
+											<progress
+												aria-label={`${provider.name} reserved capacity`}
+												aria-describedby={`provider-capacity-${provider.id}`}
+												value={Math.min(reserved, provider.maxConcurrentAgents)}
+												max={provider.maxConcurrentAgents}
+											/>
+											<span id={`provider-capacity-${provider.id}`}>
+												Running {running} / {provider.maxConcurrentAgents}
+												{metrics.scheduler.failed && " (Stale)"}
+											</span>
+										</div>
+										{reserved !== running && <p>{reserved} slots reserved</p>}
+									</>
+								) : (
+									<p>Running: {stateLabel(metrics.scheduler)}</p>
+								)}
+								{provider.contextWindow && (
+									<p>Context window: {formatTokens(provider.contextWindow)}</p>
+								)}
+								{provider.supportedConcurrency && (
+									<p>Worker concurrency: {provider.supportedConcurrency.toLocaleString()}</p>
+								)}
+								{provider.compactionThresholdTokens && (
 									<p>
-										Input: {formatTokens(usage.input)}
-										{usage.input > 0 && ` (${percent.format(usage.cached / usage.input)} cached)`}
+										Compaction threshold: {formatTokens(provider.compactionThresholdTokens)} tokens
 									</p>
-									<p>Output: {formatTokens(usage.output)}</p>
-								</>
-							)}
-							{usage && usage.incompleteTokens > 0 && <p>Token usage is incomplete</p>}
+								)}
+							</div>
+							<div>
+								<h4 className='provider-metrics-period'>
+									Last 7 days {metrics.usage.value && metrics.usage.failed && "(Stale)"}
+								</h4>
+								{!metrics.usage.value ? (
+									<p>{stateLabel(metrics.usage)}</p>
+								) : !usage ? (
+									<p>Unavailable</p>
+								) : usage.turns === 0 ? (
+									<p>No recorded usage</p>
+								) : (
+									<>
+										<p>Turns: {usage.turns.toLocaleString()}</p>
+										<p>
+											Input: {formatTokens(usage.input)}
+											{usage.input > 0
+												&& ` (${percent.format(usage.cached / usage.input)} cached)`}
+										</p>
+										<p>Output: {formatTokens(usage.output)}</p>
+									</>
+								)}
+								{usage && usage.incompleteTokens > 0 && <p>Token usage is incomplete</p>}
+							</div>
 						</article>
 					);
 				})}
