@@ -93,6 +93,9 @@ turns have no estimates. See [the private boundary](architecture.md#private-requ
 
 ## Notification request lifecycle
 
+Archiving a notification only hides its current occurrence; it does not answer or
+resolve the request. See [pending notifications](tickets.md#pending-notifications).
+
 Managed-agent request snapshots feed [Tasks Notifications](tickets.md#pending-notifications)
 without loading conversation history or selecting a chat. Agent store insert/update
 paths synchronize request-handle identities and injected-clock observation times

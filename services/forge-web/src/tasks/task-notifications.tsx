@@ -47,6 +47,21 @@ const NotificationCard = ({
 	const [feedback, setFeedback] = useState(() => drafts.get(draftKey) ?? "");
 	const date = new Date(item.at);
 	const plan = item.kind === "plan" ? item.workflow.plan : undefined;
+	const archive = async () => {
+		if (locked.current) return;
+		locked.current = true;
+		setBusy(true);
+		setError("");
+		try {
+			await api.read(`tickets/notifications/${item.id}/archive`, { parse: () => undefined }, "POST");
+		} catch (cause) {
+			setError(cause instanceof Error ? cause.message : "Could not archive notification. Retry.");
+		} finally {
+			refresh();
+			locked.current = false;
+			setBusy(false);
+		}
+	};
 	const act = async (path: string, body: unknown, agent = false) => {
 		if (locked.current) return;
 		locked.current = true;
@@ -68,6 +83,29 @@ const NotificationCard = ({
 	return (
 		<article className='notification-card' data-notification={item.id} tabIndex={-1}>
 			<div className='notification-header'>
+				<button
+					type='button'
+					className='notification-archive task-agent-archive'
+					aria-label='Archive notification'
+					title='Archive notification'
+					disabled={busy}
+					onClick={() => void archive()}
+				>
+					<svg
+						width='16'
+						height='16'
+						viewBox='0 0 24 24'
+						fill='none'
+						stroke='currentColor'
+						strokeWidth='2'
+						strokeLinecap='round'
+						strokeLinejoin='round'
+						aria-hidden='true'
+					>
+						<rect x='3' y='3' width='18' height='5' rx='1' />
+						<path d='M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8m-9 4h4' />
+					</svg>
+				</button>
 				<div className='ticket-details-heading'>
 					<nav className='ticket-details-key-row' aria-label='Ticket breadcrumb'>
 						{item.epic && (

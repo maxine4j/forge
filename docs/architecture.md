@@ -95,6 +95,12 @@ See [agent measurement semantics](agents.md#latest-turn-inference-performance) a
 
 ### Notification metadata
 
+Notification metadata includes an archival timestamp per occurrence. The owner-only
+archive endpoint hides archived rows from the feed while preserving them until the
+underlying condition resolves; a later recurrence receives a fresh identity. See
+[pending notifications](tickets.md#pending-notifications) and the
+[request lifecycle](agents.md#notification-request-lifecycle).
+
 SQLite's additive `ticket_notifications` table stores only source, condition,
 monotonic identity and first-observed UTC timestamp. Content and eligible actions
 are derived from current workflow records and managed-agent request snapshots;

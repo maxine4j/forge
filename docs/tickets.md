@@ -58,6 +58,12 @@ emphasis when positive. New identities pulse for two seconds after the initial
 successful snapshot; unchanged polling and removals do not pulse. Reduced motion
 disables animation.
 
+Each card has an Archive notification button. Archiving hides that occurrence from
+the shared feed and count without resolving its request or changing its workflow;
+the ticket Chat remains actionable. A resolved condition that recurs gets a new
+notification. See [notification metadata](architecture.md#notification-metadata)
+and [request lifecycle](agents.md#notification-request-lifecycle).
+
 The owner-only `GET /api/tickets/notifications` returns validated ticket/epic
 context, stable identity, first-observed timestamp and current controls. Each
 request counts once, including multi-question requests. Cards are globally oldest

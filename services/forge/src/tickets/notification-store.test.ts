@@ -13,11 +13,17 @@ test("additive metadata bootstrap preserves time across restart and gives recurr
 	let at = "2026-11-14T01:00:00.000Z";
 	try {
 		await database.initialize();
+		await database.run(
+			"CREATE TABLE ticket_notifications (id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, condition TEXT NOT NULL, at TEXT NOT NULL, UNIQUE(source,condition))",
+		);
 		let store = new NotificationStore(database, () => new Date(at));
 		await store.initialize();
 		await store.sync("workflow:TASK-1", ["failed:attempt-1"]);
+		await store.archive((await store.read())[0]!.id);
 		const original = await store.read();
+		expect(original[0]!.archivedAt).toBe(at);
 		at = "2026-11-14T02:00:00.000Z";
+		await store.archive(original[0]!.id);
 		await store.initialize();
 		await store.sync("workflow:TASK-1", ["failed:attempt-1"]);
 		expect(await store.read()).toEqual(original);
@@ -34,6 +40,9 @@ test("additive metadata bootstrap preserves time across restart and gives recurr
 		const recurring = (await store.read())[0]!;
 		expect(recurring.id).not.toBe(original[0]!.id);
 		expect(recurring.at).toBe(at);
+		expect(recurring.archivedAt).toBeNull();
+		await store.archive(original[0]!.id);
+		expect((await store.read())[0]!.archivedAt).toBeNull();
 		await store.sync("agent:one", ["approval-handle-1", "questions-handle-2"]);
 		await store.sync("agent:one", ["questions-handle-2"]);
 		expect((await store.read()).some((item) => item.condition === "approval-handle-1")).toBe(false);

@@ -192,6 +192,35 @@ test("ticket actions open and dismiss by touch within the phone viewport", async
 });
 
 for (const width of [1280, 390]) {
+	test(`notification archival retries and recovers focus at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 900 });
+		const state = await setupNotifications(page, [notificationFixture("1"), notificationFixture("2", "TASK-2")]);
+		let fail = true;
+		let posts = 0;
+		await page.route("**/api/tickets/notifications/*/archive", async (route) => {
+			posts++;
+			if (fail) return route.fulfill({ status: 503, json: { error: "ticket-unavailable" } });
+			state.items = state.items.filter((item) => !route.request().url().includes(`/${item.id}/archive`));
+			return route.fulfill({ status: 204 });
+		});
+		await page.getByRole("tab", { name: "Notifications (2)" }).click();
+		const cards = page.locator(".notification-card");
+		const button = cards.first().getByRole("button", { name: "Archive notification" });
+		const box = (await button.boundingBox())!;
+		const cardBox = (await cards.first().boundingBox())!;
+		expect(box.x + box.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+		await button.focus();
+		await button.press("Enter");
+		await expect(cards.first().getByRole("alert")).toBeVisible();
+		fail = false;
+		await button.press("Enter");
+		await expect(cards).toHaveCount(1);
+		await expect(cards.first()).toBeFocused();
+		await expect(page.getByRole("tab", { name: "Notifications (1)" })).not.toHaveClass(/notifications-pulse/);
+		expect(posts).toBe(2);
+		await cards.first().getByRole("button", { name: "Archive notification" }).click();
+		await expect(page.getByRole("heading", { name: "No pending notifications" })).toBeFocused();
+	});
 	test(`notifications inline questions retain drafts and failures, resolve with focus and preserve modal ancestry at ${width}px`, async ({
 		page,
 	}) => {

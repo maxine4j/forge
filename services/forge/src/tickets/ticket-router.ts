@@ -44,6 +44,12 @@ export class TicketRouter implements IHttpRouter {
 			if (!this.notifications) throw new TicketError("ticket-unavailable");
 			ctx.body = ticketNotificationsSchema.parse(await this.notifications.list(ctx.state.actor));
 		});
+		router.post("/api/tickets/notifications/:id/archive", async (ctx) => {
+			if (!this.notifications) throw new TicketError("ticket-unavailable");
+			const id = ctx.params["id"]!;
+			await this.notifications.archive(ctx.state.actor, id);
+			ctx.status = 204;
+		});
 		router.get("/api/tickets/:id/history", async (ctx) => {
 			const ticket = await this.service.get(ctx.state.actor, ctx.params["id"]!);
 			const query = ticketHistoryQuerySchema.safeParse(ctx.query);

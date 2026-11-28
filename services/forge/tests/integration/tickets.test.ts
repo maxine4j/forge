@@ -147,6 +147,23 @@ test("ticket HTTP create/read/edit/move persists and rejects invalid requests wi
 	).toBe(403);
 	expect((await request("tickets/notifications")).status).toBe(200);
 	expect(await (await request("tickets/notifications")).json()).toEqual([]);
+	for (const id of ["0", "abc", "-1", "1.5"]) {
+		expect((await request(`tickets/notifications/${id}/archive`, "POST")).status).toBe(400);
+	}
+	await notificationStore.sync("test", ["one"]);
+	const notificationId = (await notificationStore.read())[0]!.id;
+	expect((await request(`tickets/notifications/${notificationId}/archive`, "POST")).status).toBe(204);
+	expect((await request(`tickets/notifications/${notificationId}/archive`, "POST")).status).toBe(204);
+	expect((await request("tickets/notifications/999/archive", "POST")).status).toBe(204);
+	expect((await request("tickets/notifications/999/archive", "POST")).status).toBe(204);
+	expect(
+		(
+			await fetch(`http://127.0.0.1:${address.port}/api/tickets/notifications/1/archive`, {
+				method: "POST",
+				headers: { "x-webauth-user": "stranger", origin: "https://forge.example.com" },
+			})
+		).status,
+	).toBe(403);
 	expect(
 		(
 			await fetch(`http://127.0.0.1:${address.port}/api/tickets/notifications`, {

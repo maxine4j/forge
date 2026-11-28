@@ -25,11 +25,13 @@ export interface NotificationMetadata {
 	source: string;
 	condition: string;
 	at: string;
+	archivedAt: string | null;
 }
 export interface INotificationStore {
 	sync(source: string, conditions: string[], observedAt?: string): Promise<void>;
 	syncWorkflow(job: TicketWorkflowRecord, observedAt?: string): Promise<void>;
 	read(): Promise<NotificationMetadata[]>;
+	archive(id: string): Promise<void>;
 	workflows(): Promise<TicketWorkflowRecord[]>;
 }
 
@@ -44,6 +46,21 @@ export class NotificationStore implements INotificationStore {
 		await this.database.run(`CREATE TABLE IF NOT EXISTS ticket_notifications (
 			id INTEGER PRIMARY KEY AUTOINCREMENT, source TEXT NOT NULL, condition TEXT NOT NULL,
 			at TEXT NOT NULL, UNIQUE(source,condition))`);
+		const columns = z
+			.array(z.object({ name: z.string() }))
+			.parse(await this.database.all("PRAGMA table_info(ticket_notifications)"));
+		if (!columns.some(({ name }) => name === "archivedAt"))
+			await this.database.run("ALTER TABLE ticket_notifications ADD COLUMN archivedAt TEXT");
+	}
+	archive(id: string): Promise<void> {
+		const operation = this.tail.then(async () => {
+			await this.database.run("UPDATE ticket_notifications SET archivedAt=? WHERE id=? AND archivedAt IS NULL", [
+				this.now().toISOString(),
+				id,
+			]);
+		});
+		this.tail = operation.catch(() => {});
+		return operation;
 	}
 	sync(source: string, conditions: string[], observedAt?: string): Promise<void> {
 		const operation = this.tail.then(async () => {
@@ -67,13 +84,19 @@ export class NotificationStore implements INotificationStore {
 		const result: NotificationMetadata[] = [];
 		for (let offset = 0; ; offset += 500) {
 			const rows = await this.database.all(
-				"SELECT CAST(id AS TEXT) AS id,source,condition,at FROM ticket_notifications ORDER BY at,id LIMIT 500 OFFSET ?",
+				"SELECT CAST(id AS TEXT) AS id,source,condition,at,archivedAt FROM ticket_notifications ORDER BY at,id LIMIT 500 OFFSET ?",
 				[offset],
 			);
 			result.push(
 				...rows.map((row) =>
 					z
-						.object({ id: z.string(), source: z.string(), condition: z.string(), at: z.iso.datetime() })
+						.object({
+							id: z.string(),
+							source: z.string(),
+							condition: z.string(),
+							at: z.iso.datetime(),
+							archivedAt: z.iso.datetime().nullable(),
+						})
 						.parse(row),
 				),
 			);

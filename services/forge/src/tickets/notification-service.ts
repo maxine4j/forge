@@ -4,6 +4,7 @@ import type { IAgentThreadStore } from "../agents/agent-thread-store.ts";
 import type { IAccessService } from "../auth/access-service.ts";
 import type { Actor } from "../auth/types.ts";
 import type { IEpicStore } from "../epics/epic-store.ts";
+import { TicketError } from "./errors.ts";
 import { workflowNotificationKeys, type INotificationStore } from "./notification-store.ts";
 import type { ITicketService } from "./ticket-service.ts";
 import { ticketWorkflowSummary } from "./types.ts";
@@ -38,6 +39,7 @@ export class NotificationService {
 			this.store.workflows(),
 			this.store.read(),
 		]);
+		const visible = metadata.filter((item) => !item.archivedAt);
 		const result: TicketNotification[] = [];
 		for (const job of jobs) {
 			const ticket = tickets.find((ticket) => ticket.id === job.ticketId);
@@ -46,7 +48,7 @@ export class NotificationService {
 			const workflow = ticketWorkflowSummary(job);
 			const context = { ticket: { ...ticket, needsAttention: true as const }, epic, workflow };
 			const keys = workflowNotificationKeys(job, ticket.status);
-			for (const item of metadata.filter(
+			for (const item of visible.filter(
 				(item) => item.source === `workflow:${ticket.id}` && keys.includes(item.condition),
 			)) {
 				const plan = item.condition.startsWith("plan:");
@@ -72,7 +74,7 @@ export class NotificationService {
 			const agent = await this.agents.get(agentId);
 			if (!agent?.managed || agent.abandoned) continue;
 			for (const request of agent.requests) {
-				const item = metadata.find(
+				const item = visible.find(
 					(item) => item.source === `agent:${agentId}` && item.condition === request.id,
 				);
 				if (item) result.push({ ...context, id: item.id, at: item.at, kind: "request", agentId, request });
@@ -81,5 +83,10 @@ export class NotificationService {
 		return ticketNotificationsSchema.parse(
 			result.sort((a, b) => a.at.localeCompare(b.at) || Number(a.id) - Number(b.id)),
 		);
+	}
+	async archive(actor: Actor, id: string): Promise<void> {
+		this.access.assertOwner(actor);
+		if (!/^[0-9]+$/.test(id) || !/[1-9]/.test(id)) throw new TicketError("invalid-request");
+		await this.store.archive(id);
 	}
 }

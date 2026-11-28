@@ -4146,9 +4146,27 @@ summary {
 }
 .notification-header {
 	display: grid;
+	grid-template-columns: minmax(0, 1fr) auto;
 	gap: 6px;
 	padding-bottom: 12px;
 	border-bottom: 1px solid #30363d;
+}
+.notification-archive {
+	grid-column: 2;
+	grid-row: 1;
+	width: 36px;
+	height: 36px;
+	padding: 0;
+	display: grid;
+	place-items: center;
+}
+.notification-header .ticket-details-heading {
+	grid-column: 1;
+	grid-row: 1;
+	min-width: 0;
+}
+.notification-title {
+	grid-column: 1 / -1;
 }
 .notification-header .ticket-details-heading,
 .notification-header .ticket-details-key-row {
