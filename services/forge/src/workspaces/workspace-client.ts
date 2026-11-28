@@ -26,7 +26,7 @@ export interface IWorkspaceClient {
 	verify(record: WorkspaceRecord, requireIdle?: boolean): Promise<void>;
 	/** Removes only a clean owned checkout and the exact branch tip already reachable from main. */
 	removeMerged(record: WorkspaceRecord, candidate: string, preserveLocalFiles?: boolean): Promise<void>;
-	/** Discards owned ticket work after confirmed agent settlement. */
+	/** Discards owned ticket work after confirmed agent settlement and clears empty claims from incomplete allocations. */
 	removeAbandoned(record: WorkspaceRecord): Promise<void>;
 	/** Verified internal runtime path; never a public response field. */
 	location(record: WorkspaceRecord, requireIdle?: boolean): Promise<string>;
@@ -235,29 +235,15 @@ export class WorkspaceClient implements IWorkspaceClient {
 				.split("\n")
 				.find((line) => line.startsWith(`${branch} `))
 				?.slice(branch.length + 1);
-			const root = dirname(this.path(record));
+			const path = this.path(record);
+			const claim = this.claim(record);
+			const root = dirname(path);
 			if (!(await this.exists(root))) {
 				if (candidate || tip) throw new Error("Missing workspace ownership");
 				return;
 			}
 			await this.requireDirectory(root);
-			if (
-				!candidate
-				&& !tip
-				&& !(await this.exists(this.claim(record)))
-				&& !(await this.exists(this.path(record)))
-			)
-				return;
-			await this.requireClaim(record);
-			if (candidate) await this.base(record);
-			if (candidate && tip && tip !== candidate) throw new Error("Merged workspace branch changed");
-			const main = candidate
-				? gitShaSchema.parse((await this.git.run([...repo, "rev-parse", "refs/heads/main"])).trim())
-				: undefined;
-			if (candidate && main) await this.git.run([...repo, "merge-base", "--is-ancestor", candidate, main]);
-
-			const path = this.path(record);
-			const registeredPath = join(await this.files.realpath(dirname(path)), record.id);
+			const registeredPath = join(await this.files.realpath(root), record.id);
 			const worktrees = await this.git.run([...repo, "worktree", "list", "--porcelain", "-z"]);
 			const entries = worktrees.split("\0\0").map((entry) => entry.split("\0"));
 			const entry = entries.find(
@@ -266,6 +252,28 @@ export class WorkspaceClient implements IWorkspaceClient {
 			if (entries.some((other) => other !== entry && other.includes(`branch ${branch}`)))
 				throw new Error("Merged workspace branch is checked out elsewhere");
 			const exists = await this.exists(path);
+			if (!candidate && !tip && !entry && !exists) {
+				if (!(await this.exists(claim))) return;
+				const meta = await this.files.lstat(claim);
+				// A failed exclusive write can leave an empty claim before Git allocation begins.
+				if (
+					meta.isFile()
+					&& meta.size === 0
+					&& !record.baseSha
+					&& !(await this.exists(this.baseMarker(record)))
+				) {
+					await this.files.rm(claim, { force: true });
+					return;
+				}
+			}
+			await this.requireClaim(record);
+			if (candidate) await this.base(record);
+			if (candidate && tip && tip !== candidate) throw new Error("Merged workspace branch changed");
+			const main = candidate
+				? gitShaSchema.parse((await this.git.run([...repo, "rev-parse", "refs/heads/main"])).trim())
+				: undefined;
+			if (candidate && main) await this.git.run([...repo, "merge-base", "--is-ancestor", candidate, main]);
+
 			if (entry) {
 				if (
 					!tip

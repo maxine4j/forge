@@ -219,6 +219,9 @@ untracked files, and deletes the unmerged branch. It retains claim/path, reposit
 branch and linked-worktree ownership checks and rejects branches checked out
 elsewhere. Branch deletion uses its expected tip. Missing runtime resources succeed
 on retry, including a crash between checkout removal and branch deletion.
+An interrupted allocation can leave an empty claim file. Abandonment removes that
+marker when the base, branch, checkout path and Git registration are all absent.
+An existing unregistered checkout still requires manual investigation.
 Workspace metadata becomes archived; repositories, agent records, usage and
 credentials remain. The [ticket workflow](tickets.md#abandonment-and-restart)
 persists failures and retries at startup, on scheduler ticks and through reconciliation.
