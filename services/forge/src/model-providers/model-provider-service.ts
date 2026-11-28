@@ -17,6 +17,7 @@ import type { RelayMetrics } from "./ollama-relay-metrics.ts";
 export interface IModelProviderService {
 	relayMetrics(actor: Actor): Promise<RelayMetrics[]>;
 	health(actor: Actor): Promise<ModelProviderHealth[]>;
+	healthStatus(actor: Actor, id: string): Promise<ModelProviderHealth["status"]>;
 	list(actor: Actor): Promise<ModelProvider[]>;
 	create(actor: Actor, input: unknown): Promise<ModelProvider>;
 	update(actor: Actor, id: string, input: unknown): Promise<ModelProvider>;
@@ -56,16 +57,18 @@ export class ModelProviderService implements IModelProviderService {
 		return Promise.all(
 			providers
 				.filter((provider) => !provider.retired)
-				.map(async (provider) => {
-					let status: ModelProviderHealth["status"] = "unhealthy";
-					try {
-						status = await this.checkHealth(provider);
-					} catch {
-						/* Keep other results available. */
-					}
-					return { providerId: provider.id, status };
-				}),
+				.map(async (provider) => ({ providerId: provider.id, status: await this.probe(provider) })),
 		);
+	}
+	async healthStatus(actor: Actor, id: string): Promise<ModelProviderHealth["status"]> {
+		return this.probe(await this.require(actor, id));
+	}
+	private async probe(provider: ModelProvider): Promise<ModelProviderHealth["status"]> {
+		try {
+			return await this.checkHealth(provider);
+		} catch {
+			return "unhealthy";
+		}
 	}
 	async list(actor: Actor): Promise<ModelProvider[]> {
 		this.access.assertOwner(actor);

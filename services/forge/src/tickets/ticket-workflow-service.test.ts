@@ -143,6 +143,7 @@ function namedFixture(dispatchMode?: Parameters<typeof fixture>[0], quotaExhaust
 		maxConcurrentAgents: 1,
 	};
 	const records = new Map([planner, implementer].map((p) => [p.id, p]));
+	const checkHealth = vi.fn(async (_provider: ModelProvider): Promise<"healthy" | "unhealthy"> => "healthy");
 	const providers = new ModelProviderService(
 		{
 			list: async () => [...records.values()],
@@ -169,6 +170,9 @@ function namedFixture(dispatchMode?: Parameters<typeof fixture>[0], quotaExhaust
 			skills: [],
 			...(p.kind === "ollama" ? { supportsAutoReview: false as const } : {}),
 		}),
+		undefined,
+		undefined,
+		checkHealth,
 	);
 	const recordsById = new Map<string, TaskAgent>();
 	const taskAgents = new TaskAgentService(
@@ -209,7 +213,7 @@ function namedFixture(dispatchMode?: Parameters<typeof fixture>[0], quotaExhaust
 		});
 		await f.service.move(actor, ticket, { status: "todo" });
 	};
-	return { ...f, planner, implementer, providers, taskAgents, addAgent, ready };
+	return { ...f, planner, implementer, providers, taskAgents, addAgent, ready, checkHealth };
 }
 
 test("ticket avatars follow the workflow phase and retain retired assignees", async () => {
@@ -2175,6 +2179,29 @@ test("unlimited agent concurrency releases queued work while respecting provider
 	await f.taskAgents.save(actor, { name: agent.name, models: agent.models, maxConcurrentTickets: null }, agent.id);
 	await f.service.tick(actor);
 	expect(f.jobs.get(second.id)?.state).toBe("running");
+});
+
+test("unhealthy Ollama providers are skipped and queued tickets start after recovery", async () => {
+	const f = namedFixture();
+	const local = { providerId: f.implementer.id, model: "local" };
+	const localOnly = await f.addAgent("Local only", [local]);
+	const fallback = await f.addAgent("Fallback", [local, { providerId: f.planner.id, model: "test-model" }]);
+	const waiting = f.create();
+	const routed = f.create("TASK-2");
+	await f.ready(waiting, localOnly);
+	await f.ready(routed, fallback);
+
+	f.checkHealth.mockResolvedValue("unhealthy");
+	await f.service.tick(actor);
+	expect(f.checkHealth).toHaveBeenCalledExactlyOnceWith(f.implementer);
+	expect(f.jobs.get(waiting.id)).toMatchObject({ state: "queued" });
+	expect(f.jobs.get(waiting.id)?.reservation).toBeUndefined();
+	expect(f.jobs.get(routed.id)).toMatchObject({ state: "running", reservation: f.planner.id });
+	expect(f.agents.createTicketThread).toHaveBeenCalledOnce();
+
+	f.checkHealth.mockResolvedValue("healthy");
+	await f.service.tick(actor);
+	expect(f.jobs.get(waiting.id)).toMatchObject({ state: "running", reservation: f.implementer.id });
 });
 
 test("exhausted OpenAI quota routes new work to the next provider and queues cloud-only work", async () => {

@@ -322,9 +322,11 @@ or pending merge must settle before archiving.
 
 The serialized scheduler walks the assigned Agent's models in order. It skips
 retired providers, unresolved models, selections incompatible with ticket
-permissions, full providers and OpenAI while its reported Codex quota is
-exhausted. A phase waits in the queue while its Agent is full or every usable
-provider is busy. The scheduler continues scanning the board. If no model is
+permissions, full providers, Ollama providers whose [health check](#named-agents)
+does not report Healthy, and OpenAI while its reported Codex quota is exhausted.
+A phase waits in the queue while its Agent is full or none of its usable
+providers can accept work. The scheduler continues scanning the board and
+reevaluates queued phases on subsequent passes. If no model is
 usable, the phase exposes Retry setup. Before worktree or thread setup, the
 scheduler persists the chosen model and routing with a reservation that counts
 against both the [Agent's limit](#named-agents) and the
@@ -656,7 +658,8 @@ See [migration and recovery](development.md#named-provider-upgrades) and
 
 Model provider health shows every active provider, including unused providers. Opening
 the tab or selecting Refresh health checks the model list and shows Healthy, Unhealthy,
-or Usage limits reached. This is informational and does not affect editing or dispatch.
+or Usage limits reached. The scheduler uses the same Ollama health check when
+choosing a provider for a new reservation.
 See the [health API](foundation.md#model-providers) and [relay upgrade](development.md#ollama-relay).
 
 The fourth Tasks tab at `/tasks?view=agents` lists reusable configurations.

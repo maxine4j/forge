@@ -548,6 +548,15 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		return this.serialize(async () => {
 			let quota: Promise<boolean> | undefined;
 			const quotaExhausted = () => (quota ??= this.openAIQuotaExhausted());
+			const providerHealth = new Map<string, Promise<boolean>>();
+			const healthy = async (id: string) => {
+				const pending = providerHealth.get(id);
+				if (pending) return pending;
+				const check = this.providers?.healthStatus(actor, id).then((status) => status === "healthy");
+				if (!check) return true;
+				providerHealth.set(id, check);
+				return check;
+			};
 			for (const job of await this.store.list()) {
 				if (job.manualMergeSha) {
 					await this.reconcileManualMerge(actor, job).catch((err: unknown) => {
@@ -559,7 +568,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				if (!ticket || ticket.archivedAt || ticket.status === "backlog" || ticket.status === "done") continue;
 				if (job.state === "queued") {
 					if (!this.canDispatch(ticket)) continue;
-					const admitted = await this.admit(actor, ticket, job, quotaExhausted);
+					const admitted = await this.admit(actor, ticket, job, quotaExhausted, healthy);
 					if (!admitted) continue;
 					ticket = admitted;
 				}
@@ -839,6 +848,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		ticket: Ticket,
 		job: TicketWorkflowRecord,
 		quotaExhausted: () => Promise<boolean>,
+		healthy: (id: string) => Promise<boolean>,
 	): Promise<Ticket | undefined> {
 		const next = { ...job, providerSelectionError: undefined };
 		if (!next.reservation && !next.plannerId && !next.implementerId) {
@@ -860,7 +870,9 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 					return undefined;
 				usable = true;
 				if ((await this.store.countReservations(option.providerId)) >= option.limit) continue;
-				if (option.snapshot.configuration.kind === "openai" && (await quotaExhausted())) continue;
+				if (option.snapshot.configuration.kind === "openai") {
+					if (await quotaExhausted()) continue;
+				} else if (!(await healthy(option.providerId))) continue;
 				next[snapshotKey] = option.snapshot;
 				next.reservation = option.providerId;
 				break;
