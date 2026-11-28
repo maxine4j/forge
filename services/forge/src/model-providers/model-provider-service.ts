@@ -12,8 +12,10 @@ import type { Actor } from "../auth/types.ts";
 import { modelRates } from "../cost/api-pricing.ts";
 import { ModelProviderError } from "./errors.ts";
 import type { IModelProviderStore } from "./model-provider-store.ts";
+import type { RelayMetrics } from "./ollama-relay-metrics.ts";
 
 export interface IModelProviderService {
+	relayMetrics(actor: Actor): Promise<RelayMetrics[]>;
 	health(actor: Actor): Promise<ModelProviderHealth[]>;
 	list(actor: Actor): Promise<ModelProvider[]>;
 	create(actor: Actor, input: unknown): Promise<ModelProvider>;
@@ -42,7 +44,12 @@ export class ModelProviderService implements IModelProviderService {
 		private readonly wake: () => void = () => {},
 		private readonly checkHealth: (provider: ModelProvider) => Promise<ModelProviderHealth["status"]> = async () =>
 			"unhealthy",
+		private readonly readRelay: (providers: ModelProvider[]) => Promise<RelayMetrics[]> = async () => [],
 	) {}
+	async relayMetrics(actor: Actor): Promise<RelayMetrics[]> {
+		this.access.assertOwner(actor);
+		return this.readRelay(await this.store.list());
+	}
 	async health(actor: Actor): Promise<ModelProviderHealth[]> {
 		this.access.assertOwner(actor);
 		const providers = await this.store.list();

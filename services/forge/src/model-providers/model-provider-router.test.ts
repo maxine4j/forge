@@ -55,6 +55,10 @@ test("provider HTTP routes require owner/origin, expose safe records and return 
 		expect((await request("", "POST", {}, "owner", "https://other.test")).status).toBe(403);
 		expect(await (await request()).json()).toEqual([]);
 		expect((await request("/health", "GET", undefined, "other")).status).toBe(403);
+		expect((await request("/relay-metrics", "GET", undefined, "other")).status).toBe(403);
+		const relayMetrics = await request("/relay-metrics");
+		expect(relayMetrics.headers.get("cache-control")).toBe("no-store");
+		expect(await relayMetrics.json()).toEqual([]);
 		expect(await (await request("/health")).json()).toEqual([]);
 		expect((await request("", "POST", { name: "Secret", kind: "openai", loginId: "private" })).status).toBe(400);
 		expect(

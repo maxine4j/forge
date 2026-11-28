@@ -88,7 +88,8 @@ test("does not invoke the power probe when disabled", async () => {
 	const collector = createMacosCollector(
 		async (command) => {
 			commands.push(command);
-			if (command.endsWith("pmset")) return "Now drawing from 'Battery Power'\n -InternalBattery-0 75%; discharging";
+			if (command.endsWith("pmset"))
+				return "Now drawing from 'Battery Power'\n -InternalBattery-0 75%; discharging";
 			return "";
 		},
 		async () => null,

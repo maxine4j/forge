@@ -8,6 +8,10 @@ export class ModelProviderRouter implements IHttpRouter {
 	constructor(private readonly service: IModelProviderService) {}
 	create(): Router<{ actor: Actor }> {
 		const router = new Router<{ actor: Actor }>();
+		router.get("/api/model-providers/relay-metrics", async (ctx) => {
+			ctx.set("Cache-Control", "no-store");
+			ctx.body = await this.service.relayMetrics(ctx.state.actor);
+		});
 		router.get("/api/model-providers/health", async (ctx) => {
 			ctx.set("Cache-Control", "no-store");
 			ctx.body = await this.service.health(ctx.state.actor);

@@ -396,3 +396,7 @@ the view opens, and scheduler capacity updates while the tab is visible. Ollama
 endpoints are shown in Config. Reserved capacity can exceed the configured limit
 after a limit reduction. See [ticket scheduler metrics](tickets.md#agent-scheduler-metrics) and
 [agent usage](agents.md#agent-usage-overview).
+
+# Relay provider metrics
+
+The owner-only `GET /api/model-providers/relay-metrics` returns current relay snapshots for matching named Ollama providers with `Cache-Control: no-store`. Readings are not saved with provider settings. Provider cards show sample freshness and available macOS readings below recent usage. See [relay telemetry and retention](development.md#ollama-relay) and the [worker setup](../services/ollama-client/README.md).

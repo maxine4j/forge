@@ -417,7 +417,7 @@ macOS workers can include allowlisted hardware identity, operating system and
 Ollama versions, battery state, and combined CPU/GPU/ANE power in the private
 snapshot. GPU and power sampling is opt-in and requires passwordless privileges
 for the exact command described in the [worker guide](../services/ollama-client/README.md).
-Deploy the relay before upgrading workers that send the optional metadata.
+Deploy Forge and the relay before upgrading workers that send the optional metadata. Forge reads matching workers on demand through the private relay listener; see [provider metrics](foundation.md#relay-provider-metrics) and [worker setup](../services/ollama-client/README.md).
 See also [model providers](foundation.md#model-providers).
 
 Readiness checks for an installed local model. Metrics include the configured

@@ -59,6 +59,27 @@ export const modelProviderHealthSchema = z.object({
 	status: z.enum(["healthy", "unhealthy", "usage-limits-reached"]),
 });
 export const modelProviderHealthListSchema = z.array(modelProviderHealthSchema);
+export const relayMetricsListSchema = z.array(
+	z.object({
+		providerId: z.uuid(),
+		freshness: z.enum(["fresh", "stale", "offline", "unavailable"]),
+		receivedAt: z.string().nullable(),
+		macos: z
+			.object({
+				chipName: z.string().nullable(),
+				deviceModel: z.string().nullable(),
+				macosVersion: z.string().nullable(),
+				ollamaVersion: z.string().nullable(),
+				batteryPercent: z.number().nullable(),
+				powerWatts: z.number().nullable(),
+				powerSource: z.enum(["battery", "ac"]).nullable(),
+				gpuUtilization: z.number().nullable(),
+				memory: z.object({ total: z.number(), free: z.number() }).nullable(),
+			})
+			.optional(),
+	}),
+);
+export type RelayMetrics = z.infer<typeof relayMetricsListSchema>[number];
 export type ModelProviderHealth = z.infer<typeof modelProviderHealthSchema>;
 export type ModelProvider = z.infer<typeof modelProviderSchema>;
 export type ModelProviderInput = z.infer<typeof modelProviderInputSchema>;

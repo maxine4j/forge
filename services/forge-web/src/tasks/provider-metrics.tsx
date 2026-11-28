@@ -1,8 +1,10 @@
 import { costsSchema, type Costs } from "@forge/contracts";
 import {
 	modelProviderHealthListSchema,
+	relayMetricsListSchema,
 	type ModelProvider,
 	type ModelProviderHealth,
+	type RelayMetrics,
 } from "@forge/contracts/model-providers";
 import { ticketAgentMetricsSchema, type TicketAgentMetrics } from "@forge/contracts/tickets";
 import { useEffect, useState } from "react";
@@ -17,8 +19,17 @@ export function useProviderMetrics(api: IWorkspaceApi) {
 	const [health, setHealth] = useState<Result<ModelProviderHealth[]>>({ failed: false });
 	const [usage, setUsage] = useState<Result<Costs>>({ failed: false });
 	const [scheduler, setScheduler] = useState<Result<TicketAgentMetrics>>({ failed: false });
+	const [relay, setRelay] = useState<Result<RelayMetrics[]>>({ failed: false });
 	useEffect(() => {
 		let active = true;
+		let relayRequest = 0;
+		const readRelay = () => {
+			const request = ++relayRequest;
+			void api.read("model-providers/relay-metrics", relayMetricsListSchema).then(
+				(value) => { if (active && request === relayRequest) setRelay({ value, failed: false }); },
+				() => { if (active && request === relayRequest) setRelay((old) => ({ ...old, failed: true })); },
+			);
+		};
 		const readHealth = () =>
 			void api.read("model-providers/health", modelProviderHealthListSchema).then(
 				(value) => {
@@ -49,20 +60,23 @@ export function useProviderMetrics(api: IWorkspaceApi) {
 		readHealth();
 		readUsage();
 		readScheduler();
+		readRelay();
 		const interval = window.setInterval(() => {
 			if (!document.hidden) readScheduler();
 		}, 10000);
 		const visibility = () => {
-			if (!document.hidden) readScheduler();
+			if (!document.hidden) { readScheduler(); readRelay(); }
 		};
+		const relayInterval = window.setInterval(() => { if (!document.hidden) readRelay(); }, 15000);
 		document.addEventListener("visibilitychange", visibility);
 		return () => {
 			active = false;
 			window.clearInterval(interval);
+			window.clearInterval(relayInterval);
 			document.removeEventListener("visibilitychange", visibility);
 		};
 	}, [api]);
-	return { health, usage, scheduler };
+	return { health, usage, scheduler, relay };
 }
 
 const stateLabel = <T,>(result: Result<T>) =>
@@ -97,6 +111,8 @@ export function ProviderMetrics({
 									: undefined;
 					const scheduler = metrics.scheduler.value?.providers.find((row) => row.providerId === provider.id);
 					const usage = metrics.usage.value?.providers.find((row) => row.id === provider.id);
+					const relay = metrics.relay.value?.find((row) => row.providerId === provider.id);
+					const mac = relay?.macos;
 					const running = scheduler?.running ?? 0;
 					const reserved = scheduler?.reserved ?? 0;
 					return (
@@ -175,6 +191,19 @@ export function ProviderMetrics({
 									</>
 								)}
 								{usage && usage.incompleteTokens > 0 && <p>Token usage is incomplete</p>}
+								{relay && <p>Relay metrics: {metrics.relay.failed ? "stale" : relay.freshness}{relay.receivedAt && ` · ${new Date(relay.receivedAt).toLocaleString()}`}</p>}
+								{mac && <>
+									<h4>macOS</h4>
+									<p>GPU usage: {mac.gpuUtilization == null ? "Unavailable" : `${mac.gpuUtilization}%`}</p>
+									<p>System memory used / total: {mac.memory ? `${((mac.memory.total - mac.memory.free) / 1073741824).toFixed(1)} / ${(mac.memory.total / 1073741824).toFixed(1)} GiB` : "Unavailable"}</p>
+									<p>Chip: {mac.chipName ?? "Unavailable"}</p>
+									<p>Device model: {mac.deviceModel ?? "Unavailable"}</p>
+									{mac.batteryPercent != null && <p>Battery: {mac.batteryPercent}%</p>}
+									<p>Power source: {mac.powerSource ?? "Unavailable"}</p>
+									<p>CPU / GPU / ANE power: {mac.powerWatts == null ? "Unavailable" : `${mac.powerWatts} W`}</p>
+									<p>macOS version: {mac.macosVersion ?? "Unavailable"}</p>
+									<p>Ollama version: {mac.ollamaVersion ?? "Unavailable"}</p>
+								</>}
 							</div>
 						</article>
 					);

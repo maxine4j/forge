@@ -48,6 +48,7 @@ import { migrateModelProviders } from "./model-providers/model-provider-migratio
 import { ModelProviderRouter } from "./model-providers/model-provider-router.ts";
 import { ModelProviderService } from "./model-providers/model-provider-service.ts";
 import { ModelProviderStore } from "./model-providers/model-provider-store.ts";
+import { readRelayMetrics } from "./model-providers/ollama-relay-metrics.ts";
 import { pollOllamaRelay } from "./model-providers/ollama-relay-poller.ts";
 import { ActProcess } from "./pipelines/act-process.ts";
 import { GitSnapshotClient } from "./pipelines/git-snapshot-client.ts";
@@ -341,6 +342,7 @@ export const start = async (lifecycle: ILifecycle, options: StartOptions = {}): 
 			() => usage.quotaExhausted(),
 			sleep,
 		),
+		(rows) => readRelayMetrics(config.ollamaRelayOrigin, rows, fetch),
 	);
 	const tracker = new AgentExecutionTracker(wakeScheduler);
 	const agents = new AgentService(
