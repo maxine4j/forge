@@ -3414,7 +3414,15 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 							...(revision === 2 && phase === "planning" ? plans.slice(0, 1) : plans),
 						]
 					: historical
-						? [{ id: "previous", role: "assistant", text: "Previous implementation transcript" }]
+						? [
+								{ id: "previous", role: "assistant", text: "Previous implementation transcript" },
+								{
+									id: "previous-json",
+									role: "assistant",
+									text: '{"result":{"count":2}}',
+									finalAnswer: true,
+								},
+							]
 						: activity,
 				// A stale planner callback must never acquire live controls in the combined view.
 				requests:
@@ -3511,6 +3519,10 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	await expect
 		.poll(async () => Math.abs((await currentMessage.boundingBox())!.y - beforePrepend))
 		.toBeLessThanOrEqual(1);
+	const restoredJson = modal.getByRole("button", { name: "▸ result: {1}" });
+	await expect(restoredJson).toBeAttached();
+	await restoredJson.click();
+	await expect(modal.getByText("count", { exact: true })).toBeVisible();
 	await expect(latest).not.toHaveClass(/agent-scroll-unseen/);
 	await expect(modal.getByText("Retained planning message 0", { exact: true })).toHaveCount(0);
 	await history.evaluate((element) => {

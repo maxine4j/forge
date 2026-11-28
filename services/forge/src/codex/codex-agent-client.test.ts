@@ -783,6 +783,7 @@ test("starts independent threads without an inner sandbox, streams items, interr
 		status: "interrupted",
 		items: [{ text: "Previous answer" }],
 	});
+	expect(client.read(id).items[0]?.finalAnswer).toBeUndefined();
 	expect(rpc).toHaveBeenCalledWith(
 		"thread/resume",
 		expect.objectContaining({
@@ -887,7 +888,12 @@ test("history loads bounded item pages newest first and retains completion after
 		nextCursor: null,
 	});
 	rpc.mockResolvedValueOnce({
-		data: [{ turnId: "done", item: { id: "result", type: "agentMessage", text: "FORGE_RESULT\ncomplete" } }],
+		data: [
+			{
+				turnId: "done",
+				item: { id: "result", type: "agentMessage", phase: "final_answer", text: "FORGE_RESULT\ncomplete" },
+			},
+		],
 		nextCursor: "older-items",
 	});
 	rpc.mockResolvedValueOnce({
@@ -910,6 +916,7 @@ test("history loads bounded item pages newest first and retains completion after
 	expect(view).toMatchObject({ status: "completed", turnId: "done", truncated: true });
 	expect(view.items.map((item) => item.id)).toEqual(["user", "tool", "result"]);
 	expect(view.items.at(-1)?.text).toBe("FORGE_RESULT\ncomplete");
+	expect(view.items.at(-1)?.finalAnswer).toBe(true);
 	expect(view.items[1]?.text).toHaveLength(32000);
 	expect(rpc).toHaveBeenCalledWith("thread/turns/list", {
 		threadId: id,
