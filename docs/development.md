@@ -123,6 +123,9 @@ project chat history with clarification requests. Tasks includes pending plan no
 a running ticket conversation and sample epics
 and ticket planning conversations. Board settings includes two
 sample running containers with resource statistics.
+Tasks → Agents shows quota-limited OpenAI and three sample MacBooks behind the
+Ollama relay. The workers are busy, idle, and offline, with varied capabilities,
+reservations, and recent usage. See [scheduler metrics](tickets.md#agent-scheduler-metrics).
 Commit history opens shareable commit pages with parent navigation, structured
 replacement hunks, renamed files, mode changes and binary placeholders. Preview
 fixtures support unified/split rendering and whitespace filtering. Commit browser

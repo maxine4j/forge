@@ -16,7 +16,7 @@ import {
 } from "@forge/contracts";
 import { agentThreadsSchema, agentViewSchema, agentOptionsSchema, agentFilesSchema } from "@forge/contracts/agents";
 import { dockerOverviewSchema } from "@forge/contracts/docker";
-import { modelProvidersSchema } from "@forge/contracts/model-providers";
+import { modelProviderHealthListSchema, modelProvidersSchema } from "@forge/contracts/model-providers";
 import {
 	pullRequestsSchema,
 	pullRequestSchema,
@@ -32,6 +32,7 @@ import {
 	ticketWorkflowSchema,
 	ticketHistorySchema,
 	ticketNotificationsSchema,
+	ticketAgentMetricsSchema,
 } from "@forge/contracts/tickets";
 import { createServer, resolveConfig } from "vite";
 import type { ViteDevServer } from "vite";
@@ -90,7 +91,35 @@ test("mock providers expose named cards and provider-specific catalogs", async (
 			}),
 		]),
 	);
-	expect(providers.map((p) => p.kind)).toEqual(["openai", "ollama"]);
+	expect(providers.map(({ kind }) => kind)).toEqual(["openai", "ollama", "ollama", "ollama"]);
+	const [openai, busy, idle, offline] = providers;
+	for (const worker of [busy!, idle!, offline!]) {
+		expect(worker.name).toMatch(/^MacBook /);
+		expect(worker.endpoint).toMatch(/^http:\/\/ollama-relay:8081\/[^/]+\/openai\/v1$/);
+		const options = agentOptionsSchema.parse(await read(`/api/model-providers/${worker.id}/model-options`));
+		expect(options.models.length).toBeGreaterThan(0);
+	}
+	const health = modelProviderHealthListSchema.parse(await read("/api/model-providers/health"));
+	expect(health).toEqual([
+		{ providerId: openai!.id, status: "usage-limits-reached" },
+		{ providerId: busy!.id, status: "healthy" },
+		{ providerId: idle!.id, status: "healthy" },
+		{ providerId: offline!.id, status: "unhealthy" },
+	]);
+	const metrics = ticketAgentMetricsSchema.parse(await read("/api/tickets/agent-metrics"));
+	expect(metrics.providers).toEqual([
+		{ providerId: openai!.id, running: 1, reserved: 1 },
+		{ providerId: busy!.id, running: 1, reserved: busy!.maxConcurrentAgents },
+	]);
+	const costs = costsSchema.parse(await read("/api/costs?range=-7d"));
+	expect(costs.providers).toMatchObject([
+		{ id: openai!.id, turns: costs.providerTotals.openai.turns },
+		{ id: busy!.id, turns: costs.providerTotals.ollama.turns, incompleteTokens: 1 },
+		{ id: idle!.id, turns: 0 },
+		{ id: offline!.id, turns: 0 },
+	]);
+	expect(costs.providerTotals.ollama.turns).toBeGreaterThan(0);
+	expect(costs.providerTotals.openai.turns + costs.providerTotals.ollama.turns).toBe(costs.totals.turns);
 	const catalog = agentOptionsSchema.parse(await read(`/api/model-providers/${providers[0]!.id}/model-options`));
 	expect(catalog.models).toHaveLength(1);
 });

@@ -1,6 +1,7 @@
 import { costRangeSchema, defaultCostRange, type Costs } from "@forge/contracts";
 import type { AgentView } from "@forge/contracts/agents";
 import type { DockerOverview } from "@forge/contracts/docker";
+import type { ModelProvider, ModelProviderHealth } from "@forge/contracts/model-providers";
 import { defaultForgeSettings } from "@forge/contracts/settings";
 import { defaultBoardSettings, type EpicDetail, type Ticket } from "@forge/contracts/tickets";
 import type { Plugin } from "vite";
@@ -9,6 +10,48 @@ import { costFixture, phaseFixtures } from "./cost-fixture.ts";
 import { historyFixture } from "./history-fixture.ts";
 
 const date = "2026-11-02T00:00:00.000Z";
+const [openaiProvider, busyMacBook, idleMacBook, offlineMacBook] = [
+	{
+		id: "123e4567-e89b-42d3-a456-426614174099",
+		name: "OpenAI",
+		kind: "openai",
+		retired: false,
+		maxConcurrentAgents: 3,
+	},
+	{
+		id: "123e4567-e89b-42d3-a456-426614174098",
+		name: "MacBook Pro M4",
+		kind: "ollama",
+		endpoint: "http://ollama-relay:8081/macbook-pro-m4/openai/v1",
+		retired: false,
+		maxConcurrentAgents: 2,
+		contextWindow: 65_536,
+		supportedConcurrency: 4,
+		comparisonModel: "gpt-5.4",
+	},
+	{
+		id: "123e4567-e89b-42d3-a456-426614174097",
+		name: "MacBook Pro M3",
+		kind: "ollama",
+		endpoint: "http://ollama-relay:8081/macbook-pro-m3/openai/v1",
+		retired: false,
+		maxConcurrentAgents: 2,
+		contextWindow: 32_768,
+		supportedConcurrency: 2,
+	},
+	{
+		id: "123e4567-e89b-42d3-a456-426614174096",
+		name: "MacBook Air M2",
+		kind: "ollama",
+		endpoint: "http://ollama-relay:8081/macbook-air-m2/openai/v1",
+		retired: false,
+		maxConcurrentAgents: 1,
+		contextWindow: 16_384,
+		supportedConcurrency: 1,
+	},
+] as const satisfies readonly ModelProvider[];
+const relayProviders = [busyMacBook, idleMacBook, offlineMacBook];
+
 const costCutoff = (url: URL) => {
 	const range = costRangeSchema.safeParse(url.searchParams.get("range")).data ?? defaultCostRange;
 	return Date.parse(date) + Number.parseInt(range, 10) * (range.endsWith("hr") ? 3_600_000 : 86_400_000);
@@ -20,9 +63,9 @@ const previewUsage = (turns: number) =>
 		(1.17 * turns) / 8,
 		(0.075 * turns) / 8,
 	);
-const previewProviders = (usage: ReturnType<typeof previewUsage>): Pick<Costs, "providers" | "providerTotals"> => {
-	const { input, cached, output, turns, localCurrencies } = usage;
-	const openai = {
+const previewProviderUsage = (turns: number) => {
+	const { input, cached, output, localCurrencies } = previewUsage(turns);
+	return {
 		input,
 		cached,
 		output,
@@ -31,35 +74,45 @@ const previewProviders = (usage: ReturnType<typeof previewUsage>): Pick<Costs, "
 		incomplete: 0,
 		incompleteTokens: 0,
 	};
+};
+const previewProviders = (turns: number): Pick<Costs, "providers" | "providerTotals"> => {
+	const localTurns = Math.floor(turns / 4);
+	const openai = previewProviderUsage(turns - localTurns);
+	const idleUsage = { ...previewProviderUsage(0), weeklySavedPercent: 0, incompleteWeekly: 0 };
+	const incomplete = localTurns > 0 ? 1 : 0;
 	const ollama = {
-		input: 0,
-		cached: 0,
-		output: 0,
-		turns: 0,
-		apiAud: 0,
-		incomplete: 0,
-		incompleteTokens: 0,
-		weeklySavedPercent: 0,
-		incompleteWeekly: 0,
+		...previewProviderUsage(localTurns),
+		incomplete,
+		incompleteTokens: incomplete,
+		weeklySavedPercent: previewUsage(localTurns).weeklyUsagePercent,
+		incompleteWeekly: incomplete,
 	};
+	const localShare = turns ? (100 * localTurns) / turns : 0;
 	return {
 		providerTotals: { openai, ollama },
 		providers: [
 			{
-				id: "123e4567-e89b-42d3-a456-426614174099",
-				name: "OpenAI",
-				kind: "openai",
+				id: openaiProvider.id,
+				name: openaiProvider.name,
+				kind: openaiProvider.kind,
 				current: true,
-				workSharePercent: turns ? 100 : 0,
+				workSharePercent: turns ? 100 - localShare : 0,
 				...openai,
 			},
 			{
-				id: "123e4567-e89b-42d3-a456-426614174098",
-				name: "Local Ollama",
-				kind: "ollama",
-				workSharePercent: 0,
+				id: busyMacBook.id,
+				name: busyMacBook.name,
+				kind: busyMacBook.kind,
+				workSharePercent: localShare,
 				...ollama,
 			},
+			...[idleMacBook, offlineMacBook].map(({ id, name, kind }) => ({
+				id,
+				name,
+				kind,
+				workSharePercent: 0,
+				...idleUsage,
+			})),
 		],
 	};
 };
@@ -164,48 +217,47 @@ export class MockApi implements IMockApi {
 		const implementer = { name: "Local implementer", avatarColour: "Mint", avatarSymbol: "Terminal" } as const;
 		this.routes.set("/api/projects", () => projects);
 		this.routes.set("/api/settings", () => defaultForgeSettings);
-		this.routes.set("/api/tickets/agent-metrics", () => ({ providers: [], agents: [] }));
-		this.routes.set("/api/model-providers/health", () => [
-			{ providerId: "123e4567-e89b-42d3-a456-426614174099", status: "healthy" },
-			{ providerId: "123e4567-e89b-42d3-a456-426614174098", status: "healthy" },
+		this.routes.set("/api/tickets/agent-metrics", () => ({
+			providers: [
+				{ providerId: openaiProvider.id, running: 1, reserved: 1 },
+				{ providerId: busyMacBook.id, running: 1, reserved: busyMacBook.maxConcurrentAgents },
+			],
+			agents: [],
+		}));
+		this.routes.set("/api/model-providers/health", (): ModelProviderHealth[] => [
+			{ providerId: openaiProvider.id, status: "usage-limits-reached" },
+			{ providerId: busyMacBook.id, status: "healthy" },
+			{ providerId: idleMacBook.id, status: "healthy" },
+			{ providerId: offlineMacBook.id, status: "unhealthy" },
 		]);
-		this.routes.set("/api/model-providers", () => [
-			{
-				id: "123e4567-e89b-42d3-a456-426614174099",
-				name: "OpenAI",
-				kind: "openai",
-				retired: false,
-				maxConcurrentAgents: 1,
-			},
-			{
-				id: "123e4567-e89b-42d3-a456-426614174098",
-				name: "Local Ollama",
-				kind: "ollama",
-				retired: false,
-				maxConcurrentAgents: 1,
-				endpoint: "http://ollama/v1",
-				comparisonModel: "gpt-5.4",
-			},
-		]);
+		this.routes.set("/api/model-providers", () => [openaiProvider, ...relayProviders]);
+		for (const provider of relayProviders) {
+			this.routes.set(`/api/model-providers/${provider.id}/model-options`, () => ({
+				models: [{ id: "local:latest", name: "local:latest", isDefault: true }],
+				skills: [],
+				defaultModel: "local:latest",
+				supportsAutoReview: false,
+			}));
+		}
 		this.routes.set("/api/task-agents", () => [
 			{
 				id: "123e4567-e89b-42d3-a456-426614174090",
 				...planner,
 				models: [
 					{
-						providerId: "123e4567-e89b-42d3-a456-426614174099",
+						providerId: openaiProvider.id,
 						model: "preview-model",
 						reasoningEffort: "high",
 					},
-					{ providerId: "123e4567-e89b-42d3-a456-426614174098", model: "local:latest" },
-					{ providerId: "123e4567-e89b-42d3-a456-426614174098", model: "local:backup" },
+					{ providerId: busyMacBook.id, model: "local:latest" },
+					{ providerId: idleMacBook.id, model: "local:latest" },
 				],
 				retired: false,
 			},
 			{
 				id: "123e4567-e89b-42d3-a456-426614174091",
 				...implementer,
-				models: [{ providerId: "123e4567-e89b-42d3-a456-426614174098", model: "local:latest" }],
+				models: [{ providerId: busyMacBook.id, model: "local:latest" }],
 				retired: false,
 			},
 		]);
@@ -251,7 +303,7 @@ export class MockApi implements IMockApi {
 						return { ...row, ...summary, phases: phaseFixtures(summary) };
 					}),
 				),
-				...previewProviders(account),
+				...previewProviders(account.turns),
 				totals: account,
 				chats,
 				ticketEstimates: totals,
@@ -347,13 +399,7 @@ export class MockApi implements IMockApi {
 				],
 				skills: [{ name: "review", description: "Review changes and check behavior" }],
 			});
-			this.routes.set("/api/model-providers/123e4567-e89b-42d3-a456-426614174099/model-options", agentOptions);
-			this.routes.set("/api/model-providers/123e4567-e89b-42d3-a456-426614174098/model-options", () => ({
-				models: [{ id: "local:latest", name: "local:latest", isDefault: true }],
-				skills: [],
-				defaultModel: "local:latest",
-				supportsAutoReview: false,
-			}));
+			this.routes.set(`/api/model-providers/${openaiProvider.id}/model-options`, agentOptions);
 			this.routes.set(`/api/agents/${agent.id}/options`, agentOptions);
 			this.routes.set(`/api/agents/${agent.id}/files`, () => ["src/main.ts"]);
 			this.routes.set(`/api/agents/${agent.id}`, () => ({
@@ -468,7 +514,7 @@ export class MockApi implements IMockApi {
 				output: index >= 22 ? 2624 : 0,
 			}));
 			const cost: Costs = {
-				...previewProviders(usage),
+				...previewProviders(usage.turns),
 				ticketEstimates: usage,
 				chats: costFixture({ input: 0, cached: 0, output: 0, turns: 0 }),
 				quotaAttribution: [{ bucketId: "codex", consumption: 2, allocated: 1.17, unallocated: 0.83 }],
