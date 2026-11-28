@@ -9,6 +9,7 @@ The documents below define Forge requirements. Update the relevant document when
 ## Working rules
 
 - Use `apply_patch` for edits. Run `nvm use` from the repository root before Node.js commands.
+- Add a manual refresh button to a UI only when the user specifically requests one. Browsers already provide page reload.
 - Use the pinned Node.js 24, pnpm, TypeScript, Vitest, Playwright, and Oxc toolchain. Ask the owner before adding third-party dependencies.
 - Keep backend side effects behind injected interfaces. Use the workspace infrastructure package for filesystem operations, YAML, timers, and logging.
 - Keep credentials out of API responses and preserve persistent data and credentials during resource removal.

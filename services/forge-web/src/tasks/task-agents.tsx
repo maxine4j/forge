@@ -94,6 +94,7 @@ export function TaskAgents({
 	return (
 		<section className='forge-settings task-agent-catalog' aria-label='Agents'>
 			<ProviderMetrics providers={catalog.providers} metrics={metrics} />
+			<h2 className='task-agent-section-title'>Agents</h2>
 			{!catalog.agents.length && <p>No agents configured.</p>}
 			{creating && (
 				<AgentEditor

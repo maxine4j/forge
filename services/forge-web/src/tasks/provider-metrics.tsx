@@ -5,15 +5,15 @@ import {
 	type ModelProviderHealth,
 } from "@forge/contracts/model-providers";
 import { ticketAgentMetricsSchema, type TicketAgentMetrics } from "@forge/contracts/tickets";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import ollamaIcon from "../assets/ollama.svg";
 import { InterfaceIcon } from "../navigation/interface-icon.tsx";
 
 type Result<T> = { value?: T; failed: boolean };
 
 export function useProviderMetrics(api: IWorkspaceApi) {
-	const refreshRef = useRef<() => void>(() => {});
 	const [health, setHealth] = useState<Result<ModelProviderHealth[]>>({ failed: false });
 	const [usage, setUsage] = useState<Result<Costs>>({ failed: false });
 	const [scheduler, setScheduler] = useState<Result<TicketAgentMetrics>>({ failed: false });
@@ -46,13 +46,9 @@ export function useProviderMetrics(api: IWorkspaceApi) {
 					if (active) setScheduler((old) => ({ ...old, failed: true }));
 				},
 			);
-		const refresh = () => {
-			readHealth();
-			readUsage();
-			readScheduler();
-		};
-		refreshRef.current = refresh;
-		refresh();
+		readHealth();
+		readUsage();
+		readScheduler();
 		const interval = window.setInterval(() => {
 			if (!document.hidden) readScheduler();
 		}, 10000);
@@ -64,10 +60,9 @@ export function useProviderMetrics(api: IWorkspaceApi) {
 			active = false;
 			window.clearInterval(interval);
 			document.removeEventListener("visibilitychange", visibility);
-			refreshRef.current = () => {};
 		};
 	}, [api]);
-	return { health, usage, scheduler, refresh: useCallback(() => refreshRef.current(), []) };
+	return { health, usage, scheduler };
 }
 
 const stateLabel = <T,>(result: Result<T>) =>
@@ -87,10 +82,7 @@ export function ProviderMetrics({
 	const active = providers.filter((provider) => !provider.retired);
 	return (
 		<section aria-label='Model providers'>
-			<h3>Model providers</h3>
-			<button type='button' onClick={metrics.refresh}>
-				Refresh metrics
-			</button>
+			<h2 className='task-agent-section-title'>Model providers</h2>
 			{!active.length && <p>Add a model provider in Config to configure agents.</p>}
 			<div className='provider-metrics-grid'>
 				{active.map((provider) => {
@@ -111,10 +103,14 @@ export function ProviderMetrics({
 						<article className='account-card provider-metrics-card' key={provider.id}>
 							<div className='provider-metrics-heading'>
 								<div className='provider-metrics-name'>
-									<span role='img' aria-label={provider.kind === "openai" ? "OpenAI" : "Ollama"}>
-										<InterfaceIcon name={provider.kind === "openai" ? "cloud" : "laptop"} />
-									</span>
-									<h4>{provider.name}</h4>
+									{provider.kind === "ollama" ? (
+										<img src={ollamaIcon} alt='Ollama' width='16' height='16' />
+									) : (
+										<span role='img' aria-label='OpenAI'>
+											<InterfaceIcon name='cloud' />
+										</span>
+									)}
+									<h3>{provider.name}</h3>
 								</div>
 								<span className='provider-metrics-health'>
 									<span
@@ -148,7 +144,9 @@ export function ProviderMetrics({
 							{provider.compactionThresholdTokens && (
 								<p>Compaction threshold: {formatTokens(provider.compactionThresholdTokens)} tokens</p>
 							)}
-							<h5>Last 7 days {metrics.usage.value && metrics.usage.failed && "(Stale)"}</h5>
+							<h4 className='provider-metrics-period'>
+								Last 7 days {metrics.usage.value && metrics.usage.failed && "(Stale)"}
+							</h4>
 							{!metrics.usage.value ? (
 								<p>{stateLabel(metrics.usage)}</p>
 							) : !usage ? (

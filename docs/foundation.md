@@ -384,7 +384,8 @@ eval or inline style attributes. Browser validation configures Zod's supported
 Tasks → Agents shows each active provider's type icon, name, and health in the
 card header. The card shows configured ticket capacity, capabilities, and recent
 usage alongside Agent queues. Token counts use compact suffixes, and the Input
-line includes the cached share when input is positive. Ollama endpoints are shown
-in Config. Reserved capacity can exceed the configured limit after a limit
-reduction. See [ticket scheduler metrics](tickets.md#agent-scheduler-metrics) and
+line includes the cached share when input is positive. Health and usage load when
+the view opens, and scheduler capacity updates while the tab is visible. Ollama
+endpoints are shown in Config. Reserved capacity can exceed the configured limit
+after a limit reduction. See [ticket scheduler metrics](tickets.md#agent-scheduler-metrics) and
 [agent usage](agents.md#agent-usage-overview).

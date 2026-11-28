@@ -16,6 +16,7 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	const modelReads: string[] = [];
 	let healthReads = 0;
 	let schedulerReads = 0;
+	let healthFails = false;
 	let usageFails = false;
 	let schedulerFails = false;
 	let sparse = false;
@@ -68,7 +69,7 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 			if (path === "/api/task-agents" && method === "GET") return route.fulfill({ json: agent ? [agent] : [] });
 			if (path === "/api/model-providers/health") {
 				healthReads++;
-				if (healthReads === 3) return route.fulfill({ status: 503 });
+				if (healthFails) return route.fulfill({ status: 503 });
 				return route.fulfill({
 					json: [
 						{ providerId: openai, status: "healthy" },
@@ -147,6 +148,9 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	await tabs.first().press("End");
 	await expect(page).toHaveURL("/tasks?view=agents");
 	const health = page.getByRole("region", { name: "Model providers" });
+	await expect(health.getByRole("heading", { name: "Model providers", level: 2 })).toBeVisible();
+	await expect(page.getByRole("heading", { name: "Agents", level: 2, exact: true })).toBeVisible();
+	await expect(health.getByRole("button", { name: "Refresh metrics" })).toHaveCount(0);
 	const cloudCard = health
 		.getByRole("article")
 		.filter({ has: page.getByRole("heading", { name: "OpenAI", exact: true }) });
@@ -198,29 +202,25 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 			columns,
 		);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-		await health.getByRole("button", { name: "Refresh metrics" }).focus();
-		await expect(health.getByRole("button", { name: "Refresh metrics" })).toBeFocused();
 	}
 	await page.setViewportSize({ width: 1280, height: 900 });
-	await health.getByRole("button", { name: "Refresh metrics" }).click();
-	await expect(health).toContainText("Stale");
-	await expect(
-		page.getByRole("group", { name: "Agent actions" }).getByRole("button", { name: "Create agent" }),
-	).toBeEnabled();
-	await health.getByRole("button", { name: "Refresh metrics" }).click();
-	await expect(health).toContainText("Healthy");
-	usageFails = true;
 	schedulerFails = true;
-	await health.getByRole("button", { name: "Refresh metrics" }).click();
+	await page.clock.fastForward(10_000);
 	await expect(health.getByText("Running 2 / 1 (Stale)")).toBeVisible();
-	await expect(health.getByText("Last 7 days (Stale)").first()).toBeVisible();
-	usageFails = false;
 	schedulerFails = false;
 	sparse = true;
-	await health.getByRole("button", { name: "Refresh metrics" }).click();
-	await expect(health.getByText("Running 0 / 1").first()).toBeVisible();
+	await page.clock.fastForward(10_000);
+	await expect(cloudCard.getByText("Running 0 / 1", { exact: true })).toBeVisible();
 	sparse = false;
+	healthFails = true;
+	usageFails = true;
 	await page.reload();
+	await expect(cloudCard.getByText("Unavailable", { exact: true })).toHaveCount(2);
+	healthFails = false;
+	usageFails = false;
+	await page.reload();
+	await expect(cloudCard.getByText("Healthy", { exact: true })).toBeVisible();
+	await expect(cloudCard.getByText("Input: 1.3m (80% cached)", { exact: true })).toBeVisible();
 	await expect(tabs.last()).toHaveAttribute("aria-selected", "true");
 	await page.getByRole("group", { name: "Agent actions" }).getByRole("button", { name: "Create agent" }).click();
 	await page.getByLabel("Name", { exact: true }).fill("Reviewer");
