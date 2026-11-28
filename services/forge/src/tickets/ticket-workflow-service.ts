@@ -41,6 +41,7 @@ import {
 	emergencyHandoverSteer,
 	ticketFreshWorkPrompt,
 	ticketFinalizationPrompt,
+	ticketIncompleteContinuationPrompt,
 	type ITicketPrompts,
 } from "./ticket-prompts.ts";
 import type { ITicketStore } from "./ticket-store.ts";
@@ -916,6 +917,10 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		let id = planning ? job.plannerId : job.implementerId;
 		this.settingUp.add(current.id);
 		try {
+			if (!id && job.incompleteRetry?.pendingSourceTurnId) {
+				await this.store.save({ ...job, state: "uncertain" });
+				return;
+			}
 			if (!id) {
 				const view = await this.agents.createTicketThread(
 					actor,
@@ -967,7 +972,20 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 					return;
 				}
 			}
-			const priorTurn = (await this.agents.get(actor, id)).thread.turnId;
+			const currentThread = (await this.agents.get(actor, id)).thread;
+			const priorTurn = currentThread.turnId;
+			const continuation = job.incompleteRetry?.pendingSourceTurnId;
+			if (
+				continuation
+				&& (job.incompleteRetry?.threadId !== id
+					|| job.incompleteRetry.attempts >= 3
+					|| priorTurn !== continuation
+					|| job.turnId !== continuation
+					|| currentThread.status !== "completed")
+			) {
+				await this.store.save({ ...job, state: "uncertain" });
+				return;
+			}
 			const followUp = priorTurn || job.turnId || job.previousTurnId ? job.message?.trim() : undefined;
 			let prompt: string;
 			if (finalizing) {
@@ -997,23 +1015,40 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 						stage: "work",
 					};
 				}
-				prompt = followUp ?? ticketFreshWorkPrompt(current, job, assignment, recovery, interrupted);
+				prompt = continuation
+					? ticketIncompleteContinuationPrompt(requirements)
+					: (followUp ?? ticketFreshWorkPrompt(current, job, assignment, recovery, interrupted));
 			} else {
 				prompt = this.prompts.planning(current, job);
 			}
+			const previousTurnBeforeDispatch = job.previousTurnId;
+			const turnBeforeDispatch = job.turnId;
 			job.previousTurnId = priorTurn;
 			if (job.phase === "rebase" && !job.reportRetrySourceTurnId) job.mergeRetryEligible = undefined;
 			job.turnId = undefined;
 			job.state = "dispatching";
+			const retryBeforeDispatch = job.incompleteRetry;
+			if (continuation && retryBeforeDispatch)
+				job.incompleteRetry = { threadId: id, attempts: retryBeforeDispatch.attempts + 1 };
 			await this.store.save(job);
-			const view = await this.agents.dispatch(
-				actor,
-				id,
-				prompt,
-				{ ticketId: current.id, phase: job.phase },
-				() => this.canDispatch(current),
-				pin?.model ? { ...settings, pinned: true } : settings,
-			);
+			let view;
+			try {
+				view = await this.agents.dispatch(
+					actor,
+					id,
+					prompt,
+					{ ticketId: current.id, phase: job.phase },
+					() => this.canDispatch(current),
+					pin?.model ? { ...settings, pinned: true } : settings,
+				);
+			} catch (err) {
+				if (continuation && err instanceof AgentError && err.code === "agent-capacity") {
+					job.incompleteRetry = retryBeforeDispatch;
+					job.previousTurnId = previousTurnBeforeDispatch;
+					job.turnId = turnBeforeDispatch;
+				}
+				throw err;
+			}
 			job.state = "running";
 			job.turnId = view.thread.turnId;
 			await this.store.save(job);
@@ -1160,6 +1195,18 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			}
 			job.reportRetrySourceTurnId = undefined;
 			if (report.status === "incomplete") {
+				const retry =
+					job.incompleteRetry?.threadId === id ? job.incompleteRetry : { threadId: id, attempts: 0 };
+				if (!checkpoint && job.context?.attempted !== thread.turnId && retry.attempts < 3) {
+					await this.store.save({
+						...job,
+						state: "queued",
+						turnId: thread.turnId,
+						incompleteRetry: { ...retry, pendingSourceTurnId: thread.turnId },
+					});
+					this.wake();
+					return;
+				}
 				await this.store.save({ ...job, state: "failed", completionFailure: "incomplete" });
 				return;
 			}

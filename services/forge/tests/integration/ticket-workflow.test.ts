@@ -432,7 +432,19 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await restart();
 		expect(turns()).toHaveLength(beforeReconcile);
 		expect((await agents!.get(owner, implemented.implementerId!)).truncated).toBe(true);
+		for (let attempt = 0; attempt < 3; attempt++) {
+			await workflow.tick(owner);
+			await expect
+				.poll(async () => (await agents!.get(owner, implemented.implementerId!)).thread.status)
+				.toBe("completed");
+			await workflow.tick(owner);
+		}
 		expect(await jobs.get(ticket.id)).toMatchObject({ state: "failed", completionFailure: "incomplete" });
+		expect(turns().slice(beforeReconcile)).toHaveLength(3);
+		for (const [, params] of turns().slice(beforeReconcile)) {
+			expect(params).toMatchObject({ threadId: await codexId(implemented.implementerId!) });
+			expect(turnText(params)).toContain("You’ve made a start");
+		}
 		const rebaseThreadId = await codexId(implemented.implementerId!);
 		const followUpOffset = rpc.mock.calls.length;
 		await workflow.message(owner, (await ticketStore.get(ticket.id))!, "  Review the rebase  ");
@@ -505,21 +517,21 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect(history.contextWindow).toEqual({ used: 1100, max: 128000 });
 		expect(await agents!.list(owner, project.id)).toEqual([]);
 		const archived = await tickets.archive(owner, ticket.id);
-		await expect.poll(async () => (await cost.read(owner)).totals.input).toBe(11000);
+		await expect.poll(async () => (await cost.read(owner)).totals.input).toBe(14000);
 		const recorded = await cost.read(owner);
 		expect(recorded.phases.filter(({ turns }) => turns).map(({ phase, turns }) => [phase, turns])).toEqual([
 			["planning", 2],
 			["implementation", 1],
-			["rebase", 4],
+			["rebase", 7],
 			["chat", 4],
 		]);
 		expect(recorded.tickets.at(0)).toMatchObject({
 			id: ticket.id,
 			archivedAt: archived.archivedAt,
-			cached: 3500,
+			cached: 5000,
 			incomplete: { api: 0 },
 		});
-		expect(recorded.tickets.at(0)?.apiUsd).toBeCloseTo(0.020125);
+		expect(recorded.tickets.at(0)?.apiUsd).toBeCloseTo(0.02875);
 		expect(recorded.limits?.windows.at(0)).toMatchObject({ minutes: 300, usedPercent: 40 });
 		expect((await cost.read(owner)).phases.map(({ phase }) => phase)).toContain("chat");
 
@@ -583,6 +595,16 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			.poll(
 				async () => {
 					await workflow.tick(owner);
+					return (await jobs.get(partial.id))?.incompleteRetry?.pendingSourceTurnId;
+				},
+				{ timeout: 10000 },
+			)
+			.toBeTruthy();
+		await restart();
+		await expect
+			.poll(
+				async () => {
+					await workflow.tick(owner);
 					return (await jobs.get(partial.id))?.completionFailure;
 				},
 				{ timeout: 10000 },
@@ -600,6 +622,12 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect(verdict?.[1]).toMatchObject({ threadId: (initialPartial![1] as { threadId: string }).threadId });
 		expect((await jobs.get(partial.id))?.implementerId).toBe(partialJob.implementerId);
 		expect(verdict?.[1]).toMatchObject({ input: input(reportOnly) });
+		const continuations = turns(partialOffset).filter(([, params]) =>
+			turnText(params).startsWith("You’ve made a start"),
+		);
+		expect(continuations).toHaveLength(3);
+		for (const [, params] of continuations)
+			expect(params).toMatchObject({ threadId: await codexId(partialJob.implementerId!) });
 		expectAssignment(turnText(initialPartial![1]));
 		const beforeFollowUp = rpc.mock.calls.length;
 		await workflow.message(owner, (await ticketStore.get(partial.id))!, "  Finish the integration  ");

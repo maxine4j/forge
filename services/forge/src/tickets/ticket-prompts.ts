@@ -88,6 +88,10 @@ export function ticketFinalizationPrompt(requirements: CompletionRequirements, e
 	return `Assess the full assignment against the work already done. Do not edit files or commit. Return only the explicit verdict. ${report}`;
 }
 
+export function ticketIncompleteContinuationPrompt(requirements: CompletionRequirements): string {
+	return `You’ve made a start, and you can build on the work already in this chat and workspace. Please pick up the original assignment where you left off, use your last report to identify what remains, and keep going through the implementation, verification, and any required commits. You already have the context to take the next concrete step, even if the whole assignment takes several steps to finish. If you hit a real blocker, try the reasonable recovery steps available to you and tell us exactly what still prevents completion. Report completion once the full assignment is finished and verified.\n\n${ticketCompletionInstructions(requirements)}`;
+}
+
 // Older assignments could persist the rendered paragraph, including variants
 // that allowed handoff only for checkpoints.
 const completionBlocks = new Set([

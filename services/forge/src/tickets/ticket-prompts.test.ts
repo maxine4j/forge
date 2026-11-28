@@ -11,7 +11,22 @@ import {
 	TicketPrompts,
 	ticketCompletionInstructions,
 	ticketFinalizationPrompt,
+	ticketIncompleteContinuationPrompt,
 } from "./ticket-prompts.ts";
+
+test.each([false, true])(
+	"incomplete continuation encourages work and includes reporting instructions (next=%s)",
+	(next) => {
+		const requirements = completionReportRequirements(next);
+		const prompt = ticketIncompleteContinuationPrompt(requirements);
+		expect(prompt).toContain(
+			"You’ve made a start, and you can build on the work already in this chat and workspace.",
+		);
+		expect(prompt).toContain("Report completion once the full assignment is finished and verified.");
+		expect(prompt.endsWith(ticketCompletionInstructions(requirements))).toBe(true);
+		if (next) expect(prompt).toContain("summary is required");
+	},
+);
 
 test("strips repeated exact historical completion blocks and preserves surrounding prose and partial quotations", () => {
 	const original =

@@ -65,3 +65,20 @@ test("legacy snapshots normalize both phases and public projections expose only 
 		expect(JSON.stringify(publicRecord)).not.toContain(privateValue);
 	expect(normalizeTicketWorkflow(record)).toEqual(record);
 });
+
+test("incomplete retry state is bounded, private, and optional for legacy records", () => {
+	const legacy = { ticketId: "TASK-1", phase: "implementation", state: "running", mergeAttempts: 0 };
+	expect(normalizeTicketWorkflow(legacy).incompleteRetry).toBeUndefined();
+	for (const attempts of [0, 1, 3]) {
+		const record = normalizeTicketWorkflow({
+			...legacy,
+			incompleteRetry: { threadId: "thread", attempts, pendingSourceTurnId: "turn" },
+		});
+		expect(record.incompleteRetry?.attempts).toBe(attempts);
+		expect(ticketWorkflowSummary(record)).not.toHaveProperty("incompleteRetry");
+	}
+	for (const attempts of [-1, 4, 0.5])
+		expect(() =>
+			normalizeTicketWorkflow({ ...legacy, incompleteRetry: { threadId: "thread", attempts } }),
+		).toThrow();
+});

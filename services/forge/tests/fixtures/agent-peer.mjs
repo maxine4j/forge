@@ -182,8 +182,13 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		}
 		const planning = params.collaborationMode?.mode === "plan";
 		const rebase = prompt.startsWith("Rebase this branch");
+		if (rebase) thread.rebaseScenario = true;
+		const continuation = prompt.startsWith("You’ve made a start");
 		const rebaseFollowUp = prompt === "Review the rebase" || prompt === "Verify the rebase";
-		const incomplete = rebase || prompt === "Review the rebase";
+		const incomplete =
+			rebase
+			|| prompt === "Review the rebase"
+			|| (continuation && (thread.rebaseScenario || thread.completionScenario));
 		const invalid =
 			thread.invalidScenario
 			|| prompt === "Verify the rebase"
@@ -197,6 +202,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		if (
 			planning
 			|| rebase
+			|| continuation
 			|| (!highContext
 				&& (prompt.startsWith("Implement the approved plan")
 					|| prompt.includes("TASK67_CONTROLLED")

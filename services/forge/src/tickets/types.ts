@@ -9,6 +9,13 @@ export const ticketWorkflowRecordSchema = ticketWorkflowSchema.extend({
 	reservation: z.string().min(1).optional(),
 	previousTurnId: z.string().min(1).max(256).optional(),
 	reportRetrySourceTurnId: z.string().min(1).max(256).optional(),
+	incompleteRetry: z
+		.object({
+			threadId: z.string().min(1).max(256),
+			attempts: z.number().int().min(0).max(3),
+			pendingSourceTurnId: z.string().min(1).max(256).optional(),
+		})
+		.optional(),
 	subtaskIndex: z.number().int().nonnegative().optional(),
 	turnId: z.string().min(1).max(256).optional(),
 	context: z
@@ -44,6 +51,7 @@ export type TicketWorkflowRecord = z.infer<typeof ticketWorkflowRecordSchema>;
 export function ticketWorkflowSummary({
 	previousTurnId: _previous,
 	reportRetrySourceTurnId: _retry,
+	incompleteRetry: _incompleteRetry,
 	subtaskIndex: _subtaskIndex,
 	turnId: _turn,
 	context: _context,
