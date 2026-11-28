@@ -17,15 +17,24 @@ const legacyCheckpointInstruction = " Report handoff only after committing a saf
 const legacyEmergencyCheckpointInstruction =
 	" For a handoff, commit only existing uncommitted assignment changes if a safe checkpoint is immediately possible. Report promptly if there are no changes to commit or the checkpoint is blocked.";
 
-export const emergencyHandoverSteer = `EMERGENCY: You MUST stop all work IMMEDIATELY!
+const emergencyHandoffInstruction =
+	"Use only what you already know. Choose complete only if the assignment is ready to advance or merge. Otherwise choose handoff, including when you were still investigating or there is no new checkpoint. In the handover, briefly state what changed, what is committed or unsaved, which verification finished, and what the next agent should do.";
+
+export function emergencyHandoverSteer(hasNextSubtask: boolean): string {
+	const report = renderCompletionInstructions(
+		completionReportRequirements(hasNextSubtask, true),
+		completionInstruction,
+		"",
+	);
+	return `EMERGENCY: You MUST stop all work IMMEDIATELY!
 You are running critically low on context. One more operation could exhaust it and cut off this handover. This emergency instruction overrides earlier directions to finish the assignment, verify it, or wait for a checkpoint before reporting.
 
 You MUST NOT finish the current operation, even if it is almost done. You MUST NOT read another file, make another edit, finish or wait for a test run, start another test or build, check the result of a running command, investigate a failure, or reread earlier instructions. Stop now, even if you believe the assignment is already complete.
 
 The only tool actions allowed are the Git status, staging, and commit commands strictly needed to save assignment changes you already made. If you have uncommitted assignment changes and can safely checkpoint them now, commit only those changes on the current branch. If there are no uncommitted assignment changes, including when you already committed your work, skip the commit. Never create an empty commit. If a safe commit is blocked or fails, stop immediately and report what is unsaved. Do not retry, fix, or investigate it.
 
-Return exactly one JSON object now, with no Markdown or surrounding prose. If this work turn created a new safe checkpoint, return {"status":"handoff","handover":"…"}. Otherwise return {"status":"incomplete","remaining":"…"} and list what remains, including any work or verification that still needs to be confirmed.
-Use only what you already know. Briefly state what changed, what is committed or unsaved, what verification already finished, and what the next agent should do.`;
+${report} ${emergencyHandoffInstruction}`;
+}
 
 export function assignedSubtask(ticket: Ticket, job: TicketWorkflowRecord) {
 	if (job.phase === "implementation" && resolveTicketWorkflowPreset(ticket.executionSettings) === "planner-subtasks")
@@ -70,8 +79,12 @@ function renderCompletionInstructions(
 	return `End your final answer with exactly one JSON object, without Markdown fences or surrounding prose. Use only the fields shown for your outcome. ${outcomes.join(" ")} ${completion}${requirements.handoff ? checkpoint : ""}${guidance}`;
 }
 
-export function ticketFinalizationPrompt(requirements: CompletionRequirements): string {
-	const report = renderCompletionInstructions(requirements, completionInstruction, checkpointRequirement);
+export function ticketFinalizationPrompt(requirements: CompletionRequirements, emergency = false): string {
+	const report = renderCompletionInstructions(
+		requirements,
+		completionInstruction,
+		emergency ? ` ${emergencyHandoffInstruction}` : checkpointRequirement,
+	);
 	return `Assess the full assignment against the work already done. Do not edit files or commit. Return only the explicit verdict. ${report}`;
 }
 
@@ -121,6 +134,7 @@ export function ticketFreshWorkPrompt(
 			: undefined,
 		recovery && `Recovery instruction:\n${recovery}`,
 		job.context?.handover && `Handover:\n${job.context.handover}`,
+		job.context?.handover && !interrupted && "Inspect the current changes and commits before continuing.",
 		job.context?.previousSubtaskSummary && `Previous subtask summary:\n${job.context.previousSubtaskSummary}`,
 		ticketCompletionInstructions(completionReportRequirements(hasNextSubtask(ticket, job))),
 	]

@@ -652,7 +652,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect(steers).toHaveLength(1);
 		expect(steers[0]?.[1]).toMatchObject({
 			expectedTurnId: initialContextJob.turnId,
-			input: [{ type: "text", text: emergencyHandoverSteer }],
+			input: [{ type: "text", text: emergencyHandoverSteer(false) }],
 		});
 		expect(contextCalls.filter(([method]) => method === "turn/start")).toHaveLength(2);
 		const handoverCall = rpc.mock.calls.find(
@@ -669,7 +669,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				{
 					threadId: contextThreadId,
 					expectedTurnId: initialContextJob.turnId,
-					input: input(emergencyHandoverSteer),
+					input: input(emergencyHandoverSteer(false)),
 				},
 			],
 			[
@@ -677,7 +677,10 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				expect.objectContaining({
 					threadId: await codexId(successor.implementerId!),
 					input: input(
-						contextText.replace(reportBlock(), `Handover:\nFinish controlled work\n\n${reportBlock()}`),
+						contextText.replace(
+							reportBlock(),
+							`Handover:\nFinish controlled work\n\nInspect the current changes and commits before continuing.\n\n${reportBlock()}`,
+						),
 					),
 				}),
 			],
@@ -905,7 +908,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			["REPORT", undefined],
 			["UNKNOWN", "telemetry"],
 			["CHANGED", "checkpoint"],
-			["NO_PROGRESS", "no-progress"],
+			["NO_PROGRESS", undefined],
 			["AMBIGUOUS", undefined],
 		] as const) {
 			const offset = rpc.mock.calls.length;
@@ -930,7 +933,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			}
 			if (failure) {
 				await expect.poll(() => pollJob(id)).toMatchObject({ state: "failed", contextFailure: failure });
-			} else if (mode === "REPORT") {
+			} else if (mode === "REPORT" || mode === "NO_PROGRESS") {
 				await expect
 					.poll(async () => {
 						await pollJob(id);
@@ -943,19 +946,27 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			await assertQuiet();
 			const actual = turns(offset);
 			expect(actual.map(([method]) => method)).toEqual(
-				mode === "REPORT" ? ["turn/start", "turn/steer", "turn/start"] : ["turn/start", "turn/steer"],
+				mode === "REPORT" || mode === "NO_PROGRESS"
+					? ["turn/start", "turn/steer", "turn/start"]
+					: ["turn/start", "turn/steer"],
 			);
 			expect(actual[1]![1]).toMatchObject({ threadId, expectedTurnId: initial.turnId });
 			if (mode === "REPORT")
 				expect(actual[2]![1]).toMatchObject({
 					threadId,
-					input: input(reportOnly),
+					input: input(ticketFinalizationPrompt(completionReportRequirements(false, true), true)),
 				});
+			if (mode === "NO_PROGRESS") {
+				const successor = (await jobs.get(id))!;
+				expect(successor.implementerId).not.toBe(initial.implementerId);
+				expect(successor.workspaceId).toBe(initial.workspaceId);
+				expect(turnText(actual[2]![1])).toContain("Handover:\nFinish controlled work");
+			}
 			if (mode === "AMBIGUOUS") {
 				await agents!.interrupt(owner, initial.implementerId!);
 				await pollJob(id);
 			}
-			if (mode !== "REPORT") {
+			if (failure || mode === "AMBIGUOUS") {
 				await tickets.move(owner, id, { status: "backlog" });
 				await workflow.recover(owner, id);
 			}

@@ -502,6 +502,10 @@ test("steers an implementation once at the context threshold", async () => {
 	await f.service.tick(actor);
 	await f.makeService().tick(actor);
 	expect(f.agents.steer).toHaveBeenCalledOnce();
+	const prompt = f.agents.steer.mock.lastCall?.[3];
+	expect(prompt).toContain('{"status":"complete","summary":"…"}');
+	expect(prompt).toContain('{"status":"handoff","handover":"…"}');
+	expect(prompt).not.toContain('"status":"incomplete"');
 });
 
 test.each([8000, 8001])("uses the pinned threshold at a turn peak of %i", async (peak) => {
@@ -719,7 +723,7 @@ test("a clarification cannot accept an earlier turn's final answer", async () =>
 	expect(f.agents.finalAnswer).toHaveBeenCalledTimes(1);
 	expect(f.merges.merge).not.toHaveBeenCalled();
 });
-test.each(["{bad", JSON.stringify({ status: "incomplete", remaining: "tests", handover: "notes" })])(
+test.each(["{bad", JSON.stringify({ status: "incomplete", remaining: "tests" })])(
 	"rejects invalid checkpoint reports",
 	async (answer) => {
 		const f = fixture();
@@ -808,13 +812,11 @@ test("a diagnostic retry after a handoff without progress keeps the approved pla
 		"Assess the full assignment even when the latest request is a diagnostic or recovery instruction.",
 	);
 
-	f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
-	await service.tick(actor);
 	f.agents.finalAnswer.mockResolvedValueOnce("Checkpoint is unchanged");
 	f.complete(retry.implementerId!);
 	await service.tick(actor);
 	await service.tick(actor);
-	expect(f.jobs.get(ticket.id)?.context?.stage).toBe("report");
+	expect(f.jobs.get(ticket.id)?.context?.stage).toBe("work");
 	expect(f.agents.dispatch.mock.lastCall?.[2]).toContain('{"status":"incomplete","remaining":"…"');
 	f.agents.finalAnswer.mockResolvedValueOnce('{"status":"incomplete","remaining":"Run integration tests"}');
 	f.complete(retry.implementerId!);
@@ -824,10 +826,8 @@ test("a diagnostic retry after a handoff without progress keeps the approved pla
 	expect(f.merges.merge).not.toHaveBeenCalled();
 	await service.message(actor, ticket, "Run the remaining integration tests");
 	await service.tick(actor);
-	expect(f.jobs.get(ticket.id)?.implementerId).not.toBe(retry.implementerId);
-	expect(f.agents.dispatch.mock.lastCall?.[2]).toContain(
-		"Recovery instruction:\nRun the remaining integration tests",
-	);
+	expect(f.jobs.get(ticket.id)?.implementerId).toBe(retry.implementerId);
+	expect(f.agents.dispatch.mock.lastCall?.[2]).toBe("Run the remaining integration tests");
 });
 
 test("a threshold first observed after work settles uses the normal completion verdict", async () => {
@@ -960,8 +960,6 @@ test.each(["dirty", "wrong branch", "unchanged", "missing baseline"] as const)(
 		await f.service.move(actor, ticket, { status: "todo" });
 		await f.service.tick(actor);
 		const id = f.jobs.get(ticket.id)!.implementerId!;
-		f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
-		await f.service.tick(actor);
 		if (condition === "dirty" || condition === "wrong branch")
 			f.merges.candidate.mockRejectedValueOnce(new Error(condition));
 		if (condition === "unchanged") f.merges.candidate.mockResolvedValue("a".repeat(40));
@@ -978,6 +976,29 @@ test.each(["dirty", "wrong branch", "unchanged", "missing baseline"] as const)(
 		expect(f.merges.merge).not.toHaveBeenCalled();
 	},
 );
+
+test("an emergency handoff can resume with uncommitted changes and no checkpoint", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.settings(actor, ticket, { skipPlanning: true });
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	const first = f.jobs.get(ticket.id)!;
+	f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
+	await f.service.tick(actor);
+	f.merges.candidate.mockRejectedValue(new Error("dirty"));
+	f.agents.finalAnswer.mockResolvedValueOnce(
+		'Investigation is underway.\n{"status":"handoff","handover":"Inspect local edits"}\n\n',
+	);
+	f.complete(first.implementerId!);
+	await f.service.tick(actor);
+	await f.makeService().tick(actor);
+	expect(f.jobs.get(ticket.id)?.workspaceId).toBe(first.workspaceId);
+	expect(f.jobs.get(ticket.id)?.implementerId).not.toBe(first.implementerId);
+	expect(f.agents.dispatch.mock.lastCall?.[2]).toContain("Handover:\nInspect local edits");
+	expect(f.merges.candidate).not.toHaveBeenCalled();
+	expect(f.merges.merge).not.toHaveBeenCalled();
+});
 const fixture = (
 	dispatchMode: () => "running" | "paused" | "stopped" = () => "running",
 	providers?: IModelProviderService,

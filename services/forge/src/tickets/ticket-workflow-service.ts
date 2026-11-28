@@ -912,7 +912,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		const planning = job.phase === "planning";
 		const checkpoint = job.context?.stage === "report";
 		const finalizing = checkpoint || !!job.reportRetrySourceTurnId;
-		const requirements = completionReportRequirements(hasNextSubtask(current, job));
+		const requirements = completionReportRequirements(hasNextSubtask(current, job), checkpoint);
 		let id = planning ? job.plannerId : job.implementerId;
 		this.settingUp.add(current.id);
 		try {
@@ -971,7 +971,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			const followUp = priorTurn || job.turnId || job.previousTurnId ? job.message?.trim() : undefined;
 			let prompt: string;
 			if (finalizing) {
-				prompt = ticketFinalizationPrompt(requirements);
+				prompt = ticketFinalizationPrompt(requirements, checkpoint);
 			} else if (job.phase === "implementation" || job.phase === "rebase") {
 				const ordered = !!assignedSubtask(current, job);
 				const recovery = followUp ? undefined : cleanTicketAssignment(job.message);
@@ -1099,10 +1099,11 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 					&& thread.status === "running"
 					&& !requests.length
 				) {
+					const nextSubtask = hasNextSubtask(await this.tickets.get(job.ticketId), job);
 					job.context.attempted = thread.turnId;
 					await this.store.save(job);
 					try {
-						await this.agents.steer(actor, id, thread.turnId, emergencyHandoverSteer);
+						await this.agents.steer(actor, id, thread.turnId, emergencyHandoverSteer(nextSubtask));
 					} catch (err) {
 						this.log.warn({ err, ticketId: job.ticketId }, "Checkpoint steer outcome is uncertain");
 						await this.store.save({ ...job, state: "uncertain" });
@@ -1129,10 +1130,10 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		const nextSubtask = job.phase === "implementation" && hasNextSubtask(await this.tickets.get(job.ticketId), job);
 		let summary: string | undefined;
 		if (work) {
-			const report = parseCompletionReport(
-				(await this.agents.finalAnswer?.(actor, id, thread.turnId)) ?? "",
-				completionReportRequirements(nextSubtask),
-			);
+			const emergency = checkpoint || job.context?.attempted === thread.turnId;
+			const requirements = completionReportRequirements(nextSubtask, emergency);
+			const answer = (await this.agents.finalAnswer?.(actor, id, thread.turnId)) ?? "";
+			const report = parseCompletionReport(answer, requirements);
 			if (!report) {
 				if (finalizing) {
 					await this.store.save({
@@ -1162,7 +1163,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				await this.store.save({ ...job, state: "failed", completionFailure: "incomplete" });
 				return;
 			}
-			if (checkpoint || report.status === "handoff") {
+			if (checkpoint || (!emergency && report.status === "handoff")) {
 				let sha: string;
 				try {
 					if (!job.workspaceId) throw new Error("Missing workspace");
@@ -1172,29 +1173,29 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 					await this.store.save({ ...job, state: "failed", contextFailure: "checkpoint" });
 					return;
 				}
-				if (report.status === "handoff") {
-					if (!job.context?.baseline || job.context.baseline === sha) {
-						await this.store.save({ ...job, state: "failed", contextFailure: "no-progress" });
-						return;
-					}
-					await this.store.save({
-						...job,
-						implementerId: undefined,
-						previousImplementerIds: [...(job.previousImplementerIds ?? []), id],
-						turnId: undefined,
-						previousTurnId: undefined,
-						message: undefined,
-						state: "queued",
-						context: {
-							prompt: job.context.prompt,
-							handover: report.handover,
-							previousSubtaskSummary: job.context.previousSubtaskSummary,
-							stage: "work",
-						},
-					});
-					this.wake();
+				if (!emergency && (!job.context?.baseline || job.context.baseline === sha)) {
+					await this.store.save({ ...job, state: "failed", contextFailure: "no-progress" });
 					return;
 				}
+			}
+			if (report.status === "handoff") {
+				await this.store.save({
+					...job,
+					implementerId: undefined,
+					previousImplementerIds: [...(job.previousImplementerIds ?? []), id],
+					turnId: undefined,
+					previousTurnId: undefined,
+					message: undefined,
+					state: "queued",
+					context: {
+						prompt: job.context?.prompt,
+						handover: report.handover,
+						previousSubtaskSummary: job.context?.previousSubtaskSummary,
+						stage: "work",
+					},
+				});
+				this.wake();
+				return;
 			}
 			if (report.status !== "complete") throw new TicketError("ticket-conflict");
 			summary = report.summary;

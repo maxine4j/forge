@@ -14,11 +14,23 @@ describe("parseCompletionReport", () => {
 			remaining: "tests",
 		});
 	});
+	it("accepts a standalone report on the last nonblank line after prose", () => {
+		expect(parseCompletionReport('Finished the checks.\r\n{"status":"complete"}\r\n  ')).toEqual({
+			status: "complete",
+		});
+		expect(parseCompletionReport('Tests remain.\n{"status":"incomplete","remaining":"tests"}')).toEqual({
+			status: "incomplete",
+			remaining: "tests",
+		});
+	});
 	it("rejects prose, invalid fields and blank or oversized text", () => {
 		for (const answer of [
 			"not complete",
 			'{"status":"complete"',
 			'{"status":"complete"} {"status":"complete"}',
+			'Done: {"status":"complete"}',
+			'{"status":"complete"}\nTrailing prose',
+			'Work is done.\n{"status":"complete","extra":true}',
 			'[{"status":"complete"}]',
 			"null",
 			'```json\n{"status":"complete"}\n```',

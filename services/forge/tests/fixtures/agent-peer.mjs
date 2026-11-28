@@ -116,7 +116,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		const lowHeadroom =
 			(prompt.includes("TASK94_LOW") || prompt.startsWith("Implement only subtask 2:"))
 			&& !prompt.includes("Recovery instruction:");
-		const checkpointMode = prompt.match(/TASK94_CHECKPOINT_(REPORT|UNKNOWN|CHANGED|NO_PROGRESS|AMBIGUOUS)/)?.[1];
+		const checkpointMode = !prompt.includes("Handover:")
+			? prompt.match(/TASK94_CHECKPOINT_(REPORT|UNKNOWN|CHANGED|NO_PROGRESS|AMBIGUOUS)/)?.[1]
+			: undefined;
 		const highContext =
 			lowHeadroom || !!checkpointMode || (prompt.includes("TASK67_CONTROLLED") && !prompt.includes("Handover:"));
 		const turn = {
@@ -198,6 +200,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			|| (!highContext
 				&& (prompt.startsWith("Implement the approved plan")
 					|| prompt.includes("TASK67_CONTROLLED")
+					|| (prompt.includes("TASK94_CHECKPOINT_NO_PROGRESS") && prompt.includes("Handover:"))
 					|| firstSubtask
 					|| (finalSubtask && prompt.includes("Recover ordered work"))
 					|| rebaseFollowUp
@@ -324,7 +327,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 				id: `handoff-${sequence}`,
 				type: "agentMessage",
 				phase: "final_answer",
-				text: JSON.stringify({ status: "handoff", handover: "Finish controlled work" }),
+				text:
+					(thread.checkpointMode === "NO_PROGRESS" ? "Still investigating.\n" : "")
+					+ JSON.stringify({ status: "handoff", handover: "Finish controlled work" }),
 			};
 			if (!thread.lowHeadroom && (!thread.checkpointMode || thread.checkpointMode === "NO_PROGRESS")) {
 				turn.items.push(answer);

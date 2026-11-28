@@ -17,20 +17,32 @@ export function capHandoffText(input: string): string {
 
 type ReportField = { name: "summary" | "remaining" | "handover"; required: boolean; bounded?: boolean };
 
-export function completionReportRequirements(hasNextSubtask = false) {
+export function completionReportRequirements(hasNextSubtask = false, emergency = false) {
 	const complete: ReportField[] = [{ name: "summary", required: hasNextSubtask, bounded: hasNextSubtask }];
 	const incomplete: ReportField[] = [
 		{ name: "remaining", required: true },
 		{ name: "summary", required: false },
 	];
 	const handoff: ReportField[] = [{ name: "handover", required: true, bounded: true }];
-	return { complete, incomplete, handoff };
+	return { complete, incomplete: emergency ? undefined : incomplete, handoff };
 }
 
-/** Parse a final answer without accepting extra text or fields. */
+/** Accept a complete report or a standalone report on the final nonblank line. */
 export function parseCompletionReport(
 	answer: string,
 	requirements = completionReportRequirements(),
+): CompletionReport | undefined {
+	const text = answer.trim();
+	const lastLine = text.lastIndexOf("\n");
+	return (
+		parseReportObject(text, requirements)
+		?? (lastLine >= 0 ? parseReportObject(text.slice(lastLine + 1), requirements) : undefined)
+	);
+}
+
+function parseReportObject(
+	answer: string,
+	requirements: ReturnType<typeof completionReportRequirements>,
 ): CompletionReport | undefined {
 	let parsed: unknown;
 	try {
