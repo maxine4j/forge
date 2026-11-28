@@ -186,6 +186,11 @@ contains inference routing, singleton Ollama configuration or OpenAI defaults.
 
 When relay discovery is configured, connected named Ollama workers are saved as providers named for their worker IDs. The owner-only provider API returns optional read-only `contextWindow` and `supportedConcurrency` values from fresh worker telemetry. These values do not change Codex context settings or the owner-controlled `maxConcurrentAgents` scheduling limit. Owner create and patch inputs cannot set them. Last known capabilities and providers remain saved when workers disconnect or the relay is unavailable. See [relay discovery and upgrades](development.md#ollama-relay-discovery).
 
+The relay also receives optional macOS telemetry from workers; its private
+snapshot and retention are described in [relay telemetry](development.md#ollama-relay),
+and the [worker guide](../services/ollama-client/README.md) explains the optional
+power probe.
+
 Providers may specify a compaction threshold in tokens. Codex uses the configured override where applicable. Managed Implementers use Codex's default compaction behavior and Forge uses their pinned threshold for [implementation and rebase handoffs](tickets.md#implementation-context-handover). With no configured value, Forge uses 75% of the reported model window for handoff steering. Clearing an existing value removes the override for future pins. For Ollama, choose a threshold below the deployed context size with headroom for instructions, tool output, and generation. See [Codex lifecycle](agents.md#codex-harness-and-lifecycle) and [ticket execution settings](tickets.md#ticket-execution-settings).
 
 Fresh installations have no providers before relay discovery. Named cards show the name, type, OpenAI

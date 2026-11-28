@@ -16,6 +16,16 @@ Edit `run-ollama-client.sh` to set `OLLAMA_RELAY_TOKEN`, the relay URL, a unique
 
 Run the install command again to refresh the bundle from `main` and keep your launcher settings. The download needs no GitHub token and uses no npm configuration.
 
+On macOS the worker also samples hardware identity, macOS and Ollama versions,
+battery state, and system memory. Apple Silicon GPU utilization and combined
+CPU, GPU, and ANE power are optional: set `OLLAMA_RELAY_MACOS_POWERMETRICS=1`
+in the launcher to enable them. This runs
+`/usr/bin/sudo -n /usr/bin/powermetrics -n 1 -i 500 --samplers cpu_power,gpu_power`;
+the worker account must be permitted to run that exact command with sudo without
+a password. If permission is denied or the hardware does not report the values,
+those readings are unavailable and inference continues. The probe is disabled
+by default. See [relay telemetry and retention](../../docs/development.md#ollama-relay).
+
 ## Rebuild the bundle
 
 From the repository root, run:

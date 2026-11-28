@@ -413,6 +413,13 @@ each live worker and up to 16 recently disconnected workers for five minutes.
 Both routes return 404 for unknown or expired IDs. A reconnect starts with a
 fresh queue and no report.
 
+macOS workers can include allowlisted hardware identity, operating system and
+Ollama versions, battery state, and combined CPU/GPU/ANE power in the private
+snapshot. GPU and power sampling is opt-in and requires passwordless privileges
+for the exact command described in the [worker guide](../services/ollama-client/README.md).
+Deploy the relay before upgrading workers that send the optional metadata.
+See also [model providers](foundation.md#model-providers).
+
 Readiness checks for an installed local model. Metrics include the configured
 context in tokens, host total and free memory, and the count, total memory
 and VRAM of running models reported by [Ollama's running-model API](https://docs.ollama.com/api/ps).

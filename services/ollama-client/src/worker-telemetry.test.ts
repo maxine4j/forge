@@ -1,10 +1,13 @@
 import { expect, test } from "vitest";
 
 import { workerConfig } from "./config.ts";
-import { parseBattery, parseHardware, parsePower } from "./macos-telemetry.ts";
+import { createMacosCollector, parseBattery, parseHardware, parsePower } from "./macos-telemetry.ts";
 import { collectTelemetry, loadedModelMemory, parseNvidiaMetrics } from "./worker-telemetry.ts";
 
 test("parses macOS identity, power source and fractional power readings", () => {
+	expect(
+		parseHardware(JSON.stringify({ SPHardwareDataType: [{ chip_type: "Apple M4", machine_name: "MacBook Pro" }] })),
+	).toEqual({ chipName: "Apple M4", deviceModel: "MacBook Pro" });
 	expect(
 		parseHardware(JSON.stringify({ SPHardwareDataType: [{ cpu_type: "Intel Core", machine_model: "MacPro7,1" }] })),
 	).toEqual({ chipName: "Intel Core", deviceModel: "MacPro7,1" });
@@ -19,6 +22,44 @@ test("parses macOS identity, power source and fractional power readings", () => 
 		powerWatts: 1.5,
 	});
 	expect(parsePower("permission denied")).toEqual({ utilization: null, powerWatts: null });
+});
+
+test("caches successful identity probes and isolates unavailable power", async () => {
+	const calls: string[] = [];
+	const collector = createMacosCollector(
+		async (command) => {
+			calls.push(command);
+			if (command.endsWith("system_profiler"))
+				return JSON.stringify({
+					SPHardwareDataType: [
+						{ chip_type: "Apple M4", machine_name: "MacBook Pro", serial_number: "secret" },
+					],
+				});
+			if (command.endsWith("sw_vers")) return "15.2\n";
+			if (command.endsWith("pmset")) return "Now drawing from 'AC Power'\n -InternalBattery-0 42.5%; charging";
+			throw new Error("permission denied");
+		},
+		async () => "0.5.0",
+		true,
+	);
+	const signal = new AbortController().signal;
+	const first = await collector(signal);
+	expect(first).toEqual({
+		macos: {
+			chipName: "Apple M4",
+			deviceModel: "MacBook Pro",
+			macosVersion: "15.2",
+			ollamaVersion: "0.5.0",
+			batteryPercent: 42.5,
+			powerSource: "ac",
+			powerWatts: null,
+		},
+		gpus: [],
+	});
+	await collector(signal);
+	expect(calls.filter((command) => command.endsWith("system_profiler"))).toHaveLength(1);
+	expect(calls.filter((command) => command.endsWith("sw_vers"))).toHaveLength(1);
+	expect(calls.filter((command) => command.endsWith("sudo"))).toHaveLength(2);
 });
 
 const env = { OLLAMA_RELAY_TOKEN: "x".repeat(32), OLLAMA_CONTEXT_LENGTH: "42" };
