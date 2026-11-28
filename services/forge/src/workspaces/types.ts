@@ -20,5 +20,6 @@ export interface IWorkspaceFiles {
 	atomicWriteFile(path: string, data: string, options?: { mode?: number }): Promise<void>;
 	readdir(path: string): Promise<string[]>;
 	chmod(path: string, mode: number): Promise<void>;
+	rm(path: string, options?: { force?: boolean }): Promise<void>;
 	realpath(path: string): Promise<string>;
 }

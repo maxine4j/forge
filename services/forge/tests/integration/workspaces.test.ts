@@ -79,6 +79,46 @@ test("cleanup awaits runtime release and retains the checkout if closure fails",
 	await expect(files.stat(path)).rejects.toThrow();
 });
 
+test("abandonment clears an empty claim from an allocation that never created a checkout", async () => {
+	const { root, project, store, service, git } = await setup();
+	await service.create(owner, project.id, { name: "Seed" });
+	const id = randomUUID();
+	const record = {
+		id,
+		projectId: project.id,
+		name: "Interrupted allocation",
+		branch: `forge/workspace/${id}`,
+		createdAt: new Date().toISOString(),
+		status: "failed" as const,
+	};
+	await store.insert(record);
+	const worktrees = join(root, "worktrees");
+	const claim = join(worktrees, `.${id}.claim`);
+	const checkout = join(worktrees, id);
+	await files.writeFile(claim, "");
+	await files.mkdir(checkout);
+	const data = join(checkout, "local.txt");
+	await files.writeFile(data, "keep");
+
+	await expect(service.cleanupAbandoned(owner, id)).rejects.toThrow("workspace-unavailable");
+	expect(await files.readFile(data)).toBe("keep");
+	expect(await files.readFile(claim)).toBe("");
+	expect((await store.get(id))?.status).toBe("failed");
+
+	await files.rm(checkout, { recursive: true });
+	const repo = join(root, "repositories", `${project.id}.git`);
+	await git.run(["-C", repo, "worktree", "add", "--detach", checkout, "main"]);
+	await files.rm(checkout, { recursive: true });
+	await expect(service.cleanupAbandoned(owner, id)).rejects.toThrow("workspace-unavailable");
+	expect(await files.readFile(claim)).toBe("");
+
+	await git.run(["-C", repo, "worktree", "prune", "--expire=now"]);
+	await service.cleanupAbandoned(owner, id);
+	await service.cleanupAbandoned(owner, id);
+	expect(await files.readFile(claim)).toBeUndefined();
+	expect((await store.get(id))?.status).toBe("archived");
+});
+
 test("abandonment discards dirty unmerged work and retries branch deletion without losing metadata", async () => {
 	const { service, project, git, root, store, client } = await setup();
 	const workspace = await service.create(owner, project.id, { name: "Ticket" });
