@@ -23,6 +23,7 @@ import { CostStore } from "../../src/cost/cost-store.ts";
 import { SqliteDatabase } from "../../src/database/sqlite-database.ts";
 import { ModelProviderService } from "../../src/model-providers/model-provider-service.ts";
 import { ModelProviderStore } from "../../src/model-providers/model-provider-store.ts";
+import { readRelayMetrics } from "../../src/model-providers/ollama-relay-metrics.ts";
 import { pollOllamaRelay } from "../../src/model-providers/ollama-relay-poller.ts";
 
 test("discovers a connected named worker and persists refreshed capabilities through restart", async () => {
@@ -90,6 +91,29 @@ test("discovers a connected named worker and persists refreshed capabilities thr
 		await poll(service());
 		const initial = (await store.list())[0]!;
 		expect(initial).toMatchObject({ name: "gpu-1", contextWindow: 48000, supportedConcurrency: 1 });
+		socket.send(
+			JSON.stringify({
+				...report,
+				macos: {
+					chipName: "M4",
+					deviceModel: "MacBook",
+					macosVersion: "15",
+					ollamaVersion: "1",
+					batteryPercent: 0,
+					powerWatts: 0,
+					powerSource: "ac",
+					serial: "private",
+				},
+			}),
+		);
+		await vi.waitFor(async () => {
+			const rows = await readRelayMetrics(origin, [initial], fetch);
+			expect(rows).toMatchObject([
+				{ providerId: initial.id, freshness: "fresh", macos: { chipName: "M4", batteryPercent: 0 } },
+			]);
+			expect(JSON.stringify(rows)).not.toContain("private");
+		});
+		expect(await store.get(initial.id)).toEqual(initial);
 		await database.close();
 		database = new SqliteDatabase(join(root, "forge.sqlite"));
 		await database.initialize();
