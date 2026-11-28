@@ -26,8 +26,6 @@ test("strips repeated exact historical completion blocks and preserves surroundi
 		"In handover or the next-subtask summary, retain concise progress, next actions, decisions, blockers, and verification results as applicable. Omit code dumps, long logs, and repeated plan text.";
 	const blocks = [
 		original,
-		ticketCompletionInstructions(),
-		ticketCompletionInstructions(completionReportRequirements(true)),
 		...[complete, bounded].flatMap((outcome) => [
 			`${prefix} ${outcome} ${incomplete} ${finish}${outcome === bounded ? ` ${guidance}` : ""}`,
 			`${prefix} ${outcome} ${handoff} ${finish} ${guidance}`,
@@ -44,11 +42,11 @@ test("strips repeated exact historical completion blocks and preserves surroundi
 	}
 });
 
-test.each([false, true])("advertised report examples pass validation (has next subtask=%s)", (hasNextSubtask) => {
-	const requirements = completionReportRequirements(hasNextSubtask);
+test.each([false, true])("advertised report examples pass validation (checkpoint=%s)", (checkpoint) => {
+	const requirements = completionReportRequirements(checkpoint);
 	const examples = ticketCompletionInstructions(requirements).match(/\{"status":[^}]+\}/g);
 	expect(examples).toContain('{"status":"handoff","handover":"…"}');
-	expect(examples).toHaveLength(3);
+	expect(examples).toHaveLength(checkpoint ? 2 : 3);
 	for (const example of examples!) expect(parseCompletionReport(example, requirements)).toBeDefined();
 });
 

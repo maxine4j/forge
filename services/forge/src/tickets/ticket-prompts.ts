@@ -6,16 +6,7 @@ import { ticketPlanGuidance, ticketSinglePlanGuidance } from "./ticket-plan-form
 import type { TicketWorkflowRecord } from "./types.ts";
 
 type TicketInstructions = Pick<ForgeSettings, "planningInstructions" | "implementationInstructions">;
-const completionInstruction =
-	"Report complete only when the full assignment is finished and the required changes are committed. Assess the full assignment even when the latest request is a diagnostic or recovery instruction.";
-const checkpointInstruction =
-	" Report handoff only if the work turn created a new safe checkpoint commit. If the assignment is unfinished and there is no new safe checkpoint, report incomplete and list what remains.";
-const legacyCompletionInstruction =
-	"Report complete only after finishing your assigned scope and committing the required changes.";
-const legacyCheckpointInstruction = " Report handoff only after committing a safe checkpoint.";
-
-export const ticketCheckpointSteer =
-	'Finish the current operation and avoid starting another task. If the full assignment is finished and the required changes are committed, return the complete report. If work remains, commit a new checkpoint if safe and return {"status":"handoff","handover":"…"} with concise notes. If work remains and this turn has no new safe checkpoint, return {"status":"incomplete","remaining":"…"} describing what remains.';
+const checkpointInstruction = " Report handoff only after committing a safe checkpoint.";
 
 export function assignedSubtask(ticket: Ticket, job: TicketWorkflowRecord) {
 	if (job.phase === "implementation" && resolveTicketWorkflowPreset(ticket.executionSettings) === "planner-subtasks")
@@ -33,14 +24,10 @@ export function hasNextSubtask(ticket: Ticket | undefined, job: TicketWorkflowRe
 
 type CompletionRequirements = ReturnType<typeof completionReportRequirements>;
 
-export function ticketCompletionInstructions(requirements = completionReportRequirements()): string {
-	return renderCompletionInstructions(requirements, completionInstruction, checkpointInstruction);
-}
-
-function renderCompletionInstructions(
-	requirements: { [Status in keyof CompletionRequirements]: CompletionRequirements[Status] | undefined },
-	completion: string,
-	checkpoint: string,
+export function ticketCompletionInstructions(
+	requirements: Omit<CompletionRequirements, "handoff"> & {
+		handoff?: CompletionRequirements["handoff"];
+	} = completionReportRequirements(),
 ): string {
 	const outcomes = Object.entries(requirements).flatMap(([status, fields]) => {
 		if (!fields) return [];
@@ -54,14 +41,18 @@ function renderCompletionInstructions(
 		return [`${example} (${descriptions.join(". ")}).`];
 	});
 	const guidance =
-		requirements.handoff || requirements.complete?.some(({ bounded }) => bounded)
+		requirements.handoff || requirements.complete.some(({ bounded }) => bounded)
 			? " In handover or the next-subtask summary, retain concise progress, next actions, decisions, blockers, and verification results as applicable. Omit code dumps, long logs, and repeated plan text."
 			: "";
-	return `End your final answer with exactly one JSON object, without Markdown fences or surrounding prose. Use only the fields shown for your outcome. ${outcomes.join(" ")} ${completion}${requirements.handoff ? checkpoint : ""}${guidance}`;
+	const checkpoint = requirements.handoff ? checkpointInstruction : "";
+	return `End your final answer with exactly one JSON object, without Markdown fences or surrounding prose. Use only the fields shown for your outcome. ${outcomes.join(" ")} Report complete only after finishing your assigned scope and committing the required changes.${checkpoint}${guidance}`;
 }
 
-export function ticketFinalizationPrompt(requirements: CompletionRequirements): string {
-	return `Assess the full assignment against the work already done. Do not edit files or commit. Return only the explicit verdict. ${ticketCompletionInstructions(requirements)}`;
+export function ticketFinalizationPrompt(requirements: ReturnType<typeof completionReportRequirements>): string {
+	const question = requirements.incomplete
+		? "Assess the assignment against the work already done."
+		: "Using the conversation, assess whether this assignment is complete or needs a handoff.";
+	return `${question} Do not edit files or commit. Return only the explicit verdict. ${ticketCompletionInstructions(requirements)}`;
 }
 
 // Older assignments could persist the rendered paragraph, including variants
@@ -69,14 +60,14 @@ export function ticketFinalizationPrompt(requirements: CompletionRequirements): 
 const completionBlocks = new Set([
 	'End your final answer with exactly one JSON object, without Markdown fences or surrounding prose: {"status":"complete","summary":"Implemented and verified the assignment"} or {"status":"incomplete","remaining":"Still need to finish the integration tests"}. Summary is optional; remaining is required only for incomplete. Text must be nonblank and at most 2,000 characters. Report complete only after finishing your assigned scope and committing the required changes.',
 	...[false, true].flatMap((hasNext) => {
-		const work = completionReportRequirements(hasNext);
-		const checkpoint = { ...work, incomplete: undefined };
+		const work = completionReportRequirements(false, hasNext);
+		const checkpoint = ticketCompletionInstructions(completionReportRequirements(true, hasNext));
+		const current = ticketCompletionInstructions(work);
 		return [
-			ticketCompletionInstructions(work),
-			renderCompletionInstructions(work, legacyCompletionInstruction, legacyCheckpointInstruction),
-			renderCompletionInstructions(checkpoint, legacyCompletionInstruction, legacyCheckpointInstruction),
-			renderCompletionInstructions(checkpoint, legacyCompletionInstruction, ""),
-			renderCompletionInstructions({ ...work, handoff: undefined }, legacyCompletionInstruction, ""),
+			current,
+			checkpoint,
+			checkpoint.replace(checkpointInstruction, ""),
+			ticketCompletionInstructions({ ...work, handoff: undefined }),
 		];
 	}),
 ]);
@@ -102,7 +93,7 @@ export function ticketFreshWorkPrompt(
 		recovery && `Recovery instruction:\n${recovery}`,
 		job.context?.handover && `Handover:\n${job.context.handover}`,
 		job.context?.previousSubtaskSummary && `Previous subtask summary:\n${job.context.previousSubtaskSummary}`,
-		ticketCompletionInstructions(completionReportRequirements(hasNextSubtask(ticket, job))),
+		ticketCompletionInstructions(completionReportRequirements(false, hasNextSubtask(ticket, job))),
 	]
 		.filter(Boolean)
 		.join("\n\n");

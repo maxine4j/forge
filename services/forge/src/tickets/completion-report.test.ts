@@ -33,22 +33,27 @@ describe("parseCompletionReport", () => {
 		])
 			expect(parseCompletionReport(answer)).toBeUndefined();
 	});
-	it("accepts handoff and rejects invalid handoff fields", () => {
-		expect(parseCompletionReport('{"status":"handoff","handover":" notes "}')).toEqual({
+	it("accepts handoff during work and checkpoint reporting", () => {
+		const checkpoint = completionReportRequirements(true);
+		const answer = '{"status":"handoff","handover":" notes "}';
+		expect(parseCompletionReport(answer)).toEqual({ status: "handoff", handover: "notes" });
+		expect(parseCompletionReport(answer, checkpoint)).toEqual({
 			status: "handoff",
 			handover: "notes",
 		});
+		expect(parseCompletionReport('{"status":"complete"}', checkpoint)).toEqual({ status: "complete" });
 		for (const invalid of [
+			'{"status":"incomplete","remaining":"tests"}',
 			'{"status":"complete","handover":"notes"}',
 			'{"status":"handoff","handover":"notes","summary":"extra"}',
 			'{"status":"handoff","handover":" "}',
 			'{"status":"handoff","handover":null}',
 			'{"status":"handoff"}',
 		])
-			expect(parseCompletionReport(invalid)).toBeUndefined();
+			expect(parseCompletionReport(invalid, checkpoint)).toBeUndefined();
 	});
-	it("requires and bounds a nonfinal completion summary", () => {
-		const requirements = completionReportRequirements(true);
+	it.each([false, true])("requires and bounds a nonfinal completion summary (checkpoint=%s)", (checkpoint) => {
+		const requirements = completionReportRequirements(checkpoint, true);
 		for (const invalid of [
 			'{"status":"complete"}',
 			'{"status":"complete","summary":" "}',
