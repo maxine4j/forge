@@ -405,8 +405,12 @@ test("captures only the completed turn's final answer", async () => {
 		turnId: "turn-1",
 		item: { id: "b", type: "agentMessage", phase: "final_answer", text: '{"status":"complete"}' },
 	});
-	notify("turn/completed", { threadId: id, turn: { id: "turn-1", status: "completed", items: [] } });
 	expect(client.read(id).finalAnswer).toBe('{"status":"complete"}');
+	expect(client.read(id).items.find((item) => item.id === "a")?.finalAnswer).toBeUndefined();
+	expect(client.read(id).items.find((item) => item.id === "b")?.finalAnswer).toBe(true);
+	notify("item/agentMessage/delta", { threadId: id, itemId: "b", delta: " " });
+	expect(client.read(id).items.find((item) => item.id === "b")?.finalAnswer).toBeUndefined();
+	notify("turn/completed", { threadId: id, turn: { id: "turn-1", status: "completed", items: [] } });
 });
 
 test("history captures the final answer belonging to the latest completed turn", async () => {
@@ -429,7 +433,9 @@ test("history captures the final answer belonging to the latest completed turn",
 		],
 		nextCursor: null,
 	});
-	expect((await client.resume(id, "/data/worktrees/one")).finalAnswer).toBe("new");
+	const restored = await client.resume(id, "/data/worktrees/one");
+	expect(restored.finalAnswer).toBe("new");
+	expect(restored.items.map((item) => item.finalAnswer)).toEqual([true, true]);
 });
 
 test("reads paginated history without resuming or needing a working directory", async () => {

@@ -568,7 +568,8 @@ export class CodexAgentClient implements ICodexAgentClient {
 		};
 		if (view.status === "failed") view.turnFailure = this.turnFailure(last?.error);
 		for (const turn of thread.turns) {
-			for (const item of turn.items) this.item(view, item, turn.id === last?.id && turn.status === "completed");
+			for (const item of turn.items)
+				this.item(view, item, turn.id === last?.id && turn.status === "completed", turn.status === "completed");
 			this.finishTools(view, this.status(turn.status));
 		}
 		return view;
@@ -615,7 +616,12 @@ export class CodexAgentClient implements ICodexAgentClient {
 					return view;
 				}
 				const itemView: AgentRuntimeView = { status: view.status, items: [], requests: [], truncated: false };
-				this.item(itemView, entry.item, entry.turnId === view.turnId && status === "completed");
+				this.item(
+					itemView,
+					entry.item,
+					entry.turnId === view.turnId && status === "completed",
+					status === "completed",
+				);
 				if (itemView.plan !== undefined) view.plan ??= itemView.plan;
 				if (itemView.finalAnswer !== undefined) view.finalAnswer ??= itemView.finalAnswer;
 				this.finishTools(itemView, this.status(status));
@@ -656,7 +662,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 					? "interrupted"
 					: "failed";
 	}
-	private item(view: AgentRuntimeView, raw: unknown, capturePlan = false): void {
+	private item(view: AgentRuntimeView, raw: unknown, capturePlan = false, completed = capturePlan): void {
 		const item = z
 			.object({
 				id: z.string().min(1).max(256),
@@ -709,6 +715,13 @@ export class CodexAgentClient implements ICodexAgentClient {
 		this.put(view, {
 			id: item.id,
 			role,
+			...(completed
+			&& item.type === "agentMessage"
+			&& item.phase === "final_answer"
+			&& item.text !== undefined
+			&& item.text.length <= 32000
+				? { finalAnswer: true as const }
+				: {}),
 			...(item.type === "plan" ? { kind: "plan" as const } : {}),
 			text,
 			...(role === "activity"
@@ -843,6 +856,7 @@ export class CodexAgentClient implements ICodexAgentClient {
 				const existing = view.items.find((item) => item.id === delta.itemId);
 				this.put(view, {
 					...existing,
+					finalAnswer: undefined,
 					id: delta.itemId,
 					role: method === "item/commandExecution/outputDelta" ? "activity" : "assistant",
 					...(method === "item/plan/delta" ? { kind: "plan" as const } : {}),

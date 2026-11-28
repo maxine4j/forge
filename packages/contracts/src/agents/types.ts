@@ -8,6 +8,7 @@ export type AgentStatus =
 	| "failed"
 	| "uncertain";
 export interface AgentItem {
+	finalAnswer?: true;
 	kind?: "plan";
 	id: string;
 	role: "user" | "assistant" | "activity";

@@ -176,6 +176,12 @@ a reference, not the required transport lifecycle for Forge's continuous agent U
 
 ### Interactive agents
 
+Assistant messages render as Markdown with HTML and images disabled. Completed,
+untruncated final-answer messages containing a single JSON object display an
+expandable tree with a copy control preserving the original JSON payload. Legacy
+messages without phase metadata remain Markdown. This display marker is separate
+from managed completion-report capture; transcript text is unchanged.
+
 Request, history recovery, composer discovery and failed-turn explanations use
 [shared notifications](foundation.md#shared-notifications). Saved failures announce
 on display or change, while historical conversation/tool output stays in chat.

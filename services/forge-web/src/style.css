@@ -4354,3 +4354,38 @@ summary {
 		grid-template-columns: minmax(0, 1fr);
 	}
 }
+.agent-markdown {
+	overflow-wrap: anywhere;
+}
+.agent-markdown > :first-child {
+	margin-top: 0;
+}
+.agent-markdown > :last-child {
+	margin-bottom: 0;
+}
+.agent-markdown pre {
+	max-width: 100%;
+	overflow-x: auto;
+	white-space: pre;
+}
+.agent-json {
+	min-width: 0;
+	overflow-wrap: anywhere;
+}
+.agent-json-header {
+	display: flex;
+	justify-content: flex-end;
+}
+.agent-json-children {
+	padding-left: 1rem;
+}
+.agent-json-string {
+	color: #258257;
+}
+.agent-json-number {
+	color: #a65d13;
+}
+.agent-json-boolean,
+.agent-json-null {
+	color: #8b52a3;
+}

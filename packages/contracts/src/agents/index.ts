@@ -81,6 +81,7 @@ export const agentThreadSchema = agentSettingsSchema.extend({
 });
 export const agentThreadsSchema = z.array(agentThreadSchema);
 export const agentItemSchema = z.strictObject({
+	finalAnswer: z.literal(true).optional(),
 	id: z.string().min(1).max(256),
 	role: z.enum(["user", "assistant", "activity"]),
 	kind: z.literal("plan").optional(),
