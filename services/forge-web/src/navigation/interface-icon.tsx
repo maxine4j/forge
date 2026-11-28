@@ -14,6 +14,8 @@ const paths = {
 	terminals: "M3 4h18v16H3zM7 8l4 4-4 4m6 0h4",
 	play: "M8 5v14l11-7z",
 	pause: "M9 5v14m6-14v14",
+	cloud: "M7 18a4 4 0 1 1 .9-7.9 5.5 5.5 0 0 1 10.5 1.5A3.3 3.3 0 0 1 18 18Z",
+	laptop: "M5 16V5h14v11M5 16l-3 4h20l-3-4z",
 };
 
 export const InterfaceIcon = ({ name }: { name: keyof typeof paths }) => (

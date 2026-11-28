@@ -4227,6 +4227,31 @@ summary {
 	min-width: 0;
 	overflow-wrap: anywhere;
 }
+.provider-metrics-heading {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 12px;
+}
+.provider-metrics-name {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	min-width: 0;
+}
+.provider-metrics-name h4 {
+	margin: 0;
+}
+.provider-metrics-name svg {
+	vertical-align: -2px;
+}
+.provider-metrics-health {
+	flex: none;
+	max-width: 60%;
+	text-align: right;
+	color: #8b949e;
+	font-size: 13px;
+}
 .provider-metrics-card progress {
 	max-width: 100%;
 }

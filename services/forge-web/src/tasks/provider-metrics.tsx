@@ -8,6 +8,7 @@ import { ticketAgentMetricsSchema, type TicketAgentMetrics } from "@forge/contra
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
+import { InterfaceIcon } from "../navigation/interface-icon.tsx";
 
 type Result<T> = { value?: T; failed: boolean };
 
@@ -72,6 +73,10 @@ export function useProviderMetrics(api: IWorkspaceApi) {
 const stateLabel = <T,>(result: Result<T>) =>
 	result.failed ? (result.value ? "Stale" : "Unavailable") : result.value ? "" : "Loading…";
 
+const compactNumber = new Intl.NumberFormat("en-AU", { notation: "compact", maximumFractionDigits: 1 });
+const percent = new Intl.NumberFormat("en-AU", { style: "percent" });
+const formatTokens = (count: number) => compactNumber.format(count).toLowerCase();
+
 export function ProviderMetrics({
 	providers,
 	metrics,
@@ -104,16 +109,22 @@ export function ProviderMetrics({
 					const reserved = scheduler?.reserved ?? 0;
 					return (
 						<article className='account-card provider-metrics-card' key={provider.id}>
-							<h4>{provider.name}</h4>
-							<p>Type: {provider.kind === "openai" ? "OpenAI" : "Ollama"}</p>
-							<p>
-								<span
-									className={`provider-health-dot ${health?.status ?? "neutral"}`}
-									aria-hidden='true'
-								/>{" "}
-								Health: {healthLabel ?? (stateLabel(metrics.health) || "Unavailable")}{" "}
-								{metrics.health.value && metrics.health.failed && "(Stale)"}
-							</p>
+							<div className='provider-metrics-heading'>
+								<div className='provider-metrics-name'>
+									<span role='img' aria-label={provider.kind === "openai" ? "OpenAI" : "Ollama"}>
+										<InterfaceIcon name={provider.kind === "openai" ? "cloud" : "laptop"} />
+									</span>
+									<h4>{provider.name}</h4>
+								</div>
+								<span className='provider-metrics-health'>
+									<span
+										className={`provider-health-dot ${health?.status ?? "neutral"}`}
+										aria-hidden='true'
+									/>{" "}
+									{healthLabel ?? (stateLabel(metrics.health) || "Unavailable")}
+									{healthLabel && metrics.health.failed && " (Stale)"}
+								</span>
+							</div>
 							{metrics.scheduler.value ? (
 								<>
 									<p>
@@ -130,15 +141,12 @@ export function ProviderMetrics({
 							) : (
 								<p>Running: {stateLabel(metrics.scheduler)}</p>
 							)}
-							{provider.endpoint && <p>Endpoint: {provider.endpoint}</p>}
-							{provider.contextWindow && <p>Context window: {provider.contextWindow.toLocaleString()}</p>}
+							{provider.contextWindow && <p>Context window: {formatTokens(provider.contextWindow)}</p>}
 							{provider.supportedConcurrency && (
 								<p>Worker concurrency: {provider.supportedConcurrency.toLocaleString()}</p>
 							)}
 							{provider.compactionThresholdTokens && (
-								<p>
-									Compaction threshold: {provider.compactionThresholdTokens.toLocaleString()} tokens
-								</p>
+								<p>Compaction threshold: {formatTokens(provider.compactionThresholdTokens)} tokens</p>
 							)}
 							<h5>Last 7 days {metrics.usage.value && metrics.usage.failed && "(Stale)"}</h5>
 							{!metrics.usage.value ? (
@@ -150,9 +158,11 @@ export function ProviderMetrics({
 							) : (
 								<>
 									<p>Turns: {usage.turns.toLocaleString()}</p>
-									<p>Input tokens: {usage.input.toLocaleString()}</p>
-									<p>Cached input tokens (included in input): {usage.cached.toLocaleString()}</p>
-									<p>Output tokens: {usage.output.toLocaleString()}</p>
+									<p>
+										Input: {formatTokens(usage.input)}
+										{usage.input > 0 && ` (${percent.format(usage.cached / usage.input)} cached)`}
+									</p>
+									<p>Output: {formatTokens(usage.output)}</p>
 								</>
 							)}
 							{usage && usage.incompleteTokens > 0 && <p>Token usage is incomplete</p>}

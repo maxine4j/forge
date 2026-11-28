@@ -1,3 +1,4 @@
+import { costsSchema } from "@forge/contracts";
 import type { TaskAgent, TaskAgentInput } from "@forge/contracts/task-agents";
 import { defaultBoardSettings } from "@forge/contracts/tickets";
 import { expect, test } from "@playwright/test";
@@ -18,12 +19,10 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	let usageFails = false;
 	let schedulerFails = false;
 	let sparse = false;
-	const costs = new MockApi().read(new URL("http://localhost/api/costs?range=-7d")) as {
-		providers: Array<{ id: string; incompleteTokens: number }>;
-	};
-	costs.providers[0]!.id = openai;
-	costs.providers[0]!.incompleteTokens = 1;
-	costs.providers[1]!.id = ollama;
+	const costs = costsSchema.parse(new MockApi().read(new URL("http://localhost/api/costs?range=-7d")));
+	Object.assign(costs.providers.at(0)!, { id: openai, input: 1_250_000, cached: 1_000_000, output: 47_232 });
+	Object.assign(costs.providers.at(1)!, { id: ollama, input: 0, cached: 0, incompleteTokens: 1 });
+	costs.providers.at(2)!.id = unused;
 	await page.route(
 		(url) => url.pathname.startsWith("/api/"),
 		async (route) => {
@@ -82,7 +81,15 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 				return route.fulfill({
 					json: [
 						{ id: openai, name: "OpenAI", kind: "openai", retired: false },
-						{ id: ollama, name: "Local", kind: "ollama", retired: false, endpoint: "http://ollama/v1" },
+						{
+							id: ollama,
+							name: "Local",
+							kind: "ollama",
+							retired: false,
+							endpoint: "http://ollama/v1",
+							contextWindow: 65_536,
+							compactionThresholdTokens: 48_000,
+						},
 						{
 							id: unused,
 							name: `Unused ${"long-provider-name-".repeat(5)}`,
@@ -140,6 +147,20 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	await tabs.first().press("End");
 	await expect(page).toHaveURL("/tasks?view=agents");
 	const health = page.getByRole("region", { name: "Model providers" });
+	const cloudCard = health
+		.getByRole("article")
+		.filter({ has: page.getByRole("heading", { name: "OpenAI", exact: true }) });
+	const localCard = health
+		.getByRole("article")
+		.filter({ has: page.getByRole("heading", { name: "Local", exact: true }) });
+	await expect(cloudCard.getByText("Input: 1.3m (80% cached)", { exact: true })).toBeVisible();
+	await expect(cloudCard.getByText("Output: 47.2k", { exact: true })).toBeVisible();
+	await expect(localCard.getByText("Input: 0", { exact: true })).toBeVisible();
+	await expect(localCard.getByText("Context window: 65.5k", { exact: true })).toBeVisible();
+	await expect(localCard.getByText("Compaction threshold: 48k tokens", { exact: true })).toBeVisible();
+	await expect(cloudCard.getByRole("img", { name: "OpenAI", exact: true })).toBeVisible();
+	await expect(localCard.getByRole("img", { name: "Ollama", exact: true })).toBeVisible();
+	await expect(health).not.toContainText(/Type:|Health:|Endpoint:|Cached input tokens/);
 	await expect(health).toContainText("Healthy");
 	await expect(health).toContainText("Unhealthy");
 	await expect(health).toContainText("Usage limits reached");
