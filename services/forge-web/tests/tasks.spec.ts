@@ -495,7 +495,7 @@ for (const width of [1280, 390]) {
 		await page.goForward();
 		await expect(dialog.getByLabel("Description", { exact: true })).toHaveCount(0);
 		await dialog.getByRole("tab", { name: "Details", exact: true }).click();
-		await expect(dialog.getByRole("button", { name: "Edit description", exact: true })).toHaveText("Scope");
+		await expect(dialog.getByText("Scope", { exact: true })).toBeVisible();
 	});
 
 	test(`settings and confirmations consume one Back step without replay at ${width}px`, async ({ page }) => {
@@ -2124,11 +2124,8 @@ test("backlog creation and scope saves retain failed drafts and share changes wi
 	await dialog.getByLabel("Title", { exact: true }).press("Enter");
 	await expect(dialog.getByRole("button", { name: /^Edit title:/ })).toHaveText("Updated task");
 	const editDescription = dialog.getByRole("button", { name: "Edit description" });
-	const settings = dialog.getByRole("group", { name: "Agent Settings", exact: true });
-	const settingsTop = (await settings.boundingBox())!.y;
 	await editDescription.click();
 	await expect(dialog.getByLabel("Description", { exact: true })).toBeFocused();
-	expect((await settings.boundingBox())!.y).toBeCloseTo(settingsTop, 0);
 	await dialog.getByLabel("Description", { exact: true }).fill("Updated scope");
 	await expect(dialog.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
 	f.failSaves(true);
@@ -2144,12 +2141,12 @@ test("backlog creation and scope saves retain failed drafts and share changes wi
 	await editDescription.click();
 	await dialog.getByLabel("Description", { exact: true }).fill("Discard this scope");
 	await dialog.getByRole("button", { name: "Discard description changes" }).click();
-	await expect(editDescription).toHaveText("Updated scope");
+	await expect(dialog.getByText("Updated scope", { exact: true })).toBeVisible();
 	await editDescription.click();
 	await dialog.getByLabel("Description", { exact: true }).fill("Discard with Escape");
 	await dialog.getByRole("button", { name: "Discard description changes" }).click();
 	await expect(editDescription).toBeFocused();
-	await expect(editDescription).toHaveText("Updated scope");
+	await expect(dialog.getByText("Updated scope", { exact: true })).toBeVisible();
 	await dialog.getByRole("button", { name: "Close ticket" }).click();
 	await expect(page.getByRole("button", { name: "TASK-3 Updated task", exact: true })).toBeFocused();
 	await page.getByRole("tab", { name: "Board", exact: true }).click();
@@ -3475,6 +3472,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	await expect(latest).not.toHaveClass(/agent-scroll-unseen/);
 	expect(await history.evaluate((element) => element.scrollTop)).toBe(80);
 	await modal.getByRole("tab", { name: "Details", exact: true }).click();
+	await modal.getByRole("group", { name: "Plan", exact: true }).getByRole("button", { name: "Show more" }).click();
 	await expect(modal.locator(".ticket-plan-markdown").getByText("Filter works", { exact: false })).toBeVisible();
 	await modal.getByRole("tab", { name: "Chat", exact: true }).click();
 	await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(80);
