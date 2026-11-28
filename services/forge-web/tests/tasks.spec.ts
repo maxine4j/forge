@@ -2191,7 +2191,7 @@ for (const width of [1280, 390]) {
 		await dialog.getByRole("button", { name: "Create", exact: true }).click();
 		await expect(page.getByRole("button", { name: "TASK-4 Several repositories", exact: true })).toBeVisible();
 		expect(f.tickets().find((ticket) => ticket.id === "TASK-4")?.repositoryIds).toEqual([first, projectId]);
-		await page.reload();
+		await page.reload({ waitUntil: "domcontentloaded" });
 		await page.getByRole("button", { name: "TASK-4 Several repositories", exact: true }).click();
 		const details = page.getByRole("dialog", { name: "TASK-4", exact: true });
 		await details.getByRole("button", { name: "Repositories", exact: true }).click();
