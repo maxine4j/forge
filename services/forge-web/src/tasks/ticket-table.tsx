@@ -87,10 +87,10 @@ export const TicketTable = ({
 					</td>
 					<td>
 						<span
-							className={`backlog-status ticket-status-${ticket.status}`}
-							title={ticketLabels[ticket.status]}
+							className={`backlog-status ticket-status-${ticket.archivedAt ? "archived" : ticket.status}`}
+							title={ticket.archivedAt ? "Archived" : ticketLabels[ticket.status]}
 						>
-							{ticketLabels[ticket.status]}
+							{ticket.archivedAt ? "Archived" : ticketLabels[ticket.status]}
 						</span>
 					</td>
 				</tr>

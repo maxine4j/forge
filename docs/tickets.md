@@ -191,7 +191,8 @@ false, and storage failures leave controls usable in memory. With both off,
 only non-archived unfinished tickets appear. Show done includes non-archived Done
 tickets; Show archived adds every archived ticket, including archived Done tickets,
 independently of Show done. Both on shows all tickets. Counts, region labels and
-empty states describe visible tickets. Its visible
+empty states describe visible tickets. Archived rows display a yellow Archived status
+pill; their stored workflow status still determines ordering and the completion icon. Its visible
 count and row ordering follow shared one-second polling. Within each section,
 non-archived tickets precede archived tickets, then tickets sort by status:
 In progress, Ready for development, Backlog, Done. Within a status, activity sorts

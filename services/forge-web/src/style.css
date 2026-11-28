@@ -994,6 +994,10 @@
 	background: #362650;
 	color: #d2b8ff;
 }
+.backlog-status.ticket-status-archived {
+	background: #3d2e15;
+	color: #e3b341;
+}
 @media (max-width: 600px) {
 	.epic-progress-ring {
 		display: block;

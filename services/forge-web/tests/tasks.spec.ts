@@ -1653,6 +1653,8 @@ for (const width of [1280, 375]) {
 			{ ...f.tickets()[0]!, id: "TASK-3", status: "done", epicId: "EPIC-1" },
 			{ ...f.tickets()[0]!, id: "TASK-4", status: "done", epicId: "EPIC-1", archivedAt: createdAt },
 			{ ...f.tickets()[0]!, id: "TASK-5", status: "backlog", archivedAt: createdAt },
+			{ ...f.tickets()[0]!, id: "TASK-6", status: "todo", archivedAt: createdAt },
+			{ ...f.tickets()[0]!, id: "TASK-7", status: "in-progress", epicId: "EPIC-1", archivedAt: createdAt },
 		);
 		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
 		const count = page.getByRole("status");
@@ -1670,15 +1672,39 @@ for (const width of [1280, 375]) {
 		await done.press("End");
 		await expect(archived).toBeFocused();
 		await archived.press("Space");
-		await expect(count).toHaveText("5 visible tickets");
+		await expect(count).toHaveText("7 visible tickets");
 		const popup = page.getByRole("group", { name: "Filters", exact: true });
 		const bounds = await popup.boundingBox();
 		expect(bounds!.x).toBeGreaterThanOrEqual(0);
 		expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width);
 		await done.uncheck();
-		await expect(count).toHaveText("4 visible tickets");
+		await expect(count).toHaveText("6 visible tickets");
 		const epic = page.getByRole("table", { name: "EPIC-1 · Filtered epic", exact: true });
-		await expect(epic.getByRole("button")).toHaveText([/TASK-4$/]);
+		await expect(epic.getByRole("button")).toHaveText([/TASK-7$/, /TASK-4$/]);
+		for (const id of ["TASK-4", "TASK-5", "TASK-6", "TASK-7"]) {
+			const pill = page
+				.getByRole("row")
+				.filter({ has: page.getByRole("button", { name: new RegExp(id) }) })
+				.locator(".backlog-status");
+			await expect(pill).toHaveText("Archived");
+			await expect(pill).toHaveAttribute("title", "Archived");
+			await expect(pill).toHaveCSS("color", "rgb(227, 179, 65)");
+			await expect(pill).toHaveCSS("background-color", "rgb(61, 46, 21)");
+		}
+		const labels: Record<string, string> = {
+			backlog: "Backlog",
+			todo: "Ready for development",
+			"in-progress": "In progress",
+			done: "Done",
+		};
+		for (const ticket of f.tickets().filter((ticket) => !ticket.archivedAt && ticket.status !== "done")) {
+			const pill = page
+				.getByRole("row")
+				.filter({ has: page.getByRole("button", { name: new RegExp(ticket.id) }) })
+				.locator(".backlog-status");
+			await expect(pill).toHaveText(labels[ticket.status]!);
+			await expect(pill).toHaveAttribute("title", labels[ticket.status]!);
+		}
 		await expect(page.getByRole("progressbar", { name: "1 / 1 done", exact: true })).toBeVisible();
 		await archived.press("Escape");
 		await expect(trigger).toBeFocused();
@@ -1688,12 +1714,15 @@ for (const width of [1280, 375]) {
 		await page.getByRole("tab", { name: "Board", exact: true }).click();
 		await expect(page.getByRole("button", { name: /TASK-4|TASK-5/ })).toHaveCount(0);
 		await page.getByRole("tab", { name: "Backlog", exact: true }).click();
-		await expect(count).toHaveText("4 visible tickets");
+		await expect(count).toHaveText("6 visible tickets");
 		await page.reload();
-		await expect(count).toHaveText("4 visible tickets");
+		await expect(count).toHaveText("6 visible tickets");
 		await trigger.click();
 		await expect(done).not.toBeChecked();
 		await expect(archived).toBeChecked();
+		await archived.uncheck();
+		await expect(count).toHaveText("2 visible tickets");
+		await expect(page.locator(".ticket-status-archived")).toHaveCount(0);
 	});
 }
 
