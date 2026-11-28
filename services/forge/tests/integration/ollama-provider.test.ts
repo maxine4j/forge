@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { once } from "node:events";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -6,6 +7,7 @@ import { join, resolve } from "node:path";
 import * as files from "@forge/backend-infrastructure/file";
 import { maxRequestBytes } from "@forge/backend-infrastructure/ollama/types";
 import { sleep } from "@forge/backend-infrastructure/sleep";
+import Router from "@koa/router";
 import { expect, test, vi } from "vitest";
 import { WebSocket } from "ws";
 import { z } from "zod";
@@ -21,6 +23,8 @@ import { CodexAgentClient } from "../../src/codex/codex-agent-client.ts";
 import { CodexUsageClient } from "../../src/codex/codex-usage-client.ts";
 import { CostStore } from "../../src/cost/cost-store.ts";
 import { SqliteDatabase } from "../../src/database/sqlite-database.ts";
+import { HttpApplication } from "../../src/http/http-application.ts";
+import { ModelProviderRouter } from "../../src/model-providers/model-provider-router.ts";
 import { ModelProviderService } from "../../src/model-providers/model-provider-service.ts";
 import { ModelProviderStore } from "../../src/model-providers/model-provider-store.ts";
 import { readRelayMetrics } from "../../src/model-providers/ollama-relay-metrics.ts";
@@ -113,6 +117,40 @@ test("discovers a connected named worker and persists refreshed capabilities thr
 			]);
 			expect(JSON.stringify(rows)).not.toContain("private");
 		});
+		const httpService = new ModelProviderService(
+			store,
+			access,
+			randomUUID,
+			async () => {
+				throw new Error("unused");
+			},
+			undefined,
+			undefined,
+			undefined,
+			(providers) => readRelayMetrics(origin, providers, fetch),
+		);
+		const server = createServer(
+			new HttpApplication({ create: () => new Router() }, access)
+				.create([new ModelProviderRouter(httpService)])
+				.callback(),
+		);
+		server.listen(0, "127.0.0.1");
+		await once(server, "listening");
+		try {
+			const address = server.address();
+			if (!address || typeof address === "string") throw new Error("Missing port");
+			const url = `http://127.0.0.1:${address.port}/api/model-providers/relay-metrics`;
+			expect((await fetch(url)).status).toBe(403);
+			expect((await fetch(url, { headers: { "x-webauth-user": "other" } })).status).toBe(403);
+			const response = await fetch(url, { headers: { "x-webauth-user": "owner" } });
+			expect(response.status).toBe(200);
+			expect(response.headers.get("cache-control")).toBe("no-store");
+			expect(await response.json()).toMatchObject([
+				{ providerId: initial.id, freshness: "fresh", macos: { chipName: "M4" } },
+			]);
+		} finally {
+			await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+		}
 		const isolated = await readRelayMetrics(
 			origin,
 			[
