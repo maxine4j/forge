@@ -62,6 +62,56 @@ test("caches successful identity probes and isolates unavailable power", async (
 	expect(calls.filter((command) => command.endsWith("sudo"))).toHaveLength(2);
 });
 
+test("keeps independent macOS readings when probes fail and retries identity", async () => {
+	let hardwareCalls = 0;
+	const collector = createMacosCollector(
+		async (command) => {
+			if (command.endsWith("system_profiler")) {
+				hardwareCalls++;
+				return hardwareCalls === 1
+					? "malformed"
+					: JSON.stringify({ SPHardwareDataType: [{ cpu_type: "Intel", machine_model: "MacPro7,1" }] });
+			}
+			if (command.endsWith("sw_vers")) throw new Error("timed out");
+			if (command.endsWith("pmset")) return "Now drawing from 'AC Power'";
+			return "GPU HW active residency: 0%\nCombined Power (CPU + GPU + ANE): 0 mW";
+		},
+		async () => {
+			throw new Error("unavailable");
+		},
+		true,
+	);
+	const signal = new AbortController().signal;
+	const first = await collector(signal);
+	expect(first.macos).toMatchObject({
+		chipName: null,
+		macosVersion: null,
+		ollamaVersion: null,
+		batteryPercent: null,
+		powerSource: "ac",
+		powerWatts: 0,
+	});
+	expect(first.gpus).toEqual([{ utilization: 0, memoryUsed: null, memoryTotal: null }]);
+	expect((await collector(signal)).macos).toMatchObject({ chipName: "Intel", deviceModel: "MacPro7,1" });
+});
+
+test("passes cancellation to every macOS probe", async () => {
+	const controller = new AbortController();
+	const signals: AbortSignal[] = [];
+	const waitForAbort = (signal: AbortSignal): Promise<string> => {
+		signals.push(signal);
+		return new Promise((_, reject) =>
+			signal.addEventListener("abort", () => reject(new Error("aborted")), { once: true }),
+		);
+	};
+	const collector = createMacosCollector((_command, _args, signal) => waitForAbort(signal), waitForAbort, true);
+	const result = collector(controller.signal);
+	controller.abort();
+	expect((await result).macos).toMatchObject({ chipName: null, powerWatts: null, ollamaVersion: null });
+	expect(signals).toHaveLength(5);
+	expect(signals.every((signal) => signal.aborted)).toBe(true);
+});
+
 const env = { OLLAMA_RELAY_TOKEN: "x".repeat(32), OLLAMA_CONTEXT_LENGTH: "42" };
 const options = ["--worker-id", "gpu-1", "--relay-base-url", "https://relay.example:8443/"];
 
