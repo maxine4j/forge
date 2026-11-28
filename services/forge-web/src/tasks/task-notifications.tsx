@@ -13,6 +13,17 @@ import { RequestCard } from "../agents/request-card.tsx";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { EpicIcon } from "./epic-icon.tsx";
 import { TicketIndicator } from "./ticket-indicator.tsx";
+import { ticketLabels } from "./ticket-labels.ts";
+
+const relativeTime = new Intl.RelativeTimeFormat("en");
+const formatNotificationAge = (date: Date) => {
+	const minutes = Math.floor((Date.now() - date.getTime()) / 60_000);
+	if (minutes < 1) return "Just now";
+	if (minutes < 60) return relativeTime.format(-minutes, "minute");
+	const hours = Math.floor(minutes / 60);
+	if (hours < 24) return relativeTime.format(-hours, "hour");
+	return relativeTime.format(-Math.floor(hours / 24), "day");
+};
 
 const NotificationCard = ({
 	item,
@@ -34,6 +45,8 @@ const NotificationCard = ({
 	const [error, setError] = useState("");
 	const draftKey = `notification-feedback:${item.id}`;
 	const [feedback, setFeedback] = useState(() => drafts.get(draftKey) ?? "");
+	const date = new Date(item.at);
+	const plan = item.kind === "plan" ? item.workflow.plan : undefined;
 	const act = async (path: string, body: unknown, agent = false) => {
 		if (locked.current) return;
 		locked.current = true;
@@ -54,43 +67,57 @@ const NotificationCard = ({
 	};
 	return (
 		<article className='notification-card' data-notification={item.id} tabIndex={-1}>
-			<h3>
-				<TicketIndicator ticket={item.ticket} />
-				<button onClick={() => open(item.ticket)}>{item.ticket.title}</button>
-			</h3>
-			<nav aria-label='Ticket breadcrumb'>
-				{item.epic && (
-					<>
+			<div className='notification-header'>
+				<div className='ticket-details-heading'>
+					<nav className='ticket-details-key-row' aria-label='Ticket breadcrumb'>
+						{item.epic && (
+							<>
+								<a
+									className='ticket-epic-link'
+									href={`/tasks?view=notifications&epic=${item.epic.id}`}
+									aria-label={`${item.epic.id} ${item.epic.title}`}
+									title={item.epic.title}
+									onClick={(event) => {
+										event.preventDefault();
+										openEpic(item.epic!.id);
+									}}
+								>
+									<EpicIcon /> <span>{item.epic.id}</span>
+								</a>
+								<span className='ticket-breadcrumb-divider' aria-hidden='true'>
+									/
+								</span>
+							</>
+						)}
 						<a
-							href={`/tasks?view=notifications&epic=${item.epic.id}`}
+							className='notification-ticket-link'
+							href={`/tasks?view=notifications&ticket=${item.ticket.id}&tab=chat`}
 							onClick={(event) => {
 								event.preventDefault();
-								openEpic(item.epic!.id);
+								open(item.ticket);
 							}}
 						>
-							<EpicIcon /> {item.epic.id} {item.epic.title}
+							<span
+								className={`ticket-type ${item.ticket.status === "done" ? "ticket-complete" : ""}`}
+								aria-hidden='true'
+							>
+								✓
+							</span>
+							{item.ticket.id}
 						</a>
-						<span> → </span>
-					</>
-				)}
-				<a
-					href={`/tasks?view=notifications&ticket=${item.ticket.id}`}
-					onClick={(event) => {
-						event.preventDefault();
-						open(item.ticket);
-					}}
-				>
-					<span
-						className={`ticket-type ${item.ticket.status === "done" ? "ticket-complete" : ""}`}
-						aria-hidden='true'
-					>
-						✓
-					</span>{" "}
-					{item.ticket.id}
-				</a>
-				<span> · {item.ticket.status}</span>
-			</nav>
-			<time dateTime={item.at}>{new Date(item.at).toLocaleString()}</time>
+						<span className={`ticket-status-pill ticket-status-${item.ticket.status}`}>
+							{ticketLabels[item.ticket.status]}
+						</span>
+					</nav>
+					<time dateTime={item.at} title={date.toLocaleString()}>
+						{formatNotificationAge(date)}
+					</time>
+				</div>
+				<div className='notification-title'>
+					<h3>{item.ticket.title}</h3>
+					<TicketIndicator ticket={item.ticket} />
+				</div>
+			</div>
 			{item.request && item.agentId && (
 				<RequestCard
 					request={item.request}
@@ -99,21 +126,18 @@ const NotificationCard = ({
 					reply={(input) => void act(`agents/${item.agentId}/replies`, input, true)}
 				/>
 			)}
-			{item.kind === "plan" && item.workflow.plan && (
+			{plan && (
 				<>
-					<PlanMarkdown text={item.workflow.plan.text} />
-					<PlanReviewControls
-						busy={busy}
-						approve={() =>
-							void act(`tickets/${item.ticket.id}/approve`, { revision: item.workflow.plan!.revision })
-						}
-					/>
+					<div className='notification-plan'>
+						<PlanMarkdown text={plan.text} />
+					</div>
 					<form
+						className='notification-feedback'
 						onSubmit={(event) => {
 							event.preventDefault();
 							void act(`tickets/${item.ticket.id}/messages`, {
 								text: feedback,
-								revision: item.workflow.plan!.revision,
+								revision: plan.revision,
 							});
 						}}
 					>
@@ -130,23 +154,34 @@ const NotificationCard = ({
 								}}
 							/>
 						</label>
-						<button disabled={busy || !feedback.trim()}>Submit feedback</button>
+						<div className='agent-actions notification-actions'>
+							<button type='submit' disabled={busy || !feedback.trim()}>
+								Submit feedback
+							</button>
+							<PlanReviewControls
+								busy={busy}
+								approve={() =>
+									void act(`tickets/${item.ticket.id}/approve`, { revision: plan.revision })
+								}
+							/>
+						</div>
 					</form>
 				</>
 			)}
 			{item.message && <p>{item.message}</p>}
 			{item.action && (
-				<button disabled={busy} onClick={() => void act(`tickets/${item.ticket.id}/${item.action}`, {})}>
-					{item.action === "merge"
-						? "Queue merge"
-						: item.workflow.state === "setup-failed"
-							? "Retry setup"
-							: item.workflow.state === "uncertain"
-								? "Reconcile execution"
-								: "Retry cleanup"}
-				</button>
+				<div className='agent-actions notification-actions'>
+					<button disabled={busy} onClick={() => void act(`tickets/${item.ticket.id}/${item.action}`, {})}>
+						{item.action === "merge"
+							? "Queue merge"
+							: item.workflow.state === "setup-failed"
+								? "Retry setup"
+								: item.workflow.state === "uncertain"
+									? "Reconcile execution"
+									: "Retry cleanup"}
+					</button>
+				</div>
 			)}
-			<button onClick={() => open(item.ticket)}>Open ticket Chat</button>
 			{error && <p role='alert'>{error}</p>}
 		</article>
 	);

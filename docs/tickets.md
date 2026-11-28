@@ -71,8 +71,10 @@ All Tasks tabs share one-second feed polling. Fetch failures retain the last
 successful count and cards and expose Retry; opening a tab or ticket never
 dismisses a condition. Actions check the current identity, prevent repeated local
 submission, then refresh on success or failure. Only authoritative resolution
-removes a card. Request drafts share Chat's in-memory draft map and survive tab
-changes and failed submissions. Investigation opens ticket Chat. Notifications
+removes a card. Cards use the ticket modal's breadcrumb and status pill, show
+the notification's relative age, and align submission and recovery actions to
+the right. The ticket ID opens ticket Chat. Request drafts share Chat's in-memory
+draft map and survive tab changes and failed submissions. Notifications
 has no creation or backlog-filter toolbar. See [agent request lifecycle](agents.md#notification-request-lifecycle)
 and [metadata persistence](architecture.md#notification-metadata).
 

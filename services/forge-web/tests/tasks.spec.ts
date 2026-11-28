@@ -111,7 +111,8 @@ for (const width of [1280, 390]) {
 		await expect(cards).toHaveCount(1);
 		await expect(cards.first()).toBeFocused();
 		expect(state.posts[1]!.body["answers"]).toEqual({ target: "Staging", token: "private-value" });
-		await cards.first().getByRole("button", { name: "Open ticket Chat" }).click();
+		await expect(cards.first().getByRole("button", { name: "Open ticket Chat" })).toHaveCount(0);
+		await cards.first().getByRole("link", { name: "TASK-2", exact: true }).click();
 		await expect(page.getByRole("dialog", { name: "TASK-2", exact: true })).toBeVisible();
 		await expect(page).toHaveURL(/view=notifications&ticket=TASK-2&tab=chat/);
 		await page.goBack();
@@ -122,6 +123,19 @@ for (const width of [1280, 390]) {
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 	});
 }
+
+test("notifications show relative times while retaining the source timestamps", async ({ page }) => {
+	await page.clock.setFixedTime(new Date("2026-11-03T03:20:00.000Z"));
+	await setupNotifications(page, [
+		notificationFixture("hours"),
+		{ ...notificationFixture("minutes", "TASK-2"), at: "2026-11-03T03:17:00.000Z" },
+	]);
+	await page.getByRole("tab", { name: "Notifications (2)", exact: true }).click();
+	const hours = page.locator('[data-notification="hours"] time');
+	await expect(hours).toHaveText("3 hours ago");
+	await expect(hours).toHaveAttribute("datetime", createdAt);
+	await expect(page.locator('[data-notification="minutes"] time')).toHaveText("3 minutes ago");
+});
 
 test("notifications approvals, plan feedback, plan approval and recovery use inline controls and refresh stale items", async ({
 	page,
