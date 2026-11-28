@@ -105,9 +105,7 @@ export class CostService implements ICostService {
 				const attributed = turns.filter((turn) => turn.ticketId === ticket.id);
 				return { ...ticket, ...summarizeCosts(attributed, intervals), phases: phases(attributed, intervals) };
 			}),
-			weeklyBudget: history
-				? weeklyBudget(history.observations, history.completions, now, Date.parse(window.from))
-				: undefined,
+			weeklyBudget: history ? weeklyBudget(history.observations, history.completions, now, window) : undefined,
 		};
 	}
 	async readTicket(actor: Actor, ticketId: string, range = defaultCostRange): Promise<TicketCost> {

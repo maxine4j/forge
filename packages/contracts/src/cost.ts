@@ -20,6 +20,7 @@ export const weeklyObservationSchema = z.object({
 	resetsAt: z.iso.datetime(),
 });
 export const weeklyBudgetSchema = z.object({
+	window: z.object({ from: z.iso.datetime(), to: z.iso.datetime() }),
 	defaultBucketId: z.string().optional(),
 	buckets: z.array(
 		z.object({

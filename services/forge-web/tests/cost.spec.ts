@@ -26,6 +26,7 @@ const cost = {
 		{ id: "local", name: "Local Ollama", kind: "ollama", workSharePercent: 25, ...ollama },
 	],
 	weeklyBudget: {
+		window: { from: "2026-11-01T00:00:00.000Z", to: "2026-11-08T00:00:00.000Z" },
 		defaultBucketId: "codex",
 		buckets: ["codex", "other"].map((bucketId) => ({
 			bucketId,
@@ -42,7 +43,7 @@ const cost = {
 				{
 					bucketId,
 					bucket: bucketId,
-					observedAt: since,
+					observedAt: "2026-11-03T00:05:00.000Z",
 					minutes: 10080,
 					usedPercent: 60,
 					resetsAt: "2026-11-10T00:00:00.000Z",
@@ -224,6 +225,100 @@ test("legacy project Cost paths show the unknown-route view", async ({ page }) =
 	await expect(page.getByRole("heading", { name: "Page not found" })).toBeVisible();
 	await expect(page.getByRole("link", { name: "Repos", exact: true })).not.toHaveAttribute("aria-current");
 	await expect(page).toHaveURL(`/repos/${projectId}/cost`);
+});
+
+test("weekly chart follows each response window and bucket, including refresh and empty history", async ({ page }) => {
+	const base = Date.parse("2026-11-28T12:00:00.000Z");
+	const iso = (time: number) => new Date(time).toISOString();
+	const day = 86_400_000;
+	let advance = 0;
+	let empty = false;
+	await page.route(
+		(url) => url.pathname.startsWith("/api/"),
+		(route) => {
+			const url = new URL(route.request().url());
+			if (url.pathname === "/api/accounts")
+				return route.fulfill({
+					json: {
+						codex: { connection: "available", login: { state: "idle" } },
+						github: { connection: "available", login: { state: "idle" } },
+					},
+				});
+			if (url.pathname !== "/api/costs") return route.fulfill({ json: [] });
+			const range = url.searchParams.get("range") ?? "-7d";
+			const end = base + advance;
+			const length = Number.parseInt(range.slice(1), 10) * (range.endsWith("hr") ? 3_600_000 : day);
+			const from = end - length;
+			const observations = [0, 7, 14, 21].map((days) => {
+				const start = base - (21 - days) * day - 1_800_000;
+				return {
+					bucketId: "codex",
+					bucket: "codex",
+					minutes: 10080,
+					observedAt: iso(start + 300_000),
+					resetsAt: iso(start + 7 * day),
+					usedPercent: 20 + days,
+				};
+			});
+			observations.push({ ...observations[2]!, observedAt: iso(base - 2_400_000) });
+			observations.push({ ...observations[3]!, observedAt: iso(base + 2 * 3_600_000) });
+			const visible = observations.filter(
+				(entry) => Date.parse(entry.observedAt) >= from && Date.parse(entry.observedAt) <= end,
+			);
+			return route.fulfill({
+				json: {
+					...cost,
+					weeklyBudget: {
+						window: { from: iso(from), to: iso(end) },
+						defaultBucketId: "codex",
+						buckets: empty
+							? []
+							: cost.weeklyBudget.buckets.map((bucket) => ({
+									...bucket,
+									observations: visible.map((point) => ({
+										...point,
+										bucketId: bucket.bucketId,
+										bucket: bucket.bucket,
+									})),
+								})),
+					},
+				},
+			});
+		},
+	);
+	await page.goto("/costs?range=-28d");
+	const chart = page.getByRole("application", { name: /codex weekly remaining/ });
+	await expect(chart).toBeVisible();
+	await expect(chart.locator(".recharts-reference-line")).toHaveCount(4);
+	await expect(chart.locator(".recharts-line-dots .recharts-dot")).toHaveCount(9);
+	const range = page.getByRole("combobox", { name: "Cost time range", exact: true });
+	await chooseDropdown(range, "-1hr");
+	await expect(chart.locator(".recharts-reference-line")).toHaveCount(2);
+	await expect(chart.locator(".recharts-line-dots .recharts-dot")).toHaveCount(3);
+	await chart.locator(".recharts-line-dots .recharts-dot").nth(1).hover();
+	await expect(page.getByText("Weekly reset : 100%")).toBeVisible();
+	await expect(chart).toContainText(
+		new Date(base - 3_600_000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+	);
+	await chooseDropdown(page.getByRole("combobox", { name: "Weekly bucket", exact: true }), "other");
+	await expect(page.getByRole("application", { name: /other weekly remaining/ })).toBeVisible();
+	advance = 3 * 3_600_000;
+	await chooseDropdown(range, "custom");
+	await page.getByRole("textbox", { name: "Custom range" }).fill("-2hr");
+	await page.getByRole("button", { name: "Apply" }).click();
+	await expect(page).toHaveURL("/costs?range=-2hr");
+	await expect(chart).toBeVisible();
+	await chooseDropdown(page.getByRole("combobox", { name: "Weekly bucket", exact: true }), "other");
+	const other = page.getByRole("application", { name: /other weekly remaining/ });
+	await expect(other.locator(".recharts-line-dots .recharts-dot")).toHaveCount(1);
+	advance += 3_600_000;
+	await page.getByRole("button", { name: "Refresh", exact: true }).click();
+	await expect(other).toContainText(
+		new Date(base + advance).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+	);
+	empty = true;
+	await page.getByRole("button", { name: "Refresh", exact: true }).click();
+	await expect(page.getByText("Learning usage pattern. No weekly quota observations yet.")).toBeVisible();
 });
 
 test("Costs links open archived tickets outside the active board", async ({ page }) => {

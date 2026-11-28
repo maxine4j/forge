@@ -331,6 +331,7 @@ export class MockApi implements IMockApi {
 				],
 				weeklyBudget: weeklyBudget && {
 					...weeklyBudget,
+					window: { from: new Date(cutoff).toISOString(), to: date },
 					buckets: weeklyBudget.buckets.map((bucket) => ({
 						...bucket,
 						observations: bucket.observations.filter((entry) => Date.parse(entry.observedAt) >= cutoff),
@@ -519,6 +520,7 @@ export class MockApi implements IMockApi {
 				chats: costFixture({ input: 0, cached: 0, output: 0, turns: 0 }),
 				quotaAttribution: [{ bucketId: "codex", consumption: 2, allocated: 1.17, unallocated: 0.83 }],
 				weeklyBudget: {
+					window: { from: new Date(Date.parse(date) - 7 * 86_400_000).toISOString(), to: date },
 					defaultBucketId: "codex",
 					buckets: [
 						{

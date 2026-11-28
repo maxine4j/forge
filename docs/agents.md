@@ -562,9 +562,11 @@ hours, three completions and positive consumption are required. Capacity is
 Fresh exhausted allowance shows zero; samples older than fifteen minutes or past
 reset suppress estimates. The response includes sample size and observed period.
 
-The responsive burndown shows recorded current-cycle history, gaps over fifteen minutes,
-and a dashed linear reference from 100% at window start to 0% at reset. It never
-invents a starting observation. A labelled selector defaults to the lowest remaining bucket.
+The response includes the resolved `weeklyBudget.window` bounds. The responsive burndown
+uses those bounds, shows all recorded cycles and gaps over fifteen minutes, and marks
+each recorded cycle's start at 100%. Each cycle has a clipped dashed linear reference
+from its weekly start to its reset. A range beginning mid-cycle starts with its first
+recorded observation. A labelled selector defaults to the lowest remaining bucket.
 Both time charts use Recharts and expose values on hover and keyboard focus.
 This is budget capacity, not a guarantee of completing work in the remaining time:
 other account activity and changing ticket complexity affect it.

@@ -60,3 +60,18 @@ test("prefers stable codex bucket, keeps reset cycles and drops history outside 
 	expect(result.defaultBucketId).toBe("codex");
 	expect(weeklyBudget(samples, [], new Date(iso(30 * 86_400_000))).buckets).toEqual([]);
 });
+
+test("filters inclusively to the supplied window while retaining recorded cycles", () => {
+	const window = { from: iso(0), to: iso(86_400_000) };
+	const sample = series()[0]!;
+	const samples = [
+		{ ...sample, observedAt: iso(-1) },
+		{ ...sample, observedAt: window.from },
+		{ ...sample, observedAt: window.to, resetsAt: iso(14 * 86_400_000) },
+		{ ...sample, observedAt: iso(86_400_001) },
+	];
+	const result = weeklyBudget(samples, [], new Date(window.to), window);
+	expect(result.window).toEqual(window);
+	expect(result.buckets[0]!.observations.map((value) => value.observedAt)).toEqual([window.from, window.to]);
+	expect(new Set(result.buckets[0]!.observations.map((value) => value.resetsAt)).size).toBe(2);
+});

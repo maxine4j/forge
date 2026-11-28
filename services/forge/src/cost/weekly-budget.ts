@@ -1,5 +1,7 @@
 import type { WeeklyBudget, WeeklyObservation } from "@forge/contracts";
 
+import type { CostWindow } from "./types.ts";
+
 const day = 86_400_000;
 export const quotaGap = 15 * 60_000;
 
@@ -8,11 +10,15 @@ export function weeklyBudget(
 	observations: WeeklyObservation[],
 	completions: string[],
 	now: Date,
-	cutoff = now.getTime() - 28 * day,
+	window: CostWindow = { from: new Date(now.getTime() - 28 * day).toISOString(), to: now.toISOString() },
 ): WeeklyBudget {
 	const groups = new Map<string, WeeklyObservation[]>();
 	for (const observation of observations) {
-		if (Date.parse(observation.observedAt) < cutoff || Date.parse(observation.observedAt) > now.getTime()) continue;
+		if (
+			Date.parse(observation.observedAt) < Date.parse(window.from)
+			|| Date.parse(observation.observedAt) > Date.parse(window.to)
+		)
+			continue;
 		const group = groups.get(observation.bucketId) ?? [];
 		group.push(observation);
 		groups.set(observation.bucketId, group);
@@ -78,6 +84,7 @@ export function weeklyBudget(
 	}
 	buckets.sort((a, b) => a.remainingPercent - b.remainingPercent || a.bucketId.localeCompare(b.bucketId));
 	return {
+		window,
 		defaultBucketId:
 			buckets.length === 1
 				? buckets[0]?.bucketId

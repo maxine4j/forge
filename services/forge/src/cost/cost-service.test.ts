@@ -4,6 +4,34 @@ import { CostService } from "./cost-service.ts";
 import type { QuotaInterval } from "./quota-attribution.ts";
 import type { UsageTurn } from "./types.ts";
 
+test("returns the resolved weekly budget window for presets and custom ranges", async () => {
+	const now = new Date("2026-11-28T12:00:00.000Z");
+	const quotaRead = vi.fn(async () => ({ observations: [], completions: [] }));
+	const service = new CostService(
+		{ assertOwner: vi.fn() },
+		{ get: async () => undefined, listForCost: async () => [] },
+		{ read: async () => ({ since: "2026-01-01T00:00:00.000Z", turns: [] }) },
+		{ limits: async () => undefined },
+		() => now,
+		{ save: vi.fn(), read: quotaRead, intervals: vi.fn(async () => []) },
+	);
+	for (const [range, milliseconds] of [
+		["-1hr", 3_600_000],
+		["-12hr", 12 * 3_600_000],
+		["-1d", 86_400_000],
+		["-7d", 7 * 86_400_000],
+		["-28d", 28 * 86_400_000],
+		["-35d", 35 * 86_400_000],
+	] as const) {
+		const from = new Date(now.getTime() - milliseconds).toISOString();
+		expect((await service.read({ username: "owner" }, range)).weeklyBudget?.window).toEqual({
+			from,
+			to: now.toISOString(),
+		});
+		expect(quotaRead).toHaveBeenLastCalledWith(from);
+	}
+});
+
 test("aggregates all phases, chats, archived and repository-free tickets without repository joins", async () => {
 	const startedAt = "2026-10-31T23:00:00.000Z";
 	const planning = {
