@@ -89,8 +89,11 @@ and [metadata persistence](architecture.md#notification-metadata).
 Tasks retains `view=backlog|notifications|agents` and `epic=EPIC-n` links. Every page accepts
 `ticket=TASK-n` and `tab=details|chat|history|cost`, including repository sections.
 Ticket details render descriptions and plans as Markdown, initially showing ten source lines
-with independent Show more and Show less controls for longer text. Editing a description
-opens its complete saved source; archived descriptions remain read-only.
+with independent link-style Show more and Show less controls for longer text. Editing a description
+opens its complete saved Markdown source as plain text; archived descriptions remain read-only.
+Copy plan copies the complete plan, even when its preview is collapsed, and reports success
+or failure through a toast. It is available for archived tickets too. See the
+[development checks](development.md#development-checks).
 The application owns ticket selection, mutations, draft/reading caches and one
 shared ticket/epic/notification collection poller. Its details host sits outside
 retained hidden pages, with agent options and visible error notifications.

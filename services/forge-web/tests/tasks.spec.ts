@@ -3806,6 +3806,74 @@ test("mobile touch drag and read-only status work without widening the page", as
 	await context.close();
 });
 
+test("ticket details preview Markdown, edit source and copy the full plan", async ({ page }) => {
+	const f = await setup(page, false, true);
+	const description = [
+		"# Scope heading",
+		"",
+		"**Bold scope**",
+		...Array.from({ length: 8 }, (_, i) => `Scope line ${i + 1}`),
+	].join("\n");
+	const plan = [
+		"# Plan heading",
+		"",
+		"- First step",
+		...Array.from({ length: 8 }, (_, i) => `Plan line ${i + 1}`),
+	].join("\n");
+	f.tickets()[0]!.description = description;
+	f.tickets()[0]!.status = "backlog";
+	f.setWorkflow({ plan: { revision: 1, text: plan } });
+	await page.goto("/tasks?ticket=TASK-1&tab=details");
+	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	const planGroup = dialog.getByRole("group", { name: "Plan", exact: true });
+	await expect(dialog.getByRole("heading", { name: "Scope heading" })).toBeVisible();
+	await expect(dialog.locator("strong", { hasText: "Bold scope" })).toBeVisible();
+	await expect(planGroup.getByRole("heading", { name: "Plan heading" })).toBeVisible();
+	await expect(planGroup.getByRole("listitem")).toContainText("First step");
+	await expect(dialog.getByText("Scope line 8")).toHaveCount(0);
+	await expect(planGroup.getByText("Plan line 8")).toHaveCount(0);
+	const disclosures = dialog.getByRole("button", { name: "Show more" });
+	await disclosures.first().click();
+	await expect(dialog.getByText("Scope line 8")).toBeVisible();
+	await expect(planGroup.getByText("Plan line 8")).toHaveCount(0);
+	await dialog.getByRole("button", { name: "Show less" }).click();
+	await planGroup.getByRole("button", { name: "Show more" }).click();
+	await expect(planGroup.getByText("Plan line 8")).toBeVisible();
+	await planGroup.getByRole("button", { name: "Show less" }).click();
+	await page.evaluate(() =>
+		Object.defineProperty(navigator, "clipboard", {
+			configurable: true,
+			value: {
+				writeText: (text: string) => {
+					(window as unknown as { copied: string }).copied = text;
+					return Promise.resolve();
+				},
+			},
+		}),
+	);
+	await planGroup.getByRole("button", { name: "Copy plan" }).click();
+	expect(await page.evaluate(() => (window as unknown as { copied: string }).copied)).toBe(plan);
+	await expect(page.getByText("Plan copied.")).toBeVisible();
+	await dialog.getByRole("button", { name: "Edit description" }).click();
+	await expect(dialog.getByLabel("Description", { exact: true })).toHaveValue(description);
+});
+
+test("archived ticket plans remain copyable and report clipboard failure", async ({ page }) => {
+	const f = await setup(page, false, true);
+	f.tickets()[0]!.archivedAt = createdAt;
+	await page.goto("/tasks?ticket=TASK-1&tab=details");
+	const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await expect(dialog.getByRole("button", { name: "Edit description" })).toHaveCount(0);
+	await page.evaluate(() =>
+		Object.defineProperty(navigator, "clipboard", {
+			configurable: true,
+			value: { writeText: () => Promise.reject(new Error("Denied")) },
+		}),
+	);
+	await dialog.getByRole("button", { name: "Copy plan" }).click();
+	await expect(page.getByText("Could not copy plan.")).toBeVisible();
+});
+
 test("a plan needs attention on the four-column board and approval submits the displayed revision", async ({
 	page,
 }) => {
@@ -3838,7 +3906,8 @@ test("a plan needs attention on the four-column board and approval submits the d
 	await details.click();
 	await plan.getByRole("button", { name: "Approve plan", exact: true }).click();
 	await expect.poll(() => f.approvals).toEqual([{ revision: 1 }]);
-	await expect(plan.getByRole("button")).toHaveCount(0);
+	await expect(plan.getByRole("button", { name: "Approve plan" })).toHaveCount(0);
+	await expect(plan.getByRole("button", { name: "Copy plan" })).toBeVisible();
 	await expect(plan.getByRole("heading", { name: "Search plan" })).toBeVisible();
 	await panel.getByRole("button", { name: "Close ticket" }).click();
 	await expect(dot).toHaveCount(0);
