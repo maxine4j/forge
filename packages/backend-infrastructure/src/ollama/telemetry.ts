@@ -1,5 +1,15 @@
 import { Buffer } from "node:buffer";
 
+export interface MacosTelemetry {
+	chipName: string | null;
+	deviceModel: string | null;
+	macosVersion: string | null;
+	ollamaVersion: string | null;
+	batteryPercent: number | null;
+	powerWatts: number | null;
+	powerSource: "battery" | "ac" | null;
+}
+
 export interface TelemetryFrame {
 	type: "telemetry";
 	ready: boolean;
@@ -8,6 +18,7 @@ export interface TelemetryFrame {
 	hostMemory: { total: number; free: number } | null;
 	loadedModels: { count: number; size: number; sizeVram: number } | null;
 	gpus: { utilization: number | null; memoryUsed: number | null; memoryTotal: number | null }[];
+	macos?: MacosTelemetry;
 }
 
 const bytes = (value: unknown): value is number =>
@@ -15,6 +26,34 @@ const bytes = (value: unknown): value is number =>
 const nullableBytes = (value: unknown): boolean => value === null || bytes(value);
 const record = (value: unknown): value is Record<string, unknown> =>
 	value !== null && typeof value === "object" && !Array.isArray(value);
+
+/** Validate and allowlist macOS metadata before it crosses a service boundary. */
+export const readMacosTelemetry = (value: unknown): MacosTelemetry => {
+	if (!record(value)) throw new Error("Invalid macOS telemetry");
+	const string = (key: string): string | null => {
+		const field = value[key];
+		if (field === null || (typeof field === "string" && field.length > 0 && field.length <= 256)) return field;
+		throw new Error("Invalid macOS telemetry");
+	};
+	const number = (key: string, max: number): number | null => {
+		const field = value[key];
+		if (field === null || (typeof field === "number" && Number.isFinite(field) && field >= 0 && field <= max))
+			return field;
+		throw new Error("Invalid macOS telemetry");
+	};
+	const powerSource = value["powerSource"];
+	if (powerSource !== null && powerSource !== "battery" && powerSource !== "ac")
+		throw new Error("Invalid macOS telemetry");
+	return {
+		chipName: string("chipName"),
+		deviceModel: string("deviceModel"),
+		macosVersion: string("macosVersion"),
+		ollamaVersion: string("ollamaVersion"),
+		batteryPercent: number("batteryPercent", 100),
+		powerWatts: number("powerWatts", Number.MAX_VALUE),
+		powerSource,
+	};
+};
 
 /** Parse a bounded telemetry message independently of request control frames. */
 export const readTelemetry = (data: Buffer): TelemetryFrame => {
@@ -81,5 +120,6 @@ export const readTelemetry = (data: Buffer): TelemetryFrame => {
 			memoryUsed,
 			memoryTotal,
 		})),
+		...(value["macos"] === undefined ? {} : { macos: readMacosTelemetry(value["macos"]) }),
 	};
 };

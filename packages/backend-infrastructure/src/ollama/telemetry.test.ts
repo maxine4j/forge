@@ -28,4 +28,24 @@ describe("telemetry frames", () => {
 		])
 			expect(() => readTelemetry(encode(value))).toThrow();
 	});
+	it("validates and allowlists optional macOS readings", () => {
+		const macos = {
+			chipName: "Apple M4",
+			deviceModel: "MacBook Pro",
+			macosVersion: "15.0",
+			ollamaVersion: "0.1",
+			batteryPercent: 0,
+			powerWatts: 0.5,
+			powerSource: "ac",
+		};
+		expect(readTelemetry(encode({ ...sample, macos: { ...macos, serialNumber: "secret" } })).macos).toEqual(macos);
+		for (const invalid of [
+			{ batteryPercent: -1 },
+			{ batteryPercent: 101 },
+			{ powerWatts: -1 },
+			{ chipName: "x".repeat(257) },
+			{ powerSource: "unknown" },
+		])
+			expect(() => readTelemetry(encode({ ...sample, macos: { ...macos, ...invalid } }))).toThrow();
+	});
 });

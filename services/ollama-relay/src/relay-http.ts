@@ -185,9 +185,18 @@ export class RelayHttp {
 			const health = { workerId: id, status, receivedAt };
 			if (route === "health") return json(response, status === "ready" ? 200 : 503, health);
 			if (!report) return json(response, 503, health);
-			const { ready, contextWindow, hostMemory, loadedModels, gpus } = report.sample;
+			const { ready, contextWindow, hostMemory, loadedModels, gpus, macos } = report.sample;
 			const freshness = status === "offline" || status === "stale" ? status : "fresh";
-			return json(response, 200, { ...health, freshness, ready, contextWindow, hostMemory, loadedModels, gpus });
+			return json(response, 200, {
+				...health,
+				freshness,
+				ready,
+				contextWindow,
+				hostMemory,
+				loadedModels,
+				gpus,
+				...(macos === undefined ? {} : { macos }),
+			});
 		}
 		if (!slot || slot.disconnectedAt !== undefined) {
 			output.fail(503, "worker_offline", "Inference worker is unavailable");
