@@ -26,8 +26,12 @@ export function useProviderMetrics(api: IWorkspaceApi) {
 		const readRelay = () => {
 			const request = ++relayRequest;
 			void api.read("model-providers/relay-metrics", relayMetricsListSchema).then(
-				(value) => { if (active && request === relayRequest) setRelay({ value, failed: false }); },
-				() => { if (active && request === relayRequest) setRelay((old) => ({ ...old, failed: true })); },
+				(value) => {
+					if (active && request === relayRequest) setRelay({ value, failed: false });
+				},
+				() => {
+					if (active && request === relayRequest) setRelay((old) => ({ ...old, failed: true }));
+				},
 			);
 		};
 		const readHealth = () =>
@@ -65,9 +69,14 @@ export function useProviderMetrics(api: IWorkspaceApi) {
 			if (!document.hidden) readScheduler();
 		}, 10000);
 		const visibility = () => {
-			if (!document.hidden) { readScheduler(); readRelay(); }
+			if (!document.hidden) {
+				readScheduler();
+				readRelay();
+			}
 		};
-		const relayInterval = window.setInterval(() => { if (!document.hidden) readRelay(); }, 15000);
+		const relayInterval = window.setInterval(() => {
+			if (!document.hidden) readRelay();
+		}, 15000);
 		document.addEventListener("visibilitychange", visibility);
 		return () => {
 			active = false;
@@ -191,19 +200,37 @@ export function ProviderMetrics({
 									</>
 								)}
 								{usage && usage.incompleteTokens > 0 && <p>Token usage is incomplete</p>}
-								{relay && <p>Relay metrics: {metrics.relay.failed ? "stale" : relay.freshness}{relay.receivedAt && ` · ${new Date(relay.receivedAt).toLocaleString()}`}</p>}
-								{mac && <>
-									<h4>macOS</h4>
-									<p>GPU usage: {mac.gpuUtilization == null ? "Unavailable" : `${mac.gpuUtilization}%`}</p>
-									<p>System memory used / total: {mac.memory ? `${((mac.memory.total - mac.memory.free) / 1073741824).toFixed(1)} / ${(mac.memory.total / 1073741824).toFixed(1)} GiB` : "Unavailable"}</p>
-									<p>Chip: {mac.chipName ?? "Unavailable"}</p>
-									<p>Device model: {mac.deviceModel ?? "Unavailable"}</p>
-									{mac.batteryPercent != null && <p>Battery: {mac.batteryPercent}%</p>}
-									<p>Power source: {mac.powerSource ?? "Unavailable"}</p>
-									<p>CPU / GPU / ANE power: {mac.powerWatts == null ? "Unavailable" : `${mac.powerWatts} W`}</p>
-									<p>macOS version: {mac.macosVersion ?? "Unavailable"}</p>
-									<p>Ollama version: {mac.ollamaVersion ?? "Unavailable"}</p>
-								</>}
+								{relay && (
+									<p>
+										Relay metrics: {metrics.relay.failed ? "stale" : relay.freshness}
+										{relay.receivedAt && ` · ${new Date(relay.receivedAt).toLocaleString()}`}
+									</p>
+								)}
+								{mac && (
+									<>
+										<h4>macOS</h4>
+										<p>
+											GPU usage:{" "}
+											{mac.gpuUtilization == null ? "Unavailable" : `${mac.gpuUtilization}%`}
+										</p>
+										<p>
+											System memory used / total:{" "}
+											{mac.memory
+												? `${((mac.memory.total - mac.memory.free) / 1073741824).toFixed(1)} / ${(mac.memory.total / 1073741824).toFixed(1)} GiB`
+												: "Unavailable"}
+										</p>
+										<p>Chip: {mac.chipName ?? "Unavailable"}</p>
+										<p>Device model: {mac.deviceModel ?? "Unavailable"}</p>
+										{mac.batteryPercent != null && <p>Battery: {mac.batteryPercent}%</p>}
+										<p>Power source: {mac.powerSource ?? "Unavailable"}</p>
+										<p>
+											CPU / GPU / ANE power:{" "}
+											{mac.powerWatts == null ? "Unavailable" : `${mac.powerWatts} W`}
+										</p>
+										<p>macOS version: {mac.macosVersion ?? "Unavailable"}</p>
+										<p>Ollama version: {mac.ollamaVersion ?? "Unavailable"}</p>
+									</>
+								)}
 							</div>
 						</article>
 					);

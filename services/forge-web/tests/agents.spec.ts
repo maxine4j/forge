@@ -207,7 +207,6 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	await expect(health).toContainText("3 slots reserved");
 	await expect(health).toContainText("Token usage is incomplete");
 	await expect(health).toContainText("No recorded usage");
-	const localCard = health.locator("article").filter({ hasText: "Local" });
 	await expect(localCard).toContainText("GPU usage: 0%");
 	await expect(localCard).toContainText("System memory used / total: 8.0 / 16.0 GiB");
 	await expect(localCard).toContainText("Battery: 0%");
@@ -215,7 +214,7 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	await expect(localCard).toContainText("Apple M4");
 	for (const state of ["stale", "offline", "unavailable"] as const) {
 		relayState = state;
-		await health.getByRole("button", { name: "Refresh metrics" }).click();
+		await page.clock.fastForward(15_000);
 		await expect(localCard).toContainText(`Relay metrics: ${state}`);
 	}
 	await expect(localCard).not.toContainText("Apple M4");
