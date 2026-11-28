@@ -6,7 +6,19 @@ import { ticketPlanGuidance, ticketSinglePlanGuidance } from "./ticket-plan-form
 import type { TicketWorkflowRecord } from "./types.ts";
 
 type TicketInstructions = Pick<ForgeSettings, "planningInstructions" | "implementationInstructions">;
-const checkpointInstruction = " Report handoff only after committing a safe checkpoint.";
+const historicalCheckpointInstruction = " Report handoff only after committing a safe checkpoint.";
+const checkpointInstruction =
+	" For a handoff, commit only existing uncommitted assignment changes if a safe checkpoint is immediately possible. Report promptly if there are no changes to commit or the checkpoint is blocked.";
+
+export const emergencyHandoverSteer = `EMERGENCY: You MUST stop all work IMMEDIATELY!
+You are running critically low on context. One more operation could exhaust it and cut off this handover. This emergency instruction overrides earlier directions to finish the assignment, verify it, or wait for a checkpoint before reporting.
+
+You MUST NOT finish the current operation, even if it is almost done. You MUST NOT read another file, make another edit, finish or wait for a test run, start another test or build, check the result of a running command, investigate a failure, or reread earlier instructions. Stop now, even if you believe the assignment is already complete.
+
+The only tool actions allowed are the Git status, staging, and commit commands strictly needed to save assignment changes you already made. If you have uncommitted assignment changes and can safely checkpoint them now, commit only those changes on the current branch. If there are no uncommitted assignment changes, including when you already committed your work, skip the commit. Never create an empty commit. If a safe commit is blocked or fails, stop immediately and report what is unsaved. Do not retry, fix, or investigate it.
+
+Return exactly one JSON object now, with no Markdown or surrounding prose: {"status":"handoff","handover":"…"}
+Use only what you already know. Briefly state what changed, what is committed or unsaved, what verification already finished, and what the next agent should do. If you made no changes, say so and hand off immediately.`;
 
 export function assignedSubtask(ticket: Ticket, job: TicketWorkflowRecord) {
 	if (job.phase === "implementation" && resolveTicketWorkflowPreset(ticket.executionSettings) === "planner-subtasks")
@@ -52,7 +64,10 @@ export function ticketFinalizationPrompt(requirements: ReturnType<typeof complet
 	const question = requirements.incomplete
 		? "Assess the assignment against the work already done."
 		: "Using the conversation, assess whether this assignment is complete or needs a handoff.";
-	return `${question} Do not edit files or commit. Return only the explicit verdict. ${ticketCompletionInstructions(requirements)}`;
+	const report = ticketCompletionInstructions(requirements)
+		.replace(checkpointInstruction, "")
+		.replace(" and committing the required changes", "");
+	return `${question} Do not edit files or commit. Return only the explicit verdict. ${report}`;
 }
 
 // Older assignments could persist the rendered paragraph, including variants
@@ -66,7 +81,11 @@ const completionBlocks = new Set([
 		return [
 			current,
 			checkpoint,
+			current.replace(checkpointInstruction, historicalCheckpointInstruction),
+			checkpoint.replace(checkpointInstruction, historicalCheckpointInstruction),
 			checkpoint.replace(checkpointInstruction, ""),
+			checkpoint.replace(checkpointInstruction, "").replace(" and committing the required changes", ""),
+			current.replace(checkpointInstruction, "").replace(" and committing the required changes", ""),
 			ticketCompletionInstructions({ ...work, handoff: undefined }),
 		];
 	}),

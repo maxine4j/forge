@@ -34,8 +34,9 @@ import { GitTransport } from "../../src/repositories/git-transport.ts";
 import { RepositoryClient } from "../../src/repositories/repository-client.ts";
 import { TaskAgentService } from "../../src/task-agents/task-agent-service.ts";
 import { TaskAgentStore } from "../../src/task-agents/task-agent-store.ts";
+import { completionReportRequirements } from "../../src/tickets/completion-report.ts";
 import { TicketHistoryStore } from "../../src/tickets/ticket-history-store.ts";
-import { TicketPrompts } from "../../src/tickets/ticket-prompts.ts";
+import { emergencyHandoverSteer, ticketFinalizationPrompt, TicketPrompts } from "../../src/tickets/ticket-prompts.ts";
 import { TicketRouter } from "../../src/tickets/ticket-router.ts";
 import { TicketService } from "../../src/tickets/ticket-service.ts";
 import { TicketStore } from "../../src/tickets/ticket-store.ts";
@@ -65,7 +66,7 @@ const reportBlock = (nonfinal = false, checkpoint = false) =>
 		...(checkpoint ? [] : [reportIncomplete]),
 		reportHandoff,
 		reportFinish,
-		"Report handoff only after committing a safe checkpoint.",
+		"For a handoff, commit only existing uncommitted assignment changes if a safe checkpoint is immediately possible. Report promptly if there are no changes to commit or the checkpoint is blocked.",
 		reportGuidance,
 	].join(" ");
 const legacyBlock =
@@ -73,7 +74,7 @@ const legacyBlock =
 const retryReminder =
 	"The previous run may have left partial work in this worktree. Inspect the current changes and commits before continuing.";
 const input = (text: string) => [{ type: "text", text, text_elements: [] }];
-const reportOnly = `Assess the assignment against the work already done. Do not edit files or commit. Return only the explicit verdict. ${reportBlock()}`;
+const reportOnly = ticketFinalizationPrompt(completionReportRequirements());
 
 test("real Git, SQLite and controlled app-server execute the ticket lifecycle and recover a committed merge", async () => {
 	const root = await files.mkdtemp(join(tmpdir(), "forge-workflow-"));
@@ -647,7 +648,10 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		const contextCalls = rpc.mock.calls.slice(contextRpcStart);
 		const steers = contextCalls.filter(([method]) => method === "turn/steer");
 		expect(steers).toHaveLength(1);
-		expect(steers[0]?.[1]).toMatchObject({ expectedTurnId: initialContextJob.turnId });
+		expect(steers[0]?.[1]).toMatchObject({
+			expectedTurnId: initialContextJob.turnId,
+			input: [{ type: "text", text: emergencyHandoverSteer }],
+		});
 		expect(contextCalls.filter(([method]) => method === "turn/start")).toHaveLength(2);
 		const handoverCall = rpc.mock.calls.find(
 			([method, params]) => method === "turn/start" && JSON.stringify(params).includes("Finish controlled work"),
@@ -663,9 +667,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 				{
 					threadId: contextThreadId,
 					expectedTurnId: initialContextJob.turnId,
-					input: input(
-						'Finish the current operation and avoid starting another task. If work remains, commit a safe checkpoint and immediately return {"status":"handoff","handover":"…"} with concise handover notes. If the assignment is finished, return the complete report.',
-					),
+					input: input(emergencyHandoverSteer),
 				},
 			],
 			[
@@ -944,9 +946,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			if (mode === "REPORT")
 				expect(actual[2]![1]).toMatchObject({
 					threadId,
-					input: input(
-						`Using the conversation, assess whether this assignment is complete or needs a handoff. Do not edit files or commit. Return only the explicit verdict. ${reportBlock(false, true)}`,
-					),
+					input: input(ticketFinalizationPrompt(completionReportRequirements(true))),
 				});
 			if (mode === "AMBIGUOUS") {
 				await agents!.interrupt(owner, initial.implementerId!);

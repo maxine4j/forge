@@ -6,7 +6,12 @@ import {
 	ticketPlanGuidance as subtaskGuidance,
 	ticketSinglePlanGuidance as ticketPlanGuidance,
 } from "./ticket-plan-format.ts";
-import { cleanTicketAssignment, TicketPrompts, ticketCompletionInstructions } from "./ticket-prompts.ts";
+import {
+	cleanTicketAssignment,
+	TicketPrompts,
+	ticketCompletionInstructions,
+	ticketFinalizationPrompt,
+} from "./ticket-prompts.ts";
 
 test("strips repeated exact historical completion blocks and preserves surrounding prose and partial quotations", () => {
 	const original =
@@ -26,6 +31,11 @@ test("strips repeated exact historical completion blocks and preserves surroundi
 		"In handover or the next-subtask summary, retain concise progress, next actions, decisions, blockers, and verification results as applicable. Omit code dumps, long logs, and repeated plan text.";
 	const blocks = [
 		original,
+		...[false, true].flatMap((next) =>
+			[false, true].map((checkpoint) =>
+				ticketCompletionInstructions(completionReportRequirements(checkpoint, next)),
+			),
+		),
 		...[complete, bounded].flatMap((outcome) => [
 			`${prefix} ${outcome} ${incomplete} ${finish}${outcome === bounded ? ` ${guidance}` : ""}`,
 			`${prefix} ${outcome} ${handoff} ${finish} ${guidance}`,
@@ -40,6 +50,20 @@ test("strips repeated exact historical completion blocks and preserves surroundi
 			retained.join("\r\n"),
 		);
 	}
+});
+
+test("checkpoint guidance is conditional and report-only requests do not instruct commits", () => {
+	const requirements = completionReportRequirements(true);
+	expect(ticketCompletionInstructions(requirements)).toContain(
+		"commit only existing uncommitted assignment changes if a safe checkpoint is immediately possible",
+	);
+	expect(ticketCompletionInstructions(requirements)).toContain(
+		"Report promptly if there are no changes to commit or the checkpoint is blocked",
+	);
+	const report = ticketFinalizationPrompt(requirements);
+	expect(report).toContain("Do not edit files or commit");
+	expect(report).not.toContain("committing the required changes");
+	expect(report).not.toContain("commit only existing");
 });
 
 test.each([false, true])("advertised report examples pass validation (checkpoint=%s)", (checkpoint) => {

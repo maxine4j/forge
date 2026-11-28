@@ -300,7 +300,10 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 				},
 			});
 		}
-		if (thread.checkpointScenario && params.input[0].text.startsWith("Finish the current operation")) {
+		if (
+			thread.checkpointScenario
+			&& params.input[0].text.startsWith("EMERGENCY: You MUST stop all work IMMEDIATELY!")
+		) {
 			if (thread.checkpointMode === "AMBIGUOUS") {
 				write({ id, error: { code: -32603, message: "Controlled delivery failure" } });
 				return;

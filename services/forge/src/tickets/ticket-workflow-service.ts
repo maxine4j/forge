@@ -38,6 +38,7 @@ import {
 	assignedSubtask,
 	hasNextSubtask,
 	cleanTicketAssignment,
+	emergencyHandoverSteer,
 	ticketFreshWorkPrompt,
 	ticketFinalizationPrompt,
 	type ITicketPrompts,
@@ -1090,12 +1091,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 					job.context.attempted = thread.turnId;
 					await this.store.save(job);
 					try {
-						await this.agents.steer(
-							actor,
-							id,
-							thread.turnId,
-							'Finish the current operation and avoid starting another task. If work remains, commit a safe checkpoint and immediately return {"status":"handoff","handover":"…"} with concise handover notes. If the assignment is finished, return the complete report.',
-						);
+						await this.agents.steer(actor, id, thread.turnId, emergencyHandoverSteer);
 					} catch (err) {
 						this.log.warn({ err, ticketId: job.ticketId }, "Checkpoint steer outcome is uncertain");
 						await this.store.save({ ...job, state: "uncertain" });
