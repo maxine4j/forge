@@ -14,4 +14,16 @@ describe("JSON chat payloads", () => {
 			expect(parseJsonObject(text)).toBeUndefined();
 		},
 	);
+	it("retains nested values and escaped text without changing the copy payload", () => {
+		const payload = '{"nested":{"items":[null,true,0,"<script>"]},"escaped":"a\\nb"}';
+		expect(parseJsonObject(payload)).toEqual({
+			value: { nested: { items: [null, true, 0, "<script>"] }, escaped: "a\nb" },
+			payload,
+		});
+	});
+
+	it("accepts CRLF fenced objects and rejects truncated fenced JSON", () => {
+		expect(parseJsonObject('```json\r\n{"ok":true}\r\n```')?.value).toEqual({ ok: true });
+		expect(parseJsonObject('```json\n{"ok":true')).toBeUndefined();
+	});
 });
