@@ -86,7 +86,7 @@ and [metadata persistence](architecture.md#notification-metadata).
 
 ## Task navigation
 
-Tasks retains `view=backlog|notifications` and `epic=EPIC-n` links. Every page accepts
+Tasks retains `view=backlog|notifications|agents` and `epic=EPIC-n` links. Every page accepts
 `ticket=TASK-n` and `tab=details|chat|history|cost`, including repository sections.
 The application owns ticket selection, mutations, draft/reading caches and one
 shared ticket/epic/notification collection poller. Its details host sits outside
@@ -112,14 +112,15 @@ all ticket selections and sections to return to the original parent. Unsaved
 scope/title edits and busy actions also guard ticket switching.
 See [browser and gesture verification](development.md#android-back-verification).
 
-At viewport widths of at least 1024px, Board and Backlog allocate a fixed 580px
+At viewport widths of at least 1024px, all Tasks tabs allocate a fixed 580px
 right column below the usable global header. The board shrinks in place as the panel first slides in from the right
 (without animation under reduced motion). Selecting another ticket keeps the open panel in place.
 Its non-modal dialog has no backdrop
 or focus trap; outside clicks leave it open. Toolbars wrap, board columns retain
 horizontal scrolling, and backlog overflow stays inside the reduced task area.
 As the board narrows, it scrolls horizontally only as needed to reveal the selected ticket's entire column, with a 12px gap beside the panel.
-On other pages, including Notifications, a native 580px modal is centred in both
+Notifications and Agents remain scrollable in the reduced task area, with provider
+metrics adapting to the available width. On other pages, a native 580px modal is centred in both
 axes with a maximum height of the visible viewport minus 32px. Below 1024px,
 every page uses a native full-screen modal covering navigation, with safe-area
 padding and visual viewport keyboard adjustments. Resizing changes the existing

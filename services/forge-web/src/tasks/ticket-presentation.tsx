@@ -17,10 +17,7 @@ export const useTicketPresentation = (): TicketPresentation => {
 		return () => query.removeEventListener("change", update);
 	}, []);
 	if (!desktop) return "full-screen";
-	return location.pathname === "/tasks"
-		&& !["notifications", "agents"].includes(new URLSearchParams(location.search).get("view") ?? "")
-		? "docked"
-		: "centred";
+	return location.pathname === "/tasks" ? "docked" : "centred";
 };
 
 // Changing presentation promotes the same DOM node; form and conversation state survive.

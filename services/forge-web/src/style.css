@@ -2445,6 +2445,9 @@ small {
 	width: min(100%, 960px);
 	margin-block: 16px;
 }
+.ticket-docked-layout .task-agent-catalog {
+	container-type: inline-size;
+}
 .task-agent-section-title {
 	margin: 0 0 12px;
 	font-size: 24px;
@@ -4346,6 +4349,11 @@ summary {
 	}
 }
 @media (max-width: 741px) {
+	.provider-metrics-grid {
+		grid-template-columns: minmax(0, 1fr);
+	}
+}
+@container (max-width: 741px) {
 	.provider-metrics-grid {
 		grid-template-columns: minmax(0, 1fr);
 	}

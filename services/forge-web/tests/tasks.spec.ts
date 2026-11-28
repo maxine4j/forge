@@ -279,11 +279,16 @@ for (const width of [1280, 390]) {
 		await expect(cards.first()).toBeFocused();
 		expect(state.posts[1]!.body["answers"]).toEqual({ target: "Staging", token: "private-value" });
 		await expect(cards.first().getByRole("button", { name: "Open ticket Chat" })).toHaveCount(0);
-		await cards.first().getByRole("link", { name: "TASK-2", exact: true }).click();
-		await expect(page.getByRole("dialog", { name: "TASK-2", exact: true })).toBeVisible();
+		const opener = cards.first().getByRole("link", { name: "TASK-2", exact: true });
+		await opener.click();
+		const ticket = page.getByRole("dialog", { name: "TASK-2", exact: true });
+		await expect(ticket).toBeVisible();
+		await expect(ticket.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
+		expect(await ticket.evaluate((element) => element.matches(":modal"))).toBe(width < 1024);
 		await expect(page).toHaveURL(/view=notifications&ticket=TASK-2&tab=chat/);
 		await page.goBack();
 		await expect(page).toHaveURL("/tasks?view=notifications");
+		await expect(opener).toBeFocused();
 		state.items = [];
 		await expect(page.getByRole("heading", { name: "No pending notifications" })).toBeVisible();
 		await expect(page.getByRole("tab", { name: "Notifications (0)", exact: true })).toBeVisible();
@@ -3821,7 +3826,7 @@ test("a plan needs attention on the four-column board and approval submits the d
 });
 
 for (const width of [390, 690, 820, 1023, 1024, 1280]) {
-	for (const view of ["board", "backlog", "notifications"]) {
+	for (const view of ["board", "backlog", "notifications", "agents"]) {
 		test(`responsive ticket geometry on ${view} at ${width}px`, async ({ page }) => {
 			await page.setViewportSize({ width, height: 900 });
 			await setup(page);
@@ -3837,20 +3842,14 @@ for (const width of [390, 690, 820, 1023, 1024, 1280]) {
 				expect(await ticket.evaluate((element) => element.matches(":modal"))).toBe(true);
 			} else {
 				expect(rect.width).toBe(580);
-				if (view === "notifications") {
-					expect(rect.x).toBe((width - 580) / 2);
-					expect(rect.y).toBe(16);
-					expect(rect.height).toBe(868);
-				} else {
-					const header = (await page.locator(".shell > header").boundingBox())!;
-					expect(rect.y).toBe(header.y + header.height);
-					expect(rect.x).toBe(width - 580);
-					expect(await ticket.evaluate((element) => element.matches(":modal"))).toBe(false);
-					const tasks = (await page.locator(".tasks-view").boundingBox())!;
-					expect(tasks.x + tasks.width).toBeLessThanOrEqual(rect.x);
-					await page.getByRole("tab", { name: "Backlog", exact: true }).click();
-					await expect(ticket).toBeVisible();
-				}
+				const header = (await page.locator(".shell > header").boundingBox())!;
+				expect(rect.y).toBe(header.y + header.height);
+				expect(rect.x).toBe(width - 580);
+				expect(await ticket.evaluate((element) => element.matches(":modal"))).toBe(false);
+				const tasks = (await page.locator(".tasks-view").boundingBox())!;
+				expect(tasks.x + tasks.width).toBeLessThanOrEqual(rect.x);
+				await page.getByRole("tab", { name: "Backlog", exact: true }).click();
+				await expect(ticket).toBeVisible();
 			}
 			await ticket.getByRole("button", { name: "Close ticket", exact: true }).click();
 			await expect(ticket).toHaveCount(0);
@@ -3932,6 +3931,16 @@ test("the desktop ticket panel slides in once when switching between tickets", a
 	await expect(second).toBeVisible();
 	await expect(second).toHaveCSS("animation-name", "none");
 	await expect(layout).toHaveAttribute("data-dock-transitions", "1");
+});
+
+test("reduced motion disables the desktop ticket opening transition", async ({ page }) => {
+	await page.emulateMedia({ reducedMotion: "reduce" });
+	await setup(page);
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	const ticket = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await expect(ticket).toBeVisible();
+	await expect(ticket).toHaveCSS("animation-name", "none");
+	await expect(page.locator("main")).toHaveCSS("transition-duration", "0s");
 });
 
 test("opening a docked ticket reveals its column with a gap beside the panel", async ({ page }) => {
@@ -4100,6 +4109,42 @@ test("unavailable and loading tickets use a closable surface on every presentati
 	await expect(ticket).toHaveClass(/ticket-full-screen/);
 	await ticket.getByRole("button", { name: "Close ticket" }).click();
 	await expect(page).toHaveURL("/config");
+});
+
+test("an unavailable Agents ticket uses the docked surface", async ({ page }) => {
+	await page.setViewportSize({ width: 1024, height: 900 });
+	await setup(page);
+	await page.route("**/api/tickets/TASK-999", (route) => route.fulfill({ status: 404, json: {} }));
+	await page.goto("/tasks?view=agents&ticket=TASK-999&tab=chat");
+	const ticket = page.getByRole("dialog", { name: "Ticket", exact: true });
+	await expect(ticket.getByRole("status")).toHaveText("Ticket unavailable.");
+	await expect(ticket).toHaveClass(/ticket-docked/);
+	await ticket.getByRole("button", { name: "Close ticket" }).click();
+	await expect(page).toHaveURL("/tasks?view=agents");
+});
+
+test("Agents deep links preserve section and history beside the ticket", async ({ page }) => {
+	await page.setViewportSize({ width: 1024, height: 900 });
+	await setup(page);
+	await page.goto("/tasks?view=agents&ticket=TASK-1&tab=details");
+	const ticket = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await expect(ticket).toBeVisible();
+	await expect(page.locator(".provider-metrics-grid").first()).toBeVisible();
+	expect(
+		await page
+			.locator(".provider-metrics-grid")
+			.first()
+			.evaluate((element) => getComputedStyle(element).gridTemplateColumns.split(" ").length),
+	).toBe(1);
+	await ticket.getByRole("tab", { name: "Chat", exact: true }).click();
+	await page.reload();
+	await expect(ticket.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
+	await page.goBack();
+	await expect(ticket.getByRole("tab", { name: "Details", exact: true })).toHaveAttribute("aria-selected", "true");
+	await page.goForward();
+	await expect(ticket.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
+	await page.keyboard.press("Escape");
+	await expect(page).toHaveURL("/tasks?view=agents");
 });
 
 for (const archived of [false, true]) {

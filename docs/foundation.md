@@ -17,7 +17,7 @@ Every page accepts `ticket=TASK-n` with `tab=details|chat|history|cost|utils`. D
 links establish a dismissible parent preserving the pathname, unrelated query
 parameters and hash. Costs opens tickets over its own `/costs` URL. The shared
 application ticket host stays outside retained page containers and uses one
-collection poller with Tasks. At widths ≥1024px, Board/Backlog shrink beside a
+collection poller with Tasks. At widths ≥1024px, all Tasks tabs shrink beside a
 580px non-modal right panel below navigation; other pages show a centred 580px
 native modal. Below 1024px the native modal fills the visible viewport and covers
 navigation, adapting to safe areas and keyboard changes. Resizing retains the
