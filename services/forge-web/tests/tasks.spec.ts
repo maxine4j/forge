@@ -1202,6 +1202,7 @@ const dragToReady = async (page: Page, id = "TASK-1") => {
 };
 
 const confirmReturn = async (page: Page) => {
+	await page.getByRole("button", { name: "Ticket actions" }).click();
 	await page.getByRole("button", { name: "Return to backlog", exact: true }).click();
 	await page
 		.getByRole("dialog", { name: "Return TASK-1 to backlog?", exact: true })
@@ -1245,22 +1246,26 @@ for (const view of ["Board", "Backlog"]) {
 		await page.getByRole("tab", { name: view, exact: true }).click();
 		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 		const details = page.getByRole("dialog", { name: "TASK-1", exact: true });
-		const trigger = details.getByRole("button", { name: "Return to backlog", exact: true });
+		const trigger = details.getByRole("button", { name: "Ticket actions", exact: true });
+		const openReturn = async () => {
+			await trigger.click();
+			await details.getByRole("button", { name: "Return to backlog", exact: true }).click();
+		};
 		const confirmation = page.getByRole("dialog", { name: "Return TASK-1 to backlog?", exact: true });
 		const confirm = confirmation.getByRole("button", { name: "Return to backlog", exact: true });
-		await trigger.click();
+		await openReturn();
 		await expect(confirmation).toContainText("execution worktree and unmerged branch");
 		expect(f.operations).toEqual([]);
 		await confirmation.getByRole("button", { name: "Cancel", exact: true }).click();
 		await expect(trigger).toBeFocused();
-		await trigger.click();
+		await openReturn();
 		await page.keyboard.press("Escape");
 		await expect(confirmation).toBeHidden();
 		await expect(details).toBeVisible();
 		await expect(trigger).toBeFocused();
 		expect(f.tickets()[0]!.status).toBe("in-progress");
 		expect(f.operations).toEqual([]);
-		await trigger.click();
+		await openReturn();
 		delete f.tickets()[0]!.canReturnToBacklog;
 		await expect(confirm).toBeDisabled();
 		f.tickets()[0]!.canReturnToBacklog = true;
@@ -1323,15 +1328,13 @@ for (const width of [1280, 768, 600, 390, 320]) {
 		f.tickets()[0]!.canReturnToBacklog = true;
 		await expect(page.getByLabel("Status", { exact: true })).toHaveText("Ready for development");
 		expect(await textLeft(title)).toBeCloseTo(contentLeft, 0);
-		const returning = details.getByRole("button", { name: "Return to backlog", exact: true });
 		const size = width <= 600 ? 32 : 36;
-		for (const name of ["Return to backlog", "Ticket actions", "Close ticket"]) {
+		for (const name of ["Ticket actions", "Close ticket"]) {
 			expect(await details.getByRole("button", { name, exact: true }).boundingBox()).toMatchObject({
 				width: size,
 				height: size,
 			});
 		}
-		await expect(returning).toHaveAttribute("title", "Return to backlog");
 		const row = details.locator(".ticket-details-heading");
 		const status = row.getByRole("status");
 		const truncates = await status.evaluate((el) => {
@@ -1367,6 +1370,7 @@ for (const width of [1280, 768, 600, 390, 320]) {
 		await actions.click();
 		await expect(actions).toHaveAttribute("aria-expanded", "true");
 		const popup = details.getByRole("group", { name: "Ticket actions" });
+		await expect(popup.getByRole("button", { name: "Return to backlog" })).toBeVisible();
 		const box = (await popup.boundingBox())!;
 		expect(box.x).toBeGreaterThanOrEqual(0);
 		expect(box.x + box.width).toBeLessThanOrEqual(width);
@@ -1389,9 +1393,10 @@ for (const width of [1280, 390]) {
 		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 		await page.getByRole("tab", { name: "Details", exact: true }).click();
 		await expect(dialog.getByRole("button", { name: "Clear plan", exact: true })).toHaveCount(0);
-		const returning = dialog.getByRole("button", { name: "Return to backlog", exact: true });
+		const returning = dialog.getByRole("button", { name: "Ticket actions", exact: true });
 		await returning.focus();
 		await returning.press("Enter");
+		await dialog.getByRole("button", { name: "Return to backlog", exact: true }).click();
 		await page
 			.getByRole("dialog", { name: "Return TASK-1 to backlog?", exact: true })
 			.getByRole("button", { name: "Return to backlog", exact: true })
@@ -1401,9 +1406,7 @@ for (const width of [1280, 390]) {
 		await expect(dialog.getByText("Stopping ticket agents…", { exact: true })).toBeVisible();
 		await expect(dialog.getByRole("combobox", { name: "Status", exact: true })).toHaveCount(0);
 		await expect(dialog.getByRole("button", { name: "Clear plan", exact: true })).toBeDisabled();
-		await dialog.getByRole("button", { name: "Ticket actions" }).click();
-		await expect(dialog.getByRole("button", { name: "Archive ticket", exact: true })).toBeDisabled();
-		await page.keyboard.press("Escape");
+		await expect(dialog.getByRole("button", { name: "Ticket actions" })).toBeDisabled();
 		f.failReset();
 		await expect(dialog.getByText("Removing abandoned work…", { exact: true })).toBeVisible();
 		await expect(page.getByRole("alert")).toContainText("Cleanup failed");
@@ -2883,7 +2886,7 @@ test("ticket actions confirm recovery and refresh Done with Chat unavailable", a
 	const ticket = f.tickets().find(({ id }) => id === "TASK-1")!;
 	ticket.status = "in-progress";
 	const workflow: Partial<TicketWorkflow> = { phase: "implementation", state: "uncertain", workspaceId: projectId };
-	f.setWorkflow(workflow);
+	f.setWorkflow({ ...workflow, workspaceId: undefined });
 	await page.route("**/api/agents/**", (route) =>
 		route.fulfill({ status: 503, json: { error: "agent-unavailable" } }),
 	);
@@ -2912,6 +2915,14 @@ test("ticket actions confirm recovery and refresh Done with Chat unavailable", a
 	const commit = modal.getByRole("button", { name: "Commit checkpoint" });
 	const merge = modal.getByRole("button", { name: "Merge branch into main" });
 	await expect(actions).toHaveAttribute("aria-expanded", "false");
+	await actions.click();
+	await expect(commit).toHaveCount(0);
+	await expect(merge).toHaveCount(0);
+	await expect(modal.getByRole("button", { name: "Archive ticket" })).toBeVisible();
+	await expect(modal.getByText("An assigned workspace is required.")).toHaveCount(0);
+	f.setWorkflow(workflow);
+	await expect(commit).toBeVisible();
+	await page.keyboard.press("Escape");
 	await actions.focus();
 	await actions.press("Enter");
 	await expect(commit).toBeEnabled();
@@ -2931,11 +2942,7 @@ test("ticket actions confirm recovery and refresh Done with Chat unavailable", a
 	});
 	await commit.click();
 	await expect(panel.getByRole("status")).toHaveText("Committing checkpoint…");
-	await actions.click();
-	await expect(commit).toBeDisabled();
-	await expect(merge).toBeDisabled();
-	await commit.dispatchEvent("click");
-	await actions.click();
+	await expect(actions).toBeDisabled();
 	checkpoint.resolve();
 	await expect(panel.getByRole("status")).toContainText(sha);
 	expect(checkpointCalls).toBe(1);
@@ -2955,7 +2962,9 @@ test("ticket actions confirm recovery and refresh Done with Chat unavailable", a
 	await merge.click();
 	await expect(panel.getByRole("status")).toContainText(`Merged into main · ${sha}`);
 	await actions.click();
-	await expect(modal.getByText("Workspace cleanup pending.")).toBeVisible();
+	await expect(commit).toHaveCount(0);
+	await expect(merge).toHaveCount(0);
+	await expect(modal.getByText("Workspace cleanup pending.")).toHaveCount(0);
 	await expect(modal.locator(".ticket-status-done")).toHaveText("Done");
 	await page.keyboard.press("Escape");
 	await modal.getByRole("button", { name: "Close ticket" }).click();
@@ -4173,11 +4182,8 @@ for (const archived of [false, true]) {
 			await expect(modal.getByRole("group", { name: "Description" }).getByText("Linked scope")).toBeVisible();
 			await expect(modal.getByRole("button", { name: "Edit description" })).toHaveCount(0);
 			await expect(modal.getByRole("combobox", { name: "Status", exact: true })).toHaveCount(0);
-			await modal.getByRole("button", { name: "Ticket actions" }).click();
-			for (const name of ["Commit checkpoint", "Merge branch into main", "Archive ticket"])
-				await expect(modal.getByRole("button", { name })).toBeDisabled();
-			await expect(modal.getByText("Utilities are available for unarchived tickets in progress.")).toBeVisible();
-			await page.keyboard.press("Escape");
+			await expect(modal.getByRole("button", { name: "Ticket actions" })).toBeDisabled();
+			await expect(modal.getByText("Utilities are available for unarchived tickets in progress.")).toHaveCount(0);
 			await expect(modal.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
 		}
 		await page.reload();

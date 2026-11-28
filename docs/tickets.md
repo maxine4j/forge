@@ -224,14 +224,14 @@ the same completion time retain their saved order. Older tickets with no recorde
 completion time follow in saved order. The other columns support pointer and touch
 reordering, edge scrolling and cancellation. Status transitions use the board's drag controls; ticket details
 shows a labelled, read-only status pill beside the ticket key in the header.
-Ready and In progress tickets offer **Return to backlog** beside Archive and Close.
+Eligible Ready and In progress tickets offer **Return to backlog** in **Ticket actions**.
 The ticket header keeps epic/ticket keys, right-aligned execution status and these
-actions on one row. Long execution statuses truncate with an ellipsis. All three
+actions on one row. Long execution statuses truncate with an ellipsis. Both header
 actions use equal square buttons: 36px on larger screens and 32px at phone widths.
-The square circular-arrow action opens a confirmation titled “Return TASK-n to backlog?”.
+The menu action opens a confirmation titled “Return TASK-n to backlog?”.
 It explains that execution stops and the execution worktree and unmerged branch
 are removed while scope, settings and the latest saved plan are preserved.
-Cancel or Escape closes only the confirmation and restores focus to its trigger.
+Cancel or Escape closes only the confirmation and restores focus to the ellipsis when available.
 Confirmation uses the move API, prevents duplicate submissions and becomes disabled
 if polling removes eligibility. Failures toast and retain modal retry controls; success
 keeps details open with cleanup progress. Archive retains its separate confirmation.
@@ -438,8 +438,7 @@ checks. Transition conflicts return 409. Board and ticket details refresh while
 execution continues. The global board opens at `/tasks`; selection uses `/tasks?ticket=:id`. Details,
 workflow, model options and cost load by ticket ID even outside active board
 membership. Removed repository ticket APIs return not-found. The ticket modal has keyboard-accessible Details, Chat, History and Cost
-tabs. The header's **Ticket actions** menu offers checkpoint, merge and archive actions,
-with availability reasons and recovery results retained on the ticket. Details shows the complete latest saved plan below Description, including
+tabs. The header's **Ticket actions** menu offers available checkpoint, merge, return and archive actions in that order. Unavailable actions are omitted and the ellipsis is disabled when none are available. Recovery results remain on the ticket. Details shows the complete latest saved plan below Description, including
 after approval. The tabs share a row with the live execution label on the right.
 The header epic link shows its icon and key, with the full title in its tooltip
 and membership picker. The larger ticket title aligns with the Details tab content.

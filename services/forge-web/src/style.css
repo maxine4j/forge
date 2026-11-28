@@ -1616,10 +1616,6 @@
 	width: 100%;
 	white-space: normal;
 }
-.ticket-details-actions .dropdown-surface p {
-	max-width: 260px;
-	margin: 8px;
-}
 .ticket-archive-dialog {
 	width: min(420px, calc(100vw - 24px));
 }

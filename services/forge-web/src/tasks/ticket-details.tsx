@@ -398,16 +398,11 @@ export const TicketDetails = ({
 			onSuccess?.();
 			return updated;
 		});
-	const utilsUnavailable =
-		archived || ticket.status !== "in-progress"
-			? "Utilities are available for unarchived tickets in progress."
-			: resetting
-				? "Wait for the ticket reset to finish."
-				: !job?.workspaceId
-					? "An assigned workspace is required."
-					: undefined;
+	const utilsUnavailable = archived || ticket.status !== "in-progress" || !!resetting || !job?.workspaceId;
 	const utilsBusy = busy || acting || returnPending || savingSettings || feedbackPending;
 	const utilsDisabled = !!utilsUnavailable || utilsBusy || !!job?.cleanupPending;
+	const returnAvailable = canReturn && !busy && !acting && !returnPending;
+	const archiveAvailable = !archived && !busy && !acting && !resetting;
 	const runUtility = (action: "commit-checkpoint" | "merge-into-main") => {
 		if (utilsDisabled || actionPending.current || !poller.current) return;
 		const checkpoint = action === "commit-checkpoint";
@@ -571,79 +566,64 @@ export const TicketDetails = ({
 					/>
 				)}
 				<div className='ticket-details-actions'>
-					{!archived && ticket.canReturnToBacklog && (
-						<button
-							type='button'
-							className='ticket-return-action'
-							aria-label='Return to backlog'
-							title='Return to backlog'
-							disabled={busy || acting || !!resetting}
-							onClick={() => {
-								setMoveError("");
-								navigation.open("return");
-							}}
-						>
-							<svg
-								width='16'
-								height='16'
-								viewBox='0 0 24 24'
-								fill='none'
-								stroke='currentColor'
-								strokeWidth='2'
-								strokeLinecap='round'
-								strokeLinejoin='round'
-								aria-hidden='true'
-							>
-								<path d='M3 10a9 9 0 1 1 2 8 M3 4v6h6' />
-							</svg>
-						</button>
-					)}
 					<DropdownSurface
 						label='Ticket actions'
+						disabled={utilsDisabled && !returnAvailable && !archiveAvailable}
 						trigger='⋯'
 						showChevron={false}
 						className='ticket-actions-trigger'
 					>
 						{(closeActions) => (
 							<>
-								<button
-									className='dropdown-option'
-									type='button'
-									disabled={utilsDisabled}
-									onClick={() => {
-										closeActions(true);
-										runUtility("commit-checkpoint");
-									}}
-								>
-									Commit checkpoint
-								</button>
-								<button
-									className='dropdown-option'
-									type='button'
-									disabled={utilsDisabled}
-									onClick={() => {
-										closeActions(true);
-										runUtility("merge-into-main");
-									}}
-								>
-									Merge branch into main
-								</button>
-								<button
-									className='dropdown-option'
-									type='button'
-									disabled={archived || busy || acting || !!resetting}
-									onClick={() => {
-										closeActions(true);
-										setArchiveError("");
-										navigation.open("archive");
-									}}
-								>
-									Archive ticket
-								</button>
-								{utilsUnavailable && <p>{utilsUnavailable}</p>}
-								{job?.cleanupPending && <p>Workspace cleanup pending.</p>}
-								{!utilsUnavailable && utilsBusy && !utility.pending && (
-									<p>Wait for the current ticket update to finish.</p>
+								{!utilsDisabled && (
+									<>
+										<button
+											className='dropdown-option'
+											type='button'
+											onClick={() => {
+												closeActions(true);
+												runUtility("commit-checkpoint");
+											}}
+										>
+											Commit checkpoint
+										</button>
+										<button
+											className='dropdown-option'
+											type='button'
+											onClick={() => {
+												closeActions(true);
+												runUtility("merge-into-main");
+											}}
+										>
+											Merge branch into main
+										</button>
+									</>
+								)}
+								{returnAvailable && (
+									<button
+										className='dropdown-option'
+										type='button'
+										onClick={() => {
+											closeActions(true);
+											setMoveError("");
+											navigation.open("return");
+										}}
+									>
+										Return to backlog
+									</button>
+								)}
+								{archiveAvailable && (
+									<button
+										className='dropdown-option'
+										type='button'
+										onClick={() => {
+											closeActions(true);
+											setArchiveError("");
+											navigation.open("archive");
+										}}
+									>
+										Archive ticket
+									</button>
 								)}
 							</>
 						)}
