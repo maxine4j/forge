@@ -27,20 +27,21 @@ test("strips repeated exact historical completion blocks and preserves surroundi
 	const handoff =
 		'{"status":"handoff","handover":"…"} (handover is required and must be nonblank text of at most 1,500 tokens).';
 	const finish = "Report complete only after finishing your assigned scope and committing the required changes.";
+	const emergencyCheckpoint =
+		"For a handoff, commit only existing uncommitted assignment changes if a safe checkpoint is immediately possible. Report promptly if there are no changes to commit or the checkpoint is blocked.";
 	const guidance =
 		"In handover or the next-subtask summary, retain concise progress, next actions, decisions, blockers, and verification results as applicable. Omit code dumps, long logs, and repeated plan text.";
 	const blocks = [
 		original,
-		...[false, true].flatMap((next) =>
-			[false, true].map((checkpoint) =>
-				ticketCompletionInstructions(completionReportRequirements(checkpoint, next)),
-			),
-		),
+		ticketCompletionInstructions(),
+		ticketCompletionInstructions(completionReportRequirements(true)),
 		...[complete, bounded].flatMap((outcome) => [
 			`${prefix} ${outcome} ${incomplete} ${finish}${outcome === bounded ? ` ${guidance}` : ""}`,
 			`${prefix} ${outcome} ${handoff} ${finish} ${guidance}`,
 			`${prefix} ${outcome} ${incomplete} ${handoff} ${finish} Report handoff only after committing a safe checkpoint. ${guidance}`,
 			`${prefix} ${outcome} ${handoff} ${finish} Report handoff only after committing a safe checkpoint. ${guidance}`,
+			`${prefix} ${outcome} ${incomplete} ${handoff} ${finish} ${emergencyCheckpoint} ${guidance}`,
+			`${prefix} ${outcome} ${handoff} ${finish} ${emergencyCheckpoint} ${guidance}`,
 		]),
 	];
 	const retained = ["Verify the branch.", prefix, `Quoted inline: ${original}`, "Then run tests."];
@@ -58,19 +59,19 @@ test("checkpoint guidance is conditional and report-only requests do not instruc
 		"commit only existing uncommitted assignment changes if a safe checkpoint is immediately possible",
 	);
 	expect(ticketCompletionInstructions(requirements)).toContain(
-		"Report promptly if there are no changes to commit or the checkpoint is blocked",
+		"If the assignment is unfinished and there is no new safe checkpoint, report incomplete",
 	);
 	const report = ticketFinalizationPrompt(requirements);
 	expect(report).toContain("Do not edit files or commit");
-	expect(report).not.toContain("committing the required changes");
 	expect(report).not.toContain("commit only existing");
+	expect(report).toContain("Report handoff only if the work turn created a new safe checkpoint commit");
 });
 
-test.each([false, true])("advertised report examples pass validation (checkpoint=%s)", (checkpoint) => {
-	const requirements = completionReportRequirements(checkpoint);
+test.each([false, true])("advertised report examples pass validation (has next subtask=%s)", (hasNextSubtask) => {
+	const requirements = completionReportRequirements(hasNextSubtask);
 	const examples = ticketCompletionInstructions(requirements).match(/\{"status":[^}]+\}/g);
 	expect(examples).toContain('{"status":"handoff","handover":"…"}');
-	expect(examples).toHaveLength(checkpoint ? 2 : 3);
+	expect(examples).toHaveLength(3);
 	for (const example of examples!) expect(parseCompletionReport(example, requirements)).toBeDefined();
 });
 

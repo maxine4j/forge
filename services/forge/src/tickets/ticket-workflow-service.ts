@@ -497,6 +497,8 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 			}
 			if (!threadId || !["idle", "failed"].includes(job.state) || !text.trim() || text.length > 8000)
 				throw new TicketError("ticket-conflict");
+			const needsFreshThread =
+				job.contextFailure || (job.completionFailure === "incomplete" && job.context?.attempted);
 			const next: TicketWorkflowRecord = {
 				...job,
 				state: "queued",
@@ -514,7 +516,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 							},
 						}
 					: {}),
-				...(job.contextFailure
+				...(needsFreshThread
 					? {
 							implementerId: undefined,
 							previousImplementerIds: [
@@ -898,7 +900,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		const planning = job.phase === "planning";
 		const checkpoint = job.context?.stage === "report";
 		const finalizing = checkpoint || !!job.reportRetrySourceTurnId;
-		const requirements = completionReportRequirements(checkpoint, hasNextSubtask(current, job));
+		const requirements = completionReportRequirements(hasNextSubtask(current, job));
 		let id = planning ? job.plannerId : job.implementerId;
 		this.settingUp.add(current.id);
 		try {
@@ -962,11 +964,10 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				const ordered = !!assignedSubtask(current, job);
 				const recovery = followUp ? undefined : cleanTicketAssignment(job.message);
 				// A fresh retry retains an owner message and the retired Implementer.
-				// Handoffs and ordered advancement clear the message.
+				// Rebuild its assignment because older retries stored the owner message as the scope.
 				const interrupted = !followUp && !!job.message && !!job.previousImplementerIds?.length;
 				const assignment =
-					(!ordered && recovery)
-					|| (!ordered && cleanTicketAssignment(job.context?.prompt))
+					(!ordered && !interrupted && cleanTicketAssignment(job.context?.prompt))
 					|| cleanTicketAssignment(this.prompts.assignment(current, { ...job, message: undefined }))
 					|| "";
 				const boundedContext = (value: string | undefined) => {
@@ -984,9 +985,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 						stage: "work",
 					};
 				}
-				prompt =
-					followUp
-					?? ticketFreshWorkPrompt(current, job, assignment, ordered ? recovery : undefined, interrupted);
+				prompt = followUp ?? ticketFreshWorkPrompt(current, job, assignment, recovery, interrupted);
 			} else {
 				prompt = this.prompts.planning(current, job);
 			}
@@ -1120,7 +1119,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		if (work) {
 			const report = parseCompletionReport(
 				(await this.agents.finalAnswer?.(actor, id, thread.turnId)) ?? "",
-				completionReportRequirements(checkpoint, nextSubtask),
+				completionReportRequirements(nextSubtask),
 			);
 			if (!report) {
 				if (finalizing) {
