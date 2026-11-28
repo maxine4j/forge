@@ -327,22 +327,11 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 				</SectionTabs>
 				<div
 					className='task-board-actions'
-					hidden={view === "notifications"}
+					hidden={view === "notifications" || view === "agents"}
 					role='group'
-					aria-label={
-						view === "board" ? "Board actions" : view === "agents" ? "Agent actions" : "Backlog actions"
-					}
+					aria-label={view === "board" ? "Board actions" : "Backlog actions"}
 				>
-					{view === "agents" ? (
-						<ToolbarButton
-							type='button'
-							className='primary'
-							disabled={creatingAgent}
-							onClick={() => setCreatingAgent(true)}
-						>
-							Create agent
-						</ToolbarButton>
-					) : view === "board" ? (
+					{view === "board" ? (
 						<>
 							<ToolbarButton
 								type='button'
@@ -379,11 +368,9 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 							</ToolbarButton>
 						</>
 					)}
-					{view !== "agents" && (
-						<ToolbarButton type='button' className='primary' disabled={actionsBusy} onClick={create}>
-							Create ticket
-						</ToolbarButton>
-					)}
+					<ToolbarButton type='button' className='primary' disabled={actionsBusy} onClick={create}>
+						Create ticket
+					</ToolbarButton>
 				</div>
 			</div>
 			{views.map((name) => (
@@ -401,6 +388,7 @@ export const Tasks = ({ api, visible }: { api: IWorkspaceApi; visible: boolean }
 							<TaskAgents
 								api={api}
 								creating={creatingAgent}
+								openCreate={() => setCreatingAgent(true)}
 								closeCreate={() => setCreatingAgent(false)}
 							/>
 						) : name === "notifications" ? (

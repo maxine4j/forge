@@ -12,16 +12,19 @@ import { useEffect, useRef, useState } from "react";
 
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { useDialogDismissal, useModalDialog, useModalDraft, useModalNavigation } from "../navigation/controller.tsx";
+import { ToolbarButton } from "../toolbar-button.tsx";
 import { AgentAvatar } from "./agent-avatar.tsx";
 import { ProviderMetrics, useProviderMetrics } from "./provider-metrics.tsx";
 
 export function TaskAgents({
 	api,
 	creating,
+	openCreate,
 	closeCreate,
 }: {
 	api: IWorkspaceApi;
 	creating: boolean;
+	openCreate: () => void;
 	closeCreate: () => void;
 }) {
 	const [catalog, setCatalog] = useState<{ agents: TaskAgent[]; providers: ModelProvider[] }>();
@@ -94,7 +97,12 @@ export function TaskAgents({
 	return (
 		<section className='forge-settings task-agent-catalog' aria-label='Agents'>
 			<ProviderMetrics providers={catalog.providers} metrics={metrics} />
-			<h2 className='task-agent-section-title'>Agents</h2>
+			<div className='task-agent-section-heading'>
+				<h2 className='task-agent-section-title'>Agents</h2>
+				<ToolbarButton className='primary' disabled={creating} onClick={openCreate}>
+					Create agent
+				</ToolbarButton>
+			</div>
 			{!catalog.agents.length && <p>No agents configured.</p>}
 			{creating && (
 				<AgentEditor

@@ -123,15 +123,18 @@ export function ProviderMetrics({
 							</div>
 							{metrics.scheduler.value ? (
 								<>
-									<p>
-										Running {running} / {provider.maxConcurrentAgents}{" "}
-										{metrics.scheduler.failed && "(Stale)"}
-									</p>
-									<progress
-										aria-label={`${provider.name} reserved capacity`}
-										value={Math.min(reserved, provider.maxConcurrentAgents)}
-										max={provider.maxConcurrentAgents}
-									/>
+									<div className='provider-metrics-capacity'>
+										<progress
+											aria-label={`${provider.name} reserved capacity`}
+											aria-describedby={`provider-capacity-${provider.id}`}
+											value={Math.min(reserved, provider.maxConcurrentAgents)}
+											max={provider.maxConcurrentAgents}
+										/>
+										<span id={`provider-capacity-${provider.id}`}>
+											Running {running} / {provider.maxConcurrentAgents}
+											{metrics.scheduler.failed && " (Stale)"}
+										</span>
+									</div>
 									{reserved !== running && <p>{reserved} slots reserved</p>}
 								</>
 							) : (

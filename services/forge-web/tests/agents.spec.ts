@@ -148,8 +148,12 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	await tabs.first().press("End");
 	await expect(page).toHaveURL("/tasks?view=agents");
 	const health = page.getByRole("region", { name: "Model providers" });
+	const agents = page.getByRole("region", { name: "Agents", exact: true });
 	await expect(health.getByRole("heading", { name: "Model providers", level: 2 })).toBeVisible();
-	await expect(page.getByRole("heading", { name: "Agents", level: 2, exact: true })).toBeVisible();
+	const agentsHeading = agents.getByRole("heading", { name: "Agents", level: 2, exact: true });
+	const createAgent = agents.getByRole("button", { name: "Create agent", exact: true });
+	await expect(agentsHeading).toBeVisible();
+	await expect(createAgent).toBeVisible();
 	await expect(health.getByRole("button", { name: "Refresh metrics" })).toHaveCount(0);
 	const cloudCard = health
 		.getByRole("article")
@@ -171,6 +175,9 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	await expect(health).toContainText("Unused");
 	await expect(health).not.toContainText("Retired");
 	await expect(health).toContainText("Running 2 / 1");
+	const capacity = cloudCard.getByRole("progressbar", { name: "OpenAI reserved capacity" });
+	await expect(capacity).toHaveAttribute("value", "1");
+	await expect(capacity).toHaveAccessibleDescription("Running 2 / 1");
 	await expect(health).toContainText("3 slots reserved");
 	await expect(health).toContainText("Token usage is incomplete");
 	await expect(health).toContainText("No recorded usage");
@@ -202,6 +209,17 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 			columns,
 		);
 		expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+		const button = (await createAgent.boundingBox())!;
+		const heading = (await agentsHeading.boundingBox())!;
+		expect(button.x).toBeGreaterThan(heading.x);
+		expect(button.y + button.height / 2).toBeCloseTo(heading.y + heading.height / 2, 0);
+		const bar = (await capacity.boundingBox())!;
+		const caption = (await cloudCard.getByText("Running 2 / 1", { exact: true }).boundingBox())!;
+		const header = (await cloudCard.locator(".provider-metrics-heading").boundingBox())!;
+		expect(bar.width).toBeCloseTo(header.width, 0);
+		expect(bar.height).toBeGreaterThanOrEqual(28);
+		expect(caption.y).toBeGreaterThanOrEqual(bar.y);
+		expect(caption.y + caption.height).toBeLessThanOrEqual(bar.y + bar.height);
 	}
 	await page.setViewportSize({ width: 1280, height: 900 });
 	schedulerFails = true;
@@ -222,7 +240,7 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	await expect(cloudCard.getByText("Healthy", { exact: true })).toBeVisible();
 	await expect(cloudCard.getByText("Input: 1.3m (80% cached)", { exact: true })).toBeVisible();
 	await expect(tabs.last()).toHaveAttribute("aria-selected", "true");
-	await page.getByRole("group", { name: "Agent actions" }).getByRole("button", { name: "Create agent" }).click();
+	await createAgent.click();
 	await page.getByLabel("Name", { exact: true }).fill("Reviewer");
 	await page.getByRole("combobox", { name: "Model provider", exact: true }).selectOption(openai);
 	await page.getByRole("combobox", { name: "Model", exact: true }).selectOption("codex");
