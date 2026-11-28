@@ -238,7 +238,21 @@ test("routes named workers independently and resets telemetry on reconnect", asy
 		expect((await get("/unknown/metrics")).status).toBe(404);
 		expect((await get("/first/metrics")).status).toBe(503);
 		expect((await fetch(`http://127.0.0.1:${pairing}/first/health`)).status).toBe(404);
-		first.send(JSON.stringify(report));
+		first.send(
+			JSON.stringify({
+				...report,
+				macos: {
+					chipName: "Apple M4",
+					deviceModel: "MacBook Pro",
+					macosVersion: "15.0",
+					ollamaVersion: "0.6.0",
+					batteryPercent: 0,
+					powerWatts: 1.5,
+					powerSource: "battery",
+					serialNumber: "private",
+				},
+			}),
+		);
 		second.send(JSON.stringify({ ...report, ready: false, concurrency: 2 }));
 		await vi.waitFor(async () => expect((await get("/first/health")).status).toBe(200));
 		await vi.waitFor(async () =>
@@ -249,7 +263,12 @@ test("routes named workers independently and resets telemetry on reconnect", asy
 			receivedAt: new Date(now).toISOString(),
 			freshness: "fresh",
 			contextWindow: 32000,
+			macos: { chipName: "Apple M4", batteryPercent: 0, powerWatts: 1.5 },
 		});
+		const firstMetrics = await (await get("/first/metrics")).json();
+		expect(firstMetrics.macos).not.toHaveProperty("serialNumber");
+		expect(await (await get("/second/metrics")).json()).not.toHaveProperty("macos");
+		expect((await fetch(`http://127.0.0.1:${pairing}/first/metrics`)).status).toBe(404);
 		expect(await (await get("/providers")).json()).toEqual({
 			providers: [
 				{ workerId: "first", contextWindow: 32000, concurrency: 1 },
