@@ -986,6 +986,7 @@ const setup = async (
 const dragToReady = async (page: Page, id = "TASK-1") => {
 	const dialog = page.getByRole("dialog", { name: id, exact: true });
 	await expect(dialog).toBeVisible();
+	await page.emulateMedia({ reducedMotion: "reduce" });
 	const backlog =
 		(await page.getByRole("tab", { name: "Backlog", exact: true }).getAttribute("aria-selected")) === "true";
 	await dialog.getByRole("button", { name: "Close ticket" }).click();
@@ -993,12 +994,12 @@ const dragToReady = async (page: Page, id = "TASK-1") => {
 	if (backlog) await page.getByRole("tab", { name: "Board", exact: true }).click();
 	await page.getByRole("button", { name: `Drag ${id}`, exact: true }).hover();
 	await page.mouse.down();
-	const target = (await page.getByRole("region", { name: "Ready for development", exact: true }).boundingBox())!;
+	const ready = page.getByRole("region", { name: "Ready for development", exact: true });
+	const target = (await ready.boundingBox())!;
 	await page.mouse.move(target.x + 100, target.y + 100, { steps: 8 });
+	await expect(ready.locator(".ticket-drop-placeholder")).toBeVisible();
 	await page.mouse.up();
-	await expect(
-		page.getByRole("region", { name: "Ready for development", exact: true }).locator(`[data-ticket-id="${id}"]`),
-	).toBeAttached();
+	await expect(ready.locator(`[data-ticket-id="${id}"]`)).toBeAttached();
 	if (backlog) await page.getByRole("tab", { name: "Backlog", exact: true }).click();
 	await page.getByRole("button", { name: new RegExp(`^${id} `) }).click();
 };
