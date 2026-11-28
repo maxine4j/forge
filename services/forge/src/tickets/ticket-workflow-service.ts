@@ -38,6 +38,7 @@ import {
 	assignedSubtask,
 	hasNextSubtask,
 	cleanTicketAssignment,
+	ticketCheckpointSteer,
 	ticketFreshWorkPrompt,
 	ticketFinalizationPrompt,
 	type ITicketPrompts,
@@ -897,7 +898,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		const planning = job.phase === "planning";
 		const checkpoint = job.context?.stage === "report";
 		const finalizing = checkpoint || !!job.reportRetrySourceTurnId;
-		const requirements = completionReportRequirements(checkpoint, hasNextSubtask(current, job));
+		const requirements = completionReportRequirements(hasNextSubtask(current, job));
 		let id = planning ? job.plannerId : job.implementerId;
 		this.settingUp.add(current.id);
 		try {
@@ -961,11 +962,10 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 				const ordered = !!assignedSubtask(current, job);
 				const recovery = followUp ? undefined : cleanTicketAssignment(job.message);
 				// A fresh retry retains an owner message and the retired Implementer.
-				// Handoffs and ordered advancement clear the message.
+				// Rebuild its assignment because older retries stored the owner message as the scope.
 				const interrupted = !followUp && !!job.message && !!job.previousImplementerIds?.length;
 				const assignment =
-					(!ordered && recovery)
-					|| (!ordered && cleanTicketAssignment(job.context?.prompt))
+					(!ordered && !interrupted && cleanTicketAssignment(job.context?.prompt))
 					|| cleanTicketAssignment(this.prompts.assignment(current, { ...job, message: undefined }))
 					|| "";
 				const boundedContext = (value: string | undefined) => {
@@ -983,9 +983,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 						stage: "work",
 					};
 				}
-				prompt =
-					followUp
-					?? ticketFreshWorkPrompt(current, job, assignment, ordered ? recovery : undefined, interrupted);
+				prompt = followUp ?? ticketFreshWorkPrompt(current, job, assignment, recovery, interrupted);
 			} else {
 				prompt = this.prompts.planning(current, job);
 			}
@@ -1090,12 +1088,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 					job.context.attempted = thread.turnId;
 					await this.store.save(job);
 					try {
-						await this.agents.steer(
-							actor,
-							id,
-							thread.turnId,
-							'Finish the current operation and avoid starting another task. If work remains, commit a safe checkpoint and immediately return {"status":"handoff","handover":"…"} with concise handover notes. If the assignment is finished, return the complete report.',
-						);
+						await this.agents.steer(actor, id, thread.turnId, ticketCheckpointSteer);
 					} catch (err) {
 						this.log.warn({ err, ticketId: job.ticketId }, "Checkpoint steer outcome is uncertain");
 						await this.store.save({ ...job, state: "uncertain" });
@@ -1124,7 +1117,7 @@ export class TicketWorkflowService implements ITicketWorkflowService {
 		if (work) {
 			const report = parseCompletionReport(
 				(await this.agents.finalAnswer?.(actor, id, thread.turnId)) ?? "",
-				completionReportRequirements(checkpoint, nextSubtask),
+				completionReportRequirements(nextSubtask),
 			);
 			if (!report) {
 				if (finalizing) {

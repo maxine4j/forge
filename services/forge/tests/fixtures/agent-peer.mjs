@@ -115,7 +115,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 			.join("\n");
 		const lowHeadroom =
 			(prompt.includes("TASK94_LOW") || prompt.startsWith("Implement only subtask 2:"))
-			&& !prompt.includes("Recover ordered work");
+			&& !prompt.includes("Recovery instruction:");
 		const checkpointMode = prompt.match(/TASK94_CHECKPOINT_(REPORT|UNKNOWN|CHANGED|NO_PROGRESS|AMBIGUOUS)/)?.[1];
 		const highContext =
 			lowHeadroom || !!checkpointMode || (prompt.includes("TASK67_CONTROLLED") && !prompt.includes("Handover:"));
@@ -165,7 +165,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 		if (prompt.includes("TASK94_INVALID")) thread.invalidScenario = true;
 		const finishAfterInvalid = prompt === "$review Finish after invalid";
 		if (finishAfterInvalid) thread.invalidScenario = false;
-		if (thread.completionScenario && prompt.startsWith("Assess the assignment")) {
+		if (thread.completionScenario && prompt.startsWith("Assess the full assignment")) {
 			const item = {
 				id: `answer-${sequence}`,
 				type: "agentMessage",
@@ -203,8 +203,7 @@ createInterface({ input: process.stdin }).on("line", (line) => {
 					|| rebaseFollowUp
 					|| thread.invalidScenario
 					|| finishAfterInvalid
-					|| (!thread.completionScenario && prompt.startsWith("Assess the assignment"))
-					|| prompt.startsWith("Using the conversation, assess whether")
+					|| (!thread.completionScenario && prompt.startsWith("Assess the full assignment"))
 					|| prompt.includes("Recover legacy work")
 					|| (thread.completionScenario && prompt === "Finish the integration")
 					|| prompt.includes("TASK84_CONTROLLED")))

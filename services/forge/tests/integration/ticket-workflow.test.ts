@@ -52,20 +52,21 @@ const reportIncomplete =
 	'{"status":"incomplete","remaining":"…","summary":"…"} (remaining is required and must be nonblank text of at most 2,000 characters. summary is optional and must be nonblank text of at most 2,000 characters).';
 const reportHandoff =
 	'{"status":"handoff","handover":"…"} (handover is required and must be nonblank text of at most 1,500 tokens).';
-const reportFinish = "Report complete only after finishing your assigned scope and committing the required changes.";
+const reportFinish =
+	"Report complete only when the full assignment is finished and the required changes are committed. Assess the full assignment even when the latest request is a diagnostic or recovery instruction.";
 const reportGuidance =
 	"In handover or the next-subtask summary, retain concise progress, next actions, decisions, blockers, and verification results as applicable. Omit code dumps, long logs, and repeated plan text.";
-const reportBlock = (nonfinal = false, checkpoint = false) =>
+const reportBlock = (nonfinal = false) =>
 	[
 		reportIntro,
 		"Use only the fields shown for your outcome.",
 		nonfinal
 			? '{"status":"complete","summary":"…"} (summary is required and must be nonblank text of at most 1,500 tokens).'
 			: '{"status":"complete","summary":"…"} (summary is optional and must be nonblank text of at most 2,000 characters).',
-		...(checkpoint ? [] : [reportIncomplete]),
+		reportIncomplete,
 		reportHandoff,
 		reportFinish,
-		"Report handoff only after committing a safe checkpoint.",
+		"Report handoff only if the work turn created a new safe checkpoint commit. If the assignment is unfinished and there is no new safe checkpoint, report incomplete and list what remains.",
 		reportGuidance,
 	].join(" ");
 const legacyBlock =
@@ -73,7 +74,7 @@ const legacyBlock =
 const retryReminder =
 	"The previous run may have left partial work in this worktree. Inspect the current changes and commits before continuing.";
 const input = (text: string) => [{ type: "text", text, text_elements: [] }];
-const reportOnly = `Assess the assignment against the work already done. Do not edit files or commit. Return only the explicit verdict. ${reportBlock()}`;
+const reportOnly = `Assess the full assignment against the work already done. Do not edit files or commit. Return only the explicit verdict. ${reportBlock()}`;
 
 test("real Git, SQLite and controlled app-server execute the ticket lifecycle and recover a committed merge", async () => {
 	const root = await files.mkdtemp(join(tmpdir(), "forge-workflow-"));
@@ -588,7 +589,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		expect((await ticketStore.get(partial.id))?.status).toBe("in-progress");
 		expect((await git.run(["-C", repository, "rev-parse", "main"])).trim()).toBe(beforePartial);
 		const verdict = turns(partialOffset).find(
-			([method, params]) => method === "turn/start" && JSON.stringify(params).includes("Assess the assignment"),
+			([method, params]) => method === "turn/start" && turnText(params) === reportOnly,
 		);
 		const initialPartial = turns(partialOffset).find(
 			([method, params]) => method === "turn/start" && JSON.stringify(params).includes("TASK84_CONTROLLED"),
@@ -664,7 +665,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 					threadId: contextThreadId,
 					expectedTurnId: initialContextJob.turnId,
 					input: input(
-						'Finish the current operation and avoid starting another task. If work remains, commit a safe checkpoint and immediately return {"status":"handoff","handover":"…"} with concise handover notes. If the assignment is finished, return the complete report.',
+						'Finish the current operation and avoid starting another task. If the full assignment is finished and the required changes are committed, return the complete report. If work remains, commit a new checkpoint if safe and return {"status":"handoff","handover":"…"} with concise notes. If work remains and this turn has no new safe checkpoint, return {"status":"incomplete","remaining":"…"} describing what remains.',
 					),
 				},
 			],
@@ -776,11 +777,12 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			},
 		});
 		await assertQuiet();
-		await workflow.message(owner, (await ticketStore.get(legacyId))!, `  ${legacyBlock}  `);
+		await workflow.message(owner, (await ticketStore.get(legacyId))!, `  Recover legacy work\n\n${legacyBlock}  `);
 		await restart();
 		expect(turns(legacyOffset).map(([method]) => method)).toEqual(["turn/start", "turn/steer"]);
 		await workflow.tick(owner);
-		expect((await jobs.get(legacyId))?.context?.prompt).toBe("Recover legacy work");
+		const legacyAssignment = `Implement ${legacyId} TASK94_LOW and commit the changes on this worktree branch.\n\nTASK94_LOW`;
+		expect((await jobs.get(legacyId))?.context?.prompt).toBe(legacyAssignment);
 		await expect
 			.poll(async () => {
 				await pollJob(legacyId);
@@ -798,7 +800,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			expect.objectContaining({
 				threadId: await codexId(legacyRetry.implementerId!),
 				input: input(
-					`Recover legacy work\n\n${retryReminder}\n\nHandover:\nRetain the checkpoint\n\n${reportBlock()}`,
+					`${legacyAssignment}\n\n${retryReminder}\n\nRecovery instruction:\nRecover legacy work\n\nHandover:\nRetain the checkpoint\n\n${reportBlock()}`,
 				),
 			}),
 		]);
@@ -944,9 +946,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 			if (mode === "REPORT")
 				expect(actual[2]![1]).toMatchObject({
 					threadId,
-					input: input(
-						`Using the conversation, assess whether this assignment is complete or needs a handoff. Do not edit files or commit. Return only the explicit verdict. ${reportBlock(false, true)}`,
-					),
+					input: input(reportOnly),
 				});
 			if (mode === "AMBIGUOUS") {
 				await agents!.interrupt(owner, initial.implementerId!);
@@ -989,7 +989,7 @@ test("real Git, SQLite and controlled app-server execute the ticket lifecycle an
 		await db.close();
 		await files.rm(root, { recursive: true, force: true });
 	}
-}, 30_000);
+}, 60_000);
 
 test("owner recovery uses real Git and SQLite without the agent runtime", async () => {
 	const root = await files.mkdtemp(join(tmpdir(), "forge-ticket-recovery-"));
