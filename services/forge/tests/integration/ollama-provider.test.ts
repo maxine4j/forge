@@ -113,6 +113,19 @@ test("discovers a connected named worker and persists refreshed capabilities thr
 			]);
 			expect(JSON.stringify(rows)).not.toContain("private");
 		});
+		const isolated = await readRelayMetrics(
+			origin,
+			[
+				initial,
+				{ ...initial, id: "missing", name: "missing", endpoint: `${origin}/missing/openai/v1` },
+				{ ...initial, id: "wrong-path", endpoint: `${origin}/gpu-1/openai/v1/extra` },
+				{ ...initial, id: "wrong-name", name: "other" },
+			],
+			fetch,
+		);
+		expect(isolated).toHaveLength(2);
+		expect(isolated[0]).toMatchObject({ providerId: initial.id, freshness: "fresh", macos: { chipName: "M4" } });
+		expect(isolated[1]).toEqual({ providerId: "missing", freshness: "unavailable", receivedAt: null });
 		expect(await store.get(initial.id)).toEqual(initial);
 		await database.close();
 		database = new SqliteDatabase(join(root, "forge.sqlite"));
