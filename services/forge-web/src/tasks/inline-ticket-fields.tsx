@@ -1,5 +1,7 @@
 import { useId, type Ref } from "react";
 
+import { TicketTextPreview } from "./ticket-text-preview.tsx";
+
 type InlineFieldProps<Element> = {
 	value: string;
 	draft: string | undefined;
@@ -89,7 +91,8 @@ export const InlineTicketDescription = ({
 	change,
 	save,
 	discard,
-}: InlineFieldProps<HTMLTextAreaElement>) => {
+	markdown = false,
+}: InlineFieldProps<HTMLTextAreaElement> & { markdown?: boolean }) => {
 	const label = useId();
 	const editing = editable && draft !== undefined;
 	return (
@@ -118,6 +121,26 @@ export const InlineTicketDescription = ({
 							<InlineFieldActions field='description' busy={busy} discard={discard} />
 						</div>
 					</div>
+				) : markdown ? (
+					<TicketTextPreview text={value || (editable ? "Add a description" : "No description")}>
+						{(content) => (
+							<div className='ticket-description-preview'>
+								{editable && (
+									<button ref={trigger} type='button' disabled={busy} onClick={() => change(value)}>
+										Edit description
+									</button>
+								)}
+								<div
+									className='ticket-plan-markdown'
+									onClick={(event) => {
+										if (editable && !busy && !(event.target as Element).closest("a")) change(value);
+									}}
+								>
+									{content}
+								</div>
+							</div>
+						)}
+					</TicketTextPreview>
 				) : editable ? (
 					<button
 						ref={trigger}

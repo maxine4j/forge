@@ -18,7 +18,6 @@ import {
 import { useEffect, useRef, useState, useId } from "react";
 import { useLocation } from "react-router";
 
-import { PlanMarkdown } from "../agents/agent-activity.tsx";
 import { Conversation } from "../agents/agent-chat.tsx";
 import { PlanReviewControls } from "../agents/plan-review-controls.tsx";
 import { ResourcePoller } from "../api/resource-poller.ts";
@@ -36,6 +35,7 @@ import { TicketHistoryTimeline } from "./ticket-history.tsx";
 import { TicketActivityIcon, type TicketActivity } from "./ticket-indicator.tsx";
 import { ticketLabels } from "./ticket-labels.ts";
 import { useTicketDialog, useDockedDismissal, type TicketPresentation } from "./ticket-presentation.tsx";
+import { TicketTextPreview } from "./ticket-text-preview.tsx";
 
 export { ticketLabels } from "./ticket-labels.ts";
 
@@ -782,6 +782,7 @@ export const TicketDetails = ({
 			)}
 			<div className='ticket-fields' {...panel("details")}>
 				<InlineTicketDescription
+					markdown
 					value={ticket.description}
 					draft={descriptionDraft}
 					editable={editable}
@@ -805,7 +806,7 @@ export const TicketDetails = ({
 							</button>
 						)}
 						<div className='ticket-plan-markdown'>
-							<PlanMarkdown text={planMarkdown!} />
+							<TicketTextPreview text={planMarkdown!} />
 						</div>
 						{approvePlan && (
 							<div className='ticket-plan-actions'>

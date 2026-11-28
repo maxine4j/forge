@@ -1874,6 +1874,23 @@
 .ticket-description-edit {
 	position: relative;
 }
+.ticket-description-preview > button {
+	float: right;
+}
+.ticket-description-preview .ticket-plan-markdown {
+	cursor: text;
+}
+.ticket-text-disclosure {
+	clear: both;
+	text-align: left;
+}
+.ticket-text-disclosure button {
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: #58a6ff;
+	cursor: pointer;
+}
 .ticket-description-editor .ticket-description-text {
 	display: block;
 	width: 100%;
