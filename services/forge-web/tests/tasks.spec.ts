@@ -192,6 +192,30 @@ test("ticket actions open and dismiss by touch within the phone viewport", async
 });
 
 for (const width of [1280, 390]) {
+	test(`notification archival prevents duplicate submissions at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 900 });
+		const state = await setupNotifications(page, [notificationFixture("1")]);
+		let posts = 0;
+		let release!: () => void;
+		const pending = new Promise<void>((resolve) => {
+			release = resolve;
+		});
+		await page.route("**/api/tickets/notifications/*/archive", async (route) => {
+			posts++;
+			await pending;
+			state.items = [];
+			await route.fulfill({ status: 204 });
+		});
+		await page.getByRole("tab", { name: "Notifications (1)" }).click();
+		const button = page.getByRole("button", { name: "Archive notification" });
+		await button.click();
+		await expect(button).toBeDisabled();
+		await button.evaluate((element: HTMLButtonElement) => element.click());
+		expect(posts).toBe(1);
+		release();
+		await expect(page.getByRole("heading", { name: "No pending notifications" })).toBeVisible();
+		expect(posts).toBe(1);
+	});
 	test(`notification archival retries and recovers focus at ${width}px`, async ({ page }) => {
 		await page.setViewportSize({ width, height: 900 });
 		const state = await setupNotifications(page, [notificationFixture("1"), notificationFixture("2", "TASK-2")]);
