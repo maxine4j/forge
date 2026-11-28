@@ -20,7 +20,7 @@ Forge remains a TypeScript implementation, not a Forgejo deployment or fork.
 
 ## Manual ticket fast-forward
 
-The [ticket Utils merge](tickets.md#recovering-ticket-work-from-utils) checks that
+The [ticket actions merge](tickets.md#recovering-ticket-work-from-ticket-actions) checks that
 the clean, attached ticket branch has commits beyond its recorded base. Forge
 records the exact candidate before atomically verifying the ticket branch tip and
 the expected local main ref. It advances local main only by fast-forward or

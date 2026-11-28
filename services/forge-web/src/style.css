@@ -1592,7 +1592,7 @@
 	flex-shrink: 0;
 	gap: 6px;
 }
-.ticket-details-actions button {
+.ticket-details-actions > button {
 	display: grid;
 	place-items: center;
 	flex: none;
@@ -1601,15 +1601,24 @@
 	min-height: 36px;
 	padding: 0;
 }
-.ticket-details-actions .ticket-archive-action,
 .task-agent-archive {
 	background: #2b2619;
 	border-color: #473b20;
 	color: #e3b768;
 }
-.ticket-details-actions .ticket-archive-action:hover,
 .task-agent-archive:hover {
 	background: #3a301d;
+}
+.ticket-details-actions .dropdown-surface {
+	width: max-content;
+}
+.ticket-details-actions .dropdown-surface button {
+	width: 100%;
+	white-space: normal;
+}
+.ticket-details-actions .dropdown-surface p {
+	max-width: 260px;
+	margin: 8px;
 }
 .ticket-archive-dialog {
 	width: min(420px, calc(100vw - 24px));
@@ -1774,11 +1783,6 @@
 .ticket-utils {
 	overflow-wrap: anywhere;
 }
-.ticket-utils-actions {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-}
 .ticket-plan-markdown {
 	overflow-wrap: anywhere;
 	line-height: 1.55;
@@ -1942,7 +1946,7 @@ button.ticket-description-text:hover {
 	.ticket-epic-link {
 		max-width: 108px;
 	}
-	.ticket-details-actions button {
+	.ticket-details-actions > button {
 		width: 32px;
 		height: 32px;
 		min-height: 32px;

@@ -199,7 +199,7 @@ the workspace store and completes recovery before listening.
 
 ## Ticket recovery workspaces
 
-The [ticket Utils actions](tickets.md#recovering-ticket-work-from-utils) use the
+The [ticket actions](tickets.md#recovering-ticket-work-from-ticket-actions) use the
 existing owned checkout and share the workspace write guard with Forge editor
 and staging requests. Finish or abort any in-progress Git operation before using
 either action. A failed checkpoint can leave staged changes available for retry.

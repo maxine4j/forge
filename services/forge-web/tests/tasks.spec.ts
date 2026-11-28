@@ -169,6 +169,28 @@ const setupNotifications = async (page: Page, initial: TicketNotification[]) => 
 	return state;
 };
 
+test("ticket actions open and dismiss by touch within the phone viewport", async ({ browser }) => {
+	const context = await browser.newContext({
+		baseURL: "http://127.0.0.1:5176",
+		viewport: { width: 320, height: 850 },
+		hasTouch: true,
+		isMobile: true,
+	});
+	const page = await context.newPage();
+	await setup(page);
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).tap();
+	const ticket = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	const actions = ticket.getByRole("button", { name: "Ticket actions" });
+	await actions.tap();
+	const popup = ticket.getByRole("group", { name: "Ticket actions" });
+	const box = (await popup.boundingBox())!;
+	expect(box.x).toBeGreaterThanOrEqual(0);
+	expect(box.x + box.width).toBeLessThanOrEqual(320);
+	await page.touchscreen.tap(10, 800);
+	await expect(actions).toHaveAttribute("aria-expanded", "false");
+	await context.close();
+});
+
 for (const width of [1280, 390]) {
 	test(`notifications inline questions retain drafts and failures, resolve with focus and preserve modal ancestry at ${width}px`, async ({
 		page,
@@ -345,12 +367,12 @@ for (const width of [1280, 390]) {
 		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 		await expect(page).toHaveURL(/tab=details/);
-		for (const name of ["Chat", "History", "Cost", "Utils"]) {
+		for (const name of ["Chat", "History", "Cost"]) {
 			const tab = dialog.getByRole("tab", { name, exact: true });
 			await tab.click();
 			await expect(tab).toHaveAttribute("aria-selected", "true");
 		}
-		for (const name of ["Cost", "History", "Chat", "Details"]) {
+		for (const name of ["History", "Chat", "Details"]) {
 			if (name === "History") {
 				// Exercise the native dialog cancellation path separately from a
 				// browser POP. A real Android gesture still needs device verification.
@@ -364,12 +386,12 @@ for (const width of [1280, 390]) {
 		}
 		await page.goBack();
 		await expect(dialog).toHaveCount(0);
-		for (const name of ["Details", "Chat", "History", "Cost", "Utils"]) {
+		for (const name of ["Details", "Chat", "History", "Cost"]) {
 			await page.goForward();
 			await expect(dialog.getByRole("tab", { name, exact: true })).toHaveAttribute("aria-selected", "true");
 		}
 		await page.reload();
-		await expect(dialog.getByRole("tab", { name: "Utils", exact: true })).toHaveAttribute("aria-selected", "true");
+		await expect(dialog.getByRole("tab", { name: "Cost", exact: true })).toHaveAttribute("aria-selected", "true");
 		await dialog.getByRole("button", { name: "Close ticket", exact: true }).click();
 		await expect(page).toHaveURL("/tasks?view=backlog");
 		await page.goBack();
@@ -384,6 +406,16 @@ for (const width of [1280, 390]) {
 		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
 		await dialog.getByRole("button", { name: "Edit description", exact: true }).click();
 		await dialog.getByLabel("Description", { exact: true }).fill("Unsaved description");
+		const actions = dialog.getByRole("button", { name: "Ticket actions" });
+		const before = page.url();
+		await actions.click();
+		await actions.click();
+		expect(page.url()).toBe(before);
+		await actions.click();
+		await dialog.getByRole("button", { name: "Archive ticket" }).click();
+		await page.getByRole("dialog", { name: "Archive TASK-1?" }).getByRole("button", { name: "Cancel" }).click();
+		await expect(actions).toBeFocused();
+		await expect(dialog.getByLabel("Description", { exact: true })).toHaveValue("Unsaved description");
 		await page.keyboard.press("Escape");
 		await page
 			.getByRole("dialog", { name: "Unsaved changes" })
@@ -422,6 +454,7 @@ for (const width of [1280, 390]) {
 		await expect(settings).toHaveCount(0);
 		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 		const dialog = page.getByRole("dialog", { name: "TASK-1", exact: true });
+		await dialog.getByRole("button", { name: "Ticket actions" }).click();
 		await dialog.getByRole("button", { name: "Archive ticket", exact: true }).click();
 		const confirmation = page.getByRole("dialog", { name: "Archive TASK-1?", exact: true });
 		await expect(confirmation).toBeVisible();
@@ -1234,7 +1267,7 @@ for (const width of [1280, 768, 600, 390, 320]) {
 		expect(await textLeft(title)).toBeCloseTo(contentLeft, 0);
 		const returning = details.getByRole("button", { name: "Return to backlog", exact: true });
 		const size = width <= 600 ? 32 : 36;
-		for (const name of ["Return to backlog", "Archive ticket", "Close ticket"]) {
+		for (const name of ["Return to backlog", "Ticket actions", "Close ticket"]) {
 			expect(await details.getByRole("button", { name, exact: true }).boundingBox()).toMatchObject({
 				width: size,
 				height: size,
@@ -1243,14 +1276,17 @@ for (const width of [1280, 768, 600, 390, 320]) {
 		await expect(returning).toHaveAttribute("title", "Return to backlog");
 		const row = details.locator(".ticket-details-heading");
 		const status = row.getByRole("status");
-		await status.evaluate((el) => {
+		const truncates = await status.evaluate((el) => {
 			el.textContent = "A very long execution label that must truncate within its own available space ".repeat(3);
+			const range = document.createRange();
+			range.selectNodeContents(el);
+			return range.getBoundingClientRect().width > el.clientWidth;
 		});
 		await expect(status).toHaveCSS("text-align", "right");
 		await expect(status).toHaveCSS("white-space", "nowrap");
 		await expect(status).toHaveCSS("text-overflow", "ellipsis");
 		await expect(status).toHaveCSS("overflow", "hidden");
-		expect(await status.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+		expect(truncates).toBe(true);
 		const keysBox = (await row.locator(".ticket-details-key-row").boundingBox())!;
 		const statusBox = (await status.boundingBox())!;
 		const actionsBox = (await row.locator(".ticket-details-actions").boundingBox())!;
@@ -1267,7 +1303,23 @@ for (const width of [1280, 768, 600, 390, 320]) {
 		await tab.press("ArrowRight");
 		await expect(details.getByRole("tab", { name: "Chat", exact: true })).toBeFocused();
 		await page.keyboard.press("End");
-		await expect(details.getByRole("tab", { name: "Utils", exact: true })).toBeFocused();
+		await expect(details.getByRole("tab", { name: "Cost", exact: true })).toBeFocused();
+		const actions = details.getByRole("button", { name: "Ticket actions" });
+		const url = page.url();
+		await actions.click();
+		await expect(actions).toHaveAttribute("aria-expanded", "true");
+		const popup = details.getByRole("group", { name: "Ticket actions" });
+		const box = (await popup.boundingBox())!;
+		expect(box.x).toBeGreaterThanOrEqual(0);
+		expect(box.x + box.width).toBeLessThanOrEqual(width);
+		await page.keyboard.press("Escape");
+		await expect(actions).toBeFocused();
+		await expect(actions).toHaveAttribute("aria-expanded", "false");
+		await actions.press("Space");
+		await expect(actions).toHaveAttribute("aria-expanded", "true");
+		await page.mouse.click(10, 800);
+		await expect(actions).toHaveAttribute("aria-expanded", "false");
+		expect(page.url()).toBe(url);
 	});
 }
 
@@ -1291,7 +1343,9 @@ for (const width of [1280, 390]) {
 		await expect(dialog.getByText("Stopping ticket agents…", { exact: true })).toBeVisible();
 		await expect(dialog.getByRole("combobox", { name: "Status", exact: true })).toHaveCount(0);
 		await expect(dialog.getByRole("button", { name: "Clear plan", exact: true })).toBeDisabled();
+		await dialog.getByRole("button", { name: "Ticket actions" }).click();
 		await expect(dialog.getByRole("button", { name: "Archive ticket", exact: true })).toBeDisabled();
+		await page.keyboard.press("Escape");
 		f.failReset();
 		await expect(dialog.getByText("Removing abandoned work…", { exact: true })).toBeVisible();
 		await expect(page.getByRole("alert")).toContainText("Cleanup failed");
@@ -2443,6 +2497,8 @@ test("ticket archive requires confirmation and removes the card only after succe
 	const card = page.getByRole("button", { name: "TASK-1 First task", exact: true });
 	await card.click();
 	const archive = page.getByRole("button", { name: "Archive ticket", exact: true });
+	const actions = page.getByRole("button", { name: "Ticket actions", exact: true });
+	await actions.click();
 	await archive.click();
 	const confirmation = page.getByRole("dialog", { name: "Archive TASK-1?" });
 	const cancel = confirmation.getByRole("button", { name: "Cancel", exact: true });
@@ -2450,14 +2506,16 @@ test("ticket archive requires confirmation and removes the card only after succe
 	await expect(cancel).toBeFocused();
 	await cancel.click();
 	await expect(confirmation).toBeHidden();
-	await expect(archive).toBeFocused();
+	await expect(actions).toBeFocused();
+	await actions.click();
 	await archive.click();
 	await page.keyboard.press("Escape");
 	await expect(confirmation).toBeHidden();
-	await expect(archive).toBeFocused();
+	await expect(actions).toBeFocused();
 	expect(fixture.operations).toEqual([]);
 
 	fixture.setArchiveFailure(true);
+	await actions.click();
 	await archive.click();
 	await confirm.click();
 	await expect(confirmation.getByRole("alert")).toHaveText(
@@ -2729,8 +2787,7 @@ test("ticket sections are keyboard navigable tabs with a labelled active panel",
 	const details = tablist.getByRole("tab", { name: "Details" });
 	const cost = tablist.getByRole("tab", { name: "Cost" });
 	const history = tablist.getByRole("tab", { name: "History" });
-	const utils = tablist.getByRole("tab", { name: "Utils" });
-	await expect(tablist.getByRole("tab")).toHaveCount(5);
+	await expect(tablist.getByRole("tab")).toHaveCount(4);
 	await expect(chat).toHaveAttribute("aria-selected", "true");
 	await details.focus();
 	await details.press("ArrowRight");
@@ -2744,19 +2801,26 @@ test("ticket sections are keyboard navigable tabs with a labelled active panel",
 	await expect(cost).toBeFocused();
 	await expect(cost).toHaveAttribute("aria-selected", "true");
 	await cost.press("ArrowRight");
-	await expect(utils).toBeFocused();
-	await expect(modal.getByRole("tabpanel", { name: "Utils" })).toBeVisible();
-	await utils.press("ArrowRight");
 	await expect(details).toBeFocused();
 	await expect(details).toHaveAttribute("aria-selected", "true");
 	await details.press("End");
-	await expect(utils).toBeFocused();
-	await expect(utils).toHaveAttribute("aria-selected", "true");
-	await utils.press("Home");
+	await expect(cost).toBeFocused();
+	await expect(cost).toHaveAttribute("aria-selected", "true");
+	await cost.press("Home");
 	await expect(modal.getByRole("tabpanel", { name: "Details" })).toBeVisible();
 });
 
-test("ticket Utils confirms recovery actions and refreshes Done with Chat unavailable", async ({ page }) => {
+test("legacy ticket Utils links normalize while preserving other URL components", async ({ page }) => {
+	await setup(page);
+	await page.goto("/tasks?ticket=TASK-1&tab=utils&view=board#context");
+	const ticket = page.getByRole("dialog", { name: "TASK-1" });
+	await expect(ticket.getByRole("tab", { name: "Details" })).toHaveAttribute("aria-selected", "true");
+	await expect(page).toHaveURL(/ticket=TASK-1&tab=details&view=board#context$/);
+	await expect(ticket.getByRole("button", { name: "Ticket actions" })).toHaveAttribute("aria-expanded", "false");
+	await expect(ticket.getByRole("tab")).toHaveCount(4);
+});
+
+test("ticket actions confirm recovery and refresh Done with Chat unavailable", async ({ page }) => {
 	const f = await setup(page, false, true);
 	const ticket = f.tickets().find(({ id }) => id === "TASK-1")!;
 	ticket.status = "in-progress";
@@ -2784,32 +2848,62 @@ test("ticket Utils confirms recovery actions and refreshes Done with Chat unavai
 	});
 	await page.goto("/tasks?ticket=TASK-1&tab=utils");
 	const modal = page.getByRole("dialog", { name: "TASK-1" });
-	const panel = modal.getByRole("tabpanel", { name: "Utils" });
-	const commit = panel.getByRole("button", { name: "Commit checkpoint" });
-	const merge = panel.getByRole("button", { name: "Merge branch into main" });
+	await expect(page).toHaveURL(/tab=(details|chat|history|cost)/);
+	const actions = modal.getByRole("button", { name: "Ticket actions" });
+	const panel = modal.locator(".ticket-utils");
+	const commit = modal.getByRole("button", { name: "Commit checkpoint" });
+	const merge = modal.getByRole("button", { name: "Merge branch into main" });
+	await expect(actions).toHaveAttribute("aria-expanded", "false");
+	await actions.focus();
+	await actions.press("Enter");
 	await expect(commit).toBeEnabled();
+	await expect(commit).toBeFocused();
+	await commit.press("ArrowUp");
+	await expect(modal.getByRole("button", { name: "Archive ticket" })).toBeFocused();
+	await page.keyboard.press("ArrowDown");
+	await expect(commit).toBeFocused();
+	page.once("dialog", (dialog) => dialog.dismiss());
+	await commit.click();
+	expect(checkpointCalls).toBe(0);
+	await expect(actions).toBeFocused();
+	await actions.click();
 	page.once("dialog", async (dialog) => {
 		expect(dialog.message()).toContain("non-ignored untracked files");
 		await dialog.accept();
 	});
 	await commit.click();
 	await expect(panel.getByRole("status")).toHaveText("Committing checkpoint…");
+	await actions.click();
 	await expect(commit).toBeDisabled();
 	await expect(merge).toBeDisabled();
 	await commit.dispatchEvent("click");
+	await actions.click();
 	checkpoint.resolve();
 	await expect(panel.getByRole("status")).toContainText(sha);
 	expect(checkpointCalls).toBe(1);
+	page.once("dialog", (dialog) => dialog.dismiss());
+	await actions.click();
+	await merge.click();
+	expect(mergeCalls).toBe(0);
+	await expect(actions).toBeFocused();
 	page.on("dialog", async (dialog) => {
 		expect(dialog.message()).toContain("mark this ticket Done");
 		await dialog.accept();
 	});
+	await actions.click();
 	await merge.click();
 	await expect(panel.getByRole("alert")).toContainText("has diverged");
+	await actions.click();
 	await merge.click();
 	await expect(panel.getByRole("status")).toContainText(`Merged into main · ${sha}`);
-	await expect(panel.getByText("Workspace cleanup pending.")).toBeVisible();
+	await actions.click();
+	await expect(modal.getByText("Workspace cleanup pending.")).toBeVisible();
 	await expect(modal.locator(".ticket-status-done")).toHaveText("Done");
+	await page.keyboard.press("Escape");
+	await modal.getByRole("button", { name: "Close ticket" }).click();
+	await expect(
+		page.getByRole("region", { name: "Done" }).getByRole("button", { name: "TASK-1 First task" }),
+	).toBeVisible();
 });
 
 test("History retains nested visits, failed attempts, live state and reading position", async ({ page }) => {
@@ -3269,7 +3363,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	const message = modal.getByLabel("Message", { exact: true });
 	const send = modal.getByRole("button", { name: "Send message", exact: true });
 	const interrupt = modal.getByRole("button", { name: "Interrupt", exact: true });
-	await expect(modal.getByRole("tab")).toHaveCount(5);
+	await expect(modal.getByRole("tab")).toHaveCount(4);
 	await expect(modal.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
 	await expect(modal.getByRole("heading", { name: "Initial plan" })).toBeVisible();
 	await message.fill("Include filtering");
@@ -3861,6 +3955,7 @@ test("confirmations and their toast host remain above tickets across responsive 
 	const fixture = await setup(page);
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	const ticket = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await ticket.getByRole("button", { name: "Ticket actions" }).click();
 	await ticket.getByRole("button", { name: "Archive ticket", exact: true }).click();
 	const confirmation = page.getByRole("dialog", { name: "Archive TASK-1?", exact: true });
 	await expect(confirmation).toBeVisible();
@@ -3980,7 +4075,11 @@ for (const archived of [false, true]) {
 			await expect(modal.getByRole("group", { name: "Description" }).getByText("Linked scope")).toBeVisible();
 			await expect(modal.getByRole("button", { name: "Edit description" })).toHaveCount(0);
 			await expect(modal.getByRole("combobox", { name: "Status", exact: true })).toHaveCount(0);
-			await expect(modal.getByRole("button", { name: "Archive ticket" })).toBeDisabled();
+			await modal.getByRole("button", { name: "Ticket actions" }).click();
+			for (const name of ["Commit checkpoint", "Merge branch into main", "Archive ticket"])
+				await expect(modal.getByRole("button", { name })).toBeDisabled();
+			await expect(modal.getByText("Utilities are available for unarchived tickets in progress.")).toBeVisible();
+			await page.keyboard.press("Escape");
 			await expect(modal.getByRole("button", { name: "Save", exact: true })).toHaveCount(0);
 		}
 		await page.reload();

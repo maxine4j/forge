@@ -23,7 +23,7 @@ import { Conversation } from "../agents/agent-chat.tsx";
 import { PlanReviewControls } from "../agents/plan-review-controls.tsx";
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
-import { Dropdown } from "../dropdown.tsx";
+import { Dropdown, DropdownSurface } from "../dropdown.tsx";
 import { useDialogDismissal, useModalDraft, useModalNavigation } from "../navigation/controller.tsx";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { AgentAvatar } from "./agent-avatar.tsx";
@@ -39,7 +39,7 @@ import { useTicketDialog, useDockedDismissal, type TicketPresentation } from "./
 
 export { ticketLabels } from "./ticket-labels.ts";
 
-const tabLabels = { details: "Details", chat: "Chat", history: "History", cost: "Cost", utils: "Utils" };
+const tabLabels = { details: "Details", chat: "Chat", history: "History", cost: "Cost" };
 const tabs = Object.keys(tabLabels) as TicketTab[];
 type TicketTab = keyof typeof tabLabels;
 type UpdateTicket = ReturnType<typeof updateTicketSchema.parse>;
@@ -48,7 +48,6 @@ const tabIcons: Record<TicketTab, string> = {
 	details: "M6 3h8l4 4v14H6z M14 3v5h4 M9 12h6 M9 16h6",
 	chat: "M4 5h16v11H9l-5 4z",
 	cost: "M12 3v18 M16 7H9a2.5 2.5 0 0 0 0 5h6a2.5 2.5 0 0 1 0 5H8",
-	utils: "M4 8h16v12H4z M8 8V4h8v4 M4 13h16 M10 13v2h4v-2",
 };
 export interface TicketReadingState {
 	snapshots: Map<string, AgentView>;
@@ -599,32 +598,56 @@ export const TicketDetails = ({
 							</svg>
 						</button>
 					)}
-					<button
-						type='button'
-						className='ticket-archive-action'
-						aria-label='Archive ticket'
-						title='Archive ticket'
-						disabled={archived || busy || acting || !!resetting}
-						onClick={() => {
-							setArchiveError("");
-							navigation.open("archive");
-						}}
+					<DropdownSurface
+						label='Ticket actions'
+						trigger='⋯'
+						showChevron={false}
+						className='ticket-actions-trigger'
 					>
-						<svg
-							width='16'
-							height='16'
-							viewBox='0 0 24 24'
-							fill='none'
-							stroke='currentColor'
-							strokeWidth='2'
-							strokeLinecap='round'
-							strokeLinejoin='round'
-							aria-hidden='true'
-						>
-							<rect x='3' y='3' width='18' height='5' rx='1' />
-							<path d='M5 8v11a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8m-9 4h4' />
-						</svg>
-					</button>
+						{(closeActions) => (
+							<>
+								<button
+									className='dropdown-option'
+									type='button'
+									disabled={utilsDisabled}
+									onClick={() => {
+										closeActions(true);
+										runUtility("commit-checkpoint");
+									}}
+								>
+									Commit checkpoint
+								</button>
+								<button
+									className='dropdown-option'
+									type='button'
+									disabled={utilsDisabled}
+									onClick={() => {
+										closeActions(true);
+										runUtility("merge-into-main");
+									}}
+								>
+									Merge branch into main
+								</button>
+								<button
+									className='dropdown-option'
+									type='button'
+									disabled={archived || busy || acting || !!resetting}
+									onClick={() => {
+										closeActions(true);
+										setArchiveError("");
+										navigation.open("archive");
+									}}
+								>
+									Archive ticket
+								</button>
+								{utilsUnavailable && <p>{utilsUnavailable}</p>}
+								{job?.cleanupPending && <p>Workspace cleanup pending.</p>}
+								{!utilsUnavailable && utilsBusy && !utility.pending && (
+									<p>Wait for the current ticket update to finish.</p>
+								)}
+							</>
+						)}
+					</DropdownSurface>
 					<button type='button' aria-label='Close ticket' disabled={busy} onClick={close}>
 						✕
 					</button>
@@ -913,20 +936,7 @@ export const TicketDetails = ({
 			<div className='ticket-cost' {...panel("cost")}>
 				{tab === "cost" && <TicketCost api={api} ticketId={ticket.id} />}
 			</div>
-			<div className='ticket-utils' {...panel("utils")}>
-				{utilsUnavailable && <p>{utilsUnavailable}</p>}
-				{job?.cleanupPending && <p>Workspace cleanup pending.</p>}
-				{!utilsUnavailable && utilsBusy && !utility.pending && (
-					<p>Wait for the current ticket update to finish.</p>
-				)}
-				<div className='ticket-utils-actions'>
-					<button type='button' disabled={utilsDisabled} onClick={() => runUtility("commit-checkpoint")}>
-						Commit checkpoint
-					</button>
-					<button type='button' disabled={utilsDisabled} onClick={() => runUtility("merge-into-main")}>
-						Merge branch into main
-					</button>
-				</div>
+			<div className='ticket-utils'>
 				{(utility.pending || utility.success) && <p role='status'>{utility.pending ?? utility.success}</p>}
 				{utility.error && <p role='alert'>{utility.error}</p>}
 			</div>

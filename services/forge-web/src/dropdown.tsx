@@ -45,6 +45,7 @@ export const DropdownSurface = ({
 	dismissWhenDisabled = true,
 	popupLabel = label,
 	size,
+	showChevron = true,
 }: {
 	label: string;
 	disabled?: boolean;
@@ -63,6 +64,7 @@ export const DropdownSurface = ({
 	dismissWhenDisabled?: boolean;
 	popupLabel?: string;
 	size?: "toolbar";
+	showChevron?: boolean;
 }) => {
 	const id = useId();
 	const anchor = `--dropdown-${id.replace(/[^a-zA-Z0-9]/gu, "")}`;
@@ -196,7 +198,7 @@ export const DropdownSurface = ({
 				onClick={() => (open ? close() : show())}
 			>
 				{trigger}
-				<span className='ticket-chevron' aria-hidden='true' />
+				{showChevron && <span className='ticket-chevron' aria-hidden='true' />}
 			</button>
 			<div
 				ref={popup}

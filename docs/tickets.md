@@ -1,8 +1,8 @@
 # Forge ticket and PR workflow
 
-## Recovering ticket work from Utils
+## Recovering ticket work from Ticket actions
 
-Open **Utils** in an unarchived In progress ticket with an assigned workspace.
+Open **Ticket actions** in an unarchived In progress ticket with an assigned workspace.
 **Commit checkpoint** saves tracked changes, deletions, and non-ignored untracked
 files on the ticket branch. Forge displays the commit SHA and returns that same SHA
 if the tree is unchanged. **Merge branch into main** takes the clean, committed
@@ -81,7 +81,7 @@ and [metadata persistence](architecture.md#notification-metadata).
 ## Task navigation
 
 Tasks retains `view=backlog|notifications` and `epic=EPIC-n` links. Every page accepts
-`ticket=TASK-n` and `tab=details|chat|history|cost|utils`, including repository sections.
+`ticket=TASK-n` and `tab=details|chat|history|cost`, including repository sections.
 The application owns ticket selection, mutations, draft/reading caches and one
 shared ticket/epic/notification collection poller. Its details host sits outside
 retained hidden pages, with agent options and visible error notifications.
@@ -293,7 +293,7 @@ Tickets have no repository-owner column.
 `ticket_repositories` stores ordered references with foreign keys and unique
 repository/position constraints; the board index is global. See
 [development database care](development.md#development-databases).
-The owner can archive a ticket from its details panel after confirming. Archived
+The owner can archive a ticket from **Ticket actions** in its header after confirming. Archived
 tickets leave the board and remain in [Costs](agents.md#cost-and-usage).
 Forge retains the key, scope, references, status, workflow history and related data. The
 ticket and workflow remain readable by ID.
@@ -430,8 +430,9 @@ SSE APIs. Idle and failed ticket messages dispatch through the scheduler. Mutati
 checks. Transition conflicts return 409. Board and ticket details refresh while
 execution continues. The global board opens at `/tasks`; selection uses `/tasks?ticket=:id`. Details,
 workflow, model options and cost load by ticket ID even outside active board
-membership. Removed repository ticket APIs return not-found. The ticket modal has keyboard-accessible Details, Chat, History, Cost and Utils
-tabs. Details shows the complete latest saved plan below Description, including
+membership. Removed repository ticket APIs return not-found. The ticket modal has keyboard-accessible Details, Chat, History and Cost
+tabs. The header's **Ticket actions** menu offers checkpoint, merge and archive actions,
+with availability reasons and recovery results retained on the ticket. Details shows the complete latest saved plan below Description, including
 after approval. The tabs share a row with the live execution label on the right.
 The header epic link shows its icon and key, with the full title in its tooltip
 and membership picker. The larger ticket title aligns with the Details tab content.
@@ -707,7 +708,7 @@ Costs links to `/costs?ticket=:ticketId`, opening over Costs; existing
 ticket by ID independently of the active board, including archived tickets.
 Closing returns to the original page URL; reload and Back/Forward restore selection.
 Missing tickets show errors. Archived panels retain
-Details, Chat, History, Cost and Utils, with editing and execution controls read-only.
+Details, Chat, History and Cost, with editing and execution controls read-only. Ticket actions remain visible but disabled.
 
 - **Estimated API cost** prices uncached input, cached input and output using the
   dispatch snapshot's USD model rates. Unknown pricing or usage stays unavailable.
