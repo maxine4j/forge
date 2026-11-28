@@ -154,9 +154,89 @@
 	min-height: 0;
 	flex: 1;
 }
+.agent-chat-notices {
+	position: absolute;
+	z-index: 3;
+	inset: 8px 8px auto;
+	display: grid;
+	justify-items: center;
+	gap: 4px;
+	pointer-events: none;
+}
+.agent-chat-notices p {
+	margin: 0;
+	padding: 4px 12px;
+	border: 1px solid #484f58;
+	border-radius: 16px;
+	background: #21262d;
+	color: #d2dae4;
+	text-align: center;
+	font-size: 12px;
+}
+.agent-chat-notices [role="alert"] {
+	border-color: #8e422e;
+	color: #ffb4a7;
+}
+.agent-chat-notices button {
+	pointer-events: auto;
+}
+.agent-history-footer {
+	position: absolute;
+	z-index: 4;
+	inset: auto max(0px, calc((100% - 780px) / 2)) 4px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	pointer-events: none;
+}
+.agent-history-footer > * {
+	pointer-events: auto;
+}
+.agent-changes {
+	position: relative;
+}
+.agent-changes .agent-changes-pill {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px 8px;
+	border-radius: 16px;
+	font-size: 12px;
+}
+.agent-changes-added {
+	color: #7ee787;
+}
+.agent-changes-deleted {
+	color: #ff7b72;
+}
+.agent-changes-list {
+	position: absolute;
+	bottom: 100%;
+	inset-inline-start: 0;
+	width: max-content;
+	max-width: min(360px, calc(100vw - 32px));
+	max-block-size: min(9rem, 35dvh);
+	overflow: auto;
+	overscroll-behavior: contain;
+	margin: 0;
+	padding: 0;
+	list-style: none;
+	outline: 1px solid #484f58;
+	border-radius: 8px;
+	background: #21262d;
+	box-shadow: 0 4px 16px #0008;
+	font-size: 12px;
+}
+.agent-changes-list li {
+	padding-inline: 10px;
+	line-height: 1.8rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
 .agent-scroll-latest {
 	position: absolute;
-	bottom: 24px;
+	bottom: 36px;
 	left: 50%;
 	transform: translateX(-50%);
 	width: 40px;
@@ -196,8 +276,7 @@
 	overflow-y: auto;
 	overflow-anchor: none;
 	overscroll-behavior-y: contain;
-	margin: 16px 0;
-	padding: 8px max(4px, calc((100% - 760px) / 2));
+	padding: 24px max(4px, calc((100% - 760px) / 2)) 32px;
 	scrollbar-width: thin;
 }
 .agent-earlier-history {
@@ -383,18 +462,41 @@
 	font-size: 12px;
 	margin: 0 0 4px;
 }
-.agent-composer textarea {
-	resize: none;
-	min-height: 0;
-	height: 72px;
-	width: 100%;
-	padding: 4px 4px 10px;
+.agent-draft {
+	position: relative;
+	font-size: 14px;
+	line-height: 1.5;
+}
+.agent-draft::after,
+.agent-composer .agent-draft textarea {
+	display: block;
+	box-sizing: border-box;
+	padding: 0;
 	border: 0;
+	font: inherit;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
+	overflow: hidden;
+}
+.agent-draft::after {
+	/* The trailing space keeps a final newline in the measured text. */
+	content: attr(data-draft) " ";
+	min-block-size: 1lh;
+	max-block-size: 7lh;
+	visibility: hidden;
+}
+.agent-composer .agent-draft textarea {
+	position: absolute;
+	inset: 0;
+	resize: none;
+	overflow-y: auto;
+	min-height: 1lh;
+	width: 100%;
+	height: 100%;
 	background: transparent;
 	color: #e8e8eb;
 	outline: none;
 	box-shadow: none;
-	font-size: 14px;
 }
 .agent-composer textarea::placeholder {
 	color: #95969f;
@@ -420,23 +522,22 @@
 }
 .agent-performance {
 	position: relative;
-	display: flex;
-	justify-content: flex-end;
-	padding: 4px 14px;
+	margin-inline-start: auto;
 	font-size: 12px;
 }
 .agent-performance button {
-	border: 0;
-	background: transparent;
+	border: 1px solid #30363d;
+	border-radius: 16px;
+	background: #161b22;
 	color: #bfc5cf;
 	font: inherit;
-	padding: 4px;
+	padding: 3px 8px;
 }
 .agent-performance-tooltip {
 	position: absolute;
 	z-index: 10;
 	bottom: 100%;
-	right: 10px;
+	right: 0;
 	width: min(330px, calc(100vw - 40px));
 	padding: 10px;
 	border: 1px solid #41424a;
@@ -629,13 +730,13 @@
 		align-items: flex-start;
 	}
 	.agent-messages {
-		margin: 6px 0;
+		padding-block-start: 14px;
 	}
 	.agent-composer {
 		padding-top: 6px;
 	}
-	.agent-composer textarea {
-		height: 48px;
+	.agent-draft {
+		font-size: 16px;
 	}
 	.agent-composer-footer {
 		margin-top: 4px;
@@ -1173,6 +1274,9 @@
 .ticket-agent-status.is-working {
 	animation: ticket-agent-spin 1s linear infinite;
 }
+.ticket-agent-status.ticket-agent-failed {
+	color: #ff7b72;
+}
 @keyframes ticket-agent-spin {
 	to {
 		transform: rotate(360deg);
@@ -1586,6 +1690,9 @@
 	border-bottom: 0;
 }
 .ticket-details-status {
+	display: flex;
+	align-items: center;
+	justify-content: flex-end;
 	flex: 1 1 0;
 	min-width: 0;
 	text-align: right;
@@ -1811,11 +1918,6 @@ button.ticket-description-text:hover {
 	padding: 0;
 	overflow: hidden;
 }
-.ticket-details .agent-composer textarea {
-	line-height: 1.5;
-	height: 1.5lh;
-	padding: 0;
-}
 .ticket-details .agent-composer-footer {
 	margin-top: 4px;
 }
@@ -2003,9 +2105,6 @@ main:has(> .project-view:not([hidden]), > .tasks-view:not([hidden])) {
 	.agent-composer label {
 		grid-column: 1 / -1;
 		margin: 0;
-	}
-	.agent-composer textarea {
-		height: 48px;
 	}
 	.agent-composer-footer {
 		margin: 0;

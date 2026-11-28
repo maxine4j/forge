@@ -81,3 +81,10 @@ export const workspaceDiffSchema = z.strictObject({
 	unstaged: diffSectionSchema,
 	untracked: diffSectionSchema,
 });
+export const workspaceChangeSummarySchema = z.strictObject({
+	files: z.array(filePathSchema).max(100),
+	fileCount: z.int().nonnegative(),
+	additions: z.int().nonnegative(),
+	deletions: z.int().nonnegative(),
+	truncated: z.boolean(),
+});

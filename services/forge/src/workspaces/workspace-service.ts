@@ -15,6 +15,7 @@ import {
 	type WorkspacePaths,
 	type WorkspaceCommit,
 	type WorkspaceDiff,
+	type WorkspaceChangeSummary,
 } from "@forge/contracts";
 import type { TicketCheckpoint } from "@forge/contracts/tickets";
 
@@ -48,6 +49,7 @@ export interface IWorkspaceService {
 	createFile(actor: Actor, id: string, input: CreateWorkspaceFile): Promise<WorkspaceFile>;
 	saveFile(actor: Actor, id: string, input: SaveWorkspaceFile): Promise<WorkspaceFile>;
 	diff(actor: Actor, id: string): Promise<WorkspaceDiff>;
+	changeSummary(actor: Actor, id: string): Promise<WorkspaceChangeSummary>;
 	stage(actor: Actor, id: string, input: WorkspacePaths): Promise<Workspace>;
 	unstage(actor: Actor, id: string, input: WorkspacePaths): Promise<Workspace>;
 	commit(actor: Actor, id: string, input: WorkspaceCommit): Promise<Workspace>;
@@ -233,6 +235,10 @@ export class WorkspaceService implements IWorkspaceService, IMergedWorkspaceClea
 	async diff(actor: Actor, id: string): Promise<WorkspaceDiff> {
 		this.access.assertOwner(actor);
 		return this.serialize(async () => this.differences.diff(await this.ready(id)));
+	}
+	async changeSummary(actor: Actor, id: string): Promise<WorkspaceChangeSummary> {
+		this.access.assertOwner(actor);
+		return this.serialize(async () => this.differences.changeSummary(await this.ready(id)));
 	}
 	async stage(actor: Actor, id: string, input: WorkspacePaths): Promise<Workspace> {
 		return this.changeIndex(actor, id, input, false);

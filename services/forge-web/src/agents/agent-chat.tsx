@@ -6,6 +6,7 @@ import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
 import { AgentActivity } from "./agent-activity.tsx";
+import { AgentChanges } from "./agent-changes.tsx";
 import { AgentComposer } from "./agent-composer.tsx";
 import { AgentPerformanceStat } from "./agent-performance.tsx";
 import { RequestCard } from "./request-card.tsx";
@@ -45,6 +46,7 @@ export const Conversation = ({
 	snapshots,
 	scrollStates,
 	navigation,
+	notices,
 }: {
 	id: string;
 	api: IWorkspaceApi;
@@ -67,6 +69,7 @@ export const Conversation = ({
 	snapshots?: Map<string, AgentView>;
 	scrollStates?: Map<string, ConversationScroll>;
 	navigation?: ReactNode;
+	notices?: ReactNode;
 }) => {
 	const [view, setView] = useState<AgentView | undefined>(() => snapshots?.get(id));
 	const [draft, setDraft] = useState(() => drafts?.get(draftKey) ?? "");
@@ -299,32 +302,16 @@ export const Conversation = ({
 	useFailureToast(selected && status === "failed" ? failureNotice : undefined, view?.thread.turnId);
 	return (
 		<section className='agent-conversation' aria-label='Chat conversation'>
-			{(!ticketChat || historyFailed) && (
+			{!ticketChat && (
 				<div className='agent-chat-heading'>
 					{navigation}
-					{!ticketChat && (
-						<div>
-							<span className={`agent-status agent-status-${displayStatus}`}>
-								{displayStatus ?? "loading"}
-							</span>
-						</div>
-					)}
+					<div>
+						<span className={`agent-status agent-status-${displayStatus}`}>
+							{displayStatus ?? "loading"}
+						</span>
+					</div>
 					<div className='agent-actions'>
-						{historyFailed && (
-							<button
-								disabled={busy || loadingHistory}
-								onClick={() => {
-									recoveryBlocked.current = false;
-									historyNeeded.current = true;
-									setLoadingHistory(true);
-									setError("");
-									poller.current?.refresh();
-								}}
-							>
-								Retry loading history
-							</button>
-						)}
-						{!ticketChat && active && !readOnly && (
+						{active && !readOnly && (
 							<button disabled={busy || !view?.thread.turnId} onClick={() => act("interrupt", {})}>
 								Interrupt
 							</button>
@@ -332,19 +319,28 @@ export const Conversation = ({
 					</div>
 				</div>
 			)}
-			{!connected && (
-				<p className='agent-notice' role='status'>
-					Reconnecting to live updates…
-				</p>
-			)}
-
-			{loadingHistory && (
-				<p className='agent-notice' role='status'>
-					Loading history…
-				</p>
-			)}
-			{!ticketChat && view?.truncated && <p className='agent-notice'>Some history or output was omitted.</p>}
 			<div className='agent-history'>
+				<div className='agent-chat-notices'>
+					{!connected && <p role='status'>Reconnecting to live updates…</p>}
+					{loadingHistory && <p role='status'>Loading history…</p>}
+					{!ticketChat && view?.truncated && <p>Some history or output was omitted.</p>}
+					{notices}
+					{historyFailed && (
+						<button
+							type='button'
+							disabled={busy || loadingHistory}
+							onClick={() => {
+								recoveryBlocked.current = false;
+								historyNeeded.current = true;
+								setLoadingHistory(true);
+								setError("");
+								poller.current?.refresh();
+							}}
+						>
+							Retry loading history
+						</button>
+					)}
+				</div>
 				<div
 					ref={messages}
 					onScroll={() => {
@@ -458,8 +454,19 @@ export const Conversation = ({
 						</svg>
 					</button>
 				)}
+				{view && (
+					<div className='agent-history-footer'>
+						{selected && (
+							<AgentChanges
+								key={view.thread.workspaceId}
+								api={api}
+								workspaceId={view.thread.workspaceId}
+							/>
+						)}
+						<AgentPerformanceStat key={view.thread.turnId ?? view.thread.status} view={view} />
+					</div>
+				)}
 			</div>
-			{view && <AgentPerformanceStat key={view.thread.turnId ?? view.thread.status} view={view} />}
 			{view && (
 				<AgentComposer
 					id={id}

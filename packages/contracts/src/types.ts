@@ -15,6 +15,7 @@ import type {
 	workspaceCommitSchema,
 	diffSectionSchema,
 	workspaceDiffSchema,
+	workspaceChangeSummarySchema,
 } from "./workspace.ts";
 
 export type Workspace = z.infer<typeof workspaceSchema>;
@@ -27,6 +28,7 @@ export type WorkspacePaths = z.infer<typeof workspacePathsSchema>;
 export type WorkspaceCommit = z.infer<typeof workspaceCommitSchema>;
 export type DiffSection = z.infer<typeof diffSectionSchema>;
 export type WorkspaceDiff = z.infer<typeof workspaceDiffSchema>;
+export type WorkspaceChangeSummary = z.infer<typeof workspaceChangeSummarySchema>;
 
 export interface CreateProject {
 	name: string;

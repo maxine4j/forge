@@ -33,6 +33,7 @@ import { RepositorySelection } from "./repository-selection.tsx";
 import { TicketAgentSettings } from "./ticket-agent-settings.tsx";
 import { TicketCost } from "./ticket-cost.tsx";
 import { TicketHistoryTimeline } from "./ticket-history.tsx";
+import { TicketActivityIcon, type TicketActivity } from "./ticket-indicator.tsx";
 import { ticketLabels } from "./ticket-labels.ts";
 import { useTicketDialog, useDockedDismissal, type TicketPresentation } from "./ticket-presentation.tsx";
 
@@ -442,6 +443,40 @@ export const TicketDetails = ({
 	const approvePlan = !archived && reviewPlan && (
 		<PlanReviewControls busy={acting} approve={() => act("approve", { revision: reviewPlan.revision })} />
 	);
+	const headerActivity: Partial<Record<TicketWorkflow["state"], TicketActivity>> = {
+		running: "working",
+		dispatching: "working",
+		queued: "queued",
+		failed: "failed",
+		"setup-failed": "failed",
+	};
+	const activity = job && headerActivity[job.state];
+	const chatAlerts = (
+		<>
+			{job?.completionFailure && (
+				<p role='alert'>
+					{job.completionFailure === "incomplete"
+						? "The implementer reported that the assignment is incomplete."
+						: "The implementer did not provide a valid completion report."}{" "}
+					Review the conversation and send guidance to continue.
+				</p>
+			)}
+			{job?.contextFailure && (
+				<p role='alert'>
+					{
+						{
+							telemetry: "Context telemetry was unavailable.",
+							headroom: "There was not enough context remaining for a safe checkpoint report.",
+							checkpoint: "The worktree checkpoint could not be verified.",
+							report: "The checkpoint report was missing or invalid.",
+							"no-progress": "The handover did not include a new checkpoint.",
+						}[job.contextFailure]
+					}{" "}
+					Review the worktree and send retry guidance in Chat to continue.
+				</p>
+			)}
+		</>
+	);
 	return (
 		<dialog
 			ref={dialog}
@@ -513,15 +548,21 @@ export const TicketDetails = ({
 					</div>
 				</div>
 				<span className='ticket-details-status' role='status'>
-					{resetting
-						? job?.resetStage === "cleanup"
-							? "Removing abandoned work…"
-							: "Stopping ticket agents…"
-						: reviewPlan
-							? "Plan ready for review"
-							: job?.state === "merge-queued"
-								? "Queued to merge"
-								: (job?.state ?? "Loading")}
+					{resetting ? (
+						job?.resetStage === "cleanup" ? (
+							"Removing abandoned work…"
+						) : (
+							"Stopping ticket agents…"
+						)
+					) : reviewPlan ? (
+						"Plan ready for review"
+					) : job?.state === "merge-queued" ? (
+						"Queued to merge"
+					) : activity ? (
+						<TicketActivityIcon activity={activity} />
+					) : (
+						(job?.state ?? "Loading")
+					)}
 				</span>
 				{ticket.assignee && (
 					<AgentAvatar
@@ -823,28 +864,7 @@ export const TicketDetails = ({
 				{ticket.status !== "backlog" && <p>Scope is fixed after execution starts. Discuss changes in chat.</p>}
 			</div>
 			<div className='ticket-chat' {...panel("chat")}>
-				{job?.completionFailure && (
-					<p role='alert'>
-						{job.completionFailure === "incomplete"
-							? "The implementer reported that the assignment is incomplete."
-							: "The implementer did not provide a valid completion report."}{" "}
-						Review the conversation and send guidance to continue.
-					</p>
-				)}
-				{job?.contextFailure && (
-					<p role='alert'>
-						{
-							{
-								telemetry: "Context telemetry was unavailable.",
-								headroom: "There was not enough context remaining for a safe checkpoint report.",
-								checkpoint: "The worktree checkpoint could not be verified.",
-								report: "The checkpoint report was missing or invalid.",
-								"no-progress": "The handover did not include a new checkpoint.",
-							}[job.contextFailure]
-						}{" "}
-						Review the worktree and send retry guidance in Chat to continue.
-					</p>
-				)}
+				{!currentId && chatAlerts}
 				{currentId ? (
 					<Conversation
 						key={currentId}
@@ -853,6 +873,7 @@ export const TicketDetails = ({
 						id={currentId}
 						api={api}
 						changed={refresh}
+						notices={chatAlerts}
 						selected={tab === "chat"}
 						messagePath={`tickets/${ticket.id}/messages`}
 						blocked={blocked || savingSettings}

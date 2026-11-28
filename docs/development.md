@@ -121,7 +121,9 @@ Vite serves deterministic HTTP fixtures for projects, accounts, repository
 branches/files/history, project workspaces, changes, pull-request reviews and
 project chat history with clarification requests. Tasks includes pending plan notifications,
 a running ticket conversation and sample epics
-and ticket planning conversations. Board settings includes two
+and ticket planning conversations. Open TASK-14 in Chat to exercise the composer,
+inference overlay and a seven-file [change summary](agents.md#following-chat-activity).
+Board settings includes two
 sample running containers with resource statistics.
 Tasks → Agents shows quota-limited OpenAI and three sample MacBooks behind the
 Ollama relay. The workers are busy, idle, and offline, with varied capabilities,

@@ -169,7 +169,7 @@ export const AgentComposer = ({
 			window.visualViewport?.removeEventListener("resize", measure);
 			window.removeEventListener("resize", measure);
 		};
-	}, [visible]);
+	}, [visible, draft]);
 	const update = (value: string, position: number) => {
 		change(value);
 		setCursor(position);
@@ -241,53 +241,55 @@ export const AgentComposer = ({
 					)}
 				</div>
 			)}
-			<textarea
-				ref={textarea}
-				id={inputId}
-				rows={3}
-				maxLength={8000}
-				placeholder='Ask anything, @ for files, $ for skills'
-				value={draft}
-				disabled={disabled}
-				aria-controls={visible ? listId : undefined}
-				aria-autocomplete='list'
-				aria-activedescendant={visible && choices.length ? `${listId}-${selected}` : undefined}
-				onChange={(event) => update(event.target.value, event.target.selectionStart)}
-				onSelect={(event) => setCursor(event.currentTarget.selectionStart)}
-				onKeyDown={(event) => {
-					if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-					if (event.key === "Escape") {
-						setDismissed(true);
-						return;
-					}
-					if (visible && choices.length && ["ArrowDown", "ArrowUp", "Tab"].includes(event.key)) {
-						event.preventDefault();
-						if (event.key === "Tab") complete(selected);
-						else
-							setSelected(
-								(value) =>
-									(value + (event.key === "ArrowDown" ? 1 : -1) + Math.min(choices.length, 100))
-									% Math.min(choices.length, 100),
-							);
-						return;
-					}
-					if (event.key !== "Enter") return;
-					if (event.metaKey || event.ctrlKey) {
-						event.preventDefault();
-						const input = event.currentTarget;
-						const position = input.selectionStart;
-						const value = draft.slice(0, position) + "\n" + draft.slice(input.selectionEnd);
-						if (value.length > 8000) return;
-						pendingCaret.current = position + 1;
-						update(value, position + 1);
-						return;
-					}
-					if (!event.shiftKey) {
-						event.preventDefault();
-						submit();
-					}
-				}}
-			/>
+			<div className='agent-draft' data-draft={draft}>
+				<textarea
+					ref={textarea}
+					id={inputId}
+					rows={1}
+					maxLength={8000}
+					placeholder='Ask anything, @ for files, $ for skills'
+					value={draft}
+					disabled={disabled}
+					aria-controls={visible ? listId : undefined}
+					aria-autocomplete='list'
+					aria-activedescendant={visible && choices.length ? `${listId}-${selected}` : undefined}
+					onChange={(event) => update(event.target.value, event.target.selectionStart)}
+					onSelect={(event) => setCursor(event.currentTarget.selectionStart)}
+					onKeyDown={(event) => {
+						if (event.nativeEvent.isComposing || event.keyCode === 229) return;
+						if (event.key === "Escape") {
+							setDismissed(true);
+							return;
+						}
+						if (visible && choices.length && ["ArrowDown", "ArrowUp", "Tab"].includes(event.key)) {
+							event.preventDefault();
+							if (event.key === "Tab") complete(selected);
+							else
+								setSelected(
+									(value) =>
+										(value + (event.key === "ArrowDown" ? 1 : -1) + Math.min(choices.length, 100))
+										% Math.min(choices.length, 100),
+								);
+							return;
+						}
+						if (event.key !== "Enter") return;
+						if (event.metaKey || event.ctrlKey) {
+							event.preventDefault();
+							const input = event.currentTarget;
+							const position = input.selectionStart;
+							const value = draft.slice(0, position) + "\n" + draft.slice(input.selectionEnd);
+							if (value.length > 8000) return;
+							pendingCaret.current = position + 1;
+							update(value, position + 1);
+							return;
+						}
+						if (!event.shiftKey) {
+							event.preventDefault();
+							submit();
+						}
+					}}
+				/>
+			</div>
 			<div className='agent-composer-footer'>
 				<div />
 				<div className='agent-composer-actions'>

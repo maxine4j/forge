@@ -32,7 +32,7 @@ test("owner authorization precedes every workspace lookup", async () => {
 		retry: vi.fn(),
 		recover: vi.fn(),
 	};
-	const differences: IWorkspaceDiffClient = { diff: vi.fn() };
+	const differences: IWorkspaceDiffClient = { diff: vi.fn(), changeSummary: vi.fn() };
 	const service = new WorkspaceService(
 		store,
 		client,

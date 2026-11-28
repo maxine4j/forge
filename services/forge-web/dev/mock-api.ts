@@ -784,6 +784,21 @@ export class MockApi implements IMockApi {
 				unstaged: change,
 				untracked: empty,
 			}));
+			this.routes.set(`${workspaceRoot}/change-summary`, () => ({
+				files: [
+					"README.md",
+					"src/search/ranking.ts",
+					"src/search/ranking.test.ts",
+					"src/search/results.ts",
+					"src/search/query.ts",
+					"src/search/sort.ts",
+					"src/style.css",
+				],
+				fileCount: 7,
+				additions: 123,
+				deletions: 45,
+				truncated: false,
+			}));
 			this.routes.set(`${workspaceRoot}/terminal`, () => ({}));
 			this.routes.set(`${workspaceRoot}/pull-request-revision`, () => ({ revision, hasChanges: true }));
 			this.routes.set(`${projectRoot}/pull-requests`, () => [pr]);

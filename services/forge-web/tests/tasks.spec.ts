@@ -11,6 +11,98 @@ import { expectToastPlacement } from "./toast-placement.ts";
 const projectId = "123e4567-e89b-42d3-a456-426614174000";
 const createdAt = "2026-11-03T00:00:00.000Z";
 
+const openChatPreview = async (page: Page) => {
+	const fixture = await setup(page, false, true, false, false, true);
+	fixture.setAgentStatus("working");
+	fixture.setWorkflow({ state: "running" });
+	const paths = Array.from({ length: 7 }, (_, index) => `src/search-${index + 1}.ts`);
+	await page.route("**/api/workspaces/*/change-summary", (route) =>
+		route.fulfill({ json: { files: paths, fileCount: 7, additions: 123, deletions: 45, truncated: false } }),
+	);
+	await page.route("**/api/agents/*/events", (route) => route.abort());
+	await page.goto("/tasks?ticket=TASK-1&tab=chat");
+	const chat = page.getByRole("dialog", { name: "TASK-1", exact: true });
+	await expect(chat.getByRole("textbox", { name: "Message", exact: true })).toBeVisible();
+	return chat;
+};
+
+for (const width of [390, 1280]) {
+	test(`chat composer grows through seven lines at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 800 });
+		const chat = await openChatPreview(page);
+		const input = chat.getByRole("textbox", { name: "Message", exact: true });
+		const size = () =>
+			input.evaluate((element) => ({
+				height: element.clientHeight,
+				content: element.scrollHeight,
+				line: parseFloat(getComputedStyle(element).lineHeight),
+			}));
+		const one = await size();
+		expect(one.height).toBeGreaterThanOrEqual(Math.floor(one.line));
+		await input.fill("first");
+		await input.press("Shift+Enter");
+		await expect(input).toHaveValue("first\n");
+		expect((await size()).height - one.height).toBeCloseTo(one.line, 0);
+		await input.fill("line\n".repeat(6) + "last");
+		const seven = await size();
+		expect(seven.height - one.height).toBeCloseTo(6 * one.line, 0);
+		expect(seven.content).toBeLessThanOrEqual(seven.height + 1);
+		await input.fill("line\n".repeat(8) + "last");
+		expect(await size()).toMatchObject({ height: seven.height });
+		expect((await size()).content).toBeGreaterThan(seven.height);
+		await input.fill("");
+		expect((await size()).height).toBe(one.height);
+	});
+
+	test(`chat file changes opens a five-row scrollable disclosure at ${width}px`, async ({ page }) => {
+		await page.setViewportSize({ width, height: 800 });
+		const chat = await openChatPreview(page);
+		const pill = chat.getByRole("button", { name: /7 files changed\s*\+123\s*−45/ });
+		const list = chat.getByRole("list", { name: "Changed files" });
+		if (width === 1280) {
+			await pill.hover();
+			await expect(list).toBeVisible();
+			await chat.getByRole("tab", { name: "Chat", exact: true }).hover();
+			await expect(list).toBeHidden();
+		}
+		await pill.click();
+		await expect(pill).toHaveAttribute("aria-expanded", "true");
+		await expect(list.getByRole("listitem")).toHaveCount(7);
+		const size = await list.evaluate((element) => ({
+			height: element.clientHeight,
+			content: element.scrollHeight,
+			row: element.firstElementChild!.getBoundingClientRect().height,
+		}));
+		expect(size.height).toBeCloseTo(5 * size.row, 0);
+		expect(size.content).toBeGreaterThan(size.height);
+		await list.getByText("src/search-7.ts").scrollIntoViewIfNeeded();
+		expect(await list.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+		await pill.click();
+		await expect(list).toBeHidden();
+	});
+}
+
+test("chat connection notices and inference speed overlay the transcript", async ({ page }) => {
+	const chat = await openChatPreview(page);
+	const history = chat.getByLabel("Conversation history", { exact: true });
+	const status = chat.getByText("Reconnecting to live updates…", { exact: true });
+	const performance = chat.getByRole("button", { name: "Inference speed: 25.0 tokens/s" });
+	const bounds = (await history.boundingBox())!;
+	const notice = (await status.boundingBox())!;
+	const stat = (await performance.boundingBox())!;
+	expect(notice.x + notice.width / 2).toBeCloseTo(bounds.x + bounds.width / 2, 0);
+	expect(notice.y).toBeGreaterThanOrEqual(bounds.y);
+	expect(notice.y + notice.height).toBeLessThan(bounds.y + bounds.height);
+	expect(stat.y + stat.height).toBeLessThanOrEqual(bounds.y + bounds.height);
+	expect(stat.y).toBeGreaterThan(bounds.y);
+});
+
+test("ticket header uses the same running activity icon as the board", async ({ page }) => {
+	const chat = await openChatPreview(page);
+	await expect(chat.getByRole("img", { name: "Agent working", exact: true })).toBeVisible();
+	await expect(chat.getByText("running", { exact: true })).toHaveCount(0);
+});
+
 const notificationFixture = (id: string, ticketId = "TASK-1"): TicketNotification => ({
 	id,
 	at: createdAt,
@@ -2965,7 +3057,7 @@ for (const size of [
 			const { height, lineHeight } = getComputedStyle(element);
 			return Number.parseFloat(height) / Number.parseFloat(lineHeight);
 		});
-		expect(visibleLines).toBeCloseTo(1.5);
+		expect(visibleLines).toBeCloseTo(1);
 		if (size.width === 390) {
 			const timeline = await panel.locator(".agent-messages").boundingBox();
 			const composerTop = (await panel.locator(".agent-composer").boundingBox())!.y;
@@ -3979,9 +4071,8 @@ for (const width of [390, 820, 1280]) {
 		await page.getByRole("button", { name: "Send message", exact: true }).click();
 		await expect(page.getByRole("alert")).toBeVisible();
 		await expectToastPlacement(page, width, 900);
-		await page.locator(".agent-composer:visible textarea").evaluate((node) => {
-			node.style.height = "160px";
-		});
+		const grownDraft = "Retain this draft" + "\nMore detail".repeat(6);
+		await page.getByLabel("Message", { exact: true }).fill(grownDraft);
 		await expectToastPlacement(page, width, 900);
 		await page.evaluate(() => {
 			Object.defineProperty(window.visualViewport!, "height", { configurable: true, value: 480 });
@@ -3990,6 +4081,6 @@ for (const width of [390, 820, 1280]) {
 		await expectToastPlacement(page, width, 480);
 		await page.emulateMedia({ reducedMotion: "reduce" });
 		await expect(page.locator(".forge-toast-sweep")).toHaveCSS("animation-name", "none");
-		await expect(page.getByLabel("Message", { exact: true })).toHaveValue("Retain this draft");
+		await expect(page.getByLabel("Message", { exact: true })).toHaveValue(grownDraft);
 	});
 }

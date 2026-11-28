@@ -7,6 +7,7 @@ import {
 	workspaceFileSchema,
 	workspaceTreeSchema,
 	workspaceDiffSchema,
+	workspaceChangeSummarySchema,
 	workspacePathsSchema,
 	workspaceCommitSchema,
 } from "@forge/contracts";
@@ -84,6 +85,11 @@ export class WorkspaceRouter implements IHttpRouter {
 		});
 		router.get("/api/workspaces/:id/diff", async (ctx) => {
 			ctx.body = workspaceDiffSchema.parse(await this.workspaces.diff(ctx.state.actor, ctx.params["id"]!));
+		});
+		router.get("/api/workspaces/:id/change-summary", async (ctx) => {
+			ctx.body = workspaceChangeSummarySchema.parse(
+				await this.workspaces.changeSummary(ctx.state.actor, ctx.params["id"]!),
+			);
 		});
 		router.post("/api/workspaces/:id/stage", async (ctx) => {
 			ctx.body = workspaceSchema.parse(

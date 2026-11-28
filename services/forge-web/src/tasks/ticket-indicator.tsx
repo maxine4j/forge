@@ -2,8 +2,10 @@ import type { Ticket } from "@forge/contracts/tickets";
 
 import { AgentAvatar } from "./agent-avatar.tsx";
 
-const TicketActivity = ({ ticket }: { ticket: Ticket }) =>
-	ticket.resetting ? (
+export type TicketActivity = "resetting" | "attention" | "failed" | NonNullable<Ticket["agentStatus"]>;
+
+export const TicketActivityIcon = ({ activity }: { activity: TicketActivity }) =>
+	activity === "resetting" ? (
 		<span
 			className='ticket-agent-status is-working'
 			role='img'
@@ -12,39 +14,46 @@ const TicketActivity = ({ ticket }: { ticket: Ticket }) =>
 		>
 			↻
 		</span>
-	) : ticket.needsAttention ? (
+	) : activity === "attention" ? (
 		<span
 			className='ticket-agent-status ticket-attention'
 			role='img'
 			aria-label='Action required'
 			title='Action required'
 		/>
-	) : ticket.agentStatus ? (
+	) : (
 		<svg
-			className={`ticket-agent-status ${ticket.agentStatus === "working" ? "is-working" : ""}`}
+			className={`ticket-agent-status ${activity === "working" ? "is-working" : activity === "failed" ? "ticket-agent-failed" : ""}`}
 			role='img'
-			aria-label={ticket.agentStatus === "queued" ? "Agent queued" : "Agent working"}
+			aria-label={`Agent ${activity}`}
 			viewBox='0 0 16 16'
 			fill='none'
 			stroke='currentColor'
 			strokeWidth='1.5'
 		>
-			<title>{ticket.agentStatus === "queued" ? "Agent queued" : "Agent working"}</title>
-			{ticket.agentStatus === "queued" ? (
+			<title>{`Agent ${activity}`}</title>
+			{activity === "queued" ? (
 				<>
 					<circle cx='8' cy='8' r='6' />
 					<path d='M8 4v4l3 2' />
 				</>
-			) : (
+			) : activity === "working" ? (
 				<path d='M8 2a6 6 0 1 1-6 6' strokeLinecap='round' />
+			) : (
+				<>
+					<circle cx='8' cy='8' r='6' />
+					<path d='M6 6l4 4m0-4-4 4' strokeLinecap='round' />
+				</>
 			)}
 		</svg>
-	) : null;
+	);
 
-export const TicketIndicator = ({ ticket }: { ticket: Ticket }) =>
-	ticket.assignee ? (
+export const TicketIndicator = ({ ticket }: { ticket: Ticket }) => {
+	const activity = ticket.resetting ? "resetting" : ticket.needsAttention ? "attention" : ticket.agentStatus;
+	const icon = activity && <TicketActivityIcon activity={activity} />;
+	return ticket.assignee ? (
 		<span className='ticket-indicators'>
-			<TicketActivity ticket={ticket} />
+			{icon}
 			<AgentAvatar
 				colour={ticket.assignee.avatarColour}
 				symbol={ticket.assignee.avatarSymbol}
@@ -52,5 +61,6 @@ export const TicketIndicator = ({ ticket }: { ticket: Ticket }) =>
 			/>
 		</span>
 	) : (
-		<TicketActivity ticket={ticket} />
+		icon
 	);
+};

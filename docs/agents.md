@@ -390,8 +390,15 @@ Each tool expands to its output and displays its actual runtime status when
 available. Running tool summaries use a sweeping text highlight, disabled with
 reduced-motion preferences. Tool titles/statuses remain structured through output
 deltas and history reloads. No project/workspace/worktree picker is exposed.
+History, connection and workflow notices appear as centered status pills over the
+transcript. Inference speed floats along the bottom edge. The ticket header uses
+board activity icons for running and queued execution, with an error icon for failures.
 
-The rounded composer includes a small upward-arrow send button. Enter sends; Cmd+Enter and Ctrl+Enter insert
+The rounded composer grows from one to seven visible lines, then scrolls.
+When the selected thread's worktree has changes, a pill above the composer shows
+the file count and line totals from the [workspace summary](workspaces.md#integrated-agent-workspace).
+Hover or activate the pill to see changed paths, with scrolling after five rows.
+Enter sends; Cmd+Enter and Ctrl+Enter insert
 a newline at the caret (Shift+Enter also retains normal textarea behavior). IME
 composition must not submit. `$` opens enabled skills, `@` opens worktree files;
 filter from the caret, navigate with arrows, insert with Tab or a pointer, and

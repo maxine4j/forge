@@ -154,6 +154,7 @@ Workspace routes, all subject to the foundation owner/origin policy:
 | `GET /api/workspaces/:id/file?path=...`        | UTF-8 text, SHA-256 content version.                                           |
 | `POST/PUT /api/workspaces/:id/file`            | Exclusive create `{path,content}` / save `{path,content,version}`.             |
 | `GET /api/workspaces/:id/diff`                 | Separate branch, staged, unstaged, untracked sections.                         |
+| `GET /api/workspaces/:id/change-summary`       | Net changed paths, file count, and line totals for the worktree.               |
 | `POST /api/workspaces/:id/stage` or `/unstage` | `{paths}`: 1–100 explicit files; directories/globs are not staged recursively. |
 | `POST /api/workspaces/:id/commit`              | `{message,expectedHead}`; atomic expected-head branch update.                  |
 
@@ -507,6 +508,13 @@ One screen must combine:
 - PR discussion, CI results, approval/request-changes controls, and merging.
 
 Generate diffs from Git with explicit file/line/output bounds and binary handling.
+The [chat change pill](agents.md#following-chat-activity) reads the owner-only
+change summary for the selected thread's verified worktree. It compares tracked
+working files with the merge base of `main` and the checked-out commit, folding
+committed, staged and unstaged edits into one Git comparison. It includes
+non-ignored untracked files, counts text lines, and counts binary files without
+line totals. The response includes up to 100 sorted paths and flags partial
+summaries when path or untracked-content limits are reached.
 Prevent silent editor/agent overwrites with file-version checks and an explicit
 pause/edit/resume workflow. Do not promise full language-server, debugger,
 extension-marketplace, or collaborative-editing support for the initial version.

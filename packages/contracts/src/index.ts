@@ -15,6 +15,7 @@ export type {
 	WorkspaceCommit,
 	DiffSection,
 	WorkspaceDiff,
+	WorkspaceChangeSummary,
 } from "./types.ts";
 
 // Control characters are intentionally rejected at this untrusted browser boundary.

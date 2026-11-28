@@ -268,6 +268,52 @@ test("repository HTTP serves branch-specific trees, files and history behind own
 	expect((await commit("owner", "https://forge.example")).status).toBe(409);
 });
 
+test("workspace change summary returns net changes from main across commits, the index and the worktree", async () => {
+	const { service, project, projects, access, git } = await setup();
+	const seed = await service.create(owner, project.id, { name: "Main fixture" });
+	const seedPath = (await service.resolve(owner, seed.id)).path;
+	await files.writeFile(join(seedPath, "delete.txt"), "remove this line\n");
+	await files.writeFile(join(seedPath, "original-name.txt"), "rename without editing\n");
+	await service.stage(owner, seed.id, { paths: ["delete.txt", "original-name.txt"] });
+	const seedCommit = await service.commit(owner, seed.id, { message: "Seed main", expectedHead: seed.head! });
+	await git.run(["-C", seedPath, "update-ref", "refs/heads/main", seedCommit.head!]);
+	const workspace = await service.create(owner, project.id, { name: "Summary" });
+	const { path } = await service.resolve(owner, workspace.id);
+	await files.rm(join(path, "delete.txt"));
+	await git.run(["-C", path, "mv", "original-name.txt", "renamed.txt"]);
+	await files.writeFile(join(path, "committed.txt"), "original\n");
+	await service.stage(owner, workspace.id, { paths: ["committed.txt"] });
+	await service.commit(owner, workspace.id, { message: "First edit", expectedHead: workspace.head! });
+	await files.writeFile(join(path, "committed.txt"), "staged\n");
+	await service.stage(owner, workspace.id, { paths: ["committed.txt"] });
+	await files.writeFile(join(path, "committed.txt"), "final\nline\n");
+	await files.writeFile(join(path, "new file.txt"), "first\nsecond");
+	await files.writeFile(join(path, "binary"), Buffer.from([0, 255]));
+	const server = createServer(
+		new HttpApplication(new ProjectRouter(projects), access).create([new WorkspaceRouter(service)]).callback(),
+	);
+	cleanup.push(
+		() => new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve()))),
+	);
+	server.listen(0, "127.0.0.1");
+	await once(server, "listening");
+	const address = server.address();
+	if (!address || typeof address === "string") throw new Error("No listener");
+	const url = `http://127.0.0.1:${address.port}/api/workspaces/${workspace.id}/change-summary`;
+	const request = (user: string) => fetch(url, { headers: { "x-webauth-user": user } });
+	expect((await request("intruder")).status).toBe(403);
+	const response = await request("owner");
+	expect(response.status).toBe(200);
+	expect(await response.json()).toEqual({
+		files: ["binary", "committed.txt", "delete.txt", "new file.txt", "renamed.txt"],
+		fileCount: 5,
+		additions: 4,
+		deletions: 1,
+		truncated: false,
+	});
+	expect(await git.run(["-C", path, "diff", "--cached", "--name-only"])).toBe("committed.txt\n");
+});
+
 test("manual workspace preserves edits, versions, staged and branch diffs, commits and archive across recovery", async () => {
 	const { root, git, store, client, service, project } = await setup();
 	const workspace = await service.create(owner, project.id, { name: "Manual work" });
