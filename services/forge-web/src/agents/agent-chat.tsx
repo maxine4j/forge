@@ -1,6 +1,6 @@
-import { agentViewSchema, type AgentView } from "@forge/contracts/agents";
+import { agentViewSchema, type AgentItem, type AgentView } from "@forge/contracts/agents";
 import { ticketWorkflowSchema, type TicketWorkflow } from "@forge/contracts/tickets";
-import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 
 import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
@@ -14,9 +14,14 @@ type ConversationScroll = {
 	top: number;
 	follow: boolean;
 	unseen?: boolean;
-	activity?: Map<string, Map<string, string>>;
+	activity?: Map<string, string>;
 };
-const TimelineActivity = createContext<((id: string, view: AgentView) => void) | undefined>(undefined);
+type EarlierThread = { id: string; planText?: string; planMarkdown?: string };
+
+const withSavedPlan = (items: AgentItem[], planText?: string): AgentItem[] => {
+	if (!planText || items.some((item) => item.kind === "plan" && item.text.trim() === planText.trim())) return items;
+	return [...items, { id: "saved-plan", role: "assistant", kind: "plan", text: planText }];
+};
 
 export const Conversation = ({
 	id,
@@ -29,7 +34,7 @@ export const Conversation = ({
 	drafts,
 	workflowChanged,
 	draftKey = id,
-	historyOnly = false,
+	earlier,
 	prefix,
 	suffix,
 	steer = false,
@@ -38,7 +43,7 @@ export const Conversation = ({
 	feedbackPending,
 	planAction,
 	snapshots,
-	scrollState,
+	scrollStates,
 	navigation,
 }: {
 	id: string;
@@ -51,7 +56,7 @@ export const Conversation = ({
 	drafts?: Map<string, string>;
 	workflowChanged?: (job: TicketWorkflow) => void;
 	draftKey?: string;
-	historyOnly?: boolean;
+	earlier?: { threads: EarlierThread[]; snapshots: Map<string, AgentView> };
 	prefix?: ReactNode;
 	suffix?: ReactNode;
 	steer?: boolean;
@@ -60,35 +65,37 @@ export const Conversation = ({
 	feedbackPending?: (pending: boolean) => void;
 	planAction?: ReactNode;
 	snapshots?: Map<string, AgentView>;
-	scrollState?: ConversationScroll;
+	scrollStates?: Map<string, ConversationScroll>;
 	navigation?: ReactNode;
 }) => {
 	const [view, setView] = useState<AgentView | undefined>(() => snapshots?.get(id));
 	const [draft, setDraft] = useState(() => drafts?.get(draftKey) ?? "");
 	const messages = useRef<HTMLDivElement>(null);
 	const content = useRef<HTMLDivElement>(null);
+	const earlierContent = useRef<HTMLDivElement>(null);
+	const loadMoreButton = useRef<HTMLButtonElement>(null);
+	const earlierRequest = useRef<AbortController>(undefined);
+	const prepend = useRef<{ height: number; wasShort: boolean }>(undefined);
+	const [earlierViews, setEarlierViews] = useState(() => new Map(earlier?.snapshots));
+	const [loadingEarlier, setLoadingEarlier] = useState(false);
+	const [earlierFailed, setEarlierFailed] = useState(false);
+	const nextEarlier = earlier?.threads.findLast(({ id }) => !earlierViews.has(id));
+	const scrollState = scrollStates?.get(id);
 	const position = useRef<ConversationScroll>(scrollState ?? { top: 0, follow: true });
 	const [following, setFollowing] = useState(scrollState?.follow ?? true);
 	const [unseen, setUnseen] = useState(scrollState?.unseen ?? false);
-	const parentActivity = useContext(TimelineActivity);
-	const recordActivity = (threadId: string, value: AgentView) => {
-		const histories = (position.current.activity ??= new Map());
-		const previous = histories.get(threadId);
-		const next = new Map(value.items.map((item) => [item.id, item.text]));
-		if (
-			(previous || histories.size > 0)
-			&& value.items.some((item) => !previous?.has(item.id) || previous.get(item.id) !== item.text)
-		) {
-			if (!position.current.follow) {
-				position.current.unseen = true;
-				setUnseen(true);
-			}
-		}
-		histories.set(threadId, next);
-	};
 	useLayoutEffect(() => {
-		if (view) (historyOnly ? parentActivity : recordActivity)?.(id, view);
-	});
+		scrollStates?.set(id, position.current);
+	}, [id, scrollStates]);
+	useLayoutEffect(() => {
+		if (!view) return;
+		const previous = position.current.activity;
+		if (previous && !position.current.follow && view.items.some((item) => previous.get(item.id) !== item.text)) {
+			position.current.unseen = true;
+			setUnseen(true);
+		}
+		position.current.activity = new Map(view.items.map((item) => [item.id, item.text]));
+	}, [view]);
 	const resumeFollowing = () => {
 		position.current.follow = true;
 		position.current.unseen = false;
@@ -102,6 +109,18 @@ export const Conversation = ({
 			element.scrollTop = position.current.follow ? element.scrollHeight : position.current.top;
 	};
 	useLayoutEffect(() => {
+		const viewport = messages.current;
+		const anchor = prepend.current;
+		prepend.current = undefined;
+		if (!anchor || !earlierContent.current || !viewport?.clientHeight) return;
+		if (anchor.wasShort && viewport.scrollHeight > viewport.clientHeight) {
+			position.current.follow = false;
+			setFollowing(false);
+		} else if (!position.current.follow) {
+			position.current.top += earlierContent.current.getBoundingClientRect().height - anchor.height;
+		}
+	}, [earlierViews]);
+	useLayoutEffect(() => {
 		scroll();
 	});
 	useEffect(() => {
@@ -110,6 +129,43 @@ export const Conversation = ({
 		if (messages.current) observer.observe(messages.current);
 		return () => observer.disconnect();
 	}, []);
+	useEffect(() => () => earlierRequest.current?.abort(), []);
+	const loadEarlier = async () => {
+		if (!earlier || !nextEarlier || earlierRequest.current) return;
+		const request = new AbortController();
+		const { signal } = request;
+		earlierRequest.current = request;
+		setLoadingEarlier(true);
+		setEarlierFailed(false);
+		try {
+			const path = `agents/${nextEarlier.id}`;
+			let snapshot = await api.read(path, agentViewSchema, "GET", undefined, signal);
+			if (!signal.aborted && !["idle", "creating", "running", "waiting"].includes(snapshot.thread.status))
+				snapshot = await api.read(`${path}/resume`, agentViewSchema, "POST", {}, signal);
+			if (signal.aborted) return;
+			if (snapshot.thread.status === "uncertain") throw new Error("History recovery incomplete");
+			const viewport = messages.current;
+			if (viewport?.clientHeight && earlierContent.current) {
+				position.current.top = viewport.scrollTop;
+				prepend.current = {
+					height: earlierContent.current.getBoundingClientRect().height,
+					wasShort: viewport.scrollHeight <= viewport.clientHeight,
+				};
+			}
+			if (
+				document.activeElement === loadMoreButton.current
+				&& earlier.threads.every(({ id }) => id === nextEarlier.id || earlierViews.has(id))
+			)
+				viewport?.focus({ preventScroll: true });
+			earlier.snapshots.set(nextEarlier.id, snapshot);
+			setEarlierViews((previous) => new Map(previous).set(nextEarlier.id, snapshot));
+		} catch {
+			if (!signal.aborted) setEarlierFailed(true);
+		} finally {
+			earlierRequest.current = undefined;
+			if (!signal.aborted) setLoadingEarlier(false);
+		}
+	};
 	const [, setError] = useErrorState();
 	const [busy, setBusy] = useState(false);
 	const [connected, setConnected] = useState(false);
@@ -241,35 +297,6 @@ export const Conversation = ({
 				? "This turn exceeded the model's context window. Try a shorter prompt or start a new chat."
 				: "Codex could not complete this turn.";
 	useFailureToast(selected && status === "failed" ? failureNotice : undefined, view?.thread.turnId);
-	if (historyOnly)
-		return (
-			<>
-				{historyFailed && (
-					<button
-						disabled={loadingHistory}
-						onClick={() => {
-							recoveryBlocked.current = false;
-							historyNeeded.current = true;
-							poller.current?.refresh();
-						}}
-					>
-						Retry loading history
-					</button>
-				)}
-				{loadingHistory && <p role='status'>Loading planning history…</p>}
-				<AgentActivity items={view?.items ?? []} planText={planText} planMarkdown={planMarkdown} />
-				{planText
-					&& view
-					&& !loadingHistory
-					&& !view.items.some((item) => item.kind === "plan" && item.text.trim() === planText.trim()) && (
-						<AgentActivity
-							items={[{ id: "saved-plan", role: "assistant", kind: "plan", text: planText }]}
-							planText={planText}
-							planMarkdown={planMarkdown}
-						/>
-					)}
-			</>
-		);
 	return (
 		<section className='agent-conversation' aria-label='Chat conversation'>
 			{(!ticketChat || historyFailed) && (
@@ -338,59 +365,75 @@ export const Conversation = ({
 					aria-label='Conversation history'
 				>
 					<div ref={content}>
-						<TimelineActivity.Provider value={recordActivity}>
-							{prefix}
-							{view
-								&& !messagePath
-								&& !loadingHistory
-								&& !historyFailed
-								&& status !== "uncertain"
-								&& !view.items.length && (
-									<p className='agent-empty'>
-										Start a conversation about this repository. Each chat works in its own managed
-										worktree.
-									</p>
+						{earlier?.threads.length ? (
+							<div ref={earlierContent} className='agent-earlier-history'>
+								{nextEarlier && (
+									<div className='agent-load-more'>
+										<button
+											ref={loadMoreButton}
+											type='button'
+											aria-disabled={loadingEarlier}
+											onClick={loadEarlier}
+										>
+											{loadingEarlier ? "Loading…" : "Load more"}
+										</button>
+										{earlierFailed && (
+											<p role='status'>Could not load earlier messages. Try again.</p>
+										)}
+									</div>
 								)}
-							<AgentActivity
-								items={view?.items ?? []}
-								planText={planText}
-								planMarkdown={planMarkdown}
-								planAction={eligiblePlanAction}
-							/>
-							{planText
-								&& view
-								&& !loadingHistory
-								&& !view.items.some(
-									(item) => item.kind === "plan" && item.text.trim() === planText.trim(),
-								) && (
-									<AgentActivity
-										items={[{ id: "saved-plan", role: "assistant", kind: "plan", text: planText }]}
-										planText={planText}
-										planMarkdown={planMarkdown}
-										planAction={eligiblePlanAction}
-									/>
-								)}
-							{suffix}
-
-							{!ticketChat && active && (
-								<p
-									className={`agent-notice ${status === "running" ? "agent-working-highlight" : ""}`}
-									role='status'
-								>
-									{status === "waiting" ? "Waiting for your response" : "Codex is working…"}
+								{earlier.threads.map(({ id, planText, planMarkdown }) => {
+									const snapshot = earlierViews.get(id);
+									if (!snapshot) return null;
+									return (
+										<AgentActivity
+											key={id}
+											items={withSavedPlan(snapshot.items, planText)}
+											planText={planText}
+											planMarkdown={planMarkdown}
+										/>
+									);
+								})}
+							</div>
+						) : undefined}
+						{prefix}
+						{view
+							&& !messagePath
+							&& !loadingHistory
+							&& !historyFailed
+							&& status !== "uncertain"
+							&& !view.items.length && (
+								<p className='agent-empty'>
+									Start a conversation about this repository. Each chat works in its own managed
+									worktree.
 								</p>
 							)}
-							{!readOnly
-								&& view?.requests.map((request) => (
-									<RequestCard
-										key={request.id}
-										request={request}
-										drafts={drafts}
-										busy={busy || readOnly}
-										reply={(input) => act("replies", input)}
-									/>
-								))}
-						</TimelineActivity.Provider>
+						<AgentActivity
+							items={withSavedPlan(view?.items ?? [], view && !loadingHistory ? planText : undefined)}
+							planText={planText}
+							planMarkdown={planMarkdown}
+							planAction={eligiblePlanAction}
+						/>
+						{suffix}
+
+						{!ticketChat && active && (
+							<p
+								className={`agent-notice ${status === "running" ? "agent-working-highlight" : ""}`}
+								role='status'
+							>
+								{status === "waiting" ? "Waiting for your response" : "Codex is working…"}
+							</p>
+						)}
+						{!readOnly
+							&& view?.requests.map((request) => (
+								<RequestCard
+									key={request.id}
+									request={request}
+									drafts={drafts}
+									busy={busy || readOnly}
+									reply={(input) => act("replies", input)}
+								/>
+							))}
 					</div>
 				</div>
 				{!following && (

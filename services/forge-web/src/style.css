@@ -200,6 +200,29 @@
 	padding: 8px max(4px, calc((100% - 760px) / 2));
 	scrollbar-width: thin;
 }
+.agent-earlier-history {
+	display: flow-root;
+}
+.agent-load-more {
+	text-align: center;
+	color: #8b949e;
+	font-size: 13px;
+}
+.agent-load-more button,
+.agent-load-more button:hover:not(:disabled) {
+	background: transparent;
+	border: 0;
+	color: #58a6ff;
+	font-weight: 400;
+}
+.agent-load-more button:hover,
+.agent-load-more button:focus-visible {
+	text-decoration: underline;
+}
+.agent-load-more button[aria-disabled="true"] {
+	color: #8b949e;
+	cursor: default;
+}
 .agent-message {
 	padding: 4px 0;
 	margin-bottom: 24px;

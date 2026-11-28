@@ -3023,6 +3023,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	await setup(page, false, true);
 	const planner = "123e4567-e89b-42d3-a456-426614174010";
 	const implementer = "123e4567-e89b-42d3-a456-426614174011";
+	const previous = "123e4567-e89b-42d3-a456-426614174012";
 	let phase = "planning";
 	let state = "idle";
 	let revision = 1;
@@ -3031,6 +3032,12 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	let uncertain = false;
 	let resumes = 0;
 	let reject = false;
+	let rejectEarlier = true;
+	const previousRequests: string[] = [];
+	let releaseEarlier = () => {};
+	const earlierHeld = new Promise<void>((resolve) => {
+		releaseEarlier = resolve;
+	});
 	let releaseFeedback: (() => void) | undefined;
 	const feedbackHeld = new Promise<void>((resolve) => {
 		releaseFeedback = resolve;
@@ -3069,7 +3076,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	const workflow = () => ({
 		ticketId: "TASK-1",
 		plannerId: planner,
-		...(started ? { implementerId: implementer } : {}),
+		...(started ? { implementerId: implementer, previousImplementerIds: [previous] } : {}),
 		phase,
 		state,
 		mergeAttempts: 0,
@@ -3096,9 +3103,17 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	});
 	await page.route("**/api/agents/**", async (route) => {
 		const path = new URL(route.request().url()).pathname;
+		if (path.includes(previous)) {
+			previousRequests.push(path);
+			if (path.endsWith("/resume")) {
+				if (rejectEarlier) return route.fulfill({ status: 503, json: {} });
+				await earlierHeld;
+			}
+		}
 		if (path.endsWith("/events"))
 			return route.fulfill({ contentType: "text/event-stream", body: "data: changed\n\n" });
-		const historical = path.includes(planner);
+		const planning = path.includes(planner);
+		const historical = planning || path.includes(previous);
 		if (!historical && path.endsWith("/resume")) {
 			uncertain = false;
 			resumes++;
@@ -3106,13 +3121,13 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 		return route.fulfill({
 			json: {
 				thread: {
-					id: historical ? planner : implementer,
+					id: planning ? planner : historical ? previous : implementer,
 					projectId,
 					workspaceId: planner,
 					title: "Ticket",
 					createdAt,
 					status: historical
-						? phase === "planning" && state === "running"
+						? planning && phase === "planning" && state === "running"
 							? "running"
 							: "completed"
 						: uncertain
@@ -3122,7 +3137,7 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 								: "running",
 					turnId: historical ? "plan-turn" : "implementation-turn",
 				},
-				items: historical
+				items: planning
 					? [
 							...Array.from({ length: 25 }, (_, i) => ({
 								id: `old-${i}`,
@@ -3131,7 +3146,9 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 							})),
 							...(revision === 2 && phase === "planning" ? plans.slice(0, 1) : plans),
 						]
-					: activity,
+					: historical
+						? [{ id: "previous", role: "assistant", text: "Previous implementation transcript" }]
+						: activity,
 				// A stale planner callback must never acquire live controls in the combined view.
 				requests:
 					historical && phase !== "planning"
@@ -3197,15 +3214,53 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	started = true;
 	state = "running";
 	activity.push({ id: "working", role: "assistant", text: "Implementing filtering" });
+	for (let i = 0; i < 25; i++) activity.push({ id: `current-${i}`, role: "assistant", text: `Current message ${i}` });
 	await expect(send).toBeEnabled();
 	await expect(interrupt).toHaveCount(0);
-	await expect.poll(() => history.evaluate((element) => element.scrollTop)).toBe(80);
-	await expect(latest).toHaveClass(/agent-scroll-unseen/);
+	await expect(modal.getByText("Current message 24", { exact: true })).toBeInViewport();
+	await expect(latest).toHaveCount(0);
 	await expect(message).toHaveValue("Retain this draft across approval");
 	await expect(message).toHaveCount(1);
 	await expect(history).toHaveCount(1);
 	await expect(modal.getByRole("separator")).toHaveCount(1);
+	await expect(modal.getByText("Retained planning message 0", { exact: true })).toHaveCount(0);
+	await expect(modal.getByText("Previous implementation transcript", { exact: true })).toHaveCount(0);
+	expect(previousRequests).toEqual([]);
+	const loadMore = modal.getByRole("button", { name: "Load more", exact: true });
+	await expect(loadMore).not.toBeInViewport();
+	await history.evaluate((element) => {
+		element.scrollTop = 0;
+	});
+	await expect(loadMore).toBeInViewport();
+	await loadMore.click();
+	await expect(modal.getByText("Could not load earlier messages. Try again.")).toBeVisible();
+	rejectEarlier = false;
+	const currentMessage = modal.getByText("Implementing filtering", { exact: true });
+	await loadMore.click();
+	await expect(modal.getByRole("button", { name: "Loading…", exact: true })).toBeDisabled();
+	const beforePrepend = (await currentMessage.boundingBox())!.y;
+	releaseEarlier();
+	await expect(modal.getByText("Previous implementation transcript", { exact: true })).toBeAttached();
+	await expect
+		.poll(async () => Math.abs((await currentMessage.boundingBox())!.y - beforePrepend))
+		.toBeLessThanOrEqual(1);
+	await expect(latest).not.toHaveClass(/agent-scroll-unseen/);
+	await expect(modal.getByText("Retained planning message 0", { exact: true })).toHaveCount(0);
+	await history.evaluate((element) => {
+		element.scrollTop = 0;
+	});
+	await loadMore.click();
 	await expect(modal.getByText("Retained planning message 0", { exact: true })).toBeAttached();
+	await expect(
+		history.getByText(/^(Retained planning message 0|Previous implementation transcript|Implementing filtering)$/),
+	).toHaveText(["Retained planning message 0", "Previous implementation transcript", "Implementing filtering"]);
+	await expect(loadMore).toHaveCount(0);
+	expect(previousRequests).toEqual([
+		`/api/agents/${previous}`,
+		`/api/agents/${previous}/resume`,
+		`/api/agents/${previous}`,
+		`/api/agents/${previous}/resume`,
+	]);
 	await expect(modal.getByText("Some history or output was omitted.", { exact: true })).toHaveCount(0);
 	await expect(modal.getByRole("button", { name: "Allow once" })).toHaveCount(0);
 	reject = true;
@@ -3215,6 +3270,8 @@ test("one ticket timeline retains revisions, approval, drafts and history throug
 	await modal.getByRole("button", { name: "Close ticket" }).click();
 	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 	await expect(message).toHaveValue("Retain this draft across approval");
+	await expect(modal.getByText("Previous implementation transcript", { exact: true })).toBeAttached();
+	expect(previousRequests).toHaveLength(4);
 	reject = false;
 	await send.click();
 	await expect(message).toHaveValue("");

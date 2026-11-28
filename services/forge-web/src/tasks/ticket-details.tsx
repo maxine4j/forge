@@ -51,7 +51,8 @@ const tabIcons: Record<TicketTab, string> = {
 };
 export interface TicketReadingState {
 	snapshots: Map<string, AgentView>;
-	scroll: { top: number; follow: boolean };
+	earlierSnapshots: Map<string, AgentView>;
+	scroll: Map<string, { top: number; follow: boolean }>;
 	tab?: TicketTab;
 	descriptionDraft?: string;
 }
@@ -94,13 +95,13 @@ export const TicketDetails = ({
 	const [state] = useState<TicketReadingState>(() => {
 		const saved: TicketReadingState = reading.get(ticket.id) ?? {
 			snapshots: new Map<string, AgentView>(),
-			scroll: { top: 0, follow: true },
+			earlierSnapshots: new Map<string, AgentView>(),
+			scroll: new Map(),
 		};
 		reading.set(ticket.id, saved);
 		return saved;
 	});
 	const snapshots = state.snapshots;
-	const scrollState = state.scroll;
 	const archiveDialog = useRef<HTMLDialogElement>(null);
 	const returnDialog = useRef<HTMLDialogElement>(null);
 	const returning = useRef(false);
@@ -296,9 +297,17 @@ export const TicketDetails = ({
 			poller.current = undefined;
 		};
 	}, [api, ticket.id, setError]);
-	const currentId = job?.implementerId ?? job?.plannerId;
+	const previousImplementers = job?.previousImplementerIds ?? [];
+	const implementationId = job?.implementerId ?? previousImplementers.at(-1);
+	const currentId = implementationId ?? job?.plannerId;
 	const plan = job?.plan;
 	const planMarkdown = plan?.structured ? renderTicketPlan(plan.structured) : plan?.text;
+	const earlierThreads = implementationId
+		? [
+				...(job?.plannerId ? [{ id: job.plannerId, planText: plan?.text, planMarkdown }] : []),
+				...previousImplementers.filter((id) => id !== currentId).map((id) => ({ id })),
+			]
+		: [];
 	const reviewPlan =
 		ticket.status === "in-progress"
 		&& job?.phase === "planning"
@@ -840,7 +849,7 @@ export const TicketDetails = ({
 					<Conversation
 						key={currentId}
 						snapshots={snapshots}
-						scrollState={scrollState}
+						scrollStates={state.scroll}
 						id={currentId}
 						api={api}
 						changed={refresh}
@@ -855,43 +864,13 @@ export const TicketDetails = ({
 						}
 						draftKey={`ticket:${ticket.id}`}
 						drafts={drafts}
-						planText={!job?.implementerId ? plan?.text : undefined}
-						planMarkdown={!job?.implementerId ? planMarkdown : undefined}
+						planText={!implementationId ? plan?.text : undefined}
+						planMarkdown={!implementationId ? planMarkdown : undefined}
 						feedbackPending={job?.phase === "planning" ? setFeedbackPending : undefined}
 						planAction={approvePlan && <div className='ticket-chat-plan-actions'>{approvePlan}</div>}
-						prefix={
-							job?.implementerId && (job.plannerId || job.previousImplementerIds?.length) ? (
-								<>
-									{job.plannerId && (
-										<Conversation
-											id={job.plannerId}
-											api={api}
-											changed={refresh}
-											selected={tab === "chat"}
-											readOnly
-											historyOnly
-											planText={plan?.text}
-											planMarkdown={planMarkdown}
-											snapshots={snapshots}
-										/>
-									)}
-									{job.previousImplementerIds?.map((id) => (
-										<Conversation
-											key={id}
-											id={id}
-											api={api}
-											changed={refresh}
-											selected={tab === "chat"}
-											readOnly
-											historyOnly
-											snapshots={snapshots}
-										/>
-									))}
-									{implementation}
-								</>
-							) : undefined
-						}
-						suffix={!job?.implementerId ? implementation : undefined}
+						earlier={{ threads: earlierThreads, snapshots: state.earlierSnapshots }}
+						prefix={implementationId ? implementation : undefined}
+						suffix={!implementationId ? implementation : undefined}
 						workflowChanged={(value) => {
 							setJob(value);
 							refreshBoard();

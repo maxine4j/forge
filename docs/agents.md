@@ -354,12 +354,11 @@ scheduler runs, and cancellation holds capacity until execution settles.
 See [reservation behavior](tickets.md#agentic-ticket-board) and
 [startup migration](development.md#named-provider-upgrades).
 
-Opening ticket Chat
-automatically loads persisted history and reconciles recoverable execution state;
-running/waiting chats retain their live activity and untouched empty chats need no
-resume. Sidebar chats hide the internal `uncertain` status and recover only when
-selected. The conversation shows history loading instead of uncertainty and
-blocks sending until recovery completes. Recovery failures show a retry action;
+Opening ticket Chat automatically loads the current thread and reconciles
+recoverable execution state. Running or waiting chats retain their live activity,
+and untouched empty chats need no resume. Sidebar chats hide the internal
+`uncertain` status and recover only when selected. The conversation shows a
+history loading indicator and blocks sending until recovery completes. Recovery failures show a retry action;
 polling does not repeatedly retry failed recovery. Drafts survive recovery.
 Truncation is visible. SSE reconnects and periodic polling read current snapshots
 through a serialized, coalesced reader; selected chats recover newly uncertain
@@ -379,8 +378,11 @@ action clears unseen activity and resumes following. The control supports keyboa
 activation and visible focus; reduced-motion preferences use a static highlight.
 Initial history loading, identical polling snapshots, status changes and local
 tool expansion do not mark activity unseen. State belongs to each conversation in
-browser memory. Ticket tabs and planner-to-implementer transitions retain the
-timeline's paused reading position.
+browser memory. Ticket tabs retain the paused reading position. A new current
+thread opens at its latest activity. The **Load more** button at the top of ticket
+chat prepends one earlier thread per click, newest first. Prepending preserves the
+visible reading position in a scrollable transcript. Loaded transcripts are cached
+in browser memory and only the current thread polls and subscribes to live updates.
 
 The conversation follows the Codex desktop layout: right-aligned user bubbles,
 unboxed agent text and consecutive tool calls in one initially collapsed group.

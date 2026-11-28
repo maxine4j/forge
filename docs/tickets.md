@@ -446,10 +446,13 @@ Chat places Approve plan beneath the plan, aligned to the right edge of its
 message content, for both conversation plans and saved-plan fallback rendering.
 
 Successful approval inserts a persistent **Plan approved · Implementation** divider,
-with queued/setup status until the implementer starts. Planner history remains
-above it and implementer history appears below it. Codex owns separate threads in
-the same worktree; the fresh implementer receives the saved plan. Direct
-implementation can start without planner history or a plan approval divider.
+with queued/setup status until the implementer starts. The current thread loads first.
+At the top of the transcript, **Load more** prepends one earlier thread at a time,
+newest first, with planning and previous implementation transcripts above the divider.
+Only the current thread receives [live updates](agents.md#following-chat-activity).
+Codex owns separate threads in the same worktree. The fresh implementer receives
+the saved plan. Direct implementation can start without planner history or a
+plan approval divider.
 Historical requests are inactive. Only the current agent exposes reply and
 interruption controls. Completed tickets and preview fixtures are read-only.
 During an active turn, the composer button interrupts when the draft is empty or
