@@ -2,7 +2,28 @@ import { expect, test } from "vitest";
 
 import { workerConfig } from "./config.ts";
 import { createMacosCollector, parseBattery, parseHardware, parsePower } from "./macos-telemetry.ts";
+import { OllamaClient } from "./ollama-client.ts";
 import { collectTelemetry, loadedModelMemory, parseNvidiaMetrics } from "./worker-telemetry.ts";
+
+test("reads the running Ollama version from loopback and handles invalid responses", async () => {
+	const requests: { url: string; init?: RequestInit }[] = [];
+	let response = new Response(JSON.stringify({ version: "0.5.0" }));
+	const request: typeof fetch = async (input, init) => {
+		requests.push({ url: String(input), init });
+		return response;
+	};
+	const client = new OllamaClient("http://127.0.0.1:11434", request);
+	const signal = new AbortController().signal;
+	expect(await client.version(signal)).toBe("0.5.0");
+	expect(requests[0]).toEqual({
+		url: "http://127.0.0.1:11434/api/version",
+		init: { redirect: "error", signal },
+	});
+	response = new Response(JSON.stringify({ version: 123 }));
+	expect(await client.version(signal)).toBeNull();
+	response = new Response("unavailable", { status: 503 });
+	expect(await client.version(signal)).toBeNull();
+});
 
 test("parses macOS identity, power source and fractional power readings", () => {
 	expect(
@@ -60,6 +81,23 @@ test("caches successful identity probes and isolates unavailable power", async (
 	expect(calls.filter((command) => command.endsWith("system_profiler"))).toHaveLength(1);
 	expect(calls.filter((command) => command.endsWith("sw_vers"))).toHaveLength(1);
 	expect(calls.filter((command) => command.endsWith("sudo"))).toHaveLength(2);
+});
+
+test("does not invoke the power probe when disabled", async () => {
+	const commands: string[] = [];
+	const collector = createMacosCollector(
+		async (command) => {
+			commands.push(command);
+			if (command.endsWith("pmset")) return "Now drawing from 'Battery Power'\n -InternalBattery-0 75%; discharging";
+			return "";
+		},
+		async () => null,
+		false,
+	);
+	const result = await collector(new AbortController().signal);
+	expect(commands).not.toContain("/usr/bin/sudo");
+	expect(result.macos).toMatchObject({ batteryPercent: 75, powerSource: "battery", powerWatts: null });
+	expect(result.gpus).toEqual([]);
 });
 
 test("keeps independent macOS readings when probes fail and retries identity", async () => {
