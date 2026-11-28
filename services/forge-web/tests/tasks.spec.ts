@@ -3575,9 +3575,9 @@ for (const width of [390, 690, 820, 1023, 1024, 1280]) {
 			await page.goto(`/tasks?view=${view}&ticket=TASK-1&tab=details`);
 			const ticket = page.getByRole("dialog", { name: "TASK-1", exact: true });
 			await expect(ticket).toBeVisible();
-			await ticket.evaluate((element) =>
-				Promise.all(element.getAnimations().map((animation) => animation.finished)),
-			);
+			await page
+				.locator("main")
+				.evaluate((element) => Promise.all(element.getAnimations().map((animation) => animation.finished)));
 			const rect = (await ticket.boundingBox())!;
 			if (width < 1024) {
 				expect(rect).toMatchObject({ x: 0, y: 0, width, height: 900 });
@@ -3655,6 +3655,30 @@ test("docked ticket switching guards drafts, retains one owner and restores the 
 	await page.keyboard.press("Escape");
 	await expect(page).toHaveURL("/tasks");
 	await expect(first).toBeFocused();
+});
+
+test("the desktop ticket panel slides in once when switching between tickets", async ({ page }) => {
+	await page.setViewportSize({ width: 1280, height: 900 });
+	await setup(page);
+	const layout = page.locator("main");
+	await layout.evaluate((element) => {
+		element.addEventListener("transitionend", (event) => {
+			if (
+				event instanceof TransitionEvent
+				&& event.target === element
+				&& event.propertyName === "grid-template-columns"
+			)
+				element.dataset["dockTransitions"] = String(Number(element.dataset["dockTransitions"] ?? 0) + 1);
+		});
+	});
+	await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
+	await expect(page.getByRole("dialog", { name: "TASK-1", exact: true })).toBeVisible();
+	await expect(layout).toHaveAttribute("data-dock-transitions", "1");
+	await page.getByRole("button", { name: "TASK-2 Second task", exact: true }).click();
+	const second = page.getByRole("dialog", { name: "TASK-2", exact: true });
+	await expect(second).toBeVisible();
+	await expect(second).toHaveCSS("animation-name", "none");
+	await expect(layout).toHaveAttribute("data-dock-transitions", "1");
 });
 
 test("opening a docked ticket reveals its column with a gap beside the panel", async ({ page }) => {

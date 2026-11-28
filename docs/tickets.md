@@ -105,8 +105,9 @@ scope/title edits and busy actions also guard ticket switching.
 See [browser and gesture verification](development.md#android-back-verification).
 
 At viewport widths of at least 1024px, Board and Backlog allocate a fixed 580px
-right column below the usable global header. The board shrinks in place as the ticket slides in from the right
-(without animation under reduced motion). Its non-modal dialog has no backdrop
+right column below the usable global header. The board shrinks in place as the panel first slides in from the right
+(without animation under reduced motion). Selecting another ticket keeps the open panel in place.
+Its non-modal dialog has no backdrop
 or focus trap; outside clicks leave it open. Toolbars wrap, board columns retain
 horizontal scrolling, and backlog overflow stays inside the reduced task area.
 As the board narrows, it scrolls horizontally only as needed to reveal the selected ticket's entire column, with a 12px gap beside the panel.

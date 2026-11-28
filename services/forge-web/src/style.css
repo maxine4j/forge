@@ -1349,7 +1349,6 @@
 		left: auto;
 		height: 100%;
 		max-height: 100%;
-		animation: ticket-slide-in 180ms ease-out;
 	}
 	.ticket-docked-layout .backlog-toolbar,
 	.ticket-docked-layout .backlog-filters {
@@ -1375,20 +1374,9 @@
 			max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
 	}
 }
-@keyframes ticket-slide-in {
-	from {
-		transform: translateX(100%);
-	}
-	to {
-		transform: translateX(0);
-	}
-}
 @media (prefers-reduced-motion: reduce) {
 	.shell.shell-constrained main:where(:has(> .tasks-view:not([hidden]))) {
 		transition: none !important;
-	}
-	.ticket-dialog.ticket-docked {
-		animation: none;
 	}
 }
 .ticket-details-heading {
