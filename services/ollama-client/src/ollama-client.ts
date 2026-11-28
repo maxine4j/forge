@@ -8,6 +8,17 @@ export class OllamaClient implements IOllamaClient {
 		private readonly origin: string,
 		private readonly request: typeof fetch,
 	) {}
+	async version(signal: AbortSignal): Promise<string | null> {
+		const response = await this.request(`${this.origin}/api/version`, { redirect: "error", signal });
+		if (!response.ok) {
+			await response.body?.cancel();
+			return null;
+		}
+		const payload: unknown = await response.json();
+		return payload && typeof payload === "object" && "version" in payload && typeof payload.version === "string"
+			? payload.version
+			: null;
+	}
 	async listModels(signal: AbortSignal): Promise<Response> {
 		return this.request(`${this.origin}/v1/models`, { method: "GET", redirect: "error", signal });
 	}

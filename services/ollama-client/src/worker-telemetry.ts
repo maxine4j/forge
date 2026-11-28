@@ -53,15 +53,19 @@ export const collectTelemetry = async (
 		loadedModels(signal: AbortSignal): Promise<TelemetryFrame["loadedModels"]>;
 		hostMemory(): TelemetryFrame["hostMemory"];
 		gpus(signal: AbortSignal): Promise<TelemetryFrame["gpus"]>;
+		macos?(
+			signal: AbortSignal,
+		): Promise<{ macos: NonNullable<TelemetryFrame["macos"]>; gpus: TelemetryFrame["gpus"] }>;
 	},
 	lifetime: AbortSignal,
 	concurrency = 1,
 ): Promise<TelemetryFrame> => {
 	const signal = AbortSignal.any([lifetime, AbortSignal.timeout(2_000)]);
-	const [ready, loadedModels, gpus] = await Promise.all([
+	const [ready, loadedModels, gpus, macos] = await Promise.all([
 		sources.hasLocalModel(signal).catch(() => false),
 		sources.loadedModels(signal).catch(() => null),
 		sources.gpus(signal).catch(() => []),
+		sources.macos?.(signal).catch(() => undefined),
 	]);
 	return {
 		type: "telemetry",
@@ -70,6 +74,7 @@ export const collectTelemetry = async (
 		concurrency,
 		hostMemory: sources.hostMemory(),
 		loadedModels,
-		gpus,
+		gpus: macos?.gpus ?? gpus,
+		...(macos ? { macos: macos.macos } : {}),
 	};
 };

@@ -1,7 +1,25 @@
 import { expect, test } from "vitest";
 
 import { workerConfig } from "./config.ts";
+import { parseBattery, parseHardware, parsePower } from "./macos-telemetry.ts";
 import { collectTelemetry, loadedModelMemory, parseNvidiaMetrics } from "./worker-telemetry.ts";
+
+test("parses macOS identity, power source and fractional power readings", () => {
+	expect(
+		parseHardware(JSON.stringify({ SPHardwareDataType: [{ cpu_type: "Intel Core", machine_model: "MacPro7,1" }] })),
+	).toEqual({ chipName: "Intel Core", deviceModel: "MacPro7,1" });
+	expect(parseHardware("invalid")).toEqual({ chipName: null, deviceModel: null });
+	expect(parseBattery("Now drawing from 'Battery Power'\n -InternalBattery-0 0%; discharging")).toEqual({
+		batteryPercent: 0,
+		powerSource: "battery",
+	});
+	expect(parseBattery("Now drawing from 'AC Power'")).toEqual({ batteryPercent: null, powerSource: "ac" });
+	expect(parsePower("GPU HW active residency: 12.5%\nCombined Power (CPU + GPU + ANE): 1500 mW")).toEqual({
+		utilization: 12.5,
+		powerWatts: 1.5,
+	});
+	expect(parsePower("permission denied")).toEqual({ utilization: null, powerWatts: null });
+});
 
 const env = { OLLAMA_RELAY_TOKEN: "x".repeat(32), OLLAMA_CONTEXT_LENGTH: "42" };
 const options = ["--worker-id", "gpu-1", "--relay-base-url", "https://relay.example:8443/"];

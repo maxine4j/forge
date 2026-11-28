@@ -11,6 +11,7 @@ import { sleep } from "@forge/backend-infrastructure/sleep";
 import { WebSocket } from "ws";
 
 import { workerConfig } from "./config.ts";
+import { createMacosCollector } from "./macos-telemetry.ts";
 import { OllamaClient } from "./ollama-client.ts";
 import { WorkerSession, type IOllamaClient } from "./worker-session.ts";
 import { collectTelemetry, parseNvidiaMetrics } from "./worker-telemetry.ts";
@@ -56,6 +57,20 @@ export const startWorker = async (signal: AbortSignal): Promise<void> => {
 		return message;
 	});
 	const local = new OllamaClient(`http://${config.ollamaAddress}`, fetch);
+	const macos = createMacosCollector(
+		async (command, args, probeSignal) => {
+			const { stdout } = await promisify(execFile)(command, args, {
+				env: { ...env, LC_ALL: "C" },
+				signal: probeSignal,
+				maxBuffer: 8192,
+				killSignal: "SIGKILL",
+				windowsHide: true,
+			});
+			return stdout;
+		},
+		(probeSignal) => local.version(probeSignal),
+		process.env["OLLAMA_RELAY_MACOS_POWERMETRICS"] === "1",
+	);
 	try {
 		await waitForModel(local, lifetime.signal);
 		await pair(
@@ -68,7 +83,9 @@ export const startWorker = async (signal: AbortSignal): Promise<void> => {
 						hasLocalModel: (signal) => local.hasLocalModel(signal),
 						loadedModels: (signal) => local.loadedModels(signal),
 						hostMemory: () => ({ total: totalmem(), free: freemem() }),
+						...(process.platform === "darwin" ? { macos } : {}),
 						gpus: async (signal) => {
+							if (process.platform === "darwin") return [];
 							const { stdout } = await promisify(execFile)(
 								"nvidia-smi",
 								[
