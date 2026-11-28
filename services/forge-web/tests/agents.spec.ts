@@ -20,6 +20,7 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	let usageFails = false;
 	let schedulerFails = false;
 	let sparse = false;
+	let relayState: "fresh" | "stale" | "offline" | "unavailable" = "fresh";
 	const costs = costsSchema.parse(new MockApi().read(new URL("http://localhost/api/costs?range=-7d")));
 	Object.assign(costs.providers.at(0)!, { id: openai, input: 1_250_000, cached: 1_000_000, output: 47_232 });
 	Object.assign(costs.providers.at(1)!, { id: ollama, input: 0, cached: 0, incompleteTokens: 1 });
@@ -29,6 +30,31 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 		async (route) => {
 			const path = new URL(route.request().url()).pathname;
 			const method = route.request().method();
+			if (path === "/api/model-providers/relay-metrics")
+				return route.fulfill({
+					json: [
+						{
+							providerId: ollama,
+							freshness: relayState,
+							receivedAt: relayState === "unavailable" ? null : "2026-11-03T00:00:00.000Z",
+							...(relayState === "unavailable"
+								? {}
+								: {
+										macos: {
+											chipName: "Apple M4",
+											deviceModel: "MacBook Pro",
+											macosVersion: "15.1",
+											ollamaVersion: "0.12",
+											batteryPercent: 0,
+											powerWatts: 2.5,
+											powerSource: "ac",
+											gpuUtilization: 0,
+											memory: { total: 17179869184, free: 8589934592 },
+										},
+									}),
+						},
+					],
+				});
 			if (path === "/api/costs")
 				return usageFails ? route.fulfill({ status: 503 }) : route.fulfill({ json: costs });
 			if (path === "/api/tickets/agent-metrics") {
@@ -181,6 +207,18 @@ test("Tasks Agents manages models and avatar colours and shows the assignee on t
 	await expect(health).toContainText("3 slots reserved");
 	await expect(health).toContainText("Token usage is incomplete");
 	await expect(health).toContainText("No recorded usage");
+	const localCard = health.locator("article").filter({ hasText: "Local" });
+	await expect(localCard).toContainText("GPU usage: 0%");
+	await expect(localCard).toContainText("System memory used / total: 8.0 / 16.0 GiB");
+	await expect(localCard).toContainText("Battery: 0%");
+	await expect(localCard).toContainText("CPU / GPU / ANE power: 2.5 W");
+	await expect(localCard).toContainText("Apple M4");
+	for (const state of ["stale", "offline", "unavailable"] as const) {
+		relayState = state;
+		await health.getByRole("button", { name: "Refresh metrics" }).click();
+		await expect(localCard).toContainText(`Relay metrics: ${state}`);
+	}
+	await expect(localCard).not.toContainText("Apple M4");
 	const healthBeforePoll = healthReads;
 	const schedulerBeforePoll = schedulerReads;
 	await page.clock.fastForward(10_000);
