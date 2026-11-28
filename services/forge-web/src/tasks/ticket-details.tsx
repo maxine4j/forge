@@ -24,7 +24,7 @@ import { ResourcePoller } from "../api/resource-poller.ts";
 import type { IWorkspaceApi } from "../api/workspace-api.ts";
 import { Dropdown, DropdownSurface } from "../dropdown.tsx";
 import { useDialogDismissal, useModalDraft, useModalNavigation } from "../navigation/controller.tsx";
-import { useErrorState, useFailureToast } from "../toasts/toasts.tsx";
+import { useErrorState, useFailureToast, useToast } from "../toasts/toasts.tsx";
 import { AgentAvatar } from "./agent-avatar.tsx";
 import { EpicIcon } from "./epic-icon.tsx";
 import { InlineTicketDescription, InlineTicketTitle } from "./inline-ticket-fields.tsx";
@@ -86,6 +86,7 @@ export const TicketDetails = ({
 	epics: EpicSummary[];
 	openEpic: (id: string) => void;
 }) => {
+	const { notify } = useToast();
 	const navigation = useModalNavigation();
 	const location = useLocation();
 	const query = new URLSearchParams(location.search);
@@ -796,15 +797,30 @@ export const TicketDetails = ({
 				{plan && (
 					<fieldset className='ticket-detail-section'>
 						<legend>Plan</legend>
-						{!archived && ticket.status === "backlog" && (
+						<div className='ticket-plan-toolbar'>
+							{!archived && ticket.status === "backlog" && (
+								<button
+									type='button'
+									disabled={acting || busy || !!resetting}
+									onClick={() => act("clear-plan", {})}
+								>
+									Clear plan
+								</button>
+							)}
 							<button
 								type='button'
-								disabled={acting || busy || !!resetting}
-								onClick={() => act("clear-plan", {})}
+								onClick={async () => {
+									try {
+										await navigator.clipboard.writeText(planMarkdown!);
+										notify("Plan copied.", "success");
+									} catch {
+										notify("Could not copy plan.");
+									}
+								}}
 							>
-								Clear plan
+								Copy plan
 							</button>
-						)}
+						</div>
 						<div className='ticket-plan-markdown'>
 							<TicketTextPreview text={planMarkdown!} />
 						</div>

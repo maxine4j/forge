@@ -1779,6 +1779,15 @@
 .ticket-utils {
 	overflow-wrap: anywhere;
 }
+.ticket-plan-toolbar {
+	display: flex;
+	justify-content: flex-end;
+	gap: 8px;
+	flex-wrap: wrap;
+}
+.ticket-plan-toolbar > :first-child:not(:last-child) {
+	margin-right: auto;
+}
 .ticket-plan-markdown {
 	overflow-wrap: anywhere;
 	line-height: 1.55;
