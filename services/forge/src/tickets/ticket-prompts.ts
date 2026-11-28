@@ -6,8 +6,15 @@ import { ticketPlanGuidance, ticketSinglePlanGuidance } from "./ticket-plan-form
 import type { TicketWorkflowRecord } from "./types.ts";
 
 type TicketInstructions = Pick<ForgeSettings, "planningInstructions" | "implementationInstructions">;
-const historicalCheckpointInstruction = " Report handoff only after committing a safe checkpoint.";
-const checkpointInstruction =
+const completionInstruction =
+	"Report complete only when the full assignment is finished and the required changes are committed. Assess the full assignment even when the latest request is a diagnostic or recovery instruction.";
+const checkpointRequirement =
+	" Report handoff only if the work turn created a new safe checkpoint commit. If the assignment is unfinished and there is no new safe checkpoint, report incomplete and list what remains.";
+const checkpointInstruction = ` For a handoff, commit only existing uncommitted assignment changes if a safe checkpoint is immediately possible.${checkpointRequirement}`;
+const legacyCompletionInstruction =
+	"Report complete only after finishing your assigned scope and committing the required changes.";
+const legacyCheckpointInstruction = " Report handoff only after committing a safe checkpoint.";
+const legacyEmergencyCheckpointInstruction =
 	" For a handoff, commit only existing uncommitted assignment changes if a safe checkpoint is immediately possible. Report promptly if there are no changes to commit or the checkpoint is blocked.";
 
 export const emergencyHandoverSteer = `EMERGENCY: You MUST stop all work IMMEDIATELY!
@@ -17,8 +24,8 @@ You MUST NOT finish the current operation, even if it is almost done. You MUST N
 
 The only tool actions allowed are the Git status, staging, and commit commands strictly needed to save assignment changes you already made. If you have uncommitted assignment changes and can safely checkpoint them now, commit only those changes on the current branch. If there are no uncommitted assignment changes, including when you already committed your work, skip the commit. Never create an empty commit. If a safe commit is blocked or fails, stop immediately and report what is unsaved. Do not retry, fix, or investigate it.
 
-Return exactly one JSON object now, with no Markdown or surrounding prose: {"status":"handoff","handover":"…"}
-Use only what you already know. Briefly state what changed, what is committed or unsaved, what verification already finished, and what the next agent should do. If you made no changes, say so and hand off immediately.`;
+Return exactly one JSON object now, with no Markdown or surrounding prose. If this work turn created a new safe checkpoint, return {"status":"handoff","handover":"…"}. Otherwise return {"status":"incomplete","remaining":"…"} and list what remains, including any work or verification that still needs to be confirmed.
+Use only what you already know. Briefly state what changed, what is committed or unsaved, what verification already finished, and what the next agent should do.`;
 
 export function assignedSubtask(ticket: Ticket, job: TicketWorkflowRecord) {
 	if (job.phase === "implementation" && resolveTicketWorkflowPreset(ticket.executionSettings) === "planner-subtasks")
@@ -36,10 +43,14 @@ export function hasNextSubtask(ticket: Ticket | undefined, job: TicketWorkflowRe
 
 type CompletionRequirements = ReturnType<typeof completionReportRequirements>;
 
-export function ticketCompletionInstructions(
-	requirements: Omit<CompletionRequirements, "handoff"> & {
-		handoff?: CompletionRequirements["handoff"];
-	} = completionReportRequirements(),
+export function ticketCompletionInstructions(requirements = completionReportRequirements()): string {
+	return renderCompletionInstructions(requirements, completionInstruction, checkpointInstruction);
+}
+
+function renderCompletionInstructions(
+	requirements: { [Status in keyof CompletionRequirements]: CompletionRequirements[Status] | undefined },
+	completion: string,
+	checkpoint: string,
 ): string {
 	const outcomes = Object.entries(requirements).flatMap(([status, fields]) => {
 		if (!fields) return [];
@@ -53,21 +64,15 @@ export function ticketCompletionInstructions(
 		return [`${example} (${descriptions.join(". ")}).`];
 	});
 	const guidance =
-		requirements.handoff || requirements.complete.some(({ bounded }) => bounded)
+		requirements.handoff || requirements.complete?.some(({ bounded }) => bounded)
 			? " In handover or the next-subtask summary, retain concise progress, next actions, decisions, blockers, and verification results as applicable. Omit code dumps, long logs, and repeated plan text."
 			: "";
-	const checkpoint = requirements.handoff ? checkpointInstruction : "";
-	return `End your final answer with exactly one JSON object, without Markdown fences or surrounding prose. Use only the fields shown for your outcome. ${outcomes.join(" ")} Report complete only after finishing your assigned scope and committing the required changes.${checkpoint}${guidance}`;
+	return `End your final answer with exactly one JSON object, without Markdown fences or surrounding prose. Use only the fields shown for your outcome. ${outcomes.join(" ")} ${completion}${requirements.handoff ? checkpoint : ""}${guidance}`;
 }
 
-export function ticketFinalizationPrompt(requirements: ReturnType<typeof completionReportRequirements>): string {
-	const question = requirements.incomplete
-		? "Assess the assignment against the work already done."
-		: "Using the conversation, assess whether this assignment is complete or needs a handoff.";
-	const report = ticketCompletionInstructions(requirements)
-		.replace(checkpointInstruction, "")
-		.replace(" and committing the required changes", "");
-	return `${question} Do not edit files or commit. Return only the explicit verdict. ${report}`;
+export function ticketFinalizationPrompt(requirements: CompletionRequirements): string {
+	const report = renderCompletionInstructions(requirements, completionInstruction, checkpointRequirement);
+	return `Assess the full assignment against the work already done. Do not edit files or commit. Return only the explicit verdict. ${report}`;
 }
 
 // Older assignments could persist the rendered paragraph, including variants
@@ -75,18 +80,23 @@ export function ticketFinalizationPrompt(requirements: ReturnType<typeof complet
 const completionBlocks = new Set([
 	'End your final answer with exactly one JSON object, without Markdown fences or surrounding prose: {"status":"complete","summary":"Implemented and verified the assignment"} or {"status":"incomplete","remaining":"Still need to finish the integration tests"}. Summary is optional; remaining is required only for incomplete. Text must be nonblank and at most 2,000 characters. Report complete only after finishing your assigned scope and committing the required changes.',
 	...[false, true].flatMap((hasNext) => {
-		const work = completionReportRequirements(false, hasNext);
-		const checkpoint = ticketCompletionInstructions(completionReportRequirements(true, hasNext));
-		const current = ticketCompletionInstructions(work);
+		const work = completionReportRequirements(hasNext);
+		const checkpoint = { ...work, incomplete: undefined };
+		const legacyReportInstruction = legacyCompletionInstruction.replace(" and committing the required changes", "");
 		return [
-			current,
-			checkpoint,
-			current.replace(checkpointInstruction, historicalCheckpointInstruction),
-			checkpoint.replace(checkpointInstruction, historicalCheckpointInstruction),
-			checkpoint.replace(checkpointInstruction, ""),
-			checkpoint.replace(checkpointInstruction, "").replace(" and committing the required changes", ""),
-			current.replace(checkpointInstruction, "").replace(" and committing the required changes", ""),
-			ticketCompletionInstructions({ ...work, handoff: undefined }),
+			ticketCompletionInstructions(work),
+			renderCompletionInstructions(work, completionInstruction, checkpointRequirement),
+			...[work, checkpoint].flatMap((requirements) => [
+				renderCompletionInstructions(requirements, legacyCompletionInstruction, legacyCheckpointInstruction),
+				renderCompletionInstructions(
+					requirements,
+					legacyCompletionInstruction,
+					legacyEmergencyCheckpointInstruction,
+				),
+				renderCompletionInstructions(requirements, legacyReportInstruction, ""),
+			]),
+			renderCompletionInstructions(checkpoint, legacyCompletionInstruction, ""),
+			renderCompletionInstructions({ ...work, handoff: undefined }, legacyCompletionInstruction, ""),
 		];
 	}),
 ]);
@@ -112,7 +122,7 @@ export function ticketFreshWorkPrompt(
 		recovery && `Recovery instruction:\n${recovery}`,
 		job.context?.handover && `Handover:\n${job.context.handover}`,
 		job.context?.previousSubtaskSummary && `Previous subtask summary:\n${job.context.previousSubtaskSummary}`,
-		ticketCompletionInstructions(completionReportRequirements(false, hasNextSubtask(ticket, job))),
+		ticketCompletionInstructions(completionReportRequirements(hasNextSubtask(ticket, job))),
 	]
 		.filter(Boolean)
 		.join("\n\n");

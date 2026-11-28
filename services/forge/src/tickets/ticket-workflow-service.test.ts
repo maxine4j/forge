@@ -766,7 +766,63 @@ test("insufficient context waits for settlement before allowing a retry", async 
 	await f.makeService().tick(actor);
 	expect(f.jobs.get(ticket.id)?.implementerId).not.toBe(id);
 	expect(f.agents.dispatch.mock.lastCall?.[2]).toBe(
-		`Recover by verifying the committed changes\n\nThe previous run may have left partial work in this worktree. Inspect the current changes and commits before continuing.\n\n${ticketCompletionInstructions()}`,
+		`Implement TASK-1 Add search and commit the changes on this worktree branch.\n\nFind files\n\nThe previous run may have left partial work in this worktree. Inspect the current changes and commits before continuing.\n\nRecovery instruction:\nRecover by verifying the committed changes\n\n${ticketCompletionInstructions()}`,
+	);
+});
+
+test("a diagnostic retry after a handoff without progress keeps the approved plan and can report incomplete", async () => {
+	const f = fixture();
+	const ticket = f.create();
+	await f.service.settings(actor, ticket, { workflowPreset: "planner-implementer" });
+	await f.service.move(actor, ticket, { status: "todo" });
+	await f.service.tick(actor);
+	const plan =
+		"## Goals\nGoal\n## Scope\nScope\n## Decisions\nDecision\n## Acceptance criteria\nCriteria\n## Tests\nRun integration tests";
+	f.agents.plan.mockResolvedValueOnce(plan);
+	f.complete(f.jobs.get(ticket.id)!.plannerId!, "Plan");
+	await f.service.tick(actor);
+	await f.service.approve(actor, ticket, 1);
+	f.merges.head.mockResolvedValue("b".repeat(40));
+	await f.service.tick(actor);
+	const initial = f.jobs.get(ticket.id)!;
+	const assignment = initial.context!.prompt!;
+	f.agents.finalAnswer.mockResolvedValueOnce('{"status":"handoff","handover":"Integration tests remain"}');
+	f.complete(initial.implementerId!);
+	await f.service.tick(actor);
+	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", contextFailure: "no-progress" });
+
+	await f.service.message(actor, ticket, "  Report the current checkpoint without changing files  ");
+	const service = f.makeService();
+	await service.tick(actor);
+	const retry = f.jobs.get(ticket.id)!;
+	expect(retry.implementerId).not.toBe(initial.implementerId);
+	expect(retry.context?.prompt).toBe(assignment);
+	const retryPrompt = f.agents.dispatch.mock.lastCall?.[2];
+	expect(retryPrompt).toMatch(/^Implement the approved plan[\s\S]*Run integration tests/);
+	expect(retryPrompt).toContain("Recovery instruction:\nReport the current checkpoint without changing files");
+	expect(retryPrompt).toContain(
+		"Assess the full assignment even when the latest request is a diagnostic or recovery instruction.",
+	);
+
+	f.agents.contextSample.mockResolvedValue({ used: 96000, peak: 96000, max: 128000, crossed: true });
+	await service.tick(actor);
+	f.agents.finalAnswer.mockResolvedValueOnce("Checkpoint is unchanged");
+	f.complete(retry.implementerId!);
+	await service.tick(actor);
+	await service.tick(actor);
+	expect(f.jobs.get(ticket.id)?.context?.stage).toBe("report");
+	expect(f.agents.dispatch.mock.lastCall?.[2]).toContain('{"status":"incomplete","remaining":"…"');
+	f.agents.finalAnswer.mockResolvedValueOnce('{"status":"incomplete","remaining":"Run integration tests"}');
+	f.complete(retry.implementerId!);
+	await service.tick(actor);
+	expect(f.jobs.get(ticket.id)).toMatchObject({ state: "failed", completionFailure: "incomplete" });
+	expect(f.tickets.get(ticket.id)?.status).toBe("in-progress");
+	expect(f.merges.merge).not.toHaveBeenCalled();
+	await service.message(actor, ticket, "Run the remaining integration tests");
+	await service.tick(actor);
+	expect(f.jobs.get(ticket.id)?.implementerId).not.toBe(retry.implementerId);
+	expect(f.agents.dispatch.mock.lastCall?.[2]).toContain(
+		"Recovery instruction:\nRun the remaining integration tests",
 	);
 });
 

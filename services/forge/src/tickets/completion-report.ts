@@ -17,14 +17,14 @@ export function capHandoffText(input: string): string {
 
 type ReportField = { name: "summary" | "remaining" | "handover"; required: boolean; bounded?: boolean };
 
-export function completionReportRequirements(checkpoint = false, hasNextSubtask = false) {
+export function completionReportRequirements(hasNextSubtask = false) {
 	const complete: ReportField[] = [{ name: "summary", required: hasNextSubtask, bounded: hasNextSubtask }];
 	const incomplete: ReportField[] = [
 		{ name: "remaining", required: true },
 		{ name: "summary", required: false },
 	];
 	const handoff: ReportField[] = [{ name: "handover", required: true, bounded: true }];
-	return { complete, incomplete: checkpoint ? undefined : incomplete, handoff };
+	return { complete, incomplete, handoff };
 }
 
 /** Parse a final answer without accepting extra text or fields. */
