@@ -1205,11 +1205,13 @@ for (const width of [1280, 390]) {
 
 for (const status of ["backlog", "todo"] as const) {
 	test(`In progress drag to ${status} shares abandonment transitions`, async ({ page }) => {
+		await page.emulateMedia({ reducedMotion: "reduce" });
 		const f = await setup(page, false, true);
 		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 		await page.getByRole("tab", { name: "Details", exact: true }).click();
 		await expect(page.getByLabel("Status", { exact: true })).toHaveText("In progress");
 		await page.getByRole("button", { name: "Close ticket", exact: true }).click();
+		await expect(page.getByRole("dialog", { name: "TASK-1", exact: true })).toBeHidden();
 		await page.getByRole("button", { name: "Drag TASK-1", exact: true }).hover();
 		await page.mouse.down();
 		const region = page.getByRole("region", {
@@ -1218,7 +1220,7 @@ for (const status of ["backlog", "todo"] as const) {
 		});
 		const box = (await region.boundingBox())!;
 		await page.mouse.move(box.x + 100, box.y + 100, { steps: 8 });
-		await expect(page.locator(".ticket-drop-placeholder")).toBeVisible();
+		await expect(region.locator(".ticket-drop-placeholder")).toBeVisible();
 		await page.mouse.up();
 		await expect(region.getByText("First task", { exact: true })).toBeVisible();
 		expect(f.tickets().find((ticket) => ticket.id === "TASK-1")).toMatchObject({ status, resetting: true });
@@ -1856,7 +1858,8 @@ test("inline ticket title saves independently and supports keyboard save and but
 	await title.fill("Updated via keyboard");
 	f.failSaves(true);
 	await title.press("Enter");
-	await expect(page.getByRole("alert")).toBeVisible();
+	await expect(page.getByRole("alert").filter({ hasText: "Tickets are unavailable" })).toBeVisible();
+	await expect(dialog.getByRole("button", { name: "Save title", exact: true })).toBeEnabled();
 	await expect(title).toHaveValue("Updated via keyboard");
 	f.failSaves(false);
 	await title.press("Enter");
@@ -2849,11 +2852,12 @@ for (const implementation of [false, true]) {
 		await setup(page, false, true, implementation, false, true);
 		await page.getByRole("button", { name: "TASK-1 First task", exact: true }).click();
 		const modal = page.getByRole("dialog", { name: "TASK-1" });
-		const stat = modal.getByRole("button", { name: "Inference speed: 20.0 tokens/s", exact: true });
+		const stat = modal.getByRole("button", { name: "Inference speed: 25.0 tokens/s", exact: true });
 		await expect(stat).toBeVisible();
 		await stat.hover();
 		await expect(modal.getByRole("tooltip")).toContainText("Output tokens: 100");
 		await expect(modal.getByRole("tooltip")).toContainText("Model-request time: 5.00 s");
+		await expect(modal.getByRole("tooltip")).toContainText("Effective rate: 20.0 tokens/s");
 	});
 }
 
@@ -3713,10 +3717,12 @@ test("resizing retains mounted ticket drafts, active section and chat reading st
 	const ticket = page.getByRole("dialog", { name: "TASK-1", exact: true });
 	await ticket.getByRole("tab", { name: "Chat", exact: true }).click();
 	await ticket.getByRole("textbox", { name: "Message", exact: true }).fill("Keep chat draft");
-	await ticket.locator(".agent-messages").evaluate((element) => {
+	const messages = ticket.getByLabel("Conversation history", { exact: true });
+	await expect.poll(() => messages.evaluate((element) => element.scrollTop)).toBeGreaterThan(80);
+	await messages.evaluate((element) => {
 		element.scrollTop = 40;
 	});
-	const timeline = await ticket.locator(".agent-messages").evaluate((element) => element.scrollTop);
+	await expect(ticket.getByRole("button", { name: "Scroll to latest" })).toBeVisible();
 	await ticket.evaluate((element) => {
 		element.setAttribute("data-resize-marker", "same-node");
 	});
@@ -3725,9 +3731,7 @@ test("resizing retains mounted ticket drafts, active section and chat reading st
 		await expect(ticket).toHaveAttribute("data-resize-marker", "same-node");
 		await expect(ticket.getByRole("textbox", { name: "Message", exact: true })).toHaveValue("Keep chat draft");
 		await expect(ticket.getByRole("tab", { name: "Chat", exact: true })).toHaveAttribute("aria-selected", "true");
-		await expect
-			.poll(() => ticket.locator(".agent-messages").evaluate((element) => element.scrollTop))
-			.toBe(timeline);
+		await expect.poll(() => messages.evaluate((element) => element.scrollTop)).toBe(40);
 	}
 	await page.setViewportSize({ width: 690, height: 900 });
 	await page.evaluate(() => {
@@ -3851,7 +3855,7 @@ test("archived ticket chat retains history and disables input and execution", as
 	await expect(modal.getByRole("tooltip")).toContainText("32,000 of 64,000 tokens");
 	await expect(modal.getByRole("tooltip")).toContainText("50% used");
 	await expect(ring.locator("circle").nth(1)).toHaveAttribute("stroke-dasharray", "50 100");
-	const performance = modal.getByRole("button", { name: "Inference speed: 20.0 tokens/s", exact: true });
+	const performance = modal.getByRole("button", { name: "Inference speed: 25.0 tokens/s", exact: true });
 	await expect(performance).toBeVisible();
 	await performance.focus();
 	await expect(modal.getByRole("tooltip")).toContainText("Effective rate: 20.0 tokens/s");
